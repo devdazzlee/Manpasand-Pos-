@@ -87,7 +87,7 @@ export function Sales() {
       try {
         const [bRes, cRes, pRes] = await Promise.all([
           apiClient.get(`${API_BASE}/branches?limit=100`),
-          apiClient.get(`${API_BASE}/user/customer`),
+          apiClient.get(`${API_BASE}/customer`),
           apiClient.get(`${API_BASE}/products?limit=100`),
         ]);
         setBranches(bRes.data.data);

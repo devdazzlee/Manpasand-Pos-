@@ -1,668 +1,392 @@
-"use client"
+"use client";
 
-import { useState } from "react"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { Separator } from "@/components/ui/separator"
-import { DollarSign, CreditCard, Clock, User, Calculator, Receipt, AlertCircle } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+import React, { useState, useEffect } from "react";
+import apiClient from "@/lib/apiClient";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Label } from "@/components/ui/label";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Clock, User, DollarSign, Receipt, Plus, Loader2 } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 
-interface Transaction {
-  id: string
-  time: string
-  amount: number
-  type: "Cash" | "Card"
-  customer: string
-  action?: "add" | "remove" | "sale"
-  reason?: string
+interface Expense {
+  id: string;
+  particular: string;
+  amount: string;
+  created_at: string;
+  cashflow_id: string | null;
 }
 
-interface CashDrawerState {
-  openingAmount: number
-  currentAmount: number
-  totalSales: number
-  totalCash: number
-  totalCard: number
-  transactions: number
-  isOpen: boolean
-  openedAt?: string
-  closedAt?: string
+interface Cashflow {
+  id: string;
+  opening: string;
+  sales: string;
+  closing: string;
+  created_at: string;
+  expenses: Expense[];
 }
+
+const LOCAL_STORAGE_KEY = 'cashRegisterDrawer';
+
+interface DrawerState {
+  date: string; // YYYY-MM-DD
+  openingAmt: number;
+  isOpen: boolean;
+  isClosed: boolean;
+  openedAt: number; // timestamp in ms
+}
+
+// Helper function to format currency
+const formatCurrency = (amount: number) => {
+  return `Rs ${amount.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+};
 
 export function CashRegister() {
-  const { toast } = useToast()
+  const { toast } = useToast();
+  const EXP = "/expenses";
+  const CF = "/cashflows";
 
-  const [cashDrawer, setCashDrawer] = useState<CashDrawerState>({
-    openingAmount: 200.0,
-    currentAmount: 847.5,
-    totalSales: 2847.5,
-    totalCash: 1456.75,
-    totalCard: 1390.75,
-    transactions: 156,
-    isOpen: true,
-    openedAt: "10:00 AM",
-  })
+  // State
+  const [expenses, setExpenses] = useState<Expense[]>([]);
+  const [cashflows, setCashflows] = useState<Cashflow[]>([]);
+  const [loadingExp, setLoadingExp] = useState(true);
+  const [loadingCF, setLoadingCF] = useState(true);
 
-  const [isOpenDrawerDialogOpen, setIsOpenDrawerDialogOpen] = useState(false)
-  const [isCloseDrawerDialogOpen, setIsCloseDrawerDialogOpen] = useState(false)
-  const [isAddCashDialogOpen, setIsAddCashDialogOpen] = useState(false)
-  const [isRemoveCashDialogOpen, setIsRemoveCashDialogOpen] = useState(false)
-  const [amount, setAmount] = useState("")
-  const [reason, setReason] = useState("")
-  const [openingAmount, setOpeningAmount] = useState("")
+  // Dialog controls
+  const [openOpenDlg, setOpenOpenDlg] = useState(false);
+  const [openAddExpDlg, setOpenAddExpDlg] = useState(false);
+  const [openCloseDlg, setOpenCloseDlg] = useState(false);
 
-  const [denominations, setDenominations] = useState([
-    { value: 100, label: "$100", count: 2 },
-    { value: 50, label: "$50", count: 4 },
-    { value: 20, label: "$20", count: 15 },
-    { value: 10, label: "$10", count: 12 },
-    { value: 5, label: "$5", count: 8 },
-    { value: 1, label: "$1", count: 25 },
-    { value: 0.25, label: "Quarter", count: 40 },
-    { value: 0.1, label: "Dime", count: 30 },
-    { value: 0.05, label: "Nickel", count: 20 },
-    { value: 0.01, label: "Penny", count: 50 },
-  ])
+  // Interaction
+  const [openingAmt, setOpeningAmt] = useState<number>(0);
+  const [newExpense, setNewExpense] = useState({ particular: "", amount: "" });
+  const [selectedIds, setSelectedIds] = useState<string[]>([]);
 
-  const [recentTransactions, setRecentTransactions] = useState<Transaction[]>([
-    { id: "TXN156", time: "14:30", amount: 45.5, type: "Cash", customer: "John Doe", action: "sale" },
-    { id: "TXN155", time: "14:25", amount: 78.2, type: "Card", customer: "Jane Smith", action: "sale" },
-    { id: "TXN154", time: "14:20", amount: 32.1, type: "Cash", customer: "Walk-in", action: "sale" },
-    { id: "TXN153", time: "14:15", amount: 156.75, type: "Card", customer: "Mike Johnson", action: "sale" },
-    { id: "TXN152", time: "14:10", amount: 89.3, type: "Cash", customer: "Sarah Wilson", action: "sale" },
-  ])
+  const [isLoadingOpen, setIsLoadingOpen] = useState(false);
+  const [isLoadingExpAdd, setIsLoadingExpAdd] = useState(false);
+  const [isLoadingClose, setIsLoadingClose] = useState(false);
 
-  const getCurrentTime = () => {
-    return new Date().toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: false,
-    })
-  }
+  // Client-only state
+  const [today, setToday] = useState("");
 
-  const generateTransactionId = () => {
-    const nextId = cashDrawer.transactions + 1
-    return `TXN${nextId.toString().padStart(3, "0")}`
-  }
+  // Add drawer state
+  const [drawerState, setDrawerState] = useState<DrawerState | null>(null);
 
-  const addTransaction = (transaction: Omit<Transaction, "id" | "time">) => {
-    const newTransaction: Transaction = {
-      ...transaction,
-      id: generateTransactionId(),
-      time: getCurrentTime(),
+  useEffect(() => {
+    // Set today's date on client only
+    const todayStr = new Date().toISOString().split('T')[0];
+    setToday(todayStr);
+    // Load drawer state from localStorage
+    const stored = localStorage.getItem(LOCAL_STORAGE_KEY);
+    if (stored) {
+      const parsed: DrawerState = JSON.parse(stored);
+      if (parsed.date === todayStr) {
+        // Auto-close logic
+        if (parsed.isOpen && !parsed.isClosed && parsed.openedAt) {
+          const now = Date.now();
+          const ms24h = 24 * 60 * 60 * 1000;
+          if (now - parsed.openedAt >= ms24h) {
+            // Auto-close
+            const closedState = { ...parsed, isOpen: false, isClosed: true };
+            localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(closedState));
+            setDrawerState(closedState);
+            setOpeningAmt(closedState.openingAmt);
+            toast({ title: "Drawer auto-closed after 24 hours" });
+          } else {
+            setDrawerState(parsed);
+            setOpeningAmt(parsed.openingAmt);
+          }
+        } else {
+          setDrawerState(parsed);
+          setOpeningAmt(parsed.openingAmt);
+        }
+      } else {
+        setDrawerState(null);
+        setOpeningAmt(0);
+      }
+    } else {
+      setDrawerState(null);
+      setOpeningAmt(0);
     }
+    loadExpenses();
+    loadCashflows();
+  }, []);
 
-    setRecentTransactions((prev) => [newTransaction, ...prev.slice(0, 4)])
-    setCashDrawer((prev) => ({ ...prev, transactions: prev.transactions + 1 }))
-  }
+  // Helper to update localStorage
+  const updateDrawerState = (state: DrawerState | null) => {
+    if (state) {
+      localStorage.setItem(LOCAL_STORAGE_KEY, JSON.stringify(state));
+    } else {
+      localStorage.removeItem(LOCAL_STORAGE_KEY);
+    }
+    setDrawerState(state);
+  };
+
+  const loadExpenses = async () => {
+    setLoadingExp(true);
+    try {
+      const res = await apiClient.get<{ data: Expense[] }>(EXP);
+      setExpenses(res.data.data);
+    } catch {
+      toast({ title: "Failed to load expenses", variant: "destructive" });
+    } finally {
+      setLoadingExp(false);
+    }
+  };
+
+  const loadCashflows = async () => {
+    setLoadingCF(true);
+    try {
+      const res = await apiClient.get<{ data: Cashflow[] }>(CF);
+      setCashflows(res.data.data);
+    } catch {
+      toast({ title: "Failed to load cashflows", variant: "destructive" });
+    } finally {
+      setLoadingCF(false);
+    }
+  };
+
+  // Derived
+  const hasOpenedToday = !!drawerState && drawerState.isOpen && !drawerState.isClosed && drawerState.date === today;
+  const hasClosedToday = !!drawerState && drawerState.isClosed && drawerState.date === today;
+  const totalSales = cashflows.reduce((sum, cf) => today && cf.created_at.startsWith(today) ? sum + parseFloat(cf.sales) : sum, 0);
+  const unassignedToday = expenses.filter(e => today && !e.cashflow_id && e.created_at.startsWith(today));
+
+  // Handlers
+  const handleCreateExpense = async () => {
+    const amt = parseFloat(newExpense.amount);
+    if (!newExpense.particular || isNaN(amt) || amt <= 0) {
+      toast({ title: "Invalid expense", variant: "destructive" });
+      return;
+    }
+    setIsLoadingExpAdd(true);
+    try {
+      await apiClient.post(EXP, { particular: newExpense.particular, amount: amt });
+      toast({ title: "Expense added" });
+      setOpenAddExpDlg(false);
+      setNewExpense({ particular: "", amount: "" });
+      await loadExpenses();
+    } catch {
+      toast({ title: "Failed to add expense", variant: "destructive" });
+    } finally {
+      setIsLoadingExpAdd(false);
+    }
+  };
 
   const handleOpenDrawer = () => {
-    if (!openingAmount || Number.parseFloat(openingAmount) < 0) {
-      toast({
-        title: "Invalid Amount",
-        description: "Please enter a valid opening amount.",
-        variant: "destructive",
-      })
-      return
+    if (openingAmt <= 0 || isNaN(openingAmt)) {
+      toast({ title: "Enter a valid opening amount", variant: "destructive" });
+      return;
     }
-
-    const openingValue = Number.parseFloat(openingAmount)
-    setCashDrawer((prev) => ({
-      ...prev,
-      isOpen: true,
-      openingAmount: openingValue,
-      currentAmount: openingValue,
-      totalSales: 0,
-      totalCash: 0,
-      totalCard: 0,
-      transactions: 0,
-      openedAt: getCurrentTime(),
-      closedAt: undefined,
-    }))
-
-    // Reset transactions for new shift
-    setRecentTransactions([])
-
-    setOpeningAmount("")
-    setIsOpenDrawerDialogOpen(false)
-
-    toast({
-      title: "Cash Drawer Opened",
-      description: `Drawer opened with $${openingValue.toFixed(2)} opening amount.`,
-    })
-  }
-
-  const handleCloseDrawer = () => {
-    const closingTime = getCurrentTime()
-    const expectedAmount = cashDrawer.currentAmount
-    const actualAmount = totalCashInDrawer
-    const variance = actualAmount - expectedAmount
-
-    setCashDrawer((prev) => ({
-      ...prev,
-      isOpen: false,
-      closedAt: closingTime,
-    }))
-
-    // Generate end-of-day report
-    const report = {
-      openingAmount: cashDrawer.openingAmount,
-      closingAmount: actualAmount,
-      expectedAmount: expectedAmount,
-      variance: variance,
-      totalSales: cashDrawer.totalSales,
-      totalCash: cashDrawer.totalCash,
-      totalCard: cashDrawer.totalCard,
-      transactions: cashDrawer.transactions,
-      openedAt: cashDrawer.openedAt,
-      closedAt: closingTime,
+    if (hasOpenedToday || hasClosedToday) {
+      toast({ title: "Drawer already opened or closed today", variant: "destructive" });
+      return;
     }
+    setIsLoadingOpen(true);
+    setTimeout(() => {
+      const todayStr = new Date().toISOString().split('T')[0];
+      const newState: DrawerState = {
+        date: todayStr,
+        openingAmt,
+        isOpen: true,
+        isClosed: false,
+        openedAt: Date.now(),
+      };
+      updateDrawerState(newState);
+      toast({ title: `Drawer opened at ${formatCurrency(openingAmt)}` });
+      setOpenOpenDlg(false);
+      setIsLoadingOpen(false);
+    }, 800); // Simulate async
+  };
 
-    console.log("End-of-Day Report:", report)
-
-    setIsCloseDrawerDialogOpen(false)
-
-    toast({
-      title: "Cash Drawer Closed",
-      description: `Drawer closed at ${closingTime}. ${variance !== 0 ? `Variance: $${Math.abs(variance).toFixed(2)} ${variance > 0 ? "over" : "short"}` : "Perfect balance!"}`,
-      variant: variance === 0 ? "default" : "destructive",
-    })
-  }
-
-  const handleAddCash = () => {
-    if (!amount || Number.parseFloat(amount) <= 0) {
-      toast({
-        title: "Invalid Amount",
-        description: "Please enter a valid amount greater than 0.",
-        variant: "destructive",
-      })
-      return
+  const handleCloseDrawer = async () => {
+    if (!hasOpenedToday || hasClosedToday) {
+      toast({ title: "Drawer is not open or already closed today", variant: "destructive" });
+      return;
     }
+    setIsLoadingClose(true);
+    setTimeout(() => {
+      if (!drawerState) return;
+      const todayStr = new Date().toISOString().split('T')[0];
+      const closingAmt = drawerState.openingAmt + totalSales;
+      const newState: DrawerState = {
+        ...drawerState,
+        isClosed: true,
+        isOpen: false,
+      };
+      updateDrawerState(newState);
+      toast({ title: "Drawer closed", description: `Closing Amount: ${formatCurrency(closingAmt)}` });
+      setOpenCloseDlg(false);
+      setIsLoadingClose(false);
+    }, 800); // Simulate async
+  };
 
-    if (!reason.trim()) {
-      toast({
-        title: "Reason Required",
-        description: "Please provide a reason for adding cash.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const addAmount = Number.parseFloat(amount)
-
-    setCashDrawer((prev) => ({
-      ...prev,
-      currentAmount: prev.currentAmount + addAmount,
-    }))
-
-    addTransaction({
-      amount: addAmount,
-      type: "Cash",
-      customer: "System",
-      action: "add",
-      reason: reason,
-    })
-
-    toast({
-      title: "Cash Added",
-      description: `$${addAmount.toFixed(2)} added to drawer. Reason: ${reason}`,
-    })
-
-    setAmount("")
-    setReason("")
-    setIsAddCashDialogOpen(false)
-  }
-
-  const handleRemoveCash = () => {
-    if (!amount || Number.parseFloat(amount) <= 0) {
-      toast({
-        title: "Invalid Amount",
-        description: "Please enter a valid amount greater than 0.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (!reason.trim()) {
-      toast({
-        title: "Reason Required",
-        description: "Please provide a reason for removing cash.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const removeAmount = Number.parseFloat(amount)
-
-    if (removeAmount > cashDrawer.currentAmount) {
-      toast({
-        title: "Insufficient Funds",
-        description: "Cannot remove more cash than available in drawer.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    setCashDrawer((prev) => ({
-      ...prev,
-      currentAmount: prev.currentAmount - removeAmount,
-    }))
-
-    addTransaction({
-      amount: removeAmount,
-      type: "Cash",
-      customer: "System",
-      action: "remove",
-      reason: reason,
-    })
-
-    toast({
-      title: "Cash Removed",
-      description: `$${removeAmount.toFixed(2)} removed from drawer. Reason: ${reason}`,
-    })
-
-    setAmount("")
-    setReason("")
-    setIsRemoveCashDialogOpen(false)
-  }
-
-  const totalCashInDrawer = denominations.reduce((sum, denom) => sum + denom.value * denom.count, 0)
+  // SKELETON LOADER COMPONENT
+  const CardSkeleton = () => (
+    <div className="rounded-lg bg-gray-100 dark:bg-gray-800 animate-pulse h-20 w-full flex flex-col justify-center items-center">
+      <div className="h-4 w-16 bg-gray-300 dark:bg-gray-700 rounded mb-2" />
+      <div className="h-6 w-24 bg-gray-200 dark:bg-gray-600 rounded" />
+    </div>
+  );
 
   return (
     <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+      {/* Header */}
+      <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Cash Register</h1>
-          <p className="text-gray-600">Manage cash drawer and daily operations</p>
-        </div>
-        <div className="flex items-center space-x-2">
-          <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-            <Clock className="h-3 w-3 mr-1" />
-            Shift: 10:00 AM - 6:00 PM
-          </Badge>
-          <Badge variant="outline" className="bg-blue-50 text-blue-700 border-blue-200">
-            <User className="h-3 w-3 mr-1" />
-            Cashier: Sarah Johnson
-          </Badge>
-          <Badge
-            variant="outline"
-            className={`${cashDrawer.isOpen ? "bg-green-50 text-green-700 border-green-200" : "bg-red-50 text-red-700 border-red-200"}`}
-          >
-            {cashDrawer.isOpen ? "Drawer Open" : "Drawer Closed"}
-          </Badge>
-        </div>
-      </div>
-
-      {/* Cash Drawer Status */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Opening Amount</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${cashDrawer.openingAmount.toFixed(2)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Current Amount</CardTitle>
-            <DollarSign className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">${cashDrawer.currentAmount.toFixed(2)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Sales</CardTitle>
-            <Receipt className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${cashDrawer.totalSales.toFixed(2)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Transactions</CardTitle>
-            <Calculator className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{cashDrawer.transactions}</div>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Cash Drawer Management */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Cash Drawer Management</CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="bg-blue-50 p-4 rounded-lg">
-                <div className="text-sm text-blue-600 mb-1">Cash Sales</div>
-                <div className="text-xl font-bold text-blue-900">${cashDrawer.totalCash.toFixed(2)}</div>
-              </div>
-              <div className="bg-purple-50 p-4 rounded-lg">
-                <div className="text-sm text-purple-600 mb-1">Card Sales</div>
-                <div className="text-xl font-bold text-purple-900">${cashDrawer.totalCard.toFixed(2)}</div>
-              </div>
+          <h1 className="text-3xl font-bold">Cash Register</h1>
+          {today && (
+            <div className="flex space-x-2 mt-1">
+              <Badge variant="outline"><Clock className="h-4 w-4 mr-1" />{today}</Badge>
+              <Badge variant="outline"><User className="h-4 w-4 mr-1" />Cashier</Badge>
             </div>
+          )}
+        </div>
+        <div className="flex space-x-2">
+          <Dialog open={openOpenDlg} onOpenChange={setOpenOpenDlg}>
+            <DialogTrigger asChild>
+              <Button disabled={hasOpenedToday || hasClosedToday}>
+                {isLoadingOpen ? <Loader2 className="animate-spin mr-2" /> : <DollarSign className="mr-2" />}Open Drawer
+              </Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Open Drawer</DialogTitle></DialogHeader>
+              <div className="space-y-4">
+                <Label>Opening Amount</Label>
+                <Input type="number" value={openingAmt} onChange={e => setOpeningAmt(+e.target.value)} min={0} />
+                <Button onClick={handleOpenDrawer} disabled={isLoadingOpen}>
+                  {isLoadingOpen ? <Loader2 className="animate-spin mr-2" /> : 'Confirm'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
-            <Separator />
+          <Dialog open={openAddExpDlg} onOpenChange={setOpenAddExpDlg}>
+            <DialogTrigger asChild>
+              <Button><Plus className="mr-2" />Add Expense</Button>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>New Expense</DialogTitle></DialogHeader>
+              <div className="space-y-4">
+                <Label>Particular</Label>
+                <Input value={newExpense.particular} onChange={e => setNewExpense(f => ({ ...f, particular: e.target.value }))} />
+                <Label>Amount</Label>
+                <Input type="number" value={newExpense.amount} onChange={e => setNewExpense(f => ({ ...f, amount: e.target.value }))} min={0} />
+                <Button onClick={handleCreateExpense} disabled={isLoadingExpAdd}>
+                  {isLoadingExpAdd ? <Loader2 className="animate-spin mr-2" /> : 'Save Expense'}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
 
-            <div className="grid grid-cols-2 gap-3">
-              <Button
-                variant="outline"
-                className="h-12"
-                onClick={() => setIsOpenDrawerDialogOpen(true)}
-                disabled={cashDrawer.isOpen}
-              >
-                <DollarSign className="h-4 w-4 mr-2" />
-                Open Drawer
+          <Dialog open={openCloseDlg} onOpenChange={setOpenCloseDlg}>
+            <DialogTrigger asChild>
+              <Button disabled={!hasOpenedToday || hasClosedToday}>
+                {isLoadingClose ? <Loader2 className="animate-spin mr-2" /> : <Receipt className="mr-2" />}Close Drawer
               </Button>
-              <Button
-                variant="outline"
-                className="h-12"
-                onClick={() => setIsAddCashDialogOpen(true)}
-                disabled={!cashDrawer.isOpen}
-              >
-                <DollarSign className="h-4 w-4 mr-2" />
-                Add Cash
-              </Button>
-              <Button
-                variant="outline"
-                className="h-12"
-                onClick={() => setIsRemoveCashDialogOpen(true)}
-                disabled={!cashDrawer.isOpen}
-              >
-                <DollarSign className="h-4 w-4 mr-2" />
-                Remove Cash
-              </Button>
-              <Button
-                variant="outline"
-                className="h-12"
-                onClick={() => setIsCloseDrawerDialogOpen(true)}
-                disabled={!cashDrawer.isOpen}
-              >
-                <Receipt className="h-4 w-4 mr-2" />
-                Close Drawer
-              </Button>
-            </div>
-
-            {Math.abs(totalCashInDrawer - cashDrawer.currentAmount) > 0.01 && (
-              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                <div className="flex items-center space-x-2">
-                  <AlertCircle className="h-4 w-4 text-yellow-600" />
-                  <span className="text-sm text-yellow-800">
-                    Cash count mismatch: Expected ${cashDrawer.currentAmount.toFixed(2)}, Counted $
-                    {totalCashInDrawer.toFixed(2)}
-                  </span>
+            </DialogTrigger>
+            <DialogContent>
+              <DialogHeader><DialogTitle>Close Drawer</DialogTitle></DialogHeader>
+              <div className="space-y-4">
+                <Label>Select Today's Unassigned Expenses</Label>
+                <div className="max-h-48 overflow-y-auto space-y-2">
+                  {loadingExp ? <Loader2 className="animate-spin mx-auto" /> : unassignedToday.map(e => (
+                    <div key={e.id} className="flex items-center space-x-2">
+                      <input type="checkbox" checked={selectedIds.includes(e.id)} onChange={ev => setSelectedIds(ids => ev.target.checked ? [...ids, e.id] : ids.filter(i => i !== e.id))} />
+                      <span>{e.particular} - {formatCurrency(parseFloat(e.amount))}</span>
+                    </div>
+                  ))}
                 </div>
+                <Button onClick={handleCloseDrawer} disabled={isLoadingClose}>
+                  {isLoadingClose ? <Loader2 className="animate-spin mr-2" /> : 'Save Cashflow'}
+                </Button>
               </div>
+            </DialogContent>
+          </Dialog>
+        </div>
+      </div>
+
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-4">
+        <Card className="shadow-md">
+          <CardHeader><CardTitle>Opening</CardTitle></CardHeader>
+          <CardContent>
+            {(isLoadingOpen || loadingCF) ? <CardSkeleton /> : (
+              <span className="text-xl font-semibold">{drawerState && drawerState.date === today ? formatCurrency(drawerState.openingAmt) : formatCurrency(0)}</span>
             )}
           </CardContent>
         </Card>
-
-        {/* Cash Count */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Cash Count</CardTitle>
-          </CardHeader>
+        <Card className="shadow-md">
+          <CardHeader><CardTitle>Sales</CardTitle></CardHeader>
           <CardContent>
-            <div className="space-y-3">
-              {denominations.map((denom, index) => (
-                <div key={index} className="flex items-center justify-between">
-                  <div className="flex items-center space-x-3">
-                    <span className="font-medium w-16">{denom.label}</span>
-                    <span className="text-sm text-gray-500">× {denom.count}</span>
-                  </div>
-                  <span className="font-medium">${(denom.value * denom.count).toFixed(2)}</span>
-                </div>
-              ))}
-              <Separator />
-              <div className="flex items-center justify-between font-bold text-lg">
-                <span>Total Cash</span>
-                <span>${totalCashInDrawer.toFixed(2)}</span>
-              </div>
-            </div>
+            {loadingCF ? <CardSkeleton /> : (
+              <span className="text-xl font-semibold">{formatCurrency(totalSales)}</span>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="shadow-md">
+          <CardHeader><CardTitle>Closing</CardTitle></CardHeader>
+          <CardContent>
+            {(isLoadingClose || loadingCF) ? <CardSkeleton /> : (
+              <span className="text-xl font-semibold">{drawerState && drawerState.date === today ? formatCurrency(drawerState.openingAmt + totalSales) : formatCurrency(0)}</span>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="shadow-md">
+          <CardHeader><CardTitle>Expenses</CardTitle></CardHeader>
+          <CardContent>
+            {loadingExp ? <CardSkeleton /> : (
+              <span className="text-xl font-semibold">{unassignedToday.length}</span>
+            )}
           </CardContent>
         </Card>
       </div>
 
-      {/* Recent Transactions */}
+      {/* Expenses Table */}
       <Card>
-        <CardHeader>
-          <CardTitle>Recent Transactions</CardTitle>
-        </CardHeader>
+        <CardHeader><CardTitle>Expenses</CardTitle></CardHeader>
         <CardContent>
-          <div className="space-y-3">
-            {recentTransactions.length === 0 ? (
-              <div className="text-center text-gray-500 py-8">No transactions yet</div>
-            ) : (
-              recentTransactions.map((transaction) => (
-                <div key={transaction.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
-                  <div className="flex items-center space-x-3">
-                    <div
-                      className={`p-2 rounded-full ${transaction.action === "add"
-                          ? "bg-green-100"
-                          : transaction.action === "remove"
-                            ? "bg-red-100"
-                            : transaction.type === "Cash"
-                              ? "bg-green-100"
-                              : "bg-blue-100"
-                        }`}
-                    >
-                      {transaction.type === "Cash" ? (
-                        <DollarSign
-                          className={`h-4 w-4 ${transaction.action === "add"
-                              ? "text-green-600"
-                              : transaction.action === "remove"
-                                ? "text-red-600"
-                                : "text-green-600"
-                            }`}
-                        />
-                      ) : (
-                        <CreditCard className="h-4 w-4 text-blue-600" />
-                      )}
-                    </div>
-                    <div>
-                      <div className="font-medium">{transaction.id}</div>
-                      <div className="text-sm text-gray-500">
-                        {transaction.customer} • {transaction.time}
-                        {transaction.reason && ` • ${transaction.reason}`}
-                      </div>
-                    </div>
-                  </div>
-                  <div className="text-right">
-                    <div
-                      className={`font-medium ${transaction.action === "remove"
-                          ? "text-red-600"
-                          : transaction.action === "add"
-                            ? "text-green-600"
-                            : ""
-                        }`}
-                    >
-                      {transaction.action === "remove" ? "-" : ""}${transaction.amount.toFixed(2)}
-                    </div>
-                    <Badge variant="outline" className="text-xs">
-                      {transaction.action
-                        ? transaction.action === "add"
-                          ? "Add"
-                          : transaction.action === "remove"
-                            ? "Remove"
-                            : transaction.type
-                        : transaction.type}
-                    </Badge>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
+          {loadingExp ? <Loader2 className="animate-spin mx-auto" /> : (
+            <Table>
+              <TableHeader><TableRow><TableHead>Particular</TableHead><TableHead>Amount</TableHead><TableHead>Date</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {expenses.map(e => (
+                  <TableRow key={e.id} className="hover:bg-gray-50">
+                    <TableCell>{e.particular}</TableCell>
+                    <TableCell>{formatCurrency(parseFloat(e.amount))}</TableCell>
+                    <TableCell>{new Date(e.created_at).toLocaleDateString()}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
-      {/* Dialogs */}
-      <Dialog open={isOpenDrawerDialogOpen} onOpenChange={setIsOpenDrawerDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Open Cash Drawer</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-gray-600">Enter the opening amount for the cash drawer to start a new shift.</p>
-            <div>
-              <Label htmlFor="opening-amount">Opening Amount</Label>
-              <Input
-                id="opening-amount"
-                type="number"
-                step="0.01"
-                value={openingAmount}
-                onChange={(e) => setOpeningAmount(e.target.value)}
-                placeholder="200.00"
-              />
-            </div>
-            <div className="flex space-x-2">
-              <Button onClick={handleOpenDrawer} className="flex-1">
-                Open Drawer
-              </Button>
-              <Button variant="outline" onClick={() => setIsOpenDrawerDialogOpen(false)} className="flex-1">
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isAddCashDialogOpen} onOpenChange={setIsAddCashDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Cash to Drawer</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="add-amount">Amount</Label>
-              <Input
-                id="add-amount"
-                type="number"
-                step="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-            <div>
-              <Label htmlFor="add-reason">Reason (Required)</Label>
-              <Input
-                id="add-reason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="e.g., Change fund, Till adjustment"
-              />
-            </div>
-            <Button onClick={handleAddCash} className="w-full">
-              Add Cash
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isRemoveCashDialogOpen} onOpenChange={setIsRemoveCashDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Remove Cash from Drawer</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="remove-amount">Amount</Label>
-              <Input
-                id="remove-amount"
-                type="number"
-                step="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-            <div>
-              <Label htmlFor="remove-reason">Reason (Required)</Label>
-              <Input
-                id="remove-reason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="e.g., Bank deposit, Petty cash"
-              />
-            </div>
-            <Button onClick={handleRemoveCash} className="w-full">
-              Remove Cash
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={isCloseDrawerDialogOpen} onOpenChange={setIsCloseDrawerDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Close Cash Drawer</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-gray-600">
-              This will close the cash drawer and generate an end-of-day report. Make sure all transactions are
-              complete.
-            </p>
-            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
-              <div className="flex justify-between">
-                <span>Opening Amount:</span>
-                <span>${cashDrawer.openingAmount.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Total Sales:</span>
-                <span>${cashDrawer.totalSales.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Expected Amount:</span>
-                <span>${cashDrawer.currentAmount.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Actual Count:</span>
-                <span>${totalCashInDrawer.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Variance:</span>
-                <span
-                  className={
-                    Math.abs(totalCashInDrawer - cashDrawer.currentAmount) < 0.01 ? "text-green-600" : "text-red-600"
-                  }
-                >
-                  ${Math.abs(totalCashInDrawer - cashDrawer.currentAmount).toFixed(2)}
-                  {totalCashInDrawer > cashDrawer.currentAmount
-                    ? " over"
-                    : totalCashInDrawer < cashDrawer.currentAmount
-                      ? " short"
-                      : ""}
-                </span>
-              </div>
-              <div className="flex justify-between font-bold">
-                <span>Transactions:</span>
-                <span>{cashDrawer.transactions}</span>
-              </div>
-            </div>
-            <div className="flex space-x-2">
-              <Button onClick={handleCloseDrawer} className="flex-1">
-                Close Drawer
-              </Button>
-              <Button variant="outline" onClick={() => setIsCloseDrawerDialogOpen(false)} className="flex-1">
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
+      {/* Cashflow History Table */}
+      <Card>
+        <CardHeader><CardTitle>Cashflows</CardTitle></CardHeader>
+        <CardContent>
+          {loadingCF ? <Loader2 className="animate-spin mx-auto" /> : (
+            <Table>
+              <TableHeader><TableRow><TableHead>Opening</TableHead><TableHead>Sales</TableHead><TableHead>Closing</TableHead><TableHead>Date</TableHead></TableRow></TableHeader>
+              <TableBody>
+                {cashflows.map(c => (
+                  <TableRow key={c.id} className="hover:bg-gray-50">
+                    <TableCell>{formatCurrency(parseFloat(c.opening))}</TableCell>
+                    <TableCell>{formatCurrency(parseFloat(c.sales))}</TableCell>
+                    <TableCell>{formatCurrency(parseFloat(c.closing))}</TableCell>
+                    <TableCell>{new Date(c.created_at).toLocaleDateString()}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
+        </CardContent>
+      </Card>
     </div>
-  )
+  );
 }

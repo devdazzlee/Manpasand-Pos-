@@ -1,1 +1,1 @@
-export const API_BASE  = "https://backend.manpasandstore.com/api/v1";
+export const API_BASE = "https://acestudios-pos.vercel.app/api/v1";

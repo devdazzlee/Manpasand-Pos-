@@ -31,7 +31,7 @@ export function LoginForm({ onLogin }: LoginFormProps) {
     try {
       const { data } = await loginRequest(username, password)
       toast({ variant: "success", title: "Login successful" })
-      onLogin(data.token)
+      onLogin(data.token , data.branch)
     } catch (err: any) {
       setError(err.message)
       toast({ variant: "destructive", title: "Login failed", description: err.message })

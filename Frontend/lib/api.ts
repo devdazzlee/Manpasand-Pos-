@@ -13,7 +13,7 @@ export async function loginRequest(email: string, password: string) {
   return res.json() as Promise<{
     success: true
     message: string
-    data: { user: { email: string; role: string }; token: string }
+    data: { user: { email: string; role: string }; token: string , branch: string }
   }>
 }
 

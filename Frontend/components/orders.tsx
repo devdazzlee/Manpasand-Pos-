@@ -48,7 +48,7 @@ const Orders: React.FC = () => {
     setIsInitialLoading(true);
     try {
       const [cRes, pRes] = await Promise.all([
-        apiClient.get(`${API_BASE}/user/customer`),
+        apiClient.get(`${API_BASE}/customer`),
         apiClient.get(`${API_BASE}/products?limit=100`),
       ]);
       setCustomers(cRes.data.data);

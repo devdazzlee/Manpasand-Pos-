@@ -9,7 +9,6 @@ import { Reports } from "@/components/reports"
 import { Settings } from "@/components/settings"
 import { SalesHistory } from "@/components/sales-history"
 import { EmployeeManagement } from "@/components/employee-management"
-
 import { Categories } from "@/components/categories"
 import { Promotions } from "@/components/promotions"
 import { CashRegister } from "@/components/cash-register"
@@ -52,7 +51,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       case "dashboard":
         return <DashboardHome />
       case "new-sale":
-        return <Sales />
+        return <NewSale />
       case "orders":
         return <Orders />
       case "units":

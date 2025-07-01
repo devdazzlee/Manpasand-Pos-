@@ -70,7 +70,7 @@ export function Customers() {
   const fetchCustomers = async () => {
     setIsLoading(true);
     try {
-      const res = await apiClient.get(`${API_BASE}/user/customer`);
+      const res = await apiClient.get(`${API_BASE}/customer`);
       // API shape: { success, message, data: Customer[] }
       setCustomers(res.data.data);
       toast({
@@ -109,7 +109,7 @@ export function Customers() {
     if (!newCustomer.email) return;
     setIsAdding(true);
     try {
-      await apiClient.post(`${API_BASE}/user/customer`, {
+      await apiClient.post(`${API_BASE}/customer`, {
         email: newCustomer.email,
       });
       setNewCustomer({});
@@ -139,7 +139,7 @@ export function Customers() {
     if (!editingCustomer) return;
     setIsEditing(true);
     try {
-      await apiClient.patch(`${API_BASE}/user/customer/${editingCustomer.id}`, {
+      await apiClient.patch(`${API_BASE}/customer/${editingCustomer.id}`, {
         email: editingCustomer.email,
         name: editingCustomer.name,
         phone_number: editingCustomer.phone_number,
@@ -169,7 +169,7 @@ export function Customers() {
   // Delete customer
   const handleDeleteCustomer = async (id: string) => {
     try {
-      await apiClient.delete(`${API_BASE}/user/customer/${id}`);
+      await apiClient.delete(`${API_BASE}/customer/${id}`);
       toast({
         title: "Success",
         description: "Customer deleted successfully",

@@ -6,7 +6,7 @@ import { Dashboard } from "@/components/dashboard"
 import { LoadingSpinner } from "@/components/ui/loading-spinner"
 
 export default function Home() {
-  
+
   const [token, setToken] = useState<string | null>(null)
   const [checking, setChecking] = useState(true)
 
@@ -15,8 +15,9 @@ export default function Home() {
     setChecking(false)
   }, [])
 
-  const handleLogin = (jwt: string) => {
+  const handleLogin = (jwt: string, branch: string) => {
     localStorage.setItem("token", jwt)
+    localStorage.setItem("branch", branch)
     setToken(jwt)
   }
 
@@ -24,10 +25,10 @@ export default function Home() {
     localStorage.removeItem("token")
     setToken(null)
   }
-    if (checking) {
+  if (checking) {
     return (
       <div className="flex h-screen items-center justify-center">
-        <LoadingSpinner  className="w-12 h-12"  />
+        <LoadingSpinner className="w-12 h-12" />
       </div>
     )
   }
