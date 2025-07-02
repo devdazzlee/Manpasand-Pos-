@@ -5,7 +5,7 @@ import {
     updateSubcategory,
     toggleSubcategoryStatus,
     listSubcategories,
-} from '../controllers/admin/subcategory.controller';
+} from '../controllers/subcategory.controller';
 import {
     createSubcategorySchema,
     updateSubcategorySchema,
@@ -17,7 +17,7 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', validate(createSubcategorySchema), createSubcategory);
 router.get('/', validate(listSubcategoriesSchema), listSubcategories);

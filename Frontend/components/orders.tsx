@@ -84,7 +84,7 @@ const Orders: React.FC = () => {
     try {
       const params = statusFilter ? { status: statusFilter } : {};
       const res = await apiClient.get(`${API_BASE}/order`, { params });
-      setOrders(res.data.data);
+      setOrders(res.data.data.data);
       toast({
         title: "Success",
         description: "Orders loaded successfully",

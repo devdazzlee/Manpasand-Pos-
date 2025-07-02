@@ -10,7 +10,6 @@ const createOrderSchema = zod_1.z.object({
     body: zod_1.z.object({
         items: zod_1.z.array(orderItemSchema).min(1, 'At least one item is required'),
         paymentMethod: zod_1.z.enum(['CASH', 'CARD', 'MOBILE_MONEY']).optional(),
-        customerId: zod_1.z.string().optional(),
     }),
 });
 exports.createOrderSchema = createOrderSchema;

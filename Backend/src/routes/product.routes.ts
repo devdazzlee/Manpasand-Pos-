@@ -5,7 +5,7 @@ import {
     updateProduct,
     toggleProductStatus,
     listProducts,
-} from '../controllers/admin/product.controller';
+} from '../controllers/product.controller';
 import {
     createProductSchema,
     updateProductSchema,
@@ -19,7 +19,7 @@ import { parseFormData } from '../middleware/parse-formdata.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', upload.array('images', 10), parseFormData, validate(createProductSchema), createProduct);
 router.get('/', validate(listProductsSchema), listProducts);

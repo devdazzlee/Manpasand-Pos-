@@ -7,19 +7,19 @@ import {
   getCategory,
   updateCategory,
   toggleCategoryStatus,
-} from '../controllers/admin/category.controller';
+} from '../controllers/category.controller';
 
 import {
   createProduct,
   getProduct,
   updateProduct,
   toggleProductStatus,
-} from '../controllers/admin/product.controller';
+} from '../controllers/product.controller';
 import { createProductSchema, updateProductSchema } from '../validations/product.validation';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/categories', validate(createCategorySchema), createCategory);
 router.get('/categories/:id', getCategory);

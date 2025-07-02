@@ -163,7 +163,7 @@ const Subcategories: React.FC = () => {
         <h1 className="text-3xl font-bold">Subcategories</h1>
         <Button
           onClick={openAdd}
-          className="flex items-center space-x-2 bg-indigo-600 text-white hover:bg-indigo-700"
+          className="flex items-center space-x-2"
         >
           <Plus className="h-5 w-5" />
           <span>New</span>
@@ -260,7 +260,7 @@ const Subcategories: React.FC = () => {
                 onChange={(e) => setForm({ ...form, name: e.target.value })}
               />
             </div>
-            <div>
+            {/* <div>
               <Label htmlFor="image">Image File</Label>
               <input
                 type="file"
@@ -268,7 +268,7 @@ const Subcategories: React.FC = () => {
                 accept="image/*"
                 onChange={handleFileChange}
               />
-            </div>
+            </div> */}
             <div className="flex items-center space-x-2">
               <input
                 id="pos"

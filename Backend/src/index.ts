@@ -3,6 +3,7 @@ import cors from 'cors';
 import helmet from 'helmet';
 import morgan from 'morgan';
 import { config } from './config/app';
+import { prisma } from './prisma/client';
 import { errorHandler } from './middleware/error.middleware';
 import { notFoundHandler } from './middleware/not-found.middleware';
 import { connectDB } from './config/db';
@@ -18,11 +19,14 @@ import supplierRoutes from './routes/supplier.routes';
 import taxRoutes from './routes/tax.routes';
 import brandRoutes from './routes/brand.routes';
 import productRoutes  from './routes/product.routes';
-import orderRoutes  from './routes/order.routes';
+import orderRoutes  from './routes/adminOrder.routes';
 import stockRoutes  from './routes/stock.routes';
 import saleRoutes  from './routes/sale.routes';
 import appRoutes  from './routes/app.routes';
+import expenseRoutes  from './routes/expense.routes';
+import cashflowRoutes  from './routes/cashflow.routes';
 import customerRoutes  from './routes/customer.routes';
+import customerOrderRoutes  from './routes/customerOrder.routes';
 import deviceIdentityRoutes  from './routes/device_identity.routes';
 
 const vAPI = process.env.vAPI || '/api/v1';
@@ -53,15 +57,18 @@ app.use(`${vAPI}/products`, productRoutes);
 app.use(`${vAPI}/order`, orderRoutes);
 app.use(`${vAPI}/sale`, saleRoutes);
 app.use(`${vAPI}/stock`, stockRoutes);
+app.use(`${vAPI}/expenses`, expenseRoutes);
+app.use(`${vAPI}/cashflows`, cashflowRoutes);
 
 // App Routes
-app.use(`${vAPI}/user/app`, appRoutes);
-app.use(`${vAPI}/user/customer`, customerRoutes);
-app.use(`${vAPI}/user/device-identity`, deviceIdentityRoutes);
+app.use(`${vAPI}/customer/app`, appRoutes);
+app.use(`${vAPI}/customer`, customerRoutes);
+app.use(`${vAPI}/app/customer/order`, customerOrderRoutes);
+app.use(`${vAPI}/customer/device-identity`, deviceIdentityRoutes);
 
 // Health check
 app.get('/health', (req, res) => {
-  res.status(200).json({ status: 'OK' });
+  res.status(200).json({ status: 'OK - Server is working fine' });
 });
 
 // Error handling
@@ -71,5 +78,10 @@ app.use(notFoundHandler);
 // Start server
 app.listen(config.port, () => {
   console.log(`Server running on port ${config.port}`);
+});
+
+process.on('SIGINT', async () => {
+  await prisma.$disconnect();
+  process.exit(0);
 });
 

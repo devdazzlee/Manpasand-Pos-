@@ -6,12 +6,12 @@ import {
     adjustStockController,
     getStocksController,
     getStockMovementsController,
-} from "../controllers/admin/stock.controller";
+} from "../controllers/stock.controller";
 import { createStockSchema, adjustStockSchema } from "../validations/stock.validation";
 
 const router = Router();
 
-router.use(authenticate, authorize(["ADMIN"]));
+router.use(authenticate, authorize(["SUPER_ADMIN", "ADMIN"]));
 
 router.post("/", validate(createStockSchema), createStockController);
 router.patch("/adjust", validate(adjustStockSchema), adjustStockController);

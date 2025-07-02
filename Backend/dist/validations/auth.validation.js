@@ -6,7 +6,7 @@ const registerSchema = zod_1.z.object({
     body: zod_1.z.object({
         email: zod_1.z.string().email('Invalid email address'),
         password: zod_1.z.string().min(6, 'Password must be at least 6 characters'),
-        role: zod_1.z.enum(['ADMIN', 'USER']).optional(),
+        role: zod_1.z.enum(['ADMIN', 'SUPER_ADMIN']).optional(),
     }),
 });
 exports.registerSchema = registerSchema;

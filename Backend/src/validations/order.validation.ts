@@ -9,7 +9,6 @@ const createOrderSchema = z.object({
   body: z.object({
     items: z.array(orderItemSchema).min(1, 'At least one item is required'),
     paymentMethod: z.enum(['CASH', 'CARD', 'MOBILE_MONEY']).optional(),
-    customerId: z.string().optional(),
   }),
 });
 

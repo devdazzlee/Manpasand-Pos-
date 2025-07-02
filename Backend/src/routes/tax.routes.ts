@@ -5,7 +5,7 @@ import {
     updateTax,
     toggletaxestatus,
     listTaxes,
-} from '../controllers/admin/tax.controller';
+} from '../controllers/tax.controller';
 import {
     createtaxeschema,
     updatetaxeschema,
@@ -17,7 +17,7 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', validate(createtaxeschema), createTax);
 router.get('/', validate(listTaxesSchema), listTaxes);

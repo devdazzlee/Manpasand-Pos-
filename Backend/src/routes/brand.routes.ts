@@ -5,7 +5,7 @@ import {
     updateBrand,
     toggleBrandDisplay,
     listBrands,
-} from '../controllers/admin/brand.controller';
+} from '../controllers/brand.controller';
 import {
     createBrandSchema,
     updateBrandSchema,
@@ -17,7 +17,7 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', validate(createBrandSchema), createBrand);
 router.get('/', validate(listBrandsSchema), listBrands);

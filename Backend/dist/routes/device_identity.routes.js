@@ -4,7 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const device_identity_controller_1 = require("../controllers/user/device_identity.controller");
+const device_identity_controller_1 = require("../controllers/device_identity.controller");
 const validation_middleware_1 = require("../middleware/validation.middleware");
 const device_identity_validation_1 = require("../validations/device_identity.validation");
 const router = express_1.default.Router();

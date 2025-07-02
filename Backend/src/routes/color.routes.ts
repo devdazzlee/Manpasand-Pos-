@@ -4,7 +4,7 @@ import {
     getColor,
     updateColor,
     listColors,
-} from '../controllers/admin/color.controller';
+} from '../controllers/color.controller';
 import {
     createColorSchema,
     updateColorSchema,
@@ -16,7 +16,7 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', validate(createColorSchema), createColor);
 router.get('/', validate(listColorsSchema), listColors);

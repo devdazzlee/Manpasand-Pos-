@@ -12,6 +12,7 @@ import { LoadingSpinner } from "@/components/ui/loading-spinner"
 import { useLoading } from "@/hooks/use-loading"
 import { useToast } from "@/hooks/use-toast"
 import { Search, Plus, Minus, Trash2, CreditCard, DollarSign, Scan } from "lucide-react"
+import apiClient from "@/lib/apiClient"
 
 interface CartItem {
   id: string
@@ -27,6 +28,7 @@ interface Product {
   price: number
   category: string
   stock: number
+  categoryId: string
 }
 
 interface SuspendedSale {
@@ -39,35 +41,77 @@ interface SuspendedSale {
 
 export function NewSale() {
   const [cart, setCart] = useState<CartItem[]>([])
-  const [selectedCategory, setSelectedCategory] = useState("All")
+  const [selectedCategory, setSelectedCategory] = useState("all")
   const [searchTerm, setSearchTerm] = useState("")
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
   const [productsLoading, setProductsLoading] = useState(false)
   const [suspendedSales, setSuspendedSales] = useState<SuspendedSale[]>([])
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(null)
-
+  const [products, setProducts] = useState<Product[]>([])
+  const [categories, setCategories] = useState<any[]>([])
   const { loading: paymentLoading, withLoading: withPaymentLoading } = useLoading()
-  const { loading: scanLoading, withLoading: withScanLoading } = useLoading()
+  const [scanLoading, setScanLoading] = useState(false)
   const { loading: suspendLoading, withLoading: withSuspendLoading } = useLoading()
   const { toast } = useToast()
+  const [customers, setCustomers] = useState<any[]>([])
+  const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null)
 
-  const categories = ["All", "Fruits", "Dairy", "Beverages", "Snacks", "Bakery"]
+  console.log("customers >>>>>>>>>>", customers)
+  const getProducts = async () => {
+    try {
+      const res = await apiClient.get("/products")
+      // Map API data to your Product type
+      const apiProducts = res.data.data.map((item: any) => ({
+        id: item.id,
+        name: item.name,
+        price: Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? item.purchase_rate ?? 0),
+        category: item.category?.name || "Uncategorized",
+        categoryId: item.category?.id || "",
+        stock: item.max_qty ?? 0, // or use another field if you have actual stock
+      }))
+      setProducts(apiProducts)
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load products",
+        description: "Could not fetch products from server",
+      })
+    }
+  }
+  const getCategories = async () => {
+    try {
+      const res = await apiClient.get("/categories")
+      // Add "All" as the first option
+      setCategories([{ id: "all", name: "All" }, ...res.data.data])
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load categories",
+        description: "Could not fetch categories from server",
+      })
+    }
+  }
+  const getCustomer = async () => {
+    const res = await apiClient.get("/customer")
+    setCustomers(res.data.data)
+  }
 
-  const products: Product[] = [
-    { id: "1", name: "Banana", price: 0.75, category: "Fruits", stock: 50 },
-    { id: "2", name: "Orange", price: 0.6, category: "Fruits", stock: 30 },
-    { id: "3", name: "Apple", price: 1.2, category: "Fruits", stock: 25 },
-    { id: "4", name: "Lemon", price: 0.4, category: "Fruits", stock: 40 },
-    { id: "5", name: "Milk", price: 3.5, category: "Dairy", stock: 20 },
-    { id: "6", name: "Cheese", price: 5.2, category: "Dairy", stock: 15 },
-    { id: "7", name: "Yogurt", price: 2.8, category: "Dairy", stock: 18 },
-    { id: "8", name: "Coca Cola", price: 1.5, category: "Beverages", stock: 35 },
-    { id: "9", name: "Water", price: 1.0, category: "Beverages", stock: 50 },
-    { id: "10", name: "Chips", price: 2.25, category: "Snacks", stock: 25 },
-    { id: "11", name: "Cookies", price: 3.75, category: "Snacks", stock: 20 },
-    { id: "12", name: "Bread", price: 2.5, category: "Bakery", stock: 12 },
-    { id: "13", name: "Croissant", price: 1.8, category: "Bakery", stock: 8 },
-  ]
+  const createSale = async () => {
+    const res = await apiClient.post("/sale", {
+      customer_id: 1,
+      total: total,
+      items: cart,
+    })
+  }
+
+  useEffect(() => {
+    const fetchData = async () => {
+      setProductsLoading(true)
+      await Promise.all([getProducts(), getCategories(), getCustomer()])
+      setProductsLoading(false)
+    }
+    fetchData()
+  }, [])
 
   // Load suspended sales from localStorage on component mount
   useEffect(() => {
@@ -77,8 +121,10 @@ export function NewSale() {
     }
   }, [])
 
+
+
   const filteredProducts = products.filter((product) => {
-    const matchesCategory = selectedCategory === "All" || product.category === selectedCategory
+    const matchesCategory = selectedCategory === "all" || product.categoryId === selectedCategory
     const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase())
     return matchesCategory && matchesSearch
   })
@@ -115,6 +161,7 @@ export function NewSale() {
     }
 
     toast({
+      className: "absolute top-2",
       title: "Item Added",
       description: `${product.name} added to cart`,
     })
@@ -171,8 +218,7 @@ export function NewSale() {
   }
 
   const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  const tax = subtotal * 0.08
-  const total = subtotal + tax
+  const total = subtotal
 
   const generateTransactionId = () => {
     return `TXN${Date.now().toString().slice(-6)}`
@@ -184,7 +230,6 @@ export function NewSale() {
       timestamp: new Date().toISOString(),
       items: cart,
       subtotal,
-      tax,
       total,
       paymentMethod,
       cashier: "Admin User",
@@ -206,14 +251,13 @@ ITEMS:
 ${receiptData.items
         .map(
           (item: CartItem) =>
-            `${item.name} x${item.quantity} @ $${item.price.toFixed(2)} = $${(item.price * item.quantity).toFixed(2)}`,
+            `${item.name} x${item.quantity} @ Rs ${item.price.toFixed(2)} = Rs ${(item.price * item.quantity).toFixed(2)}`,
         )
         .join("\n")}
 
 --------------------------------
-Subtotal: $${receiptData.subtotal.toFixed(2)}
-Tax (8%): $${receiptData.tax.toFixed(2)}
-TOTAL: $${receiptData.total.toFixed(2)}
+Subtotal: Rs ${receiptData.subtotal.toFixed(2)}
+TOTAL: Rs ${receiptData.total.toFixed(2)}
 
 Payment Method: ${receiptData.paymentMethod}
 
@@ -235,9 +279,40 @@ Thank you for shopping with us!
   const handlePayment = async (method: string) => {
     await withPaymentLoading(async () => {
       try {
-        // Simulate payment processing
-        await new Promise((resolve) => setTimeout(resolve, 2000))
+        // Prepare items for API
+        const saleItems = cart.map(item => ({
+          productId: item.id,
+          quantity: item.quantity,
+          price: item.price,
+        }))
 
+        // Get branchId from localStorage (key: 'branch')
+        let branchId = ""
+        try {
+          const branchStr = localStorage.getItem("branch")
+          console.log(branchStr)
+          if (branchStr) {
+            const branchObj = branchStr
+            branchId = branchStr || ""
+          }
+        } catch (e) {
+          branchId = ""
+        }
+
+        // Prepare payload
+        const payload: any = {
+          items: saleItems,
+          paymentMethod: method === "Cash" ? "CASH" : "CARD",
+          branchId,
+        }
+        if (selectedCustomer) {
+          payload.customerId = selectedCustomer
+        }
+
+        // Call create sale API
+        await apiClient.post("/sale", payload)
+
+        // (You can keep your local transaction/receipt logic if you want)
         const transactionId = generateTransactionId()
         const receiptData = generateReceiptData(transactionId, method)
 
@@ -315,33 +390,33 @@ Thank you for shopping with us!
   }
 
   const handleBarcodeScan = async () => {
-    await withScanLoading(async () => {
-      try {
-        // Simulate barcode scanning
-        await new Promise((resolve) => setTimeout(resolve, 1500))
+    setScanLoading(true)
+    try {
+      // Simulate barcode scanning
+      await new Promise((resolve) => setTimeout(resolve, 1500))
 
-        // Simulate finding a product by barcode
-        const randomProduct = products[Math.floor(Math.random() * products.length)]
-        await addToCart(randomProduct)
+      // Simulate finding a product by barcode
+      const randomProduct = products[Math.floor(Math.random() * products.length)]
+      await addToCart(randomProduct)
 
-        toast({
-          title: "Barcode Scanned",
-          description: `Found ${randomProduct.name}`,
-        })
-      } catch (error) {
-        toast({
-          variant: "destructive",
-          title: "Scan Failed",
-          description: "Could not read barcode",
-        })
-      }
-    })
+      toast({
+        title: "Barcode Scanned",
+        description: `Found ${randomProduct.name}`,
+      })
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Scan Failed",
+        description: "Could not read barcode",
+      })
+    } finally {
+      setScanLoading(false)
+    }
   }
 
-  const handleCategoryChange = async (category: string) => {
+  const handleCategoryChange = async (categoryId: string) => {
     setProductsLoading(true)
-    setSelectedCategory(category)
-    // Simulate loading products for category
+    setSelectedCategory(categoryId)
     await new Promise((resolve) => setTimeout(resolve, 500))
     setProductsLoading(false)
   }
@@ -382,16 +457,34 @@ Thank you for shopping with us!
         <div className="flex space-x-2 mb-6 overflow-x-auto">
           {categories.map((category) => (
             <Button
-              key={category}
-              variant={selectedCategory === category ? "default" : "outline"}
-              onClick={() => handleCategoryChange(category)}
+              key={category.id}
+              variant={selectedCategory === category.id ? "default" : "outline"}
+              onClick={() => handleCategoryChange(category.id)}
               className="whitespace-nowrap"
               disabled={productsLoading}
             >
-              {productsLoading && selectedCategory === category && <LoadingSpinner size="sm" className="mr-2" />}
-              {category}
+              {productsLoading && selectedCategory === category.id && <LoadingSpinner size="sm" className="mr-2" />}
+              {category.name}
             </Button>
           ))}
+        </div>
+
+        <div className="mb-4 max-w-xs bg-white text-black">
+          <label className="block text-sm font-medium text-gray-700 mb-1">Customer (optional)</label>
+          <select
+            className="w-full border rounded px-3 py-2"
+            style={{ color: 'black', backgroundColor: 'white' }}
+            value={selectedCustomer ?? ""}
+            onChange={e => setSelectedCustomer(e.target.value || null)}
+          >
+            <option value="">Select customer</option>
+            {customers.map((customer: any) => (
+              <option className="text-black" key={customer.id} value={customer.id}>
+                <span className="text-black">{customer.email}</span>
+                asdasdas
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Products Grid */}
@@ -407,6 +500,11 @@ Thank you for shopping with us!
                 </CardContent>
               </Card>
             ))}
+          </div>
+        ) : filteredProducts.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-64 col-span-full">
+            <span className="text-2xl mb-2">🛒</span>
+            <p className="text-gray-500 text-lg">No products found in this category.</p>
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
@@ -428,7 +526,7 @@ Thank you for shopping with us!
                       {cartItem && <Badge className="absolute -top-2 -right-2 bg-blue-600">{cartItem.quantity}</Badge>}
                     </div>
                     <h3 className="font-medium text-gray-900 mb-1">{product.name}</h3>
-                    <p className="text-lg font-bold text-blue-600">${product.price.toFixed(2)}</p>
+                    <p className="text-lg font-bold text-blue-600">Rs {product.price.toFixed(2)}</p>
                     <div className="flex items-center justify-between mt-2">
                       <p
                         className={`text-sm ${isOutOfStock ? "text-red-500" : isLowStock ? "text-yellow-600" : "text-gray-500"}`}
@@ -471,8 +569,8 @@ Thank you for shopping with us!
                 <div key={item.id} className="flex items-center justify-between p-3 border rounded-lg">
                   <div className="flex-1">
                     <h4 className="font-medium text-gray-900">{item.name}</h4>
-                    <p className="text-sm text-gray-500">${item.price.toFixed(2)} each</p>
-                    <p className="text-sm font-medium">${(item.price * item.quantity).toFixed(2)}</p>
+                    <p className="text-sm text-gray-500">Rs {item.price.toFixed(2)} each</p>
+                    <p className="text-sm font-medium">Rs {(item.price * item.quantity).toFixed(2)}</p>
                   </div>
                   <div className="flex items-center space-x-2">
                     <Button size="sm" variant="outline" onClick={() => updateQuantity(item.id, -1)}>
@@ -502,16 +600,12 @@ Thank you for shopping with us!
             <div className="space-y-2 mb-4">
               <div className="flex justify-between">
                 <span>Subtotal:</span>
-                <span>${subtotal.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between">
-                <span>Tax (8%):</span>
-                <span>${tax.toFixed(2)}</span>
+                <span>Rs {subtotal.toFixed(2)}</span>
               </div>
               <Separator />
               <div className="flex justify-between font-bold text-lg">
                 <span>Total:</span>
-                <span>${total.toFixed(2)}</span>
+                <span>Rs {total.toFixed(2)}</span>
               </div>
             </div>
 
@@ -549,9 +643,9 @@ Thank you for shopping with us!
             <div className="bg-gray-50 p-4 rounded-lg">
               <div className="flex justify-between mb-2">
                 <span>Total Amount:</span>
-                <span className="font-bold text-xl">${total.toFixed(2)}</span>
+                <span className="font-bold text-xl">Rs {total.toFixed(2)}</span>
               </div>
-              <div className="text-sm text-gray-600">{cart.length} item(s) • Tax included</div>
+              <div className="text-sm text-gray-600">{cart.length} item(s)</div>
             </div>
             <div className="grid grid-cols-2 gap-4">
               <LoadingButton

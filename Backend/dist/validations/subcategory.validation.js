@@ -4,8 +4,8 @@ exports.listSubcategoriesSchema = exports.getSubcategorySchema = exports.updateS
 const zod_1 = require("zod");
 const subcategoryBaseSchema = {
     name: zod_1.z.string().min(1, 'Name is required').max(100),
-    image: zod_1.z.string().optional(),
     display_on_pos: zod_1.z.boolean().optional().default(true),
+    is_active: zod_1.z.boolean().optional().default(true),
 };
 exports.createSubcategorySchema = zod_1.z.object({
     body: zod_1.z.object({

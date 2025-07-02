@@ -5,7 +5,7 @@ import {
     updateSupplier,
     toggleSupplierStatus,
     listSuppliers,
-} from '../controllers/admin/supplier.controller';
+} from '../controllers/supplier.controller';
 import {
     createSupplierSchema,
     updateSupplierSchema,
@@ -17,7 +17,7 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', validate(createSupplierSchema), createSupplier);
 router.get('/', validate(listSuppliersSchema), listSuppliers);

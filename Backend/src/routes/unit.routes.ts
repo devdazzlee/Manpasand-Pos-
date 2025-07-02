@@ -4,7 +4,7 @@ import {
     getUnit,
     updateUnit,
     listUnits,
-} from '../controllers/admin/unit.controller';
+} from '../controllers/unit.controller';
 import {
     createUnitSchema,
     updateUnitSchema,
@@ -16,7 +16,7 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', validate(createUnitSchema), createUnit);
 router.get('/', validate(listUnitsSchema), listUnits);

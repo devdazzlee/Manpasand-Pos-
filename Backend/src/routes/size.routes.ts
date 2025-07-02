@@ -4,7 +4,7 @@ import {
     getSize,
     updateSize,
     listSizes,
-} from '../controllers/admin/size.controller';
+} from '../controllers/size.controller';
 import {
     createSizeSchema,
     updateSizeSchema,
@@ -16,7 +16,7 @@ import { validate } from '../middleware/validation.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', validate(createSizeSchema), createSize);
 router.get('/', validate(listSizesSchema), listSizes);

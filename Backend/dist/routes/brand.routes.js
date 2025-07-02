@@ -4,12 +4,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = __importDefault(require("express"));
-const brand_controller_1 = require("../controllers/admin/brand.controller");
+const brand_controller_1 = require("../controllers/brand.controller");
 const brand_validation_1 = require("../validations/brand.validation");
 const validation_middleware_1 = require("../middleware/validation.middleware");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = express_1.default.Router();
-router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['ADMIN']));
+router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
 router.post('/', (0, validation_middleware_1.validate)(brand_validation_1.createBrandSchema), brand_controller_1.createBrand);
 router.get('/', (0, validation_middleware_1.validate)(brand_validation_1.listBrandsSchema), brand_controller_1.listBrands);
 router.get('/:id', (0, validation_middleware_1.validate)(brand_validation_1.getBrandSchema), brand_controller_1.getBrand);

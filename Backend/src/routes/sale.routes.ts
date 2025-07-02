@@ -6,12 +6,12 @@ import {
     getSaleByIdController,
     createSaleController,
     refundSaleController,
-} from "../controllers/admin/sale.controller";
+} from "../controllers/sale.controller";
 import { createSaleSchema, refundSaleSchema } from "../validations/sale.validation";
 
 const router = Router();
 
-router.use(authenticate, authorize(["ADMIN"]));
+router.use(authenticate, authorize(["SUPER_ADMIN", "ADMIN"]));
 
 router.get("/", getSalesController);
 router.get("/:saleId", getSaleByIdController);

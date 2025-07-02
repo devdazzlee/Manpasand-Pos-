@@ -5,7 +5,7 @@ import {
     updateBranch,
     toggleBranchStatus,
     listBranches,
-} from '../controllers/admin/branch.controller';
+} from '../controllers/branch.controller';
 import {
     createBranchSchema,
     updateBranchSchema,
@@ -17,7 +17,7 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', validate(createBranchSchema), createBranch);
 router.get('/', validate(listBranchesSchema), listBranches);

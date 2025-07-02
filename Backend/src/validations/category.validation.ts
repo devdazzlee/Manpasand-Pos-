@@ -4,7 +4,6 @@ const categoryBaseSchema = {
   name: z.string().min(1, 'Name is required').max(100),
   slug: z.string().min(1, 'Slug is required').max(100),
   display_on_branches: z.array(z.string()).optional(),
-  image: z.string().optional(),
   get_tax_from_item: z.boolean().optional().default(false),
   editable_sale_rate: z.boolean().optional().default(false),
   display_on_pos: z.boolean().optional().default(true),

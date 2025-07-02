@@ -1,5 +1,5 @@
 import express from 'express';
-import { addDeviceIdentity } from '../controllers/user/device_identity.controller';
+import { addDeviceIdentity } from '../controllers/device_identity.controller';
 import { validate } from '../middleware/validation.middleware';
 import { deviceIdentitySchema } from '../validations/device_identity.validation';
 

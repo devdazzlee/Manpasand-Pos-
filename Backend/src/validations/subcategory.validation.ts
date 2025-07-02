@@ -2,8 +2,8 @@ import { z } from 'zod';
 
 const subcategoryBaseSchema = {
   name: z.string().min(1, 'Name is required').max(100),
-  image: z.string().optional(),
   display_on_pos: z.boolean().optional().default(true),
+  is_active: z.boolean().optional().default(true),
 };
 
 export const createSubcategorySchema = z.object({

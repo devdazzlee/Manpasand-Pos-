@@ -1,6 +1,6 @@
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
+  url      = env("ACCELERATE_URL")
 }
 
 generator client {
@@ -86,12 +86,14 @@ model Category {
 }
 
 model CategoryImages {
-  id          String   @id @default(uuid())
+  id          String      @id @default(uuid())
   category_id String
-  category    Category @relation(fields: [category_id], references: [id])
+  category    Category    @relation(fields: [category_id], references: [id])
   image       String
-  is_active   Boolean  @default(true)
-  created_at  DateTime @default(now())
+  status      ImageStatus @default(PENDING)
+  error       String?
+  is_active   Boolean     @default(true)
+  created_at  DateTime    @default(now())
 
   @@index([category_id])
 }
@@ -331,7 +333,7 @@ model StockMovement {
   unit_cost       Decimal?
   notes           String?
   created_by      String?
-  user            User?              @relation(fields: [created_by], references: [id])
+  user            User?             @relation(fields: [created_by], references: [id])
   created_at      DateTime          @default(now())
 
   @@index([product_id])
@@ -346,8 +348,8 @@ model Sale {
   id               String        @id @default(uuid())
   sale_number      String        @unique
   invoice_number   String?       @unique
-  branch_id        String
-  branch           Branch        @relation(fields: [branch_id], references: [id])
+  branch_id        String?
+  branch           Branch?       @relation(fields: [branch_id], references: [id])
   customer_id      String?
   customer         Customer?     @relation(fields: [customer_id], references: [id])
   sale_date        DateTime      @default(now())
@@ -362,7 +364,7 @@ model Sale {
   notes            String?
   status           SaleStatus    @default(COMPLETED)
   created_by       String?
-  user             User?          @relation(fields: [created_by], references: [id])
+  user             User?         @relation(fields: [created_by], references: [id])
   sale_items       SaleItem[]
   created_at       DateTime      @default(now())
   updated_at       DateTime      @default(now()) @updatedAt
@@ -458,12 +460,14 @@ model Customer {
   area_id            String?
   area               Area?           @relation(fields: [area_id], references: [id])
   address            String?
+  billing_address    String?
   phone_number       String?
   gender             String?
   ntn                String?
   mobile_number      String?
   strn               String?
   email              String
+  password           String?
   dob                DateTime?
   customer_cat       String[]
   gov_id             String?
@@ -495,7 +499,7 @@ model Discount {
 model Order {
   id             String         @id @default(uuid())
   branch_id      String?
-  branch         Branch?         @relation(fields: [branch_id], references: [id])
+  branch         Branch?        @relation(fields: [branch_id], references: [id])
   customer_id    String?
   customer       Customer?      @relation(fields: [customer_id], references: [id])
   order_number   String         @unique
@@ -543,7 +547,7 @@ model DeviceIdentity {
 // ENUMS
 enum Role {
   ADMIN
-  SUPER_ADMIN // Added super admin role
+  SUPER_ADMIN
 }
 
 enum OrderStatus {
@@ -599,4 +603,23 @@ enum PurchaseOrderStatus {
   PARTIALLY_RECEIVED
   RECEIVED
   CANCELLED
+}
+
+model Expense {
+  id         String   @id @default(uuid())
+  particular String
+  amount     Decimal
+  created_at DateTime @default(now())
+
+  cashflow_id String? // make this optional
+  cashflow    CashFlow? @relation(fields: [cashflow_id], references: [id])
+}
+
+model CashFlow {
+  id         String    @id @default(uuid())
+  opening    Decimal
+  sales      Decimal
+  expenses   Expense[]
+  closing    Decimal
+  created_at DateTime  @default(now())
 }

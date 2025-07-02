@@ -6,7 +6,6 @@ const categoryBaseSchema = {
     name: zod_1.z.string().min(1, 'Name is required').max(100),
     slug: zod_1.z.string().min(1, 'Slug is required').max(100),
     display_on_branches: zod_1.z.array(zod_1.z.string()).optional(),
-    image: zod_1.z.string().optional(),
     get_tax_from_item: zod_1.z.boolean().optional().default(false),
     editable_sale_rate: zod_1.z.boolean().optional().default(false),
     display_on_pos: zod_1.z.boolean().optional().default(true),

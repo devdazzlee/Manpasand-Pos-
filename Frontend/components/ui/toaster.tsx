@@ -1,9 +1,9 @@
 "use client"
 
-import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport } from "@/components/ui/toast"
+import { Toast, ToastClose, ToastDescription, ToastProvider, ToastTitle, ToastViewport, ToastViewportPosition } from "@/components/ui/toast"
 import { useToast } from "@/hooks/use-toast"
 
-export function Toaster() {
+export function Toaster({ position = "bottom-right" }: { position?: ToastViewportPosition } = {}) {
   const { toasts } = useToast()
 
   return (
@@ -18,7 +18,7 @@ export function Toaster() {
           <ToastClose />
         </Toast>
       ))}
-      <ToastViewport />
+      <ToastViewport position={position} />
     </ToastProvider>
   )
 }

@@ -12,14 +12,12 @@ const logger = winston_1.default.createLogger({
         new winston_1.default.transports.Console({
             format: winston_1.default.format.combine(winston_1.default.format.colorize(), winston_1.default.format.simple()),
         }),
-        new winston_1.default.transports.File({ filename: 'error.log', level: 'error' }),
-        new winston_1.default.transports.File({ filename: 'combined.log' }),
     ],
 });
 exports.logger = logger;
-if (process.env.NODE_ENV !== 'production') {
-    logger.add(new winston_1.default.transports.Console({
-        format: winston_1.default.format.simple(),
-    }));
+// Only use file logging locally or on non-serverless platforms
+if (process.env.VERCEL !== '1') {
+    logger.add(new winston_1.default.transports.File({ filename: 'error.log', level: 'error' }));
+    logger.add(new winston_1.default.transports.File({ filename: 'combined.log' }));
 }
 //# sourceMappingURL=logger.js.map
