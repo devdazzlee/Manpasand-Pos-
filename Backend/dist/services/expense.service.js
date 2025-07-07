@@ -25,6 +25,21 @@ class ExpenseService {
             },
         };
     }
+    async create(data) {
+        return client_1.prisma.employeeType.create({ data });
+    }
+    async getAll() {
+        return client_1.prisma.employeeType.findMany();
+    }
+    async getById(id) {
+        return client_1.prisma.employeeType.findUniqueOrThrow({ where: { id } });
+    }
+    async update(id, data) {
+        return client_1.prisma.employeeType.update({ where: { id }, data });
+    }
+    async delete(id) {
+        return client_1.prisma.employeeType.delete({ where: { id } });
+    }
 }
 exports.ExpenseService = ExpenseService;
 //# sourceMappingURL=expense.service.js.map

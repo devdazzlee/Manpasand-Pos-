@@ -30,6 +30,11 @@ const errorHandler = (err, req, res, next) => {
         message = 'Invalid database query';
         errors = [{ message: err.message }];
     }
+    if (err.name === 'PrismaClientKnownRequestError') {
+        statusCode = 400;
+        message = 'Database request error';
+        errors = [{ message: err.message, code: err.code }];
+    }
     // Handle PrismaClientInitializationError
     if (err.name === 'PrismaClientInitializationError') {
         statusCode = 503;

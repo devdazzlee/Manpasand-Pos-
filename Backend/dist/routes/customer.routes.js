@@ -17,6 +17,8 @@ router.post('/logout', customerAuth_middleware_1.authenticateCustomer, customer_
 router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
 router.post('/', (0, validation_middleware_1.validate)(customer_validation_1.cusRegisterationSchema), customer_controller_1.createShopCustomer);
 router.get('/', customer_controller_1.getCustomers);
+router.put('/:customerId', (0, validation_middleware_1.validate)(customer_validation_1.customerUpdateSchema), customer_controller_1.updateCustomerByAdmin);
+router.delete('/:customerId', customer_controller_1.deleteCustomer);
 router.get('/:customerId', customer_controller_1.getCustomerById);
 exports.default = router;
 //# sourceMappingURL=customer.routes.js.map

@@ -10,10 +10,15 @@ const register = asyncHandler(async (req: Request, res: Response) => {
   new ApiResponse(user, 'IUser registered successfully', 201).send(res);
 });
 
+const registerAdmin = asyncHandler(async (req: Request, res: Response) => {
+  const user = await authService.registerAdmin(req.body);
+  new ApiResponse(user, 'IUser registered successfully', 201).send(res);
+});
+
 const login = asyncHandler(async (req: Request, res: Response) => {
   const { email, password } = req.body;
   const userWithToken = await authService.login(email, password);
-  new ApiResponse({ ...userWithToken, branch: "fd14f487-48d4-491d-a95a-74b8c2f32f6f" }, 'Login successful').send(res);
+  new ApiResponse({ ...userWithToken }, 'Login successful').send(res);
 });
 
 const logout = asyncHandler(async (req: Request, res: Response) => {
@@ -25,4 +30,4 @@ const getCurrentUser = asyncHandler(async (req: Request, res: Response) => {
   new ApiResponse(req.user, 'Current user fetched').send(res);
 });
 
-export { register, login, logout, getCurrentUser };
+export { register, login, logout, registerAdmin, getCurrentUser };

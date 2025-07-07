@@ -38,6 +38,8 @@ import Suppliers from "./suppliers"
 import Brands from "./Brands"
 import Colors from "./color"
 import Sizes from "./sizes"
+import { Salaries } from "./Salaries"
+import { Designation } from "./Designation"
 
 interface DashboardProps {
   onLogout: () => void
@@ -88,12 +90,14 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <Customers />
       case "loyalty":
         return <Stocks />
-      case "gift-cards":
-        return <GiftCards />
+      case "designation":
+        return <Designation />
       case "employees":
         return <EmployeeManagement />
       case "shifts":
         return <Shifts />
+      case "salaries":
+        return <Salaries />
       case "promotions":
         return <Promotions />
       case "cash-register":

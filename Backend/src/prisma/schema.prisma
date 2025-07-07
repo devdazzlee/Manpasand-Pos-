@@ -16,6 +16,9 @@ model User {
   updated_at DateTime  @default(now()) @updatedAt
   sessions   Session[]
 
+  branch_id String?
+  branch    Branch? @relation(fields: [branch_id], references: [id])
+
   // Relations for tracking user actions
   sales           Sale[]
   purchase_orders PurchaseOrder[]
@@ -55,6 +58,8 @@ model Branch {
   purchase_orders PurchaseOrder[]
   stock_movements StockMovement[]
   Order           Order[]
+  User            User[]
+  employees       Employee[]
 
   @@index([code])
   @@index([is_active])
@@ -366,6 +371,7 @@ model Sale {
   created_by       String?
   user             User?         @relation(fields: [created_by], references: [id])
   sale_items       SaleItem[]
+  original_sale_id String?
   created_at       DateTime      @default(now())
   updated_at       DateTime      @default(now()) @updatedAt
 
@@ -378,21 +384,29 @@ model Sale {
   @@index([created_by])
 }
 
+enum SaleItemType {
+  ORIGINAL
+  RETURN
+  EXCHANGE
+}
+
 // NEW: Sale Items
 model SaleItem {
-  id              String   @id @default(uuid())
-  sale_id         String
-  sale            Sale     @relation(fields: [sale_id], references: [id], onDelete: Cascade)
-  product_id      String
-  product         Product  @relation(fields: [product_id], references: [id])
-  quantity        Int
-  unit_price      Decimal
-  tax_rate        Decimal  @default(0)
-  tax_amount      Decimal  @default(0)
-  discount_rate   Decimal  @default(0)
-  discount_amount Decimal  @default(0)
-  line_total      Decimal
-  created_at      DateTime @default(now())
+  id               String       @id @default(uuid())
+  sale_id          String
+  sale             Sale         @relation(fields: [sale_id], references: [id], onDelete: Cascade)
+  product_id       String
+  product          Product      @relation(fields: [product_id], references: [id])
+  quantity         Int
+  unit_price       Decimal
+  tax_rate         Decimal      @default(0)
+  tax_amount       Decimal      @default(0)
+  discount_rate    Decimal      @default(0)
+  discount_amount  Decimal      @default(0)
+  line_total       Decimal
+  item_type        SaleItemType @default(ORIGINAL)
+  ref_sale_item_id String?
+  created_at       DateTime     @default(now())
 
   @@index([sale_id])
   @@index([product_id])
@@ -576,6 +590,7 @@ enum SaleStatus {
   COMPLETED
   CANCELLED
   REFUNDED
+  EXCHANGED
 }
 
 enum PaymentStatus {
@@ -622,4 +637,81 @@ model CashFlow {
   expenses   Expense[]
   closing    Decimal
   created_at DateTime  @default(now())
+}
+
+// Staff Management
+model Employee {
+  id           String   @id @default(uuid())
+  name         String
+  email        String?  @unique
+  phone_number String?
+  cnic         String?  @unique
+  gender       String?
+  join_date    DateTime
+  is_active    Boolean  @default(true)
+
+  // Relations
+  branch_id String?
+  branch    Branch? @relation(fields: [branch_id], references: [id])
+
+  employee_type_id  String
+  employee_type     EmployeeType      @relation(fields: [employee_type_id], references: [id])
+  shift_assignments ShiftAssignment[]
+  salaries          Salary[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@index([branch_id])
+  @@index([employee_type_id])
+}
+
+model EmployeeType {
+  id        String  @id @default(uuid())
+  name      String  @unique
+  is_active Boolean @default(true)
+
+  employees Employee[]
+}
+
+model Shift {
+  id         String   @id @default(uuid())
+  name       String
+  start_time DateTime
+  end_time   DateTime
+  is_active  Boolean  @default(true)
+
+  shift_assignments ShiftAssignment[]
+}
+
+model ShiftAssignment {
+  id          String    @id @default(uuid())
+  employee_id String
+  shift_id    String
+  start_date  DateTime
+  end_date    DateTime?
+
+  employee Employee @relation(fields: [employee_id], references: [id])
+  shift    Shift    @relation(fields: [shift_id], references: [id])
+
+  @@unique([employee_id, shift_id, start_date])
+  @@index([shift_id])
+}
+
+model Salary {
+  id          String    @id @default(uuid())
+  employee_id String
+  month       Int // 1 - 12
+  year        Int
+  amount      Decimal
+  is_paid     Boolean   @default(false)
+  paid_date   DateTime?
+  notes       String?
+
+  employee Employee @relation(fields: [employee_id], references: [id])
+
+  created_at DateTime @default(now())
+
+  @@unique([employee_id, month, year])
+  @@index([employee_id])
 }

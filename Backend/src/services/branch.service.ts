@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateBranchInput, UpdateBranchInput } from '../validations/branch.validation';
+import { endOfDay, startOfDay } from 'date-fns';
 
 export class BranchService {
   public async createBranch(data: CreateBranchInput) {
@@ -10,8 +11,6 @@ export class BranchService {
         created_at: 'desc',
       },
     });
-
-    console.log('Last Branch:', lastBranch);
 
     const code = lastBranch ? (parseInt(lastBranch.code) + 1).toString() : '1000';
 
@@ -60,7 +59,7 @@ export class BranchService {
     return updatedBranch;
   }
 
-  async toggleBranchStatus(id: string) {
+  public async toggleBranchStatus(id: string) {
     // Check if branch exists
     const branch = await prisma.branch.findUnique({ where: { id } });
     if (!branch) {
@@ -120,5 +119,43 @@ export class BranchService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  public async getBranchDetails(branchId: string) {
+    const today = new Date();
+
+    const branch = await prisma.branch.findUnique({
+      where: { id: branchId },
+      include: {
+        employees: {
+          where: { is_active: true },
+          include: {
+            employee_type: true,
+          },
+        },
+        sales: {
+          where: {
+            sale_date: {
+              gte: startOfDay(today),
+              lte: endOfDay(today),
+            },
+          },
+          select: {
+            id: true,
+            sale_number: true,
+            total_amount: true,
+            sale_date: true,
+            payment_method: true,
+            status: true,
+          },
+        },
+      },
+    });
+
+    if (!branch) {
+      throw new Error('Branch not found');
+    }
+
+    return branch;
   }
 }

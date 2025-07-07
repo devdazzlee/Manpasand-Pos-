@@ -63,8 +63,8 @@ export function Customers() {
   const [isAdding, setIsAdding] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [newCustomer, setNewCustomer] = useState<Partial<Customer>>({});
-  const [editingCustomer, setEditingCustomer] = useState<Customer | null>(null);
+  const [newCustomer, setNewCustomer] = useState<Partial<Customer & { billing_address?: string }>>({});
+  const [editingCustomer, setEditingCustomer] = useState<(Customer & { billing_address?: string }) | null>(null);
 
   // 1) Fetch customers
   const fetchCustomers = async () => {
@@ -104,13 +104,17 @@ export function Customers() {
     loadData();
   }, []);
 
-  // 2) Create customer (email only)
+  // 2) Create customer (all fields)
   const handleAddCustomer = async () => {
     if (!newCustomer.email) return;
     setIsAdding(true);
     try {
       await apiClient.post(`${API_BASE}/customer`, {
         email: newCustomer.email,
+        name: newCustomer.name,
+        phone_number: newCustomer.phone_number,
+        address: newCustomer.address,
+        billing_address: newCustomer.billing_address,
       });
       setNewCustomer({});
       setIsAddDialogOpen(false);
@@ -134,16 +138,17 @@ export function Customers() {
     }
   };
 
-  // Edit customer
+  // Edit customer (all fields, use PUT)
   const handleEditCustomer = async () => {
     if (!editingCustomer) return;
     setIsEditing(true);
     try {
-      await apiClient.patch(`${API_BASE}/customer/${editingCustomer.id}`, {
+      await apiClient.put(`${API_BASE}/customer/${editingCustomer.id}`, {
         email: editingCustomer.email,
         name: editingCustomer.name,
         phone_number: editingCustomer.phone_number,
         address: editingCustomer.address,
+        billing_address: editingCustomer.billing_address,
       });
       setEditingCustomer(null);
       toast({
@@ -250,6 +255,67 @@ export function Customers() {
                     })
                   }
                   placeholder="Enter customer email"
+                  required
+                />
+              </div>
+              <div>
+                <Label htmlFor="name">Name</Label>
+                <Input
+                  id="name"
+                  type="text"
+                  value={newCustomer.name || ""}
+                  onChange={(e) =>
+                    setNewCustomer({
+                      ...newCustomer,
+                      name: e.target.value,
+                    })
+                  }
+                  placeholder="Enter customer name"
+                />
+              </div>
+              <div>
+                <Label htmlFor="phone_number">Phone Number</Label>
+                <Input
+                  id="phone_number"
+                  type="tel"
+                  value={newCustomer.phone_number || ""}
+                  onChange={(e) =>
+                    setNewCustomer({
+                      ...newCustomer,
+                      phone_number: e.target.value,
+                    })
+                  }
+                  placeholder="Enter phone number"
+                />
+              </div>
+              <div>
+                <Label htmlFor="address">Address</Label>
+                <Input
+                  id="address"
+                  type="text"
+                  value={newCustomer.address || ""}
+                  onChange={(e) =>
+                    setNewCustomer({
+                      ...newCustomer,
+                      address: e.target.value,
+                    })
+                  }
+                  placeholder="Enter address"
+                />
+              </div>
+              <div>
+                <Label htmlFor="billing_address">Billing Address</Label>
+                <Input
+                  id="billing_address"
+                  type="text"
+                  value={newCustomer.billing_address || ""}
+                  onChange={(e) =>
+                    setNewCustomer({
+                      ...newCustomer,
+                      billing_address: e.target.value,
+                    })
+                  }
+                  placeholder="Enter billing address"
                 />
               </div>
               <Button
@@ -447,6 +513,7 @@ export function Customers() {
                       email: e.target.value,
                     })
                   }
+                  required
                 />
               </div>
               <div>
@@ -492,6 +559,21 @@ export function Customers() {
                     })
                   }
                   placeholder="Enter address"
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-billing-address">Billing Address</Label>
+                <Input
+                  id="edit-billing-address"
+                  type="text"
+                  value={editingCustomer.billing_address || ""}
+                  onChange={(e) =>
+                    setEditingCustomer({
+                      ...editingCustomer,
+                      billing_address: e.target.value,
+                    })
+                  }
+                  placeholder="Enter billing address"
                 />
               </div>
               <Button

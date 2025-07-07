@@ -18,12 +18,12 @@ const adjustStockController = asyncHandler(async (req: Request, res: Response) =
 });
 
 const getStocksController = asyncHandler(async (req: Request, res: Response) => {
-    const stocks = await stockService.getStockByBranch(req.query.branchId as string);
+    const stocks = await stockService.getStockByBranch(req.user?.branch_id as string as string);
     new ApiResponse(stocks, "Stocks retrieved successfully").send(res);
 });
 
 const getStockMovementsController = asyncHandler(async (req: Request, res: Response) => {
-    const movements = await stockService.getStockMovements(req.query.branchId as string);
+    const movements = await stockService.getStockMovements(req.user?.branch_id as string as string);
     new ApiResponse(movements, "Stock movement history retrieved").send(res);
 });
 

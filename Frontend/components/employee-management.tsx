@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -10,227 +10,218 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Search, Plus, Edit, Trash2, UserCheck, DollarSign, Award, Eye, BarChart3 } from "lucide-react"
+import { Search, Plus, Edit, Trash2, Loader2, Users } from "lucide-react"
+import apiClient from "@/lib/apiClient"
+import { Calendar } from "@/components/ui/calendar"
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover"
+import { cn } from "@/lib/utils"
 
 interface Employee {
   id: string
   name: string
-  email: string
-  phone: string
-  role: string
-  salary: number
-  status: "active" | "inactive"
-  joinDate: string
-  totalSales: number
-  hoursWorked: number
-  performance: number
+  email?: string
+  phone_number?: string
+  cnic?: string
+  gender?: string
+  join_date: string
+  employee_type_id: string
 }
 
 interface NewEmployeeForm {
   name: string
   email: string
-  phone: string
-  role: string
-  salary: string
+  phone_number: string
+  cnic: string
+  gender: string
+  join_date: string
+  employee_type_id: string
+}
+
+interface EmployeeType {
+  id: string
+  name: string
 }
 
 export function EmployeeManagement() {
-  const [employees, setEmployees] = useState<Employee[]>([
-    {
-      id: "1",
-      name: "Sarah Johnson",
-      email: "sarah@manpasand.com",
-      phone: "+1 234-567-8901",
-      role: "Manager",
-      salary: 4500,
-      status: "active",
-      joinDate: "2023-01-15",
-      totalSales: 15420.5,
-      hoursWorked: 160,
-      performance: 95,
-    },
-    {
-      id: "2",
-      name: "Mike Davis",
-      email: "mike@manpasand.com",
-      phone: "+1 234-567-8902",
-      role: "Cashier",
-      salary: 3200,
-      status: "active",
-      joinDate: "2023-03-20",
-      totalSales: 12850.75,
-      hoursWorked: 155,
-      performance: 88,
-    },
-    {
-      id: "3",
-      name: "Lisa Wilson",
-      email: "lisa@manpasand.com",
-      phone: "+1 234-567-8903",
-      role: "Cashier",
-      salary: 3000,
-      status: "active",
-      joinDate: "2023-06-10",
-      totalSales: 9875.0,
-      hoursWorked: 148,
-      performance: 92,
-    },
-    {
-      id: "4",
-      name: "John Smith",
-      email: "john@manpasand.com",
-      phone: "+1 234-567-8904",
-      role: "Stock Manager",
-      salary: 3800,
-      status: "inactive",
-      joinDate: "2022-11-05",
-      totalSales: 0,
-      hoursWorked: 0,
-      performance: 0,
-    },
-  ])
-
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [employeeTypes, setEmployeeTypes] = useState<EmployeeType[]>([])
+  const [typesLoading, setTypesLoading] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
-  const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
-  const [isPerformanceDialogOpen, setIsPerformanceDialogOpen] = useState(false)
   const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-
-  const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null)
-  const [viewingEmployee, setViewingEmployee] = useState<Employee | null>(null)
-  const [deletingEmployee, setDeleteingEmployee] = useState<Employee | null>(null)
-
-  const [newEmployee, setNewEmployee] = useState<NewEmployeeForm>({
+  const [editingEmployee, setEditingEmployee] = useState<(Employee & { join_date: Date | null }) | null>(null)
+  const [deletingEmployee, setDeletingEmployee] = useState<Employee | null>(null)
+  const [newEmployee, setNewEmployee] = useState<NewEmployeeForm & { join_date: Date | null }>({
     name: "",
     email: "",
-    phone: "",
-    role: "",
-    salary: "",
+    phone_number: "",
+    cnic: "",
+    gender: "",
+    join_date: null,
+    employee_type_id: "",
   })
+  const [loading, setLoading] = useState(false)
+  const [actionLoading, setActionLoading] = useState(false)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
 
-  const [performanceData, setPerformanceData] = useState({
-    totalSales: "",
-    hoursWorked: "",
-    performance: "",
-  })
+  // Fetch employees from API
+  const getEmployees = async () => {
+    setLoading(true)
+    try {
+      const res = await apiClient.get("/employee")
+      // Convert join_date to Date object for all employees
+      setEmployees(res.data.data.map((emp: Employee) => ({ ...emp, join_date: emp.join_date ? new Date(emp.join_date) : null })))
+    } catch (error) {
+      console.log("Get employees error", error)
+    } finally {
+      setLoading(false)
+    }
+  }
 
-  const filteredEmployees = employees.filter(
-    (employee) =>
-      employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      employee.email.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      employee.role.toLowerCase().includes(searchTerm.toLowerCase()),
-  )
+  // Fetch employee types
+  const getEmployeeTypes = async () => {
+    setTypesLoading(true)
+    try {
+      const res = await apiClient.get("/employee/types")
+      setEmployeeTypes(res.data.data)
+    } catch (error) {
+      setEmployeeTypes([])
+    } finally {
+      setTypesLoading(false)
+    }
+  }
 
-  const handleAddEmployee = () => {
-    if (newEmployee.name && newEmployee.email && newEmployee.role && newEmployee.salary) {
-      const employee: Employee = {
-        id: Date.now().toString(),
-        name: newEmployee.name,
-        email: newEmployee.email,
-        phone: newEmployee.phone,
-        role: newEmployee.role,
-        salary: Number.parseInt(newEmployee.salary),
-        status: "active",
-        joinDate: new Date().toISOString().split("T")[0],
-        totalSales: 0,
-        hoursWorked: 0,
-        performance: 0,
+  useEffect(() => {
+    setIsInitialLoading(true)
+    getEmployees().finally(() => setIsInitialLoading(false))
+    getEmployeeTypes()
+  }, [])
+
+  // Add employee
+  const handleAddEmployee = async () => {
+    if (newEmployee.name && newEmployee.join_date && newEmployee.employee_type_id) {
+      setActionLoading(true)
+      try {
+        const payload: any = {
+          name: newEmployee.name,
+          join_date: newEmployee.join_date.toISOString(),
+          employee_type_id: newEmployee.employee_type_id,
+        }
+        if (newEmployee.email) payload.email = newEmployee.email
+        if (newEmployee.phone_number) payload.phone_number = newEmployee.phone_number
+        if (newEmployee.cnic) payload.cnic = newEmployee.cnic
+        if (newEmployee.gender) payload.gender = newEmployee.gender
+        await apiClient.post("/employee", payload)
+        setIsAddDialogOpen(false)
+        setNewEmployee({ name: "", email: "", phone_number: "", cnic: "", gender: "", join_date: null, employee_type_id: "" })
+        getEmployees()
+      } catch (error) {
+        console.log("Add employee error", error)
+      } finally {
+        setActionLoading(false)
       }
-      setEmployees([...employees, employee])
-      setNewEmployee({ name: "", email: "", phone: "", role: "", salary: "" })
-      setIsAddDialogOpen(false)
     }
   }
 
-  const handleEditEmployee = () => {
-    if (editingEmployee) {
-      setEmployees(employees.map((e) => (e.id === editingEmployee.id ? editingEmployee : e)))
-      setEditingEmployee(null)
-      setIsEditDialogOpen(false)
-    }
-  }
-
-  const handleUpdatePerformance = () => {
-    if (editingEmployee && performanceData.performance) {
-      const updatedEmployee = {
-        ...editingEmployee,
-        totalSales: Number.parseFloat(performanceData.totalSales) || editingEmployee.totalSales,
-        hoursWorked: Number.parseInt(performanceData.hoursWorked) || editingEmployee.hoursWorked,
-        performance: Number.parseInt(performanceData.performance),
-      }
-
-      setEmployees(employees.map((e) => (e.id === editingEmployee.id ? updatedEmployee : e)))
-      setPerformanceData({ totalSales: "", hoursWorked: "", performance: "" })
-      setEditingEmployee(null)
-      setIsPerformanceDialogOpen(false)
-    }
-  }
-
-  const handleDeleteEmployee = () => {
-    if (deletingEmployee) {
-      setEmployees(employees.filter((e) => e.id !== deletingEmployee.id))
-      setDeleteingEmployee(null)
-      setIsDeleteDialogOpen(false)
-    }
-  }
-
-  const handleToggleStatus = (employee: Employee) => {
-    const newStatus = employee.status === "active" ? "inactive" : "active"
-    setEmployees(employees.map((e) => (e.id === employee.id ? { ...e, status: newStatus } : e)))
-  }
-
+  // Edit employee
   const openEditDialog = (employee: Employee) => {
-    setEditingEmployee({ ...employee })
+    setEditingEmployee({ ...employee, join_date: employee.join_date ? new Date(employee.join_date) : null })
     setIsEditDialogOpen(true)
   }
 
-  const openViewDialog = (employee: Employee) => {
-    setViewingEmployee(employee)
-    setIsViewDialogOpen(true)
+  const handleEditEmployee = async () => {
+    if (editingEmployee && editingEmployee.name && editingEmployee.join_date && editingEmployee.employee_type_id) {
+      setActionLoading(true)
+      try {
+        await apiClient.put(`/employee/${editingEmployee.id}`, {
+          name: editingEmployee.name,
+          email: editingEmployee.email,
+          phone_number: editingEmployee.phone_number,
+          cnic: editingEmployee.cnic,
+          gender: editingEmployee.gender,
+          join_date: editingEmployee.join_date.toISOString(),
+          employee_type_id: editingEmployee.employee_type_id,
+        })
+        setIsEditDialogOpen(false)
+        setEditingEmployee(null)
+        getEmployees()
+      } catch (error) {
+        console.log("Edit employee error", error)
+      } finally {
+        setActionLoading(false)
+      }
+    }
   }
 
-  const openPerformanceDialog = (employee: Employee) => {
-    setEditingEmployee(employee)
-    setPerformanceData({
-      totalSales: employee.totalSales.toString(),
-      hoursWorked: employee.hoursWorked.toString(),
-      performance: employee.performance.toString(),
-    })
-    setIsPerformanceDialogOpen(true)
-  }
-
+  // Delete employee
   const openDeleteDialog = (employee: Employee) => {
-    setDeleteingEmployee(employee)
+    setDeletingEmployee(employee)
     setIsDeleteDialogOpen(true)
   }
 
-  const activeEmployees = employees.filter((e) => e.status === "active").length
-  const totalSalaries = employees.reduce((sum, e) => sum + e.salary, 0)
-  const avgPerformance =
-    employees.length > 0 ? employees.reduce((sum, e) => sum + e.performance, 0) / employees.length : 0
+  const handleDeleteEmployee = async () => {
+    if (deletingEmployee) {
+      setActionLoading(true)
+      try {
+        await apiClient.delete(`/employee/${deletingEmployee.id}`)
+        setIsDeleteDialogOpen(false)
+        setDeletingEmployee(null)
+        getEmployees()
+      } catch (error) {
+        console.log("Delete employee error", error)
+      } finally {
+        setActionLoading(false)
+      }
+    }
+  }
 
-  const getPerformanceColor = (performance: number) => {
-    if (performance >= 90) return "text-green-600"
-    if (performance >= 75) return "text-yellow-600"
-    return "text-red-600"
+  // Filtered employees
+  const filteredEmployees = employees.filter(
+    (employee) =>
+      employee.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+      (employee.email && employee.email.toLowerCase().includes(searchTerm.toLowerCase()))
+  )
+
+  // Stats
+  const totalEmployees = employees.length
+
+  if (isInitialLoading) {
+    return (
+      <div className="p-6 space-y-6">
+        <div className="flex items-center justify-center py-20">
+          <div className="text-center">
+            <Loader2 className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" />
+            <p className="text-gray-600">Loading employees data...</p>
+          </div>
+        </div>
+      </div>
+    )
   }
 
   return (
     <div className="p-6 space-y-6">
+      {/* Stats Card */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Total Employees</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{totalEmployees}</div>
+          </CardContent>
+        </Card>
+      </div>
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold text-gray-900">Employee Management</h1>
-          <p className="text-gray-600">Manage your team and track performance</p>
+          <p className="text-gray-600">Manage your team</p>
         </div>
-
         {/* Add Employee Dialog */}
         <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
           <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Employee
-            </Button>
+            <Button>Add Employee</Button>
           </DialogTrigger>
           <DialogContent>
             <DialogHeader>
@@ -238,13 +229,62 @@ export function EmployeeManagement() {
             </DialogHeader>
             <div className="space-y-4">
               <div>
-                <Label htmlFor="name">Full Name</Label>
+                <Label htmlFor="name">Full Name<span className="text-red-500">*</span></Label>
                 <Input
                   id="name"
                   value={newEmployee.name}
                   onChange={(e) => setNewEmployee({ ...newEmployee, name: e.target.value })}
                   placeholder="Enter full name"
+                  disabled={actionLoading}
+                  required
                 />
+              </div>
+              <div>
+                <Label htmlFor="join_date">Join Date<span className="text-red-500">*</span></Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !newEmployee.join_date && "text-muted-foreground"
+                      )}
+                    >
+                      {newEmployee.join_date ? newEmployee.join_date.toLocaleDateString() : "Pick a date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={newEmployee.join_date}
+                      onSelect={(date) => setNewEmployee({ ...newEmployee, join_date: date })}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div>
+                <Label htmlFor="employee_type_id">Employee Type<span className="text-red-500">*</span></Label>
+                <Select
+                  value={newEmployee.employee_type_id}
+                  onValueChange={(val) => setNewEmployee({ ...newEmployee, employee_type_id: val })}
+                  disabled={actionLoading || typesLoading}
+                >
+                  <SelectTrigger id="employee_type_id">
+                    <SelectValue placeholder={typesLoading ? "Loading..." : "Select type"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {typesLoading ? (
+                      <SelectItem value="" disabled>Loading...</SelectItem>
+                    ) : employeeTypes.length === 0 ? (
+                      <SelectItem value="" disabled>No types found</SelectItem>
+                    ) : (
+                      employeeTypes.map((type) => (
+                        <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
+                      ))
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label htmlFor="email">Email</Label>
@@ -253,98 +293,53 @@ export function EmployeeManagement() {
                   type="email"
                   value={newEmployee.email}
                   onChange={(e) => setNewEmployee({ ...newEmployee, email: e.target.value })}
-                  placeholder="Enter email address"
+                  placeholder="Enter email address (optional)"
+                  disabled={actionLoading}
                 />
               </div>
               <div>
-                <Label htmlFor="phone">Phone</Label>
+                <Label htmlFor="phone_number">Phone</Label>
                 <Input
-                  id="phone"
-                  value={newEmployee.phone}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, phone: e.target.value })}
-                  placeholder="Enter phone number"
+                  id="phone_number"
+                  value={newEmployee.phone_number}
+                  onChange={(e) => setNewEmployee({ ...newEmployee, phone_number: e.target.value })}
+                  placeholder="Enter phone number (optional)"
+                  disabled={actionLoading}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="role">Role</Label>
-                  <Select
-                    value={newEmployee.role}
-                    onValueChange={(value) => setNewEmployee({ ...newEmployee, role: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select role" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Manager">Manager</SelectItem>
-                      <SelectItem value="Cashier">Cashier</SelectItem>
-                      <SelectItem value="Stock Manager">Stock Manager</SelectItem>
-                      <SelectItem value="Sales Associate">Sales Associate</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="salary">Monthly Salary ($)</Label>
-                  <Input
-                    id="salary"
-                    type="number"
-                    value={newEmployee.salary}
-                    onChange={(e) => setNewEmployee({ ...newEmployee, salary: e.target.value })}
-                    placeholder="Enter salary"
-                  />
-                </div>
+              <div>
+                <Label htmlFor="cnic">CNIC</Label>
+                <Input
+                  id="cnic"
+                  value={newEmployee.cnic}
+                  onChange={(e) => setNewEmployee({ ...newEmployee, cnic: e.target.value })}
+                  placeholder="Enter CNIC (optional)"
+                  disabled={actionLoading}
+                />
+              </div>
+              <div>
+                <Label htmlFor="gender">Gender</Label>
+                <Input
+                  id="gender"
+                  value={newEmployee.gender}
+                  onChange={(e) => setNewEmployee({ ...newEmployee, gender: e.target.value })}
+                  placeholder="Enter gender (optional)"
+                  disabled={actionLoading}
+                />
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)}>
+              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={actionLoading}>
                 Cancel
               </Button>
-              <Button onClick={handleAddEmployee}>Add Employee</Button>
+              <Button onClick={handleAddEmployee} disabled={actionLoading}>
+                {actionLoading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
+                Add Employee
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Employees</CardTitle>
-            <UserCheck className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{employees.length}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Employees</CardTitle>
-            <UserCheck className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{activeEmployees}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Salaries</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${totalSalaries.toLocaleString()}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Avg Performance</CardTitle>
-            <Award className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{avgPerformance.toFixed(1)}%</div>
-          </CardContent>
-        </Card>
-      </div>
-
       {/* Search */}
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
@@ -355,176 +350,70 @@ export function EmployeeManagement() {
           className="pl-10"
         />
       </div>
-
       {/* Employees Table */}
       <Card>
         <CardHeader>
           <CardTitle>Team Members</CardTitle>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Employee</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Contact</TableHead>
-                <TableHead>Salary</TableHead>
-                <TableHead>Performance</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredEmployees.map((employee) => (
-                <TableRow key={employee.id}>
-                  <TableCell>
-                    <div className="flex items-center space-x-3">
-                      <Avatar>
-                        <AvatarFallback>
-                          {employee.name
-                            .split(" ")
-                            .map((n) => n[0])
-                            .join("")}
-                        </AvatarFallback>
-                      </Avatar>
-                      <div>
-                        <div className="font-medium">{employee.name}</div>
-                        <div className="text-sm text-gray-500">Joined {employee.joinDate}</div>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>{employee.role}</TableCell>
-                  <TableCell>
-                    <div className="space-y-1">
-                      <div className="text-sm">{employee.email}</div>
-                      <div className="text-sm text-gray-500">{employee.phone}</div>
-                    </div>
-                  </TableCell>
-                  <TableCell>${employee.salary.toLocaleString()}</TableCell>
-                  <TableCell>
-                    <div className="flex items-center space-x-2">
-                      <div className={`text-sm font-medium ${getPerformanceColor(employee.performance)}`}>
-                        {employee.performance}%
-                      </div>
-                      <div className="w-16 bg-gray-200 rounded-full h-2">
-                        <div
-                          className="bg-blue-600 h-2 rounded-full"
-                          style={{ width: `${employee.performance}%` }}
-                        ></div>
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <Badge
-                      variant={employee.status === "active" ? "default" : "secondary"}
-                      className={`cursor-pointer ${employee.status === "active" ? "bg-green-100 text-green-800 hover:bg-green-200" : "hover:bg-gray-200"}`}
-                      onClick={() => handleToggleStatus(employee)}
-                    >
-                      {employee.status}
-                    </Badge>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex space-x-1">
-                      <Button size="sm" variant="outline" onClick={() => openViewDialog(employee)}>
-                        <Eye className="h-3 w-3" />
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => openEditDialog(employee)}>
-                        <Edit className="h-3 w-3" />
-                      </Button>
-                      <Button size="sm" variant="outline" onClick={() => openPerformanceDialog(employee)}>
-                        <BarChart3 className="h-3 w-3" />
-                      </Button>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openDeleteDialog(employee)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      {/* View Employee Dialog */}
-      <Dialog open={isViewDialogOpen} onOpenChange={setIsViewDialogOpen}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Employee Details</DialogTitle>
-          </DialogHeader>
-          {viewingEmployee && (
-            <div className="space-y-6">
-              <div className="flex items-center space-x-4">
-                <Avatar className="h-16 w-16">
-                  <AvatarFallback className="text-lg">
-                    {viewingEmployee.name
-                      .split(" ")
-                      .map((n) => n[0])
-                      .join("")}
-                  </AvatarFallback>
-                </Avatar>
-                <div>
-                  <h3 className="text-xl font-semibold">{viewingEmployee.name}</h3>
-                  <p className="text-gray-600">{viewingEmployee.role}</p>
-                  <Badge className={viewingEmployee.status === "active" ? "bg-green-100 text-green-800" : ""}>
-                    {viewingEmployee.status}
-                  </Badge>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Email</Label>
-                  <p>{viewingEmployee.email}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Phone</Label>
-                  <p>{viewingEmployee.phone}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Salary</Label>
-                  <p className="text-lg font-semibold">${viewingEmployee.salary.toLocaleString()}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Join Date</Label>
-                  <p>{viewingEmployee.joinDate}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Total Sales</Label>
-                  <p className="text-lg font-semibold">${viewingEmployee.totalSales.toLocaleString()}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Hours Worked</Label>
-                  <p>{viewingEmployee.hoursWorked} hours</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Performance</Label>
-                  <div className="flex items-center space-x-2">
-                    <span className={`font-semibold ${getPerformanceColor(viewingEmployee.performance)}`}>
-                      {viewingEmployee.performance}%
-                    </span>
-                    <div className="w-20 bg-gray-200 rounded-full h-2">
-                      <div
-                        className="bg-blue-600 h-2 rounded-full"
-                        style={{ width: `${viewingEmployee.performance}%` }}
-                      ></div>
-                    </div>
-                  </div>
-                </div>
+          {loading ? (
+            <div className="flex justify-center py-10">
+              <div className="text-center">
+                <Loader2 className="animate-spin h-8 w-8 text-gray-500 mx-auto mb-2" />
+                <p className="text-gray-600">Loading employees...</p>
               </div>
             </div>
+          ) : filteredEmployees.length === 0 ? (
+            <div className="text-center py-10">
+              <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+              <p className="text-gray-600">No employees found</p>
+            </div>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Name</TableHead>
+                  <TableHead>Email</TableHead>
+                  <TableHead>Phone</TableHead>
+                  <TableHead>CNIC</TableHead>
+                  <TableHead>Gender</TableHead>
+                  <TableHead>Join Date</TableHead>
+                  <TableHead>Employee Type ID</TableHead>
+                  <TableHead>Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredEmployees.map((employee) => (
+                  <TableRow key={employee.id}>
+                    <TableCell>{employee.name}</TableCell>
+                    <TableCell>{employee.email || "-"}</TableCell>
+                    <TableCell>{employee.phone_number || "-"}</TableCell>
+                    <TableCell>{employee.cnic || "-"}</TableCell>
+                    <TableCell>{employee.gender || "-"}</TableCell>
+                    <TableCell>{employee.join_date ? new Date(employee.join_date).toISOString().slice(0, 10) : "-"}</TableCell>
+                    <TableCell>{employee.employee_type_id}</TableCell>
+                    <TableCell>
+                      <div className="flex space-x-1">
+                        <Button size="sm" variant="outline" onClick={() => openEditDialog(employee)}>
+                          <Edit className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => openDeleteDialog(employee)}
+                          className="text-red-600 hover:text-red-700"
+                        >
+                          <Trash2 className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
           )}
-          <DialogFooter>
-            <Button onClick={() => setIsViewDialogOpen(false)}>Close</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
+        </CardContent>
+      </Card>
       {/* Edit Employee Dialog */}
       <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
         <DialogContent>
@@ -539,6 +428,7 @@ export function EmployeeManagement() {
                   id="edit-name"
                   value={editingEmployee.name}
                   onChange={(e) => setEditingEmployee({ ...editingEmployee, name: e.target.value })}
+                  disabled={actionLoading}
                 />
               </div>
               <div>
@@ -548,124 +438,96 @@ export function EmployeeManagement() {
                   type="email"
                   value={editingEmployee.email}
                   onChange={(e) => setEditingEmployee({ ...editingEmployee, email: e.target.value })}
+                  disabled={actionLoading}
                 />
               </div>
               <div>
-                <Label htmlFor="edit-phone">Phone</Label>
+                <Label htmlFor="edit-phone_number">Phone</Label>
                 <Input
-                  id="edit-phone"
-                  value={editingEmployee.phone}
-                  onChange={(e) => setEditingEmployee({ ...editingEmployee, phone: e.target.value })}
+                  id="edit-phone_number"
+                  value={editingEmployee.phone_number}
+                  onChange={(e) => setEditingEmployee({ ...editingEmployee, phone_number: e.target.value })}
+                  disabled={actionLoading}
                 />
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label htmlFor="edit-role">Role</Label>
-                  <Select
-                    value={editingEmployee.role}
-                    onValueChange={(value) => setEditingEmployee({ ...editingEmployee, role: value })}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Manager">Manager</SelectItem>
-                      <SelectItem value="Cashier">Cashier</SelectItem>
-                      <SelectItem value="Stock Manager">Stock Manager</SelectItem>
-                      <SelectItem value="Sales Associate">Sales Associate</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div>
-                  <Label htmlFor="edit-salary">Monthly Salary ($)</Label>
-                  <Input
-                    id="edit-salary"
-                    type="number"
-                    value={editingEmployee.salary}
-                    onChange={(e) =>
-                      setEditingEmployee({ ...editingEmployee, salary: Number.parseInt(e.target.value) })
-                    }
-                  />
-                </div>
+              <div>
+                <Label htmlFor="edit-cnic">CNIC</Label>
+                <Input
+                  id="edit-cnic"
+                  value={editingEmployee.cnic}
+                  onChange={(e) => setEditingEmployee({ ...editingEmployee, cnic: e.target.value })}
+                  disabled={actionLoading}
+                />
               </div>
               <div>
-                <Label htmlFor="edit-status">Status</Label>
+                <Label htmlFor="edit-gender">Gender</Label>
+                <Input
+                  id="edit-gender"
+                  value={editingEmployee.gender}
+                  onChange={(e) => setEditingEmployee({ ...editingEmployee, gender: e.target.value })}
+                  disabled={actionLoading}
+                />
+              </div>
+              <div>
+                <Label htmlFor="edit-join_date">Join Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn(
+                        "w-full justify-start text-left font-normal",
+                        !editingEmployee?.join_date && "text-muted-foreground"
+                      )}
+                    >
+                      {editingEmployee?.join_date ? editingEmployee.join_date.toLocaleDateString() : "Pick a date"}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={editingEmployee?.join_date || null}
+                      onSelect={(date) => setEditingEmployee(editingEmployee ? { ...editingEmployee, join_date: date } : null)}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div>
+                <Label htmlFor="edit-employee_type_id">Employee Type</Label>
                 <Select
-                  value={editingEmployee.status}
-                  onValueChange={(value: "active" | "inactive") =>
-                    setEditingEmployee({ ...editingEmployee, status: value })
-                  }
+                  value={editingEmployee.employee_type_id}
+                  onValueChange={(val) => setEditingEmployee({ ...editingEmployee, employee_type_id: val })}
+                  disabled={actionLoading || typesLoading}
                 >
-                  <SelectTrigger>
-                    <SelectValue />
+                  <SelectTrigger id="edit-employee_type_id">
+                    <SelectValue placeholder={typesLoading ? "Loading..." : "Select type"} />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="active">Active</SelectItem>
-                    <SelectItem value="inactive">Inactive</SelectItem>
+                    {typesLoading ? (
+                      <SelectItem value="" disabled>Loading...</SelectItem>
+                    ) : employeeTypes.length === 0 ? (
+                      <SelectItem value="" disabled>No types found</SelectItem>
+                    ) : (
+                      employeeTypes.map((type) => (
+                        <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
+                      ))
+                    )}
                   </SelectContent>
                 </Select>
               </div>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={actionLoading}>
               Cancel
             </Button>
-            <Button onClick={handleEditEmployee}>Update Employee</Button>
+            <Button onClick={handleEditEmployee} disabled={actionLoading}>
+              {actionLoading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
+              Update Employee
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Performance Update Dialog */}
-      <Dialog open={isPerformanceDialogOpen} onOpenChange={setIsPerformanceDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Update Performance</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="total-sales">Total Sales ($)</Label>
-              <Input
-                id="total-sales"
-                type="number"
-                step="0.01"
-                value={performanceData.totalSales}
-                onChange={(e) => setPerformanceData({ ...performanceData, totalSales: e.target.value })}
-                placeholder="Enter total sales"
-              />
-            </div>
-            <div>
-              <Label htmlFor="hours-worked">Hours Worked</Label>
-              <Input
-                id="hours-worked"
-                type="number"
-                value={performanceData.hoursWorked}
-                onChange={(e) => setPerformanceData({ ...performanceData, hoursWorked: e.target.value })}
-                placeholder="Enter hours worked"
-              />
-            </div>
-            <div>
-              <Label htmlFor="performance">Performance Score (0-100)</Label>
-              <Input
-                id="performance"
-                type="number"
-                min="0"
-                max="100"
-                value={performanceData.performance}
-                onChange={(e) => setPerformanceData({ ...performanceData, performance: e.target.value })}
-                placeholder="Enter performance score"
-              />
-            </div>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsPerformanceDialogOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdatePerformance}>Update Performance</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
@@ -679,10 +541,11 @@ export function EmployeeManagement() {
             <p className="text-sm text-gray-500 mt-2">This action cannot be undone.</p>
           </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)}>
+            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={actionLoading}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleDeleteEmployee}>
+            <Button variant="destructive" onClick={handleDeleteEmployee} disabled={actionLoading}>
+              {actionLoading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
               Delete Employee
             </Button>
           </DialogFooter>

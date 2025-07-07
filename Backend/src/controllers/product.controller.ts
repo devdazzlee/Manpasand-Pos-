@@ -56,3 +56,15 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
 
     new ApiResponse(result.data, 'Products retrieved successfully', 200).send(res);
 });
+
+export const getFeaturedProducts = asyncHandler(async (req: Request, res: Response) => {
+    console.log('Fetching featured products');
+    
+    const featuredProducts = await productService.getFeaturedProducts();
+    new ApiResponse(featuredProducts, 'Featured products retrieved successfully', 200).send(res);
+});
+
+export const getBestSellingProducts = asyncHandler(async (req: Request, res: Response) => {
+    const bestSellingProducts = await productService.getBestSellingProducts();
+    new ApiResponse(bestSellingProducts, 'Best selling products retrieved successfully', 200).send(res);
+});

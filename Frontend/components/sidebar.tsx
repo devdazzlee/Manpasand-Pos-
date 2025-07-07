@@ -79,9 +79,9 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
         { id: "orders", label: "Orders", icon: ListOrdered },
         { id: "suppliers", label: "Suppliers", icon: Truck },
         { id: "returns", label: "Returns & Refunds", icon: RotateCcw },
-        { id: "reservations", label: "Reservations", icon: Calendar },
-        { id: "layaway-holds", label: "Layaway & Holds", icon: Pause },
-        { id: "promotions", label: "Promotions", icon: Tag },
+        // { id: "reservations", label: "Reservations", icon: Calendar },
+        // { id: "layaway-holds", label: "Layaway & Holds", icon: Pause },
+        // { id: "promotions", label: "Promotions", icon: Tag },
       ],
     },
     {
@@ -97,7 +97,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
         {id: "brand" , label: "Brands", icon: StoreIcon},
         {id: "colors" , label: "Colors", icon: Package},
         {id : "sizes" , label: "Sizes", icon: Package},
-        { id: "purchase-orders", label: "Purchase Orders", icon: FileText },
+        // { id: "purchase-orders", label: "Purchase Orders", icon: FileText },
         { id: "pricing", label: "Pricing & Margins", icon: PriceTag },
       ],
     },
@@ -108,9 +108,12 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
       items: [
         { id: "customers", label: "Customers", icon: Users },
         { id: "loyalty", label: "Stocks", icon: Gift },
-        { id: "gift-cards", label: "Gift Cards", icon: CreditCard },
+        // { id: "gift-cards", label: "Gift Cards", icon: CreditCard },
         { id: "employees", label: "Employees", icon: UserCheck },
         { id: "shifts", label: "Shift Management", icon: Clock },
+        {id: "salaries",label: "Salaries", icon: CreditCard },
+        {id: "designation",label: "Designation", icon: Shield }
+
       ],
     },
     {
@@ -119,7 +122,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
       expandable: true,
       items: [
         { id: "expenses", label: "Expenses", icon: Receipt },
-        { id: "tax-management", label: "Tax Management", icon: Calculator },
+        // { id: "tax-management", label: "Tax Management", icon: Calculator },
       ],
     },
     {
@@ -128,11 +131,11 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
       expandable: true,
       items: [
         { id: "reports", label: "Reports & Analytics", icon: BarChart3 },
-        { id: "audit", label: "Audit Trail", icon: Shield },
-        { id: "multi-location", label: "Multi-Location", icon: MapPin },
-        { id: "integrations", label: "Integrations", icon: Zap },
-        { id: "backup", label: "Backup & Sync", icon: Database },
-        { id: "settings", label: "Settings", icon: SettingsIcon },
+        // { id: "audit", label: "Audit Trail", icon: Shield },
+        // { id: "multi-location", label: "Multi-Location", icon: MapPin },
+        // { id: "integrations", label: "Integrations", icon: Zap },
+        // { id: "backup", label: "Backup & Sync", icon: Database },
+        // { id: "settings", label: "Settings", icon: SettingsIcon },
       ],
     },
   ]

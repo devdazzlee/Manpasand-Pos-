@@ -8,7 +8,6 @@ const saleItemSchema = z.object({
 
 const createSaleSchema = z.object({
     body: z.object({
-        branchId: z.string().min(1),
         customerId: z.string().optional(),
         paymentMethod: z.enum(["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER", "CREDIT"]),
         items: z.array(saleItemSchema).min(1),
@@ -17,7 +16,26 @@ const createSaleSchema = z.object({
 
 const refundSaleSchema = z.object({
     body: z.object({
-        reason: z.string().optional(),
+        customerId: z.string().optional(),
+        returnedItems: z
+            .array(
+                z.object({
+                    productId: z.string().min(1),
+                    quantity: z.number().int().positive(),
+                })
+            )
+            .optional()
+            .default([]),
+        exchangedItems: z
+            .array(
+                z.object({
+                    productId: z.string().min(1),
+                    quantity: z.number().int().positive(),
+                    price: z.number().nonnegative(),
+                })
+            )
+            .optional()
+            .default([]),
     }),
 });
 

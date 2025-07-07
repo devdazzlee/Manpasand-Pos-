@@ -5,6 +5,8 @@ import {
     updateProduct,
     toggleProductStatus,
     listProducts,
+    getFeaturedProducts,
+    getBestSellingProducts,
 } from '../controllers/product.controller';
 import {
     createProductSchema,
@@ -23,6 +25,8 @@ router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', upload.array('images', 10), parseFormData, validate(createProductSchema), createProduct);
 router.get('/', validate(listProductsSchema), listProducts);
+router.get('/featured', getFeaturedProducts);
+router.get('/best-selling', getBestSellingProducts);
 router.get('/:id', validate(getProductSchema), getProduct);
 router.patch('/:id', validate(updateProductSchema), updateProduct);
 router.patch('/:id/toggle-status', validate(getProductSchema), toggleProductStatus);

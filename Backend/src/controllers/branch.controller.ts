@@ -37,3 +37,9 @@ export const listBranches = asyncHandler(async (req: Request, res: Response) => 
 
     new ApiResponse(result.data, 'Branches retrieved successfully', 200).send(res);
 });
+
+export const getBranchDetails = asyncHandler(async (req: Request, res: Response) => {
+    const branchId = req.params.id;
+    const branchDetails = await branchService.getBranchDetails(branchId);
+    new ApiResponse(branchDetails, 'Branch details retrieved successfully').send(res);
+});

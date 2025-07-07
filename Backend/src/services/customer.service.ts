@@ -1,4 +1,4 @@
-import { Customer, Prisma } from '@prisma/client';
+import { Customer } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import jwt from 'jsonwebtoken';
@@ -155,6 +155,25 @@ class CustomerService {
         });
 
         return updatedCustomer;
+    }
+
+    public async deleteCustomer(customerId: Customer['id']) {
+        const existingCustomer = await prisma.customer.findUnique({
+            where: { id: customerId },
+        });
+
+        if (!existingCustomer) {
+            throw new AppError(404, 'Customer not found');
+        }
+
+        await prisma.customer.delete({
+            where: { id: customerId },
+        });
+
+        // Remove session from Redis if exists
+        await redis.del(`session:customer:${customerId}`);
+
+        return { message: 'Customer deleted successfully' };
     }
 
     public async logoutCustomer(customerId: Customer['id']) {

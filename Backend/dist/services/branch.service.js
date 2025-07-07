@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BranchService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
+const date_fns_1 = require("date-fns");
 class BranchService {
     async createBranch(data) {
         const lastBranch = await client_1.prisma.branch.findFirst({
@@ -10,7 +11,6 @@ class BranchService {
                 created_at: 'desc',
             },
         });
-        console.log('Last Branch:', lastBranch);
         const code = lastBranch ? (parseInt(lastBranch.code) + 1).toString() : '1000';
         const branch = await client_1.prisma.branch.create({
             data: {
@@ -93,6 +93,40 @@ class BranchService {
                 totalPages: Math.ceil(total / limit),
             },
         };
+    }
+    async getBranchDetails(branchId) {
+        const today = new Date();
+        const branch = await client_1.prisma.branch.findUnique({
+            where: { id: branchId },
+            include: {
+                employees: {
+                    where: { is_active: true },
+                    include: {
+                        employee_type: true,
+                    },
+                },
+                sales: {
+                    where: {
+                        sale_date: {
+                            gte: (0, date_fns_1.startOfDay)(today),
+                            lte: (0, date_fns_1.endOfDay)(today),
+                        },
+                    },
+                    select: {
+                        id: true,
+                        sale_number: true,
+                        total_amount: true,
+                        sale_date: true,
+                        payment_method: true,
+                        status: true,
+                    },
+                },
+            },
+        });
+        if (!branch) {
+            throw new Error('Branch not found');
+        }
+        return branch;
     }
 }
 exports.BranchService = BranchService;

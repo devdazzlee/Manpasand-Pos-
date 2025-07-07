@@ -28,6 +28,10 @@ import cashflowRoutes  from './routes/cashflow.routes';
 import customerRoutes  from './routes/customer.routes';
 import customerOrderRoutes  from './routes/customerOrder.routes';
 import deviceIdentityRoutes  from './routes/device_identity.routes';
+import dashboardRoutes  from './routes/dashboard.routes';
+import employeeRoutes  from './routes/employee.route';
+import salaryRoutes  from './routes/salary.route';
+import shiftRoutes  from './routes/shift.route';
 
 const vAPI = process.env.vAPI || '/api/v1';
 const app = express();
@@ -59,6 +63,10 @@ app.use(`${vAPI}/sale`, saleRoutes);
 app.use(`${vAPI}/stock`, stockRoutes);
 app.use(`${vAPI}/expenses`, expenseRoutes);
 app.use(`${vAPI}/cashflows`, cashflowRoutes);
+app.use(`${vAPI}/dashboard`, dashboardRoutes);
+app.use(`${vAPI}/employee`, employeeRoutes);
+app.use(`${vAPI}/salaries`, salaryRoutes);
+app.use(`${vAPI}/shifts`, shiftRoutes);
 
 // App Routes
 app.use(`${vAPI}/customer/app`, appRoutes);

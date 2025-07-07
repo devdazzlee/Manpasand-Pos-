@@ -31,9 +31,19 @@ export const getCustomers = asyncHandler(async (req: Request, res: Response) => 
     new ApiResponse(customers, 'Customers fetched').send(res);
 });
 
+export const updateCustomerByAdmin = asyncHandler(async (req: Request, res: Response) => {
+    const customers = await customerService.updateCustomer(req.params?.customerId, req.body);
+    new ApiResponse(customers, 'Customers fetched').send(res);
+});
+
 export const updateCustomer = asyncHandler(async (req: Request, res: Response) => {
     const customers = await customerService.updateCustomer(req.customer?.id, req.body);
     new ApiResponse(customers, 'Customers fetched').send(res);
+});
+
+export const deleteCustomer = asyncHandler(async (req: Request, res: Response) => {
+    await customerService.deleteCustomer(req.params.customerId);
+    new ApiResponse(null, 'Customer deleted').send(res);
 });
 
 export const logoutCustomer = asyncHandler(async (req: Request, res: Response) => {

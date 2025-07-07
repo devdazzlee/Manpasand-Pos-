@@ -126,6 +126,20 @@ class CustomerService {
         });
         return updatedCustomer;
     }
+    async deleteCustomer(customerId) {
+        const existingCustomer = await client_1.prisma.customer.findUnique({
+            where: { id: customerId },
+        });
+        if (!existingCustomer) {
+            throw new apiError_1.AppError(404, 'Customer not found');
+        }
+        await client_1.prisma.customer.delete({
+            where: { id: customerId },
+        });
+        // Remove session from Redis if exists
+        await redis_1.redis.del(`session:customer:${customerId}`);
+        return { message: 'Customer deleted successfully' };
+    }
     async logoutCustomer(customerId) {
         await redis_1.redis.del(`session:customer:${customerId}`);
         return { message: 'Logged out successfully' };
