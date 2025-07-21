@@ -10,76 +10,111 @@ import { useToast } from "@/hooks/use-toast"
 import { DollarSign, ShoppingCart, Users, Package, TrendingUp, TrendingDown, RefreshCw, Download } from "lucide-react"
 import apiClient from "@/lib/apiClient"
 
+interface TopProduct {
+  id: string
+  name: string
+  sku: string
+  sales_rate_inc_dis_and_tax: string
+  _count: {
+    order_items: number
+  }
+}
+
+interface RecentSale {
+  productName: string
+  price: string
+}
+
+interface DashboardStats {
+  totalCustomers: number
+  lowStockProducts: Array<{
+    id: string
+    current_quantity: number
+    product: {
+      name: string
+      sku: string
+    }
+  }>
+  todaySales: any[]
+}
+
 export function DashboardHome() {
-  const [dashboardData, setDashboardData] = useState<any>(null)
+  const [topProducts, setTopProducts] = useState<TopProduct[]>([])
+  const [recentSales, setRecentSales] = useState<RecentSale[]>([])
+  const [stats, setStats] = useState<DashboardStats | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
+  const [lastRefresh, setLastRefresh] = useState<string | null>(null)
 
   const { loading: refreshLoading, withLoading: withRefreshLoading } = useLoading()
   const { loading: exportLoading, withLoading: withExportLoading } = useLoading()
   const { toast } = useToast()
 
-
   const getTopProducts = async () => {
     try {
-      const data = await apiClient.get('/products/best-selling')
-      console.log("data", data)
+      const response = await apiClient.get('/products/best-selling')
+      if (response?.data?.success) {
+        setTopProducts(response.data.data)
+      }
     } catch (error) {
-      console.log("error", error)
-
+      console.error("Error fetching top products:", error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to fetch top products"
+      })
     }
   }
 
-  useEffect(() => {
-    getTopProducts()
-  }, [])
-  // Simulate initial data loading
-  useEffect(() => {
-    const loadDashboardData = async () => {
-      await new Promise((resolve) => setTimeout(resolve, 2000))
-      setDashboardData({
-        todaySales: 2847.5,
-        totalTransactions: 156,
-        totalCustomers: 1247,
-        lowStockItems: 8,
-        salesGrowth: 12.5,
-        transactionGrowth: -2.3,
-        customerGrowth: 8.7,
-        inventoryGrowth: -15.2,
-        recentSales: [
-          { id: "TXN156", time: "14:30", amount: 45.5, customer: "John Doe", status: "completed" },
-          { id: "TXN155", time: "14:25", amount: 78.2, customer: "Jane Smith", status: "completed" },
-          { id: "TXN154", time: "14:20", amount: 32.1, customer: "Walk-in", status: "completed" },
-          { id: "TXN153", time: "14:15", amount: 156.75, customer: "Mike Johnson", status: "completed" },
-          { id: "TXN152", time: "14:10", amount: 89.3, customer: "Sarah Wilson", status: "refunded" },
-        ],
-        topProducts: [
-          { name: "Banana", sales: 45, revenue: 33.75, trend: "up" },
-          { name: "Milk", sales: 32, revenue: 112.0, trend: "up" },
-          { name: "Bread", sales: 28, revenue: 70.0, trend: "down" },
-          { name: "Apple", sales: 25, revenue: 30.0, trend: "up" },
-          { name: "Orange", sales: 22, revenue: 13.2, trend: "stable" },
-        ],
+  const getRecentSales = async () => {
+    try {
+      const response = await apiClient.get('/sale/recent')
+      if (response?.data?.success) {
+        setRecentSales(response.data.data)
+      }
+    } catch (error) {
+      console.error("Error fetching recent sales:", error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to fetch recent sales"
       })
-      setInitialLoading(false)
     }
+  }
 
-    loadDashboardData()
+  const getStats = async () => {
+    try {
+      const response = await apiClient.get('/dashboard/stats')
+      if (response?.data?.success) {
+        setStats(response.data.data)
+      }
+    } catch (error) {
+      console.error("Error fetching stats:", error)
+      toast({
+        variant: "destructive",
+        title: "Error",
+        description: "Failed to fetch dashboard stats"
+      })
+    }
+  }
+
+  const loadAllData = async () => {
+    await Promise.all([
+      getTopProducts(),
+      getRecentSales(),
+      getStats()
+    ])
+    setInitialLoading(false)
+    setLastRefresh(new Date().toLocaleTimeString())
+  }
+
+  useEffect(() => {
+    loadAllData()
   }, [])
 
   const handleRefreshData = async () => {
     await withRefreshLoading(async () => {
       try {
-        // Simulate data refresh
-        await new Promise((resolve) => setTimeout(resolve, 1500))
-
-        // Update some random values to show refresh
-        setDashboardData((prev: any) => ({
-          ...prev,
-          todaySales: prev.todaySales + Math.random() * 100,
-          totalTransactions: prev.totalTransactions + Math.floor(Math.random() * 10),
-          lastRefresh: new Date().toLocaleTimeString(),
-        }))
-
+        await loadAllData()
         toast({
           variant: "success",
           title: "Data Refreshed",
@@ -95,42 +130,31 @@ export function DashboardHome() {
     })
   }
 
-  const generateReport = (reportType: string) => {
-    const reportData = {
-      type: reportType,
-      generatedAt: new Date().toISOString(),
-      data: dashboardData,
-      summary: {
-        totalSales: dashboardData.todaySales,
-        totalTransactions: dashboardData.totalTransactions,
-        averageTransaction: dashboardData.todaySales / dashboardData.totalTransactions,
-        topProduct: dashboardData.topProducts[0]?.name || "N/A",
-      },
-    }
+  const generateReport = () => {
+    if (!stats || !topProducts || !recentSales) return
 
     const reportContent = `
-MANPASAND POS SYSTEM - ${reportType.toUpperCase()} REPORT
-Generated: ${new Date(reportData.generatedAt).toLocaleString()}
+MANPASAND POS SYSTEM - DAILY SALES REPORT
+Generated: ${new Date().toLocaleString()}
 ================================================
 
 SUMMARY:
-- Total Sales: $${reportData.summary.totalSales.toFixed(2)}
-- Total Transactions: ${reportData.summary.totalTransactions}
-- Average Transaction: $${reportData.summary.averageTransaction.toFixed(2)}
-- Top Product: ${reportData.summary.topProduct}
+- Total Customers: ${stats.totalCustomers}
+- Low Stock Items: ${stats.lowStockProducts.length}
+${stats.todaySales.length > 0 ? `- Today's Sales: ${stats.todaySales.length}` : '- No sales today'}
 
 RECENT TRANSACTIONS:
-${dashboardData.recentSales
-        .map((sale: any) => `${sale.id} - ${sale.customer} - $${sale.amount.toFixed(2)} - ${sale.status}`)
-        .join("\n")}
+${recentSales.map((sale) => `${sale.productName} - $${sale.price}`).join("\n")}
 
 TOP PRODUCTS:
-${dashboardData.topProducts
-        .map(
-          (product: any, index: number) =>
-            `${index + 1}. ${product.name} - ${product.sales} units - $${product.revenue.toFixed(2)}`,
-        )
-        .join("\n")}
+${topProducts.slice(0, 5).map((product, index) => 
+  `${index + 1}. ${product.name} - ${product._count.order_items} orders - $${product.sales_rate_inc_dis_and_tax}`
+).join("\n")}
+
+LOW STOCK ALERTS:
+${stats.lowStockProducts.map(item => 
+  `${item.product.name} (${item.product.sku}) - Quantity: ${item.current_quantity}`
+).join("\n")}
 
 ================================================
 Report generated by MANPASAND POS System
@@ -140,7 +164,7 @@ Report generated by MANPASAND POS System
     const url = URL.createObjectURL(blob)
     const a = document.createElement("a")
     a.href = url
-    a.download = `${reportType}-report-${Date.now()}.txt`
+    a.download = `daily-sales-report-${Date.now()}.txt`
     document.body.appendChild(a)
     a.click()
     document.body.removeChild(a)
@@ -150,11 +174,7 @@ Report generated by MANPASAND POS System
   const handleExportReport = async () => {
     await withExportLoading(async () => {
       try {
-        // Simulate report generation
-        await new Promise((resolve) => setTimeout(resolve, 2000))
-
-        generateReport("daily-sales")
-
+        generateReport()
         toast({
           variant: "success",
           title: "Report Exported",
@@ -174,8 +194,7 @@ Report generated by MANPASAND POS System
     return <PageLoader message="Loading dashboard..." />
   }
 
-  const formatCurrency = (amount: number) => `$${amount.toFixed(2)}`
-  const formatGrowth = (growth: number) => `${growth >= 0 ? "+" : ""}${growth.toFixed(1)}%`
+  const formatCurrency = (amount: string | number) => `$${Number(amount).toFixed(2)}`
 
   return (
     <div className="p-6 space-y-6">
@@ -184,8 +203,8 @@ Report generated by MANPASAND POS System
           <h1 className="text-3xl font-bold text-gray-900">Dashboard</h1>
           <p className="text-gray-600">
             Welcome back! Here's what's happening today.
-            {dashboardData.lastRefresh && (
-              <span className="text-sm text-green-600 ml-2">Last updated: {dashboardData.lastRefresh}</span>
+            {lastRefresh && (
+              <span className="text-sm text-green-600 ml-2">Last updated: {lastRefresh}</span>
             )}
           </p>
         </div>
@@ -214,39 +233,17 @@ Report generated by MANPASAND POS System
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{formatCurrency(dashboardData.todaySales)}</div>
-            <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-              {dashboardData.salesGrowth >= 0 ? (
-                <TrendingUp className="h-3 w-3 text-green-600" />
-              ) : (
-                <TrendingDown className="h-3 w-3 text-red-600" />
-              )}
-              <span className={dashboardData.salesGrowth >= 0 ? "text-green-600" : "text-red-600"}>
-                {formatGrowth(dashboardData.salesGrowth)}
-              </span>
-              <span>from yesterday</span>
-            </div>
+            <div className="text-2xl font-bold">{stats?.todaySales?.length || 0}</div>
           </CardContent>
         </Card>
 
         <Card className="hover:shadow-md transition-shadow">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Transactions</CardTitle>
+            <CardTitle className="text-sm font-medium">Recent Transactions</CardTitle>
             <ShoppingCart className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{dashboardData.totalTransactions}</div>
-            <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-              {dashboardData.transactionGrowth >= 0 ? (
-                <TrendingUp className="h-3 w-3 text-green-600" />
-              ) : (
-                <TrendingDown className="h-3 w-3 text-red-600" />
-              )}
-              <span className={dashboardData.transactionGrowth >= 0 ? "text-green-600" : "text-red-600"}>
-                {formatGrowth(dashboardData.transactionGrowth)}
-              </span>
-              <span>from yesterday</span>
-            </div>
+            <div className="text-2xl font-bold">{recentSales.length}</div>
           </CardContent>
         </Card>
 
@@ -256,18 +253,7 @@ Report generated by MANPASAND POS System
             <Users className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{dashboardData.totalCustomers.toLocaleString()}</div>
-            <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-              {dashboardData.customerGrowth >= 0 ? (
-                <TrendingUp className="h-3 w-3 text-green-600" />
-              ) : (
-                <TrendingDown className="h-3 w-3 text-red-600" />
-              )}
-              <span className={dashboardData.customerGrowth >= 0 ? "text-green-600" : "text-red-600"}>
-                {formatGrowth(dashboardData.customerGrowth)}
-              </span>
-              <span>this month</span>
-            </div>
+            <div className="text-2xl font-bold">{stats?.totalCustomers || 0}</div>
           </CardContent>
         </Card>
 
@@ -277,18 +263,7 @@ Report generated by MANPASAND POS System
             <Package className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">{dashboardData.lowStockItems}</div>
-            <div className="flex items-center space-x-1 text-xs text-muted-foreground">
-              {dashboardData.inventoryGrowth >= 0 ? (
-                <TrendingUp className="h-3 w-3 text-green-600" />
-              ) : (
-                <TrendingDown className="h-3 w-3 text-red-600" />
-              )}
-              <span className={dashboardData.inventoryGrowth >= 0 ? "text-green-600" : "text-red-600"}>
-                {formatGrowth(dashboardData.inventoryGrowth)}
-              </span>
-              <span>from last week</span>
-            </div>
+            <div className="text-2xl font-bold text-yellow-600">{stats?.lowStockProducts?.length || 0}</div>
           </CardContent>
         </Card>
       </div>
@@ -299,33 +274,33 @@ Report generated by MANPASAND POS System
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               Recent Sales
-              <Badge variant="secondary">{dashboardData.recentSales.length} transactions</Badge>
+              <Badge variant="secondary">{recentSales.length} transactions</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {dashboardData.recentSales.map((sale: any) => (
+              {recentSales.slice(0, 5).map((sale, index) => (
                 <div
-                  key={sale.id}
+                  key={index}
                   className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
                 >
                   <div>
-                    <div className="font-medium">{sale.id}</div>
-                    <div className="text-sm text-gray-500">
-                      {sale.customer} • {sale.time}
-                    </div>
+                    <div className="font-medium">{sale.productName}</div>
                   </div>
                   <div className="text-right">
-                    <div className="font-medium">{formatCurrency(sale.amount)}</div>
+                    <div className="font-medium">{formatCurrency(sale.price)}</div>
                     <Badge
-                      variant={sale.status === "completed" ? "default" : "destructive"}
-                      className={sale.status === "completed" ? "bg-green-100 text-green-800" : ""}
+                      variant="default"
+                      className="bg-green-100 text-green-800"
                     >
-                      {sale.status}
+                      completed
                     </Badge>
                   </div>
                 </div>
               ))}
+              {recentSales.length === 0 && (
+                <div className="text-center text-gray-500">No recent sales</div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -335,14 +310,14 @@ Report generated by MANPASAND POS System
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               Top Products
-              <Badge variant="secondary">Today's best sellers</Badge>
+              <Badge variant="secondary">Best sellers</Badge>
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {dashboardData.topProducts.map((product: any, index: number) => (
+              {topProducts.slice(0, 5).map((product, index) => (
                 <div
-                  key={product.name}
+                  key={product.id}
                   className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
                 >
                   <div className="flex items-center space-x-3">
@@ -350,15 +325,17 @@ Report generated by MANPASAND POS System
                     <div>
                       <div className="font-medium flex items-center space-x-2">
                         <span>{product.name}</span>
-                        {product.trend === "up" && <TrendingUp className="h-3 w-3 text-green-600" />}
-                        {product.trend === "down" && <TrendingDown className="h-3 w-3 text-red-600" />}
+                        <TrendingUp className="h-3 w-3 text-green-600" />
                       </div>
-                      <div className="text-sm text-gray-500">{product.sales} units sold</div>
+                      <div className="text-sm text-gray-500">{product._count.order_items} orders</div>
                     </div>
                   </div>
-                  <div className="font-medium">{formatCurrency(product.revenue)}</div>
+                  <div className="font-medium">{formatCurrency(product.sales_rate_inc_dis_and_tax)}</div>
                 </div>
               ))}
+              {topProducts.length === 0 && (
+                <div className="text-center text-gray-500">No top products data</div>
+              )}
             </div>
           </CardContent>
         </Card>
