@@ -12,8 +12,21 @@ import { useToast } from "@/hooks/use-toast"
 import { Store, Eye, EyeOff } from "lucide-react"
 import { loginRequest } from "@/lib/api"
 
+interface LoginResponse {
+  success: boolean
+  message: string
+  data: {
+    user: {
+      email: string
+      role: string
+    }
+    token: string
+    branch: string
+  }
+}
+
 interface LoginFormProps {
-  onLogin: (token: string) => void
+  onLogin: (token: string, branch: string, user: { email: string; role: string }) => void
 }
 
 export function LoginForm({ onLogin }: LoginFormProps) {
@@ -29,9 +42,10 @@ export function LoginForm({ onLogin }: LoginFormProps) {
     setError("")
     setIsLoading(true)
     try {
-      const { data } = await loginRequest(username, password)
+      const response = await loginRequest(username, password) as LoginResponse
+      const { token, branch, user } = response.data
       toast({ variant: "success", title: "Login successful" })
-      onLogin(data.token , data.branch)
+      onLogin(token, branch, user)
     } catch (err: any) {
       setError(err.message)
       toast({ variant: "destructive", title: "Login failed", description: err.message })
