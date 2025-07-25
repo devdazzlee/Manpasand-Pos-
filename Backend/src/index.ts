@@ -32,6 +32,7 @@ import dashboardRoutes  from './routes/dashboard.routes';
 import employeeRoutes  from './routes/employee.route';
 import salaryRoutes  from './routes/salary.route';
 import shiftRoutes  from './routes/shift.route';
+import shiftAssignmentRoutes  from './routes/shiftAssignment.routes';
 
 const vAPI = process.env.vAPI || '/api/v1';
 const app = express();
@@ -67,6 +68,7 @@ app.use(`${vAPI}/dashboard`, dashboardRoutes);
 app.use(`${vAPI}/employee`, employeeRoutes);
 app.use(`${vAPI}/salaries`, salaryRoutes);
 app.use(`${vAPI}/shifts`, shiftRoutes);
+app.use(`${vAPI}/shift-assignment`, shiftAssignmentRoutes);
 
 // App Routes
 app.use(`${vAPI}/customer/app`, appRoutes);

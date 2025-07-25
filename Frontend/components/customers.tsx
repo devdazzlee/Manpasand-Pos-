@@ -370,11 +370,11 @@ export function Customers() {
             <CardTitle className="text-sm font-medium">
               Total Revenue
             </CardTitle>
-            <DollarSign className="h-4 w-4 text-blue-600" />
+            {/* <DollarSign className="h-4 w-4 text-blue-600" /> */}
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold text-blue-600">
-              ${totalRevenue.toFixed(2)}
+              Rs {totalRevenue.toFixed(2)}
             </div>
           </CardContent>
         </Card>

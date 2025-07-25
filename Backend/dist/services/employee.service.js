@@ -29,6 +29,19 @@ class EmployeeService {
             },
         };
     }
+    async updateEmployee(id, data) {
+        const employee = await client_1.prisma.employee.update({
+            where: { id },
+            data,
+        });
+        return employee;
+    }
+    async deleteEmployee(id) {
+        const employee = await client_1.prisma.employee.delete({
+            where: { id },
+        });
+        return employee;
+    }
 }
 exports.EmployeeService = EmployeeService;
 //# sourceMappingURL=employee.service.js.map

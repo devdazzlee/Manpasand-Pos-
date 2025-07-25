@@ -268,21 +268,15 @@ export function EmployeeManagement() {
                 <Select
                   value={newEmployee.employee_type_id}
                   onValueChange={(val) => setNewEmployee({ ...newEmployee, employee_type_id: val })}
-                  disabled={actionLoading || typesLoading}
+                  disabled={actionLoading || typesLoading || employeeTypes.length === 0}
                 >
                   <SelectTrigger id="employee_type_id">
-                    <SelectValue placeholder={typesLoading ? "Loading..." : "Select type"} />
+                    <SelectValue placeholder={typesLoading ? "Loading..." : employeeTypes.length === 0 ? "No types found" : "Select type"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {typesLoading ? (
-                      <SelectItem value="" disabled>Loading...</SelectItem>
-                    ) : employeeTypes.length === 0 ? (
-                      <SelectItem value="" disabled>No types found</SelectItem>
-                    ) : (
-                      employeeTypes.map((type) => (
-                        <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
-                      ))
-                    )}
+                    {employeeTypes.map((type) => (
+                      <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -497,21 +491,15 @@ export function EmployeeManagement() {
                 <Select
                   value={editingEmployee.employee_type_id}
                   onValueChange={(val) => setEditingEmployee({ ...editingEmployee, employee_type_id: val })}
-                  disabled={actionLoading || typesLoading}
+                  disabled={actionLoading || typesLoading || employeeTypes.length === 0}
                 >
                   <SelectTrigger id="edit-employee_type_id">
-                    <SelectValue placeholder={typesLoading ? "Loading..." : "Select type"} />
+                    <SelectValue placeholder={typesLoading ? "Loading..." : employeeTypes.length === 0 ? "No types found" : "Select type"} />
                   </SelectTrigger>
                   <SelectContent>
-                    {typesLoading ? (
-                      <SelectItem value="" disabled>Loading...</SelectItem>
-                    ) : employeeTypes.length === 0 ? (
-                      <SelectItem value="" disabled>No types found</SelectItem>
-                    ) : (
-                      employeeTypes.map((type) => (
-                        <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
-                      ))
-                    )}
+                    {employeeTypes.map((type) => (
+                      <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>

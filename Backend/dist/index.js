@@ -37,6 +37,7 @@ const dashboard_routes_1 = __importDefault(require("./routes/dashboard.routes"))
 const employee_route_1 = __importDefault(require("./routes/employee.route"));
 const salary_route_1 = __importDefault(require("./routes/salary.route"));
 const shift_route_1 = __importDefault(require("./routes/shift.route"));
+const shiftAssignment_routes_1 = __importDefault(require("./routes/shiftAssignment.routes"));
 const vAPI = process.env.vAPI || '/api/v1';
 const app = (0, express_1.default)();
 (0, db_1.connectDB)();
@@ -68,6 +69,7 @@ app.use(`${vAPI}/dashboard`, dashboard_routes_1.default);
 app.use(`${vAPI}/employee`, employee_route_1.default);
 app.use(`${vAPI}/salaries`, salary_route_1.default);
 app.use(`${vAPI}/shifts`, shift_route_1.default);
+app.use(`${vAPI}/shift-assignment`, shiftAssignment_routes_1.default);
 // App Routes
 app.use(`${vAPI}/customer/app`, app_routes_1.default);
 app.use(`${vAPI}/customer`, customer_routes_1.default);

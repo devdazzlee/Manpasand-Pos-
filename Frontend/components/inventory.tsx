@@ -605,7 +605,8 @@ export default function Inventory() {
   const [loading, setLoading] = useState(false)
   const [totalProducts, setTotalProducts] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize] = useState(10)
+  const [pageSize, setPageSize] = useState<number>(10)
+  const [gotoPage, setGotoPage] = useState<string>("")
 
   // State for filters
   const [searchTerm, setSearchTerm] = useState("")
@@ -729,7 +730,7 @@ export default function Inventory() {
   // Load products when filters change
   useEffect(() => {
     loadProducts()
-  }, [currentPage, searchTerm, selectedCategory, selectedSubcategory])
+  }, [currentPage, searchTerm, selectedCategory, selectedSubcategory, pageSize])
 
   const loadDropdownData = async () => {
     try {
@@ -773,13 +774,15 @@ export default function Inventory() {
   const loadProducts = async () => {
     setLoading(true)
     try {
-      const response = await apiService.getProducts({
+      const params: any = {
         page: currentPage,
-        limit: pageSize,
+        limit: pageSize === 0 ? 100000 : pageSize, // 0 means 'All', set a very high number
         search: searchTerm || undefined,
         category_id: selectedCategory === "all" ? undefined : selectedCategory,
         subcategory_id: selectedSubcategory === "all" ? undefined : selectedSubcategory,
-      })
+      }
+      if (pageSize === 0) delete params.page // remove page param for 'All'
+      const response = await apiService.getProducts(params)
 
       // Handle inconsistent API responses for the product list
       const productsArray = Array.isArray(response) ? response : response?.data || []
@@ -1134,6 +1137,18 @@ export default function Inventory() {
               ))}
             </SelectContent>
           </Select>
+          <Select value={String(pageSize)} onValueChange={value => { setPageSize(Number(value)); setCurrentPage(1); }}>
+            <SelectTrigger className="w-32">
+              <SelectValue placeholder="Page Size" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="20">20</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+              <SelectItem value="0">All</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Products Table */}
@@ -1175,10 +1190,10 @@ export default function Inventory() {
                           </div>
                         </TableCell>
                         <TableCell>{product.sku}</TableCell>
-                        <TableCell>{product.category?.name || "-"}</TableCell>
-                        <TableCell>{product.unit?.name || "-"}</TableCell>
-                        <TableCell>${product.purchase_rate.toFixed(2)}</TableCell>
-                        <TableCell>${product.sales_rate_exc_dis_and_tax.toFixed(2)}</TableCell>
+                        <TableCell>{product.category_id || "-"}</TableCell>
+                        <TableCell>{product.unit_id || "-"}</TableCell>
+                        <TableCell>{product.purchase_rate.toFixed(2)}</TableCell>
+                        <TableCell>{product.sales_rate_exc_dis_and_tax.toFixed(2)}</TableCell>
                         <TableCell>
                           <Badge
                             className={product.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}
@@ -1209,32 +1224,68 @@ export default function Inventory() {
                     ))}
                   </TableBody>
                 </Table>
-
                 {/* Pagination */}
-                {totalPages > 1 && (
-                  <div className="flex items-center justify-between mt-4">
-                    <div className="text-sm text-gray-500">
-                      Showing {(currentPage - 1) * pageSize + 1} to {Math.min(currentPage * pageSize, totalProducts)} of{" "}
-                      {totalProducts} products
+                {(totalPages > 1 || pageSize === 0) && (
+                  <div className="flex flex-col md:flex-row md:items-center md:justify-between mt-4 space-y-2 md:space-y-0">
+                    <div className="text-sm text-gray-500 mb-2 md:mb-0">
+                      {pageSize === 0 ? (
+                        <>Showing all {totalProducts} products</>
+                      ) : (
+                        <>Page {currentPage} of {totalPages} (Total: {totalProducts} products)</>
+                      )}
                     </div>
-                    <div className="flex space-x-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                        disabled={currentPage === 1}
-                      >
-                        Previous
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                        disabled={currentPage === totalPages}
-                      >
-                        Next
-                      </Button>
-                    </div>
+                    {pageSize !== 0 && (
+                      <div className="flex items-center space-x-2">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(1)}
+                          disabled={currentPage === 1}
+                        >
+                          First
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                          disabled={currentPage === 1}
+                        >
+                          Previous
+                        </Button>
+                        <Input
+                          type="number"
+                          min={1}
+                          max={totalPages}
+                          value={gotoPage}
+                          onChange={e => setGotoPage(e.target.value)}
+                          onKeyDown={e => {
+                            if (e.key === "Enter") {
+                              const page = Math.max(1, Math.min(Number(gotoPage), totalPages))
+                              if (!isNaN(page)) setCurrentPage(page)
+                              setGotoPage("")
+                            }
+                          }}
+                          placeholder="Go to page"
+                          className="w-24 h-8 px-2 text-sm"
+                        />
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                          disabled={currentPage === totalPages}
+                        >
+                          Next
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => setCurrentPage(totalPages)}
+                          disabled={currentPage === totalPages}
+                        >
+                          Last
+                        </Button>
+                      </div>
+                    )}
                   </div>
                 )}
               </>

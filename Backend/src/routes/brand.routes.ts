@@ -16,10 +16,10 @@ import { validate } from '../middleware/validation.middleware';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
+router.post('/', authenticate, validate(createBrandSchema), createBrand);
 
 router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
-router.post('/', validate(createBrandSchema), createBrand);
 router.get('/', validate(listBrandsSchema), listBrands);
 router.get('/:id', validate(getBrandSchema), getBrand);
 router.patch('/:id', validate(updateBrandSchema), updateBrand);

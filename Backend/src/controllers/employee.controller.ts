@@ -15,3 +15,15 @@ export const listEmployees = asyncHandler(async (req: Request, res: Response) =>
   const result = await employeeService.listEmployees(req.user?.branch_id!, Number(page), Number(limit));
   new ApiResponse(result.data, 'Employees fetched successfully', 200).send(res);
 });
+
+export const updateEmployee = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const updatedEmployee = await employeeService.updateEmployee(id, req.body);
+  new ApiResponse(updatedEmployee, 'Employee updated successfully', 200).send(res);
+});
+
+export const deleteEmployee = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  await employeeService.deleteEmployee(id);
+  new ApiResponse(null, 'Employee deleted successfully', 200).send(res);
+});

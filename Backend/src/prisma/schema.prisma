@@ -626,7 +626,7 @@ model Expense {
   amount     Decimal
   created_at DateTime @default(now())
 
-  cashflow_id String? // make this optional
+  cashflow_id String?
   cashflow    CashFlow? @relation(fields: [cashflow_id], references: [id])
 }
 
@@ -634,9 +634,9 @@ model CashFlow {
   id         String    @id @default(uuid())
   opening    Decimal
   sales      Decimal
-  expenses   Expense[]
-  closing    Decimal
+  closing    Decimal? // nullable until closing added
   created_at DateTime  @default(now())
+  expenses   Expense[]
 }
 
 // Staff Management
@@ -680,22 +680,18 @@ model Shift {
   start_time DateTime
   end_time   DateTime
   is_active  Boolean  @default(true)
-
-  shift_assignments ShiftAssignment[]
 }
 
 model ShiftAssignment {
   id          String    @id @default(uuid())
   employee_id String
-  shift_id    String
+  shift_time  String
   start_date  DateTime
   end_date    DateTime?
 
   employee Employee @relation(fields: [employee_id], references: [id])
-  shift    Shift    @relation(fields: [shift_id], references: [id])
 
-  @@unique([employee_id, shift_id, start_date])
-  @@index([shift_id])
+  @@unique([employee_id,start_date])
 }
 
 model Salary {

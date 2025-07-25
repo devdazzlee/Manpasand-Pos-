@@ -12,6 +12,27 @@ export const createEmployeeSchema = z.object({
   }),
 });
 
+export const updateEmployeeSchema = z.object({
+  body: z.object({
+    name: z.string().optional(),
+    email: z.string().email().optional(),
+    phone_number: z.string().optional(),
+    cnic: z.string().optional(),
+    gender: z.string().optional(),
+    join_date: z.string().datetime().optional(),
+    employee_type_id: z.string().uuid().optional(),
+  }),
+  params: z.object({
+    id: z.string().uuid(),
+  }),
+});
+
+export const deleteEmployeeSchema = z.object({
+  params: z.object({
+    id: z.string().uuid(),
+  }),
+});
+
 export const listEmployeeSchema = z.object({
   query: z.object({
     page: z.coerce.number().optional(),

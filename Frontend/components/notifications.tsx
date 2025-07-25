@@ -48,7 +48,7 @@ export function Notifications() {
     {
       id: "NOT-002",
       title: "Daily Sales Report",
-      message: "Today's sales target achieved: ₹50,000",
+      message: "Today's sales target achieved: Rs 50,000",
       type: "success",
       timestamp: "2024-01-15 18:00:00",
       read: true,
@@ -230,6 +230,11 @@ export function Notifications() {
     }
   }
 
+  // Utility to replace ₹ or dollar with Rs 
+  const formatCurrency = (text: string) => {
+    return text.replace(/₹|dollar/gi, "Rs ");
+  };
+
   const renderNotificationsTable = (filteredNotifications: Notification[]) => (
     <Table>
       <TableHeader>
@@ -255,7 +260,7 @@ export function Notifications() {
             <TableRow key={notification.id} className={notification.read ? "" : "bg-blue-50"}>
               <TableCell>{getTypeIcon(notification.type)}</TableCell>
               <TableCell className="font-medium">{notification.title}</TableCell>
-              <TableCell className="max-w-xs truncate">{notification.message}</TableCell>
+              <TableCell className="max-w-xs truncate">{formatCurrency(notification.message)}</TableCell>
               <TableCell>
                 <Badge className={getPriorityColor(notification.priority)}>{notification.priority}</Badge>
               </TableCell>
@@ -493,7 +498,7 @@ export function Notifications() {
               </Badge>
             </div>
             <div className="bg-gray-50 p-4 rounded-lg">
-              <p className="text-gray-900">{selectedNotification?.message}</p>
+              <p className="text-gray-900">{selectedNotification ? formatCurrency(selectedNotification.message) : ""}</p>
             </div>
             <div className="text-sm text-gray-500">
               <p>

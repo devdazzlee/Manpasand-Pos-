@@ -244,7 +244,7 @@ export function Expenses() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">${totalExpenses.toFixed(2)}</div>
+            <div className="text-2xl font-bold">Rs {totalExpenses.toFixed(2)}</div>
           </CardContent>
         </Card>
         <Card>
@@ -253,7 +253,7 @@ export function Expenses() {
             <DollarSign className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">${paidExpenses.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-green-600">Rs {paidExpenses.toFixed(2)}</div>
           </CardContent>
         </Card>
         <Card>
@@ -262,7 +262,7 @@ export function Expenses() {
             <DollarSign className="h-4 w-4 text-yellow-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-yellow-600">${pendingExpenses.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-yellow-600">Rs {pendingExpenses.toFixed(2)}</div>
           </CardContent>
         </Card>
         <Card>
@@ -271,7 +271,7 @@ export function Expenses() {
             <DollarSign className="h-4 w-4 text-red-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-red-600">${overdueExpenses.toFixed(2)}</div>
+            <div className="text-2xl font-bold text-red-600">Rs {overdueExpenses.toFixed(2)}</div>
           </CardContent>
         </Card>
       </div>
@@ -328,7 +328,7 @@ export function Expenses() {
                   <TableCell>
                     <Badge variant="secondary">{expense.category}</Badge>
                   </TableCell>
-                  <TableCell className="font-medium">${expense.amount.toFixed(2)}</TableCell>
+                  <TableCell className="font-medium">Rs {expense.amount.toFixed(2)}</TableCell>
                   <TableCell>
                     <div className="flex items-center space-x-1">
                       <Calendar className="h-3 w-3" />

@@ -30,4 +30,19 @@ export class EmployeeService {
       },
     };
   }
+
+  async updateEmployee(id: string, data: Partial<CreateEmployeeInput>) {
+    const employee = await prisma.employee.update({
+      where: { id },
+      data,
+    });
+    return employee;
+  }
+
+  async deleteEmployee(id: string) {
+    const employee = await prisma.employee.delete({
+      where: { id },
+    });
+    return employee;
+  }
 }

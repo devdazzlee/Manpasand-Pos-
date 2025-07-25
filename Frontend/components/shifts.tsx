@@ -18,8 +18,18 @@ import {
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Search, Clock, Users, Calendar, DollarSign, Eye, StopCircle, Edit, Trash2, Loader2 } from "lucide-react"
+import { Plus, Search, Clock, Users,  DollarSign, Eye, StopCircle, Edit, Trash2, Loader2, Calendar as CalendarIcon } from "lucide-react"
 import apiClient from "@/lib/apiClient"
+import { Calendar } from "@/components/ui/calendar";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { format } from "date-fns";
+import { cn } from "@/lib/utils";
+
+interface Employee {
+  id: string
+  name: string
+  hourlyRate?: number
+}
 
 interface Shift {
   id: string
@@ -45,45 +55,79 @@ interface NewShiftForm {
   breakTime: string
 }
 
-const employees = [
-  { id: "emp-001", name: "John Doe", hourlyRate: 15 },
-  { id: "emp-002", name: "Jane Smith", hourlyRate: 18 },
-  { id: "emp-003", name: "Mike Johnson", hourlyRate: 16 },
-  { id: "emp-004", name: "Sarah Wilson", hourlyRate: 20 },
-]
-
 export function Shifts() {
-  const [shifts, setShifts] = useState<any[]>([])
-  const [page, setPage] = useState(1)
-  const [limit] = useState(10)
-  const [totalPages, setTotalPages] = useState(1)
-  const [isLoading, setIsLoading] = useState(false)
-  const [isCreateShiftOpen, setIsCreateShiftOpen] = useState(false)
-  const [isEditShiftOpen, setIsEditShiftOpen] = useState(false)
-  const [editingShift, setEditingShift] = useState<any | null>(null)
-  const [isDeleteDialogOpen, setIsDeleteDialogOpen] = useState(false)
-  const [deletingShiftId, setDeletingShiftId] = useState<string | null>(null)
-  const [newShift, setNewShift] = useState({ name: "", start_time: "", end_time: "" })
-  const [searchTerm, setSearchTerm] = useState("")
-  const [statusFilter, setStatusFilter] = useState<string>("all")
-  const [dateRangeFilter, setDateRangeFilter] = useState<string>("all")
-  const [addLoading, setAddLoading] = useState(false)
-  const [deleteLoading, setDeleteLoading] = useState(false)
+  const [employees, setEmployees] = useState<Employee[]>([])
+  const [shifts, setShifts] = useState<Shift[]>([])
 
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "scheduled":
-        return "bg-blue-100 text-blue-800"
-      case "active":
-        return "bg-green-100 text-green-800"
-      case "completed":
-        return "bg-gray-100 text-gray-800"
-      case "cancelled":
-        return "bg-red-100 text-red-800"
-      default:
-        return "bg-gray-100 text-gray-800"
+  const [isCreateShiftOpen, setIsCreateShiftOpen] = useState(false)
+  const [isViewShiftOpen, setIsViewShiftOpen] = useState(false)
+  const [isEditShiftOpen, setIsEditShiftOpen] = useState(false)
+  const [isEndShiftOpen, setIsEndShiftOpen] = useState(false)
+  const [selectedShift, setSelectedShift] = useState<Shift | null>(null)
+  const [editingShift, setEditingShift] = useState<Shift | null>(null)
+  const [searchTerm, setSearchTerm] = useState("")
+  const [employeeFilter, setEmployeeFilter] = useState("all")
+  const [endShiftSales, setEndShiftSales] = useState("")
+
+  // Add loading state
+  const [loading, setLoading] = useState(false)
+
+  const [newShift, setNewShift] = useState<NewShiftForm>({
+    employee: "",
+    employeeId: "",
+    date: "",
+    shiftType: "",
+    startTime: "",
+    endTime: "",
+    breakTime: "1",
+  })
+
+  const [date, setDate] = useState<Date | undefined>(undefined);
+
+  // Fetch employees from API
+  const getEmployees = async () => {
+    try {
+      const res = await apiClient.get("/employee")
+      const apiEmployees = res.data.data.map((emp: any) => ({
+        id: emp.id,
+        name: emp.name,
+        hourlyRate: emp.hourlyRate || 15, // fallback if not present
+      }))
+      setEmployees(apiEmployees)
+    } catch (error) {
+      console.error("Error fetching employees:", error)
     }
   }
+
+  // Fetch all shifts from API
+  const getAllShifts = async () => {
+    try {
+      const res = await apiClient.get("/shift-assignment");
+      const apiShifts = res.data.data.map((shift: any) => ({
+        id: shift.id,
+        employee: shift.employee?.name || "",
+        employeeId: shift.employee_id,
+        date: shift.start_date?.split("T")[0] || "",
+        startTime: shift.shift_time?.split("-")[0]?.trim() || "",
+        endTime: shift.shift_time?.split("-")[1]?.trim() || "",
+        breakTime: shift.break_time || "1 hour",
+        totalHours: shift.total_hours || 0,
+        status: shift.status || "scheduled",
+        sales: shift.sales || 0,
+        hourlyRate: shift.hourly_rate || 15,
+      }));
+      setShifts(apiShifts);
+    } catch (error) {
+      console.error("Error fetching shifts:", error);
+    }
+  };
+
+  useEffect(() => {
+    getEmployees()
+    getAllShifts()
+  }, [])
+
+  const getStatusColor = (status: string) => "bg-gray-100 text-gray-800";
 
   const calculateHours = (startTime: string, endTime: string, breakHours: number) => {
     const start = new Date(`2000-01-01T${startTime}:00`)
@@ -98,126 +142,211 @@ export function Shifts() {
     return Math.max(0, diff - breakHours)
   }
 
-  const getShifts = async (pageNum = page) => {
-    setIsLoading(true)
-    try {
-      const res = await apiClient.get(`/shifts?page=${pageNum}&limit=${limit}`)
-      const { data, meta } = res.data
-      setShifts(data)
-      setTotalPages(meta?.totalPages || 1)
-    } catch (error) {
-      console.log("error", error)
-    } finally {
-      setIsLoading(false)
+  const handleShiftTypeChange = (type: string) => {
+    setNewShift({ ...newShift, shiftType: type })
+
+    switch (type) {
+      case "morning":
+        setNewShift((prev) => ({ ...prev, startTime: "09:00", endTime: "17:00" }))
+        break
+      case "evening":
+        setNewShift((prev) => ({ ...prev, startTime: "13:00", endTime: "21:00" }))
+        break
+      case "night":
+        setNewShift((prev) => ({ ...prev, startTime: "21:00", endTime: "05:00" }))
+        break
+      default:
+        break
     }
   }
 
-  useEffect(() => {
-    getShifts(page)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [page])
-
+  // Add (Assign) Shift
   const handleCreateShift = async () => {
-    if (newShift.name && newShift.start_time && newShift.end_time) {
-      setAddLoading(true)
+    if (newShift.employeeId && newShift.date && newShift.startTime && newShift.endTime) {
+      setLoading(true)
       try {
-        await apiClient.post('/shifts', {
-          name: newShift.name,
-          start_time: new Date(newShift.start_time).toISOString(),
-          end_time: new Date(newShift.end_time).toISOString(),
+        const shift_time = `${newShift.startTime} - ${newShift.endTime}`
+        const startDateTime = new Date(`${newShift.date}T${newShift.startTime}:00`).toISOString()
+        await apiClient.post("/shift-assignment", {
+          employee_id: newShift.employeeId,
+          shift_time,
+          start_date: startDateTime,
         })
         setIsCreateShiftOpen(false)
-        setNewShift({ name: "", start_time: "", end_time: "" })
-        getShifts(1)
-        setPage(1)
+        setNewShift({
+          employee: "",
+          employeeId: "",
+          date: "",
+          shiftType: "",
+          startTime: "",
+          endTime: "",
+          breakTime: "1",
+        })
+        await getAllShifts()
       } catch (error) {
-        console.log("Create shift error", error)
+        console.error("Error assigning shift:", error)
       } finally {
-        setAddLoading(false)
+        setLoading(false)
       }
     }
   }
 
-  const handleEditShift = (shift: any) => {
-    setEditingShift({ ...shift, start_time: shift.start_time?.slice(0, 16), end_time: shift.end_time?.slice(0, 16) })
+  const handleEmployeeSelect = (employeeId: string) => {
+    const employee = employees.find((emp) => emp.id === employeeId)
+    if (employee) {
+      setNewShift({
+        ...newShift,
+        employee: employee.name,
+        employeeId: employee.id,
+      })
+    }
+  }
+
+  const handleViewShift = (shift: Shift) => {
+    setSelectedShift(shift)
+    setIsViewShiftOpen(true)
+  }
+
+  const handleEditShift = (shift: Shift) => {
+    setEditingShift({ ...shift })
     setIsEditShiftOpen(true)
   }
 
+  // Edit Shift
   const handleUpdateShift = async () => {
-    if (editingShift && editingShift.name && editingShift.start_time && editingShift.end_time) {
+    if (editingShift) {
+      setLoading(true);
       try {
-        await apiClient.put(`/shifts/${editingShift.id}`, {
-          name: editingShift.name,
-          start_time: new Date(editingShift.start_time).toISOString(),
-          end_time: new Date(editingShift.end_time).toISOString(),
-        })
-        setIsEditShiftOpen(false)
-        setEditingShift(null)
-        getShifts(page)
+        const shift_time = `${editingShift.startTime} - ${editingShift.endTime}`;
+        await apiClient.patch(`/shift-assignment/${editingShift.id}`, {
+          shift_time,
+          start_date: editingShift.date,
+          // Add other fields as needed
+        });
+        setIsEditShiftOpen(false);
+        setEditingShift(null);
+        await getAllShifts();
       } catch (error) {
-        console.log("Update shift error", error)
-      }
-    }
-  }
-
-  const handleDeleteShift = async () => {
-    if (deletingShiftId) {
-      setDeleteLoading(true)
-      try {
-        await apiClient.delete(`/shifts/${deletingShiftId}`)
-        setIsDeleteDialogOpen(false)
-        setDeletingShiftId(null)
-        getShifts(page)
-      } catch (error) {
-        console.log("Delete shift error", error)
+        console.error("Error updating shift:", error);
       } finally {
-        setDeleteLoading(false)
+        setLoading(false);
+      }
+    }
+  };
+
+  // End Shift
+  const handleEndShift = (shift: Shift) => {
+    setSelectedShift(shift)
+    setEndShiftSales(shift.sales.toString())
+    setIsEndShiftOpen(true)
+  }
+
+  // End Shift
+  const handleConfirmEndShift = async () => {
+    if (selectedShift) {
+      setLoading(true)
+      try {
+        await apiClient.patch(`/shift-assignment/end/${selectedShift.employeeId}`)
+        setIsEndShiftOpen(false)
+        setSelectedShift(null)
+        setEndShiftSales("")
+        await getAllShifts()
+      } catch (error) {
+        console.error("Error ending shift:", error)
+      } finally {
+        setLoading(false)
       }
     }
   }
 
-  const filteredShifts = shifts.filter((shift) => {
-    let matches = true
-    if (statusFilter !== "all") {
-      matches = statusFilter === "active" ? shift.is_active : !shift.is_active
+  // Delete Shift
+  const handleDeleteShift = async (shiftId: string) => {
+    setLoading(true);
+    try {
+      await apiClient.delete(`/shift-assignment/${shiftId}`);
+      await getAllShifts();
+    } catch (error) {
+      console.error("Error deleting shift:", error);
+    } finally {
+      setLoading(false);
     }
-    if (dateRangeFilter !== "all") {
-      const shiftDate = new Date(shift.start_time)
-      const now = new Date()
-      if (dateRangeFilter === "today") {
-        matches = matches &&
-          shiftDate.getFullYear() === now.getFullYear() &&
-          shiftDate.getMonth() === now.getMonth() &&
-          shiftDate.getDate() === now.getDate()
-      } else if (dateRangeFilter === "week") {
-        const startOfWeek = new Date(now)
-        startOfWeek.setDate(now.getDate() - now.getDay())
-        startOfWeek.setHours(0,0,0,0)
-        const endOfWeek = new Date(startOfWeek)
-        endOfWeek.setDate(startOfWeek.getDate() + 6)
-        endOfWeek.setHours(23,59,59,999)
-        matches = matches && shiftDate >= startOfWeek && shiftDate <= endOfWeek
-      } else if (dateRangeFilter === "month") {
-        matches = matches &&
-          shiftDate.getFullYear() === now.getFullYear() &&
-          shiftDate.getMonth() === now.getMonth()
+  };
+
+  const filterShifts = (status?: string) => {
+    let filtered = shifts
+
+    // Filter by status/tab
+    if (status) {
+      switch (status) {
+        case "today":
+          const today = new Date().toISOString().split("T")[0]
+          filtered = filtered.filter((shift) => shift.date === today)
+          break
+        case "week":
+          const weekAgo = new Date()
+          weekAgo.setDate(weekAgo.getDate() - 7)
+          filtered = filtered.filter((shift) => new Date(shift.date) >= weekAgo)
+          break
+        case "scheduled":
+          filtered = filtered.filter((shift) => shift.status === "scheduled")
+          break
+        case "completed":
+          filtered = filtered.filter((shift) => shift.status === "completed")
+          break
       }
     }
+
+    // Filter by employee
+    if (employeeFilter !== "all") {
+      filtered = filtered.filter((shift) => shift.employeeId === employeeFilter)
+    }
+
+    // Filter by search term
     if (searchTerm) {
-      matches = matches && (
-        shift.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        shift.id.toLowerCase().includes(searchTerm.toLowerCase())
+      filtered = filtered.filter(
+        (shift) =>
+          shift.employee.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          shift.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          shift.status.toLowerCase().includes(searchTerm.toLowerCase()),
       )
     }
-    return matches
-  })
 
-  const ShiftTable = ({ shiftData }: { shiftData: any[] }) => (
+    return filtered
+  }
+
+  // Calculate statistics
+  const today = new Date().toISOString().split("T")[0]
+  const todayShifts = shifts.filter((shift) => shift.date === today)
+  const todayHours = todayShifts.reduce((sum, shift) => {
+    // Parse start and end times
+    const [startHour, startMinute] = shift.startTime.split(":").map(Number);
+    const [endHour, endMinute] = shift.endTime.split(":").map(Number);
+    let hours = (endHour + endMinute / 60) - (startHour + startMinute / 60);
+
+    // Handle overnight shifts
+    if (hours < 0) hours += 24;
+
+    // Subtract break time (parse as float, fallback to 0)
+    const breakHours = parseFloat(shift.breakTime) || 0;
+    hours = Math.max(0, hours - breakHours);
+
+    return sum + hours;
+  }, 0);
+  const activeShifts = shifts.filter((shift) => shift.status === "active" || shift.status === "scheduled").length;
+  const tomorrowShifts = shifts.filter((shift) => {
+    const tomorrow = new Date()
+    tomorrow.setDate(tomorrow.getDate() + 1)
+    return shift.date === tomorrow.toISOString().split("T")[0] && shift.status === "scheduled"
+  }).length
+  const todayLaborCost = todayShifts.reduce((sum, shift) => sum + shift.totalHours * shift.hourlyRate, 0)
+
+  const ShiftTable = ({ shiftData }: { shiftData: Shift[] }) => (
     <Table>
       <TableHeader>
         <TableRow>
           <TableHead>Shift ID</TableHead>
-          <TableHead>Name</TableHead>
+          <TableHead>Employee</TableHead>
+          <TableHead>Date</TableHead>
           <TableHead>Start Time</TableHead>
           <TableHead>End Time</TableHead>
           <TableHead>Status</TableHead>
@@ -228,30 +357,36 @@ export function Shifts() {
         {shiftData.map((shift) => (
           <TableRow key={shift.id}>
             <TableCell className="font-medium">{shift.id}</TableCell>
-            <TableCell>{shift.name}</TableCell>
-            <TableCell>{shift.start_time ? new Date(shift.start_time).toLocaleString() : ""}</TableCell>
-            <TableCell>{shift.end_time ? new Date(shift.end_time).toLocaleString() : ""}</TableCell>
+            <TableCell>{shift.employee}</TableCell>
+            <TableCell>{shift.date}</TableCell>
+            <TableCell>{shift.startTime}</TableCell>
+            <TableCell>{shift.endTime}</TableCell>
             <TableCell>
-              <Badge className={shift.is_active ? "bg-green-100 text-green-800" : "bg-blue-100 text-blue-800"}>
-                {shift.is_active ? "Active" : "Scheduled"}
-              </Badge>
+              <Badge className={getStatusColor(shift.status)}>{shift.status}</Badge>
             </TableCell>
             <TableCell>
               <div className="flex gap-1">
+                <Button variant="outline" size="sm" onClick={() => handleViewShift(shift)}>
+                  <Eye className="h-3 w-3" />
+                </Button>
                 <Button variant="outline" size="sm" onClick={() => handleEditShift(shift)}>
                   <Edit className="h-3 w-3" />
                 </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setDeletingShiftId(shift.id)
-                    setIsDeleteDialogOpen(true)
-                  }}
-                  className="text-red-600 hover:text-red-700"
-                >
-                  <Trash2 className="h-3 w-3" />
-                </Button>
+                {shift.status === "active" && (
+                  <Button variant="outline" size="sm" onClick={() => handleEndShift(shift)}>
+                    <StopCircle className="h-3 w-3" />
+                  </Button>
+                )}
+                {shift.status === "scheduled" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDeleteShift(shift.id)}
+                    className="text-red-600 hover:text-red-700"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                )}
               </div>
             </TableCell>
           </TableRow>
@@ -265,8 +400,9 @@ export function Shifts() {
       <div className="flex justify-between items-center">
         <div>
           <h1 className="text-3xl font-bold">Shift Management</h1>
-          <p className="text-gray-600">Manage employee shifts</p>
+          <p className="text-gray-600">Manage employee shifts and time tracking</p>
         </div>
+
         {/* Create Shift Dialog */}
         <Dialog open={isCreateShiftOpen} onOpenChange={setIsCreateShiftOpen}>
           <DialogTrigger asChild>
@@ -278,108 +414,326 @@ export function Shifts() {
           <DialogContent>
             <DialogHeader>
               <DialogTitle>Schedule New Shift</DialogTitle>
-              <DialogDescription>Create a new shift</DialogDescription>
+              <DialogDescription>Create a new shift for an employee</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label htmlFor="name">Name</Label>
-                <Input
-                  id="name"
-                  value={newShift.name}
-                  onChange={(e) => setNewShift({ ...newShift, name: e.target.value })}
-                  placeholder="Shift Name"
-                  disabled={addLoading}
-                />
+                <Label htmlFor="employee">Employee</Label>
+                <Select value={newShift.employeeId} onValueChange={handleEmployeeSelect}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select employee" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {employees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>
+                        {emp.name} (Rs {emp.hourlyRate}/hr)
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="start_time">Start Time</Label>
-                <Input
-                  id="start_time"
-                  type="datetime-local"
-                  value={newShift.start_time}
-                  onChange={(e) => setNewShift({ ...newShift, start_time: e.target.value })}
-                  disabled={addLoading}
-                />
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="date">Date</Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}
+                        disabled={loading}
+                      >
+                        <CalendarIcon className="mr-2 h-4 w-4" />
+                        {date ? format(date, "PPP") : <span>Pick a date</span>}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0">
+                      <Calendar
+                        mode="single"
+                        selected={date}
+                        onSelect={(date) => setDate(date)}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="shift-type">Shift Type</Label>
+                  <Select value={newShift.shiftType} onValueChange={handleShiftTypeChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="morning">Morning (9AM-5PM)</SelectItem>
+                      <SelectItem value="evening">Evening (1PM-9PM)</SelectItem>
+                      <SelectItem value="night">Night (9PM-5AM)</SelectItem>
+                      <SelectItem value="custom">Custom</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="end_time">End Time</Label>
-                <Input
-                  id="end_time"
-                  type="datetime-local"
-                  value={newShift.end_time}
-                  onChange={(e) => setNewShift({ ...newShift, end_time: e.target.value })}
-                  disabled={addLoading}
-                />
+              <div className="grid grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label htmlFor="start-time">Start Time</Label>
+                  <Input
+                    type="time"
+                    value={newShift.startTime}
+                    onChange={(e) => setNewShift({ ...newShift, startTime: e.target.value })}
+                    disabled={loading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="end-time">End Time</Label>
+                  <Input
+                    type="time"
+                    value={newShift.endTime}
+                    onChange={(e) => setNewShift({ ...newShift, endTime: e.target.value })}
+                    disabled={loading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="break-time">Break (hours)</Label>
+                  <Input
+                    type="number"
+                    step="0.5"
+                    value={newShift.breakTime}
+                    onChange={(e) => setNewShift({ ...newShift, breakTime: e.target.value })}
+                    placeholder="1"
+                    disabled={loading}
+                  />
+                </div>
               </div>
+              {newShift.startTime && newShift.endTime && (
+                <div className="text-sm text-gray-600">
+                  Total Hours:{" "}
+                  {calculateHours(
+                    newShift.startTime,
+                    newShift.endTime,
+                    Number.parseFloat(newShift.breakTime) || 0,
+                  ).toFixed(1)}
+                  h
+                </div>
+              )}
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsCreateShiftOpen(false)} disabled={addLoading}>
+              <Button variant="outline" onClick={() => setIsCreateShiftOpen(false)} disabled={loading}>
                 Cancel
               </Button>
-              <Button onClick={handleCreateShift} disabled={addLoading}>
-                {addLoading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
-                Schedule Shift
+              <Button onClick={handleCreateShift} disabled={loading}>
+                {loading ? (
+                  <>
+                    Scheduling...
+                    <Loader2 className="animate-spin w-4 h-4 ml-2" />
+                  </>
+                ) : (
+                  "Schedule Shift"
+                )}
               </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
       </div>
-      {/* Filters */}
-      <div className="flex gap-4 mb-4">
-        <div className="relative flex-1">
-          <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-          <Input
-            placeholder="Search shifts..."
-            className="pl-10"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-        <Tabs value={statusFilter} onValueChange={setStatusFilter} className="">
-          <TabsList>
-            <TabsTrigger value="all">All</TabsTrigger>
-            <TabsTrigger value="active">Active</TabsTrigger>
-            <TabsTrigger value="scheduled">Scheduled</TabsTrigger>
-          </TabsList>
-        </Tabs>
-        <Tabs value={dateRangeFilter} onValueChange={setDateRangeFilter} className="">
-          <TabsList>
-            <TabsTrigger value="all">All Dates</TabsTrigger>
-            <TabsTrigger value="today">Today</TabsTrigger>
-            <TabsTrigger value="week">This Week</TabsTrigger>
-            <TabsTrigger value="month">This Month</TabsTrigger>
-          </TabsList>
-        </Tabs>
+
+      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Active Shifts</CardTitle>
+            <Clock className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{activeShifts}</div>
+            <p className="text-xs text-muted-foreground">Currently working</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Today's Hours</CardTitle>
+            <Users className="h-4 w-4 text-muted-foreground" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{todayHours}</div>
+            <p className="text-xs text-muted-foreground">Total hours worked</p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-medium">Scheduled</CardTitle>
+            {/* <Calendar className="h-4 w-4 text-muted-foreground" /> */}
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold">{tomorrowShifts}</div>
+            <p className="text-xs text-muted-foreground">Tomorrow's shifts</p>
+          </CardContent>
+        </Card>
       </div>
-      {/* Loader and Table */}
-      {isLoading ? (
-        <div className="flex justify-center items-center py-10">
-          <span className="text-lg font-semibold">Loading...</span>
-        </div>
-      ) : (
-        <>
-          <ShiftTable shiftData={filteredShifts} />
-          <div className="flex justify-end gap-2 mt-4">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.max(1, p - 1))}
-              disabled={page === 1}
-            >
-              Prev
-            </Button>
-            <span className="px-2 py-1 text-sm">Page {page} of {totalPages}</span>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-              disabled={page === totalPages}
-            >
-              Next
-            </Button>
+
+      <Tabs defaultValue="today" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="today">Today</TabsTrigger>
+          <TabsTrigger value="week">This Week</TabsTrigger>
+          <TabsTrigger value="scheduled">Scheduled</TabsTrigger>
+          <TabsTrigger value="completed">Completed</TabsTrigger>
+        </TabsList>
+
+        <div className="flex gap-4">
+          <div className="relative flex-1">
+            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search shifts..."
+              className="pl-10"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+            />
           </div>
-        </>
-      )}
+          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+            <SelectTrigger className="w-48">
+              <SelectValue placeholder="Filter by employee" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Employees</SelectItem>
+              {employees.map((emp) => (
+                <SelectItem key={emp.id} value={emp.id}>
+                  {emp.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <TabsContent value="today">
+          <Card>
+            <CardHeader>
+              <CardTitle>Today's Shifts</CardTitle>
+              <CardDescription>Current and scheduled shifts for today</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="flex justify-center items-center h-32">
+                  <p>Loading shifts...</p>
+                </div>
+              ) : (
+                <ShiftTable shiftData={filterShifts("today")} />
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="week">
+          <Card>
+            <CardHeader>
+              <CardTitle>This Week's Shifts</CardTitle>
+              <CardDescription>All shifts from the past 7 days</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="flex justify-center items-center h-32">
+                  <p>Loading shifts...</p>
+                </div>
+              ) : (
+                <ShiftTable shiftData={filterShifts("week")} />
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="scheduled">
+          <Card>
+            <CardHeader>
+              <CardTitle>Scheduled Shifts</CardTitle>
+              <CardDescription>Upcoming scheduled shifts</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="flex justify-center items-center h-32">
+                  <p>Loading shifts...</p>
+                </div>
+              ) : (
+                <ShiftTable shiftData={filterShifts("scheduled")} />
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="completed">
+          <Card>
+            <CardHeader>
+              <CardTitle>Completed Shifts</CardTitle>
+              <CardDescription>All completed shifts</CardDescription>
+            </CardHeader>
+            <CardContent>
+              {loading ? (
+                <div className="flex justify-center items-center h-32">
+                  <p>Loading shifts...</p>
+                </div>
+              ) : (
+                <ShiftTable shiftData={filterShifts("completed")} />
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+      </Tabs>
+
+      {/* View Shift Dialog */}
+      <Dialog open={isViewShiftOpen} onOpenChange={setIsViewShiftOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Shift Details</DialogTitle>
+          </DialogHeader>
+          {selectedShift && (
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Shift ID</Label>
+                  <p className="text-lg font-semibold">{selectedShift.id}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Employee</Label>
+                  <p className="text-lg font-semibold">{selectedShift.employee}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Date</Label>
+                  <p>{selectedShift.date}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Status</Label>
+                  <Badge className={getStatusColor(selectedShift.status)}>{selectedShift.status}</Badge>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Start Time</Label>
+                  <p>{selectedShift.startTime}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">End Time</Label>
+                  <p>{selectedShift.endTime}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Break Time</Label>
+                  <p>{selectedShift.breakTime}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Total Hours</Label>
+                  <p className="text-lg font-semibold">{selectedShift.totalHours}h</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Sales</Label>
+                  <p className="text-lg font-semibold">Rs {selectedShift.sales.toLocaleString()}</p>
+                </div>
+                <div>
+                  <Label className="text-sm font-medium text-gray-500">Labor Cost</Label>
+                  <p className="text-lg font-semibold">
+                    Rs {(selectedShift.totalHours * selectedShift.hourlyRate).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button onClick={() => setIsViewShiftOpen(false)} disabled={loading}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       {/* Edit Shift Dialog */}
       <Dialog open={isEditShiftOpen} onOpenChange={setIsEditShiftOpen}>
         <DialogContent>
@@ -389,52 +743,144 @@ export function Shifts() {
           {editingShift && (
             <div className="space-y-4">
               <div className="space-y-2">
-                <Label>Name</Label>
+                <Label>Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}
+                      disabled={loading}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {date ? format(date, "PPP") : <span>Pick a date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0">
+                    <Calendar
+                      mode="single"
+                      selected={date}
+                      onSelect={(date) => setDate(date)}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label>Start Time</Label>
+                  <Input
+                    type="time"
+                    value={editingShift.startTime}
+                    onChange={(e) => setEditingShift({ ...editingShift, startTime: e.target.value })}
+                    disabled={loading}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>End Time</Label>
+                  <Input
+                    type="time"
+                    value={editingShift.endTime}
+                    onChange={(e) => setEditingShift({ ...editingShift, endTime: e.target.value })}
+                    disabled={loading}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Break Time (hours)</Label>
                 <Input
-                  value={editingShift.name}
-                  onChange={(e) => setEditingShift({ ...editingShift, name: e.target.value })}
+                  type="number"
+                  step="0.5"
+                  value={editingShift.breakTime.split(" ")[0]}
+                  onChange={(e) =>
+                    setEditingShift({
+                      ...editingShift,
+                      breakTime: `${e.target.value} hour${e.target.value !== "1" ? "s" : ""}`,
+                    })
+                  }
+                  disabled={loading}
                 />
               </div>
               <div className="space-y-2">
-                <Label>Start Time</Label>
-                <Input
-                  type="datetime-local"
-                  value={editingShift.start_time}
-                  onChange={(e) => setEditingShift({ ...editingShift, start_time: e.target.value })}
-                />
-              </div>
-              <div className="space-y-2">
-                <Label>End Time</Label>
-                <Input
-                  type="datetime-local"
-                  value={editingShift.end_time}
-                  onChange={(e) => setEditingShift({ ...editingShift, end_time: e.target.value })}
-                />
+                <Label>Status</Label>
+                <Select
+                  value={editingShift.status}
+                  onValueChange={(value: Shift["status"]) => setEditingShift({ ...editingShift, status: value })}
+                  disabled={loading}
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="scheduled">Scheduled</SelectItem>
+                    <SelectItem value="active">Active</SelectItem>
+                    <SelectItem value="completed">Completed</SelectItem>
+                    <SelectItem value="cancelled">Cancelled</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           )}
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditShiftOpen(false)}>
+            <Button variant="outline" onClick={() => setIsEditShiftOpen(false)} disabled={loading}>
               Cancel
             </Button>
-            <Button onClick={handleUpdateShift}>Update Shift</Button>
+            <Button onClick={handleUpdateShift} disabled={loading}>
+              {loading ? (
+                <>
+                  Updating...
+                  <Loader2 className="animate-spin w-4 h-4 ml-2" />
+                </>
+              ) : (
+                "Update Shift"
+              )}
+            </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {/* Delete Shift Dialog */}
-      <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
+
+      {/* End Shift Dialog */}
+      <Dialog open={isEndShiftOpen} onOpenChange={setIsEndShiftOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Delete Shift</DialogTitle>
-            <DialogDescription>Are you sure you want to delete this shift?</DialogDescription>
+            <DialogTitle>End Shift</DialogTitle>
+            <DialogDescription>Complete the shift and record final sales</DialogDescription>
           </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label className="text-sm font-medium text-gray-500">Employee</Label>
+              <p className="text-lg font-semibold">{selectedShift?.employee}</p>
+            </div>
+            <div>
+              <Label className="text-sm font-medium text-gray-500">Shift Duration</Label>
+              <p>
+                {selectedShift?.startTime} - {selectedShift?.endTime} ({selectedShift?.totalHours}h)
+              </p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="final-sales">Final Sales Amount (Rs)</Label>
+              <Input
+                id="final-sales"
+                type="number"
+                value={endShiftSales}
+                onChange={(e) => setEndShiftSales(e.target.value)}
+                placeholder="Enter total sales"
+                disabled={loading}
+              />
+            </div>
+          </div>
           <DialogFooter>
-            <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={deleteLoading}>
+            <Button variant="outline" onClick={() => setIsEndShiftOpen(false)} disabled={loading}>
               Cancel
             </Button>
-            <Button variant="destructive" onClick={handleDeleteShift} disabled={deleteLoading}>
-              {deleteLoading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
-              Delete
+            <Button onClick={handleConfirmEndShift} disabled={loading}>
+              {loading ? (
+                <>
+                  Ending...
+                  <Loader2 className="animate-spin w-4 h-4 ml-2" />
+                </>
+              ) : (
+                "End Shift"
+              )}
             </Button>
           </DialogFooter>
         </DialogContent>

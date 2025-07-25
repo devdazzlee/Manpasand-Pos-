@@ -321,7 +321,7 @@ export function Returns() {
               <TableCell>{returnItem.customer}</TableCell>
               <TableCell>{returnItem.date}</TableCell>
               <TableCell>{returnItem.reason}</TableCell>
-              <TableCell>₹{returnItem.amount.toLocaleString()}</TableCell>
+              <TableCell>Rs {returnItem.amount.toLocaleString()}</TableCell>
               <TableCell className="capitalize">{returnItem.method}</TableCell>
               <TableCell>
                 <Badge className={getStatusColor(returnItem.status)}>{returnItem.status}</Badge>
@@ -491,7 +491,7 @@ export function Returns() {
             <DollarSign className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">₹{todayValue.toLocaleString()}</div>
+            <div className="text-2xl font-bold">Rs {todayValue.toLocaleString()}</div>
             <p className="text-xs text-muted-foreground">Today's total</p>
           </CardContent>
         </Card>
@@ -618,7 +618,7 @@ export function Returns() {
                       <Badge className={getStatusColor(selectedReturn.status)}>{selectedReturn.status}</Badge>
                     </div>
                     <div>
-                      <strong>Amount:</strong> ₹{selectedReturn.amount.toLocaleString()}
+                      <strong>Amount:</strong> Rs {selectedReturn.amount.toLocaleString()}
                     </div>
                   </div>
                 </div>
@@ -636,7 +636,7 @@ export function Returns() {
                             Qty: {item.quantity} • Reason: {item.reason}
                           </div>
                         </div>
-                        <div className="font-medium">₹{item.price.toLocaleString()}</div>
+                        <div className="font-medium">Rs {item.price.toLocaleString()}</div>
                       </div>
                     ))}
                   </div>
