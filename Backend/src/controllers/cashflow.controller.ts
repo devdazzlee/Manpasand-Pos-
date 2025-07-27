@@ -24,6 +24,12 @@ export const getCashFlowByDate = asyncHandler(async (req: Request, res: Response
   });
   console.log('All cashflows for this branch:', allCashFlows); // Debug log
   
+  // Check if there are any cashflows at all for this branch
+  const totalCashFlows = await prisma.cashFlow.count({
+    where: { branch_id: branchId },
+  });
+  console.log('Total cashflows for this branch:', totalCashFlows); // Debug log
+  
   const result = await cashFlowService.getCashFlowByDate(branchId, date as string);
   console.log('getCashFlowByDate result:', result); // Debug log
 
@@ -36,11 +42,15 @@ export const createOpening = asyncHandler(async (req: Request, res: Response) =>
   if (!branchId) {
     return res.status(400).json({ message: 'Branch not found in request.' });
   }
-  // Check for open drawer for this branch
-  const openDrawer = await cashFlowService.findOpenDrawer(branchId);
-  if (openDrawer) {
-    return res.status(400).json({ message: 'Drawer already open for today for this branch. Please close it before opening a new one.' });
+  
+  // Check if ANY drawer was opened today (including closed ones)
+  const anyDrawerToday = await cashFlowService.findAnyDrawerToday(branchId);
+  if (anyDrawerToday) {
+    return res.status(400).json({ 
+      message: 'A drawer has already been opened today for this branch. Only one drawer per day is allowed. Please wait until tomorrow to open a new drawer.' 
+    });
   }
+  
   const cashFlow = await cashFlowService.createOpeningCashFlow({
     opening: req.body.opening,
     sales: req.body.sales,
@@ -124,6 +134,11 @@ export const debugCashFlows = asyncHandler(async (req: Request, res: Response) =
     return res.status(400).json({ message: 'Branch not found in request.' });
   }
   
+  const { date } = req.query;
+  const today = new Date();
+  const startOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 0, 0, 0, 0);
+  const endOfDay = new Date(today.getFullYear(), today.getMonth(), today.getDate(), 23, 59, 59, 999);
+  
   const allCashFlows = await prisma.cashFlow.findMany({
     where: { branch_id: branchId },
     orderBy: { opened_at: 'desc' },
@@ -137,6 +152,14 @@ export const debugCashFlows = asyncHandler(async (req: Request, res: Response) =
     },
     include: { expenses: true },
   });
+  
+  const anyDrawerToday = await cashFlowService.findAnyDrawerToday(branchId);
+  
+  // Test the specific date if provided
+  let testDateResult = null;
+  if (date) {
+    testDateResult = await cashFlowService.getCashFlowByDate(branchId, date as string);
+  }
   
   const allExpenses = await prisma.expense.findMany({
     include: {
@@ -155,6 +178,14 @@ export const debugCashFlows = asyncHandler(async (req: Request, res: Response) =
   new ApiResponse({
     allCashFlows,
     openDrawers,
+    anyDrawerToday,
+    canOpenDrawerToday: !anyDrawerToday,
+    testDateResult,
+    dateRange: {
+      startOfDay: startOfDay.toISOString(),
+      endOfDay: endOfDay.toISOString(),
+      requestedDate: date
+    },
     allExpenses,
     branchId,
     currentDate: new Date().toISOString(),

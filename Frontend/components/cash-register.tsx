@@ -21,9 +21,22 @@ import {
   Calculator,
   Receipt,
   AlertCircle,
+  Calendar,
+  Filter,
+  Loader2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/apiClient";
+import { Calendar as CalendarIcon } from "lucide-react";
+import { format } from "date-fns";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverTrigger,
+} from "@/components/ui/popover";
+import { cn } from "@/lib/utils";
+import { PageLoader } from "./ui/page-loader";
 
 interface Transaction {
   id: string;
@@ -54,157 +67,245 @@ export function CashRegister() {
     []
   );
   const [loading, setLoading] = useState(true);
+  const [todayDrawerExists, setTodayDrawerExists] = useState(false);
+
+  // Loading states for buttons
+  const [openDrawerLoading, setOpenDrawerLoading] = useState(false);
+  const [closeDrawerLoading, setCloseDrawerLoading] = useState(false);
+  const [addCashLoading, setAddCashLoading] = useState(false);
+  const [debugLoading, setDebugLoading] = useState(false);
+
+  // Date filter state
+  const [selectedDate, setSelectedDate] = useState<Date>(new Date());
+  const [dateFilterOpen, setDateFilterOpen] = useState(false);
 
   const [isOpenDrawerDialogOpen, setIsOpenDrawerDialogOpen] = useState(false);
   const [isCloseDrawerDialogOpen, setIsCloseDrawerDialogOpen] = useState(false);
   const [isAddCashDialogOpen, setIsAddCashDialogOpen] = useState(false);
-  const [isRemoveCashDialogOpen, setIsRemoveCashDialogOpen] = useState(false);
   const [amount, setAmount] = useState("");
   const [reason, setReason] = useState("");
   const [openingAmount, setOpeningAmount] = useState("");
 
-  // Only for UI cash count, not backend
-  const [denominations, setDenominations] = useState([
-    { value: 100, label: "Rs 100", count: 0 },
-    { value: 50, label: "Rs 50", count: 0 },
-    { value: 20, label: "Rs 20", count: 0 },
-    { value: 10, label: "Rs 10", count: 0 },
-    { value: 5, label: "Rs 5", count: 0 },
-    { value: 1, label: "Rs 1", count: 0 },
-    { value: 0.25, label: "Quarter", count: 0 },
-    { value: 0.1, label: "Dime", count: 0 },
-    { value: 0.05, label: "Nickel", count: 0 },
-    { value: 0.01, label: "Penny", count: 0 },
-  ]);
-
   // API Endpoints
   async function openDrawer(opening: number, sales: number = 0) {
     try {
-      const response = await apiClient.post("/cashflows/opening", { opening, sales });
+      const response = await apiClient.post("/cashflows/opening", {
+        opening,
+        sales,
+      });
       return response;
     } catch (error: any) {
-      if (error.response?.status === 400 && error.response?.data?.message?.includes('already open')) {
-        throw new Error('Drawer is already open for today. Please close it first.');
+      if (
+        error.response?.status === 400 &&
+        error.response?.data?.message?.includes("already been opened today")
+      ) {
+        throw new Error(
+          "A drawer has already been opened today. Only one drawer per day is allowed. Please wait until tomorrow."
+        );
       }
       throw error;
     }
   }
-  
+
   async function addExpense(particular: string, amount: number) {
     try {
-      const response = await apiClient.post("/cashflows/expense", { particular, amount });
+      const response = await apiClient.post("/cashflows/expense", {
+        particular,
+        amount,
+      });
       return response;
     } catch (error: any) {
-      if (error.response?.status === 400 && error.response?.data?.message?.includes('No open drawer')) {
-        throw new Error('No open drawer found. Please open a drawer first.');
+      if (
+        error.response?.status === 400 &&
+        error.response?.data?.message?.includes("No open drawer")
+      ) {
+        throw new Error("No open drawer found. Please open a drawer first.");
       }
       throw error;
     }
   }
-  
+
   async function closeDrawer(cashflow_id: string, closing: number) {
     try {
-      const response = await apiClient.post("/cashflows/closing", { cashflow_id, closing });
-      return response;
-    } catch (error: any) {
-      throw error;
-    }
-  }
-  
-  async function getTodayDrawer() {
-    try {
-    const today = new Date().toISOString().slice(0, 10);
-      console.log('getTodayDrawer - sending date:', today); // Debug log
-      const response = await apiClient.get(`/cashflows/by-date?date=${today}`);
-      return response;
-    } catch (error: any) {
-      throw error;
-    }
-  }
-  
-  async function getTodayExpenses() {
-    try {
-    const today = new Date().toISOString().slice(0, 10);
-      const response = await apiClient.get(`/cashflows/expenses?date=${today}`);
+      const response = await apiClient.post("/cashflows/closing", {
+        cashflow_id,
+        closing,
+      });
       return response;
     } catch (error: any) {
       throw error;
     }
   }
 
+  async function getDrawerByDate(date: Date) {
+    try {
+      // Use local timezone formatting instead of UTC
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const dateString = `${year}-${month}-${day}`;
+
+      console.log("getDrawerByDate - sending date:", dateString); // Debug log
+      console.log("getDrawerByDate - original date object:", date); // Debug log
+      console.log("getDrawerByDate - local date string:", dateString); // Debug log
+      const response = await apiClient.get(
+        `/cashflows/by-date?date=${dateString}`
+      );
+      return response;
+    } catch (error: any) {
+      throw error;
+    }
+  }
+
+  async function getExpensesByDate(date: Date) {
+    try {
+      // Use local timezone formatting instead of UTC
+      const year = date.getFullYear();
+      const month = String(date.getMonth() + 1).padStart(2, "0");
+      const day = String(date.getDate()).padStart(2, "0");
+      const dateString = `${year}-${month}-${day}`;
+
+      const response = await apiClient.get(
+        `/cashflows/expenses?date=${dateString}`
+      );
+      return response;
+    } catch (error: any) {
+      throw error;
+    }
+  }
+
+  // Helper function to check if there's already a drawer for today
+  const checkTodayDrawer = async () => {
+    const today = new Date();
+    try {
+      const todayDrawerRes = await getDrawerByDate(today);
+      if (todayDrawerRes.data.success && todayDrawerRes.data.data?.exists) {
+        setTodayDrawerExists(true);
+        return todayDrawerRes.data.data.data;
+      }
+      setTodayDrawerExists(false);
+      return null;
+    } catch (error) {
+      console.error("Error checking today drawer:", error);
+      setTodayDrawerExists(false);
+      return null;
+    }
+  };
+
   // Debug function to test API integration
   const debugAPI = async () => {
+    if (debugLoading) return; // Prevent multiple calls
+
+    setDebugLoading(true);
     try {
-      console.log('Testing API integration...');
-      
+      console.log("Testing API integration...");
+
       // Test debug endpoint
-      console.log('Testing debug endpoint...');
-      const debugRes = await apiClient.get('/cashflows/debug');
-      console.log('Debug response:', debugRes.data);
-      
-      // Test getTodayDrawer
-      console.log('Testing getTodayDrawer...');
-      const drawerRes = await getTodayDrawer();
-      console.log('Drawer response:', drawerRes.data);
-      
-      // Test getTodayExpenses
-      console.log('Testing getTodayExpenses...');
-      const expensesRes = await getTodayExpenses();
-      console.log('Expenses response:', expensesRes.data);
-      
+      console.log("Testing debug endpoint...");
+      const debugRes = await apiClient.get("/cashflows/debug");
+      console.log("Debug response:", debugRes.data);
+
+      // Test getDrawerByDate
+      console.log("Testing getDrawerByDate...");
+      const drawerRes = await getDrawerByDate(selectedDate);
+      console.log("Drawer response:", drawerRes.data);
+
+      // Test getExpensesByDate
+      console.log("Testing getExpensesByDate...");
+      const expensesRes = await getExpensesByDate(selectedDate);
+      console.log("Expenses response:", expensesRes.data);
+
       // Debug current state
-      console.log('Current cashDrawer state:', cashDrawer);
-      console.log('Is drawer open?', cashDrawer?.isOpen);
-      
+      console.log("Current cashDrawer state:", cashDrawer);
+      console.log("Is drawer open?", cashDrawer?.isOpen);
+
       toast({
         title: "API Test Complete",
         description: "Check console for API response details",
       });
     } catch (error: any) {
-      console.error('API Test Error:', error);
+      console.error("API Test Error:", error);
       toast({
         title: "API Test Failed",
         description: error.message || "Check console for details",
         variant: "destructive",
       });
+    } finally {
+      setDebugLoading(false);
+    }
+  };
+
+  // Test function to create a test cashflow
+  const testCreateCashflow = async () => {
+    if (debugLoading) return;
+
+    setDebugLoading(true);
+    try {
+      console.log("Creating test cashflow...");
+      const response = await apiClient.get("/cashflows/test-create");
+      console.log("Test create response:", response.data);
+
+      toast({
+        title: "Test Cashflow Created",
+        description:
+          "A test cashflow has been created. Check console for details.",
+      });
+
+      // Refresh the data
+      await fetchDrawerAndExpenses();
+    } catch (error: any) {
+      console.error("Test Create Error:", error);
+      toast({
+        title: "Test Create Failed",
+        description: error.message || "Check console for details",
+        variant: "destructive",
+      });
+    } finally {
+      setDebugLoading(false);
     }
   };
 
   // Fetch drawer and expenses
-  const fetchDrawerAndExpenses = async () => {
+  const fetchDrawerAndExpenses = async (date?: Date) => {
+    const targetDate = date || selectedDate;
     setLoading(true);
     try {
-      const drawerRes = await getTodayDrawer();
-      console.log('Drawer response:', drawerRes.data); // Debug log
-      
+      const drawerRes = await getDrawerByDate(targetDate);
+      console.log("Drawer response:", drawerRes.data); // Debug log
+
       // Handle the response structure correctly
       if (drawerRes.data.success && drawerRes.data.data) {
         const result = drawerRes.data.data;
-        console.log('Result from API:', result); // Debug log
-        
+        console.log("Result from API:", result); // Debug log
+
         if (result.exists && result.data) {
           const cashFlowData = result.data;
-          console.log('CashFlow data:', cashFlowData); // Debug log
-          console.log('Status from API:', cashFlowData.status); // Debug log
-          console.log('Status comparison:', cashFlowData.status === "OPEN"); // Debug log
-          
+          console.log("CashFlow data:", cashFlowData); // Debug log
+          console.log("Status from API:", cashFlowData.status); // Debug log
+          console.log("Status comparison:", cashFlowData.status === "OPEN"); // Debug log
+
           const drawerState = {
             id: cashFlowData.id,
             openingAmount: Number(cashFlowData.opening),
-            currentAmount: cashFlowData.closing ? Number(cashFlowData.closing) : Number(cashFlowData.opening),
+            currentAmount: cashFlowData.closing
+              ? Number(cashFlowData.closing)
+              : Number(cashFlowData.opening),
             totalSales: Number(cashFlowData.sales),
             transactions: cashFlowData.expenses?.length || 0,
             isOpen: cashFlowData.status === "OPEN",
             openedAt: cashFlowData.opened_at,
             closedAt: cashFlowData.closed_at,
           };
-          console.log('Setting cash drawer state:', drawerState); // Debug log
-          console.log('isOpen will be set to:', drawerState.isOpen); // Debug log
+          console.log("Setting cash drawer state:", drawerState); // Debug log
+          console.log("isOpen will be set to:", drawerState.isOpen); // Debug log
           setCashDrawer(drawerState);
-          
-          // Use expenses from the drawer response
+
+          // Use expenses from the drawer response - these are already filtered by date
           if (cashFlowData.expenses) {
-            console.log('Using expenses from drawer response:', cashFlowData.expenses.length); // Debug log
+            console.log(
+              "Using expenses from drawer response:",
+              cashFlowData.expenses.length
+            ); // Debug log
             setRecentTransactions(
               cashFlowData.expenses.map((exp: any) => ({
                 id: exp.id,
@@ -220,22 +321,34 @@ export function CashRegister() {
             setRecentTransactions([]);
           }
         } else {
-          console.log('No drawer exists, setting to null'); // Debug log
+          console.log("No drawer exists, setting to null"); // Debug log
           setCashDrawer(null);
           setRecentTransactions([]);
         }
       } else {
-        console.log('No success or no data in response'); // Debug log
+        console.log("No success or no data in response"); // Debug log
         setCashDrawer(null);
         setRecentTransactions([]);
       }
+
+      // Check if the selected date is today and update todayDrawerExists accordingly
+      const today = new Date();
+      const isToday = targetDate.toDateString() === today.toDateString();
+      if (isToday) {
+        await checkTodayDrawer();
+      } else {
+        setTodayDrawerExists(false);
+      }
     } catch (err: any) {
-      console.error('Error fetching drawer data:', err);
+      console.error("Error fetching drawer data:", err);
       setCashDrawer(null);
       setRecentTransactions([]);
-      
+
       // Show error toast for specific errors
-      if (err.response?.status === 400 && err.response?.data?.message?.includes('Branch not found')) {
+      if (
+        err.response?.status === 400 &&
+        err.response?.data?.message?.includes("Branch not found")
+      ) {
         toast({
           title: "Authentication Error",
           description: "Please log in again. Branch information is missing.",
@@ -252,20 +365,43 @@ export function CashRegister() {
     // eslint-disable-next-line
   }, []);
 
+  // Check for today's drawer status on component mount
+  useEffect(() => {
+    const checkTodayStatus = async () => {
+      console.log("Current date:", new Date().toDateString());
+      console.log("Selected date:", selectedDate.toDateString());
+      console.log(
+        "Is today?",
+        new Date().toDateString() === selectedDate.toDateString()
+      );
+
+      const todayDrawer = await checkTodayDrawer();
+      if (todayDrawer && todayDrawer.status === "CLOSED") {
+        toast({
+          title: "Today's Drawer Closed",
+          description:
+            "Today's drawer has been closed. You can view historical data or wait until tomorrow to open a new drawer.",
+          variant: "default",
+        });
+      }
+    };
+
+    checkTodayStatus();
+  }, []);
+
   // Debug effect to log cashDrawer changes
   useEffect(() => {
-    console.log('CashDrawer state changed:', cashDrawer);
-    console.log('Is drawer open?', cashDrawer?.isOpen);
+    console.log("CashDrawer state changed:", cashDrawer);
+    console.log("Is drawer open?", cashDrawer?.isOpen);
   }, [cashDrawer]);
 
   // UI logic
-  const totalCashInDrawer = denominations.reduce(
-    (sum, denom) => sum + denom.value * denom.count,
-    0
-  );
+  const totalCashInDrawer = cashDrawer?.currentAmount || 0;
 
   // Handlers
   const handleOpenDrawer = async () => {
+    if (openDrawerLoading) return; // Prevent multiple calls
+
     if (!openingAmount || Number.parseFloat(openingAmount) < 0) {
       toast({
         title: "Invalid Amount",
@@ -274,12 +410,41 @@ export function CashRegister() {
       });
       return;
     }
+
+    // Check if drawer is already open for today
+    const todayDrawer = await checkTodayDrawer();
+
+    if (todayDrawer) {
+      if (todayDrawer.status === "OPEN") {
+        toast({
+          title: "Drawer Already Open",
+          description:
+            "A drawer is already open for today. Please close it before opening a new one.",
+          variant: "destructive",
+        });
+        setIsOpenDrawerDialogOpen(false);
+        setOpeningAmount("");
+        return;
+      } else if (todayDrawer.status === "CLOSED") {
+        toast({
+          title: "Drawer Already Exists",
+          description:
+            "A drawer has already been opened and closed today. Only one drawer per day is allowed. Please wait until tomorrow.",
+          variant: "destructive",
+        });
+        setIsOpenDrawerDialogOpen(false);
+        setOpeningAmount("");
+        return;
+      }
+    }
+
+    setOpenDrawerLoading(true);
     try {
       const openingValue = Number.parseFloat(openingAmount);
-      console.log('Opening drawer with amount:', openingValue); // Debug log
+      console.log("Opening drawer with amount:", openingValue); // Debug log
       const response = await openDrawer(openingValue, 0);
-      console.log('Open drawer response:', response); // Debug log
-      
+      console.log("Open drawer response:", response); // Debug log
+
       toast({
         title: "Cash Drawer Opened",
         description: `Drawer opened with Rs ${openingValue.toFixed(
@@ -290,32 +455,48 @@ export function CashRegister() {
       setOpeningAmount("");
       await fetchDrawerAndExpenses();
     } catch (err: any) {
-      console.error('Error opening drawer:', err); // Debug log
+      console.error("Error opening drawer:", err); // Debug log
       toast({
         title: "Error",
-        description: err.message || err.response?.data?.message || "Failed to open drawer",
+        description:
+          err.message || err.response?.data?.message || "Failed to open drawer",
         variant: "destructive",
       });
+    } finally {
+      setOpenDrawerLoading(false);
     }
   };
 
   const handleCloseDrawer = async () => {
+    if (closeDrawerLoading) return; // Prevent multiple calls
     if (!cashDrawer) return;
+
+    setCloseDrawerLoading(true);
     try {
       await closeDrawer(cashDrawer.id, totalCashInDrawer);
-      toast({ title: "Cash Drawer Closed", description: `Drawer closed successfully.` });
+      toast({
+        title: "Cash Drawer Closed",
+        description: `Drawer closed successfully.`,
+      });
       setIsCloseDrawerDialogOpen(false);
       await fetchDrawerAndExpenses();
     } catch (err: any) {
       toast({
         title: "Error",
-        description: err.message || err.response?.data?.message || "Failed to close drawer",
+        description:
+          err.message ||
+          err.response?.data?.message ||
+          "Failed to close drawer",
         variant: "destructive",
       });
+    } finally {
+      setCloseDrawerLoading(false);
     }
   };
 
   const handleAddCash = async () => {
+    if (addCashLoading) return; // Prevent multiple calls
+
     if (!amount || Number.parseFloat(amount) <= 0) {
       toast({
         title: "Invalid Amount",
@@ -332,6 +513,8 @@ export function CashRegister() {
       });
       return;
     }
+
+    setAddCashLoading(true);
     try {
       await addExpense(reason, Number.parseFloat(amount));
       toast({
@@ -347,24 +530,33 @@ export function CashRegister() {
     } catch (err: any) {
       toast({
         title: "Error",
-        description: err.message || err.response?.data?.message || "Failed to add cash",
+        description:
+          err.message || err.response?.data?.message || "Failed to add cash",
         variant: "destructive",
       });
+    } finally {
+      setAddCashLoading(false);
     }
   };
 
-  // Remove cash is not a backend feature yet, so just show a toast
-  const handleRemoveCash = () => {
-    toast({
-      title: "Not Implemented",
-      description: "Remove cash is not implemented in backend.",
-      variant: "destructive",
-    });
+  // Handle date filter change
+  const handleDateChange = (date: Date | undefined) => {
+    if (date) {
+      setSelectedDate(date);
+      fetchDrawerAndExpenses(date);
+    }
+  };
+
+  // Reset to today's date
+  const handleTodayClick = () => {
+    const today = new Date();
+    setSelectedDate(today);
+    fetchDrawerAndExpenses(today);
   };
 
   // UI rendering
   if (loading) {
-    return <div className="p-6">Loading...</div>;
+    return <PageLoader message="Loading Cash Register..." />;
   }
 
   return (
@@ -377,20 +569,46 @@ export function CashRegister() {
           </p>
         </div>
         <div className="flex items-center space-x-2">
-          <Badge
-            variant="outline"
-            className="bg-green-50 text-green-700 border-green-200"
-          >
-            <Clock className="h-3 w-3 mr-1" />
-            Shift: 10:00 AM - 6:00 PM
-          </Badge>
-          <Badge
-            variant="outline"
-            className="bg-blue-50 text-blue-700 border-blue-200"
-          >
-            <User className="h-3 w-3 mr-1" />
-            Cashier: Sarah Johnson
-          </Badge>
+          {/* Date Filter */}
+          <div className="flex items-center space-x-2">
+            <Label htmlFor="date-filter" className="text-sm font-medium">
+              Date:
+            </Label>
+            <Popover open={dateFilterOpen} onOpenChange={setDateFilterOpen}>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "w-[200px] justify-start text-left font-normal",
+                    !selectedDate && "text-muted-foreground"
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {selectedDate ? (
+                    format(selectedDate, "PPP")
+                  ) : (
+                    <span>Pick a date</span>
+                  )}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <CalendarComponent
+                  mode="single"
+                  selected={selectedDate}
+                  onSelect={handleDateChange}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleTodayClick}
+              className="text-xs"
+            >
+              Today
+            </Button>
+          </div>
           <Badge
             variant="outline"
             className={`${
@@ -401,26 +619,6 @@ export function CashRegister() {
           >
             {cashDrawer?.isOpen ? "Drawer Open" : "Drawer Closed"}
           </Badge>
-          <Badge
-            variant="outline"
-            className="bg-gray-50 text-gray-700 border-gray-200 text-xs"
-          >
-            Debug: {cashDrawer ? `ID: ${cashDrawer.id}, Status: ${cashDrawer.isOpen ? 'OPEN' : 'CLOSED'}` : 'No Drawer'}
-          </Badge>
-          <Badge
-            variant="outline"
-            className="bg-yellow-50 text-yellow-700 border-yellow-200 text-xs"
-          >
-            Buttons: Add={!cashDrawer?.isOpen ? 'DISABLED' : 'ENABLED'}, Remove={!cashDrawer?.isOpen ? 'DISABLED' : 'ENABLED'}, Close={!cashDrawer?.isOpen ? 'DISABLED' : 'ENABLED'}
-          </Badge>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={debugAPI}
-            className="text-xs"
-          >
-            Debug API
-          </Button>
         </div>
       </div>
 
@@ -488,52 +686,55 @@ export function CashRegister() {
                 variant="outline"
                 className="h-12"
                 onClick={() => setIsOpenDrawerDialogOpen(true)}
-                disabled={!!cashDrawer?.isOpen}
+                disabled={
+                  !!cashDrawer?.isOpen || openDrawerLoading || todayDrawerExists
+                }
               >
-                <DollarSign className="h-4 w-4 mr-2" />
-                Open Drawer
+                {openDrawerLoading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <DollarSign className="h-4 w-4 mr-2" />
+                )}
+                {openDrawerLoading ? "Opening..." : "Open Drawer"}
               </Button>
               <Button
                 variant="outline"
                 className="h-12"
                 onClick={() => setIsAddCashDialogOpen(true)}
-                disabled={!cashDrawer?.isOpen}
+                disabled={!cashDrawer?.isOpen || addCashLoading}
               >
-                <DollarSign className="h-4 w-4 mr-2" />
-                Add Cash
-              </Button>
-              <Button
-                variant="outline"
-                className="h-12"
-                onClick={() => setIsRemoveCashDialogOpen(true)}
-                disabled={!cashDrawer?.isOpen}
-              >
-                <DollarSign className="h-4 w-4 mr-2" />
-                Remove Cash
+                {addCashLoading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <DollarSign className="h-4 w-4 mr-2" />
+                )}
+                {addCashLoading ? "Adding..." : "Add Cash"}
               </Button>
               <Button
                 variant="outline"
                 className="h-12"
                 onClick={() => setIsCloseDrawerDialogOpen(true)}
-                disabled={!cashDrawer?.isOpen}
+                disabled={!cashDrawer?.isOpen || closeDrawerLoading}
               >
-                <Receipt className="h-4 w-4 mr-2" />
-                Close Drawer
+                {closeDrawerLoading ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Receipt className="h-4 w-4 mr-2" />
+                )}
+                {closeDrawerLoading ? "Closing..." : "Close Drawer"}
               </Button>
             </div>
-            {cashDrawer &&
-              Math.abs(totalCashInDrawer - cashDrawer.currentAmount) > 0.01 && (
-                <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
-                  <div className="flex items-center space-x-2">
-                    <AlertCircle className="h-4 w-4 text-yellow-600" />
-                    <span className="text-sm text-yellow-800">
-                      Cash count mismatch: Expected Rs 
-                      {cashDrawer.currentAmount.toFixed(2)}, Counted Rs 
-                      {totalCashInDrawer.toFixed(2)}
-                    </span>
-                  </div>
+            {todayDrawerExists && !cashDrawer?.isOpen && (
+              <div className="bg-blue-50 border border-blue-200 rounded-lg p-3">
+                <div className="flex items-center space-x-2">
+                  <AlertCircle className="h-4 w-4 text-blue-600" />
+                  <span className="text-sm text-blue-800">
+                    Today's drawer has already been opened and closed. Only one
+                    drawer per day is allowed.
+                  </span>
                 </div>
-              )}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
@@ -600,7 +801,7 @@ export function CashRegister() {
                       }`}
                     >
                       {transaction.action === "remove" ? "-" : ""}
-                      {transaction.amount.toFixed(2)}
+                      Rs {transaction.amount.toFixed(2)}
                     </div>
                     <Badge variant="outline" className="text-xs">
                       {transaction.action
@@ -644,12 +845,20 @@ export function CashRegister() {
               />
             </div>
             <div className="flex space-x-2">
-              <Button onClick={handleOpenDrawer} className="flex-1">
-                Open Drawer
+              <Button
+                onClick={handleOpenDrawer}
+                disabled={openDrawerLoading}
+                className="flex-1"
+              >
+                {openDrawerLoading && (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                {openDrawerLoading ? "Opening..." : "Open Drawer"}
               </Button>
               <Button
                 variant="outline"
                 onClick={() => setIsOpenDrawerDialogOpen(false)}
+                disabled={openDrawerLoading}
                 className="flex-1"
               >
                 Cancel
@@ -685,44 +894,15 @@ export function CashRegister() {
                 placeholder="e.g., Change fund, Till adjustment"
               />
             </div>
-            <Button onClick={handleAddCash} className="w-full">
-              Add Cash
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={isRemoveCashDialogOpen}
-        onOpenChange={setIsRemoveCashDialogOpen}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Remove Cash from Drawer</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div>
-              <Label htmlFor="remove-amount">Amount</Label>
-              <Input
-                id="remove-amount"
-                type="number"
-                step="0.01"
-                value={amount}
-                onChange={(e) => setAmount(e.target.value)}
-                placeholder="0.00"
-              />
-            </div>
-            <div>
-              <Label htmlFor="remove-reason">Reason (Required)</Label>
-              <Input
-                id="remove-reason"
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="e.g., Bank deposit, Petty cash"
-              />
-            </div>
-            <Button onClick={handleRemoveCash} className="w-full">
-              Remove Cash
+            <Button
+              onClick={handleAddCash}
+              disabled={addCashLoading}
+              className="w-full"
+            >
+              {addCashLoading && (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              )}
+              {addCashLoading ? "Adding..." : "Add Cash"}
             </Button>
           </div>
         </DialogContent>
@@ -758,42 +938,26 @@ export function CashRegister() {
                 <span>Actual Count:</span>
                 <span>Rs {totalCashInDrawer.toFixed(2)}</span>
               </div>
-              <div className="flex justify-between">
-                <span>Variance:</span>
-                <span
-                  className={
-                    cashDrawer &&
-                    Math.abs(totalCashInDrawer - cashDrawer.currentAmount) <
-                      0.01
-                      ? "text-green-600"
-                      : "text-red-600"
-                  }
-                >
-                  Rs 
-                  {cashDrawer
-                    ? Math.abs(
-                        totalCashInDrawer - cashDrawer.currentAmount
-                      ).toFixed(2)
-                    : "0.00"}
-                  {cashDrawer && totalCashInDrawer > cashDrawer.currentAmount
-                    ? " over"
-                    : cashDrawer && totalCashInDrawer < cashDrawer.currentAmount
-                    ? " short"
-                    : ""}
-                </span>
-              </div>
               <div className="flex justify-between font-bold">
                 <span>Transactions:</span>
                 <span>{cashDrawer?.transactions || 0}</span>
               </div>
             </div>
             <div className="flex space-x-2">
-              <Button onClick={handleCloseDrawer} className="flex-1">
-                Close Drawer
+              <Button
+                onClick={handleCloseDrawer}
+                disabled={closeDrawerLoading}
+                className="flex-1"
+              >
+                {closeDrawerLoading && (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                )}
+                {closeDrawerLoading ? "Closing..." : "Close Drawer"}
               </Button>
               <Button
                 variant="outline"
                 onClick={() => setIsCloseDrawerDialogOpen(false)}
+                disabled={closeDrawerLoading}
                 className="flex-1"
               >
                 Cancel
