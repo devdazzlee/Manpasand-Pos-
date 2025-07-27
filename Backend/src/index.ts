@@ -33,6 +33,7 @@ import employeeRoutes  from './routes/employee.route';
 import salaryRoutes  from './routes/salary.route';
 import shiftRoutes  from './routes/shift.route';
 import shiftAssignmentRoutes  from './routes/shiftAssignment.routes';
+import cron from 'node-cron';
 
 const vAPI = process.env.vAPI || '/api/v1';
 const app = express();
@@ -84,6 +85,25 @@ app.get('/health', (req, res) => {
 // Error handling
 app.use(errorHandler);
 app.use(notFoundHandler);
+
+// Cron job to close drawers after 24 hours
+cron.schedule('0 * * * *', async () => {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+  const openDrawers = await prisma.cashFlow.findMany({
+    where: {
+      status: 'OPEN',
+      opened_at: { lte: cutoff },
+    },
+  });
+  for (const drawer of openDrawers) {
+    await prisma.cashFlow.update({
+      where: { id: drawer.id },
+      data: { status: 'CLOSED', closed_at: new Date() },
+    });
+    console.log(`Drawer ${drawer.id} closed automatically by cron.`);
+  }
+});
 
 // Start server
 app.listen(config.port, () => {

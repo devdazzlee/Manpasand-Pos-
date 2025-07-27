@@ -15,6 +15,7 @@ model User {
   created_at DateTime  @default(now())
   updated_at DateTime  @default(now()) @updatedAt
   sessions   Session[]
+  cashflows  CashFlow[]
 
   branch_id String?
   branch    Branch? @relation(fields: [branch_id], references: [id])
@@ -50,6 +51,7 @@ model Branch {
   is_active             Boolean  @default(true)
   created_at            DateTime @default(now())
   updated_at            DateTime @default(now()) @updatedAt
+  cashflows             CashFlow[]
 
   // Relations
   category        Category[]
@@ -632,11 +634,23 @@ model Expense {
 
 model CashFlow {
   id         String    @id @default(uuid())
+  user_id    String?
+  user       User?     @relation(fields: [user_id], references: [id])
+  branch_id  String?
+  branch     Branch?   @relation(fields: [branch_id], references: [id])
   opening    Decimal
   sales      Decimal
   closing    Decimal? // nullable until closing added
+  status     CashFlowStatus @default(OPEN)
+  opened_at  DateTime  @default(now())
+  closed_at  DateTime?
   created_at DateTime  @default(now())
   expenses   Expense[]
+}
+
+enum CashFlowStatus {
+  OPEN
+  CLOSED
 }
 
 // Staff Management

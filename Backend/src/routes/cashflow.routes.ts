@@ -5,6 +5,8 @@ import {
   addClosing,
   getCashFlowByDate,
   listCashFlows,
+  getExpensesByDate,
+  debugCashFlows,
 } from '../controllers/cashflow.controller';
 
 import {
@@ -13,6 +15,7 @@ import {
   addClosingSchema,
   listCashFlowsSchema,
   getCashFlowByDateSchema,
+  getExpensesByDateSchema,
 } from '../validations/cashflow.validation';
 
 import { validate } from '../middleware/validation.middleware';
@@ -26,5 +29,7 @@ router.post('/opening', validate(createOpeningSchema), createOpening);
 router.post('/expense', validate(createExpenseSchema), addExpense);
 router.post('/closing', validate(addClosingSchema), addClosing);
 router.get('/', validate(listCashFlowsSchema), listCashFlows);
+router.get('/expenses', validate(getExpensesByDateSchema), getExpensesByDate);
+router.get('/debug', debugCashFlows);
 
 export default router;

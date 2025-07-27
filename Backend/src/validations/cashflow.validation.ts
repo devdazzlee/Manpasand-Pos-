@@ -9,7 +9,6 @@ export const createOpeningSchema = z.object({
 
 export const createExpenseSchema = z.object({
   body: z.object({
-    cashflow_id: z.string().uuid(),
     particular: z.string().min(1),
     amount: z.number().positive(),
   }),
@@ -25,6 +24,14 @@ export const addClosingSchema = z.object({
 export const getCashFlowByDateSchema = z.object({
   query: z.object({
     date: z.string().refine((val) => !isNaN(Date.parse(val)), {
+      message: 'Invalid date format',
+    }),
+  }),
+});
+
+export const getExpensesByDateSchema = z.object({
+  query: z.object({
+    date: z.string().optional().refine((val) => !val || !isNaN(Date.parse(val)), {
       message: 'Invalid date format',
     }),
   }),

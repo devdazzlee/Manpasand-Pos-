@@ -65,6 +65,7 @@ export function DashboardHome() {
     }
   }
 
+
   const getRecentSales = async () => {
     try {
       const response = await apiClient.get('/sale/recent')
