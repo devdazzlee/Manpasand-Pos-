@@ -121,15 +121,15 @@ const menuSections: SidebarMenuSection[] = [
       { id: "designation", label: "Designation", icon: Shield },
     ],
   },
-  {
-    id: "finance",
-    label: "Financial Management",
-    expandable: true,
-    items: [
-      { id: "expenses", label: "Expenses", icon: Receipt },
-      // { id: "tax-management", label: "Tax Management", icon: Calculator },
-    ],
-  },
+  // {
+  //   id: "finance",
+  //   label: "Financial Management",
+  //   expandable: true,
+  //   items: [
+  //     { id: "expenses", label: "Expenses", icon: Receipt },
+  //     // { id: "tax-management", label: "Tax Management", icon: Calculator },
+  //   ],
+  // },
   {
     id: "system",
     label: "System & Admin",

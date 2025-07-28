@@ -11,19 +11,106 @@ type RelationField =
     | 'supplier_id' | 'brand_id' | 'color_id' | 'size_id';
 
 export class ProductService {
+    private async getOrCreateUnknownEntry(modelName: string, codePrefix: string, tx?: any) {
+        const unknownName = 'Unknown';
+        const unknownCode = `${codePrefix}-UNKNOWN`;
+        
+        // Use transaction context if provided, otherwise use regular prisma
+        const prismaClient = tx || prisma;
+        
+        try {
+            console.log(`🔍 Looking for existing ${modelName} with name: "${unknownName}"`);
+            
+            // Try to find existing unknown entry
+            let unknownEntry = await prismaClient[modelName].findFirst({
+                where: { name: unknownName }
+            });
+
+            if (unknownEntry) {
+                console.log(`✅ Found existing ${modelName} with ID: ${unknownEntry.id}`);
+            } else {
+                console.log(`❌ No existing ${modelName} found, creating new one...`);
+                
+                // If not found, create it
+                const timestamp = Date.now().toString().slice(-6);
+                const uniqueSlug = `unknown-${timestamp}`;
+                
+                // Create data object with any type to allow additional properties
+                let modelData: any = {
+                    name: unknownName,
+                    code: unknownCode,
+                    is_active: true,
+                    display_on_pos: true,
+                };
+
+                // Add model-specific fields
+                switch (modelName) {
+                    case 'tax':
+                        modelData.percentage = 0;
+                        break;
+                    case 'category':
+                        modelData.slug = uniqueSlug;
+                        break;
+                    case 'subcategory':
+                        // Subcategory doesn't have slug field, so just use base data
+                        break;
+                    case 'unit':
+                    case 'supplier':
+                    case 'brand':
+                    case 'color':
+                    case 'size':
+                        // These models only need base data
+                        break;
+                }
+                
+                console.log(`📝 Creating ${modelName} with data:`, modelData);
+                
+                unknownEntry = await prismaClient[modelName].create({
+                    data: modelData
+                });
+                
+                console.log(`✅ Created ${modelName} with ID: ${unknownEntry.id}`);
+            }
+
+            return unknownEntry.id;
+        } catch (error) {
+            console.error(`❌ Error in getOrCreateUnknownEntry for ${modelName}:`, error);
+            throw error;
+        }
+    }
+
+    private async generateSKU(productName: string): Promise<string> {
+        // Generate a simple SKU based on product name and timestamp
+        const timestamp = Date.now().toString().slice(-6);
+        const namePrefix = productName.substring(0, 3).toUpperCase().replace(/\s/g, '');
+        const sku = `${namePrefix}${timestamp}`;
+        
+        // Check if SKU already exists
+        const existingSku = await prisma.product.findUnique({
+            where: { sku },
+            select: { id: true }
+        });
+
+        if (existingSku) {
+            // If exists, add a random suffix
+            const randomSuffix = Math.random().toString(36).substring(2, 5).toUpperCase();
+            return `${sku}${randomSuffix}`;
+        }
+
+        return sku;
+    }
+
     private buildProductData(data: CreateProductInput, code: string) {
-        return {
+        const productData: any = {
             name: data.name,
-            sku: data.sku,
+            sku: data.sku || '', // Will be set in createProduct method
             code,
-            pct_or_hs_code: data.pct_or_hs_code,
-            description: data.description,
             purchase_rate: data.purchase_rate,
             sales_rate_exc_dis_and_tax: data.sales_rate_exc_dis_and_tax,
             sales_rate_inc_dis_and_tax: data.sales_rate_inc_dis_and_tax,
             discount_amount: data.discount_amount ?? 0,
-            min_qty: Number(data.min_qty) ?? 0,
-            max_qty: Number(data.max_qty) ?? 0,
+            min_qty: data.min_qty ?? 10,
+            max_qty: data.max_qty ?? 10,
             is_active: data.is_active ?? true,
             display_on_pos: data.display_on_pos ?? true,
             is_batch: data.is_batch ?? false,
@@ -32,24 +119,40 @@ export class ProductService {
             is_deal: data.is_deal ?? false,
             is_featured: data.is_featured ?? false,
         };
+
+        // Only add optional fields if they have values
+        if (data.pct_or_hs_code !== undefined) {
+            productData.pct_or_hs_code = data.pct_or_hs_code;
+        }
+        if (data.description !== undefined) {
+            productData.description = data.description;
+        }
+
+        return productData;
     }
 
-    private buildRelationData(data: CreateProductInput) {
-        const relations: Record<string, { connect: { id: string } }> = {};
-        const relationFields: RelationField[] = [
-            'unit_id', 'tax_id', 'category_id', 'subcategory_id',
-            'supplier_id', 'brand_id', 'color_id', 'size_id'
-        ];
+    private buildUpdateProductData(data: UpdateProductInput) {
+        const updateData: any = {};
+        
+        if (data.name !== undefined) updateData.name = data.name;
+        if (data.sku !== undefined) updateData.sku = data.sku;
+        if (data.pct_or_hs_code !== undefined) updateData.pct_or_hs_code = data.pct_or_hs_code;
+        if (data.description !== undefined) updateData.description = data.description;
+        if (data.purchase_rate !== undefined) updateData.purchase_rate = new Decimal(data.purchase_rate).toNumber();
+        if (data.sales_rate_exc_dis_and_tax !== undefined) updateData.sales_rate_exc_dis_and_tax = new Decimal(data.sales_rate_exc_dis_and_tax).toNumber();
+        if (data.sales_rate_inc_dis_and_tax !== undefined) updateData.sales_rate_inc_dis_and_tax = new Decimal(data.sales_rate_inc_dis_and_tax).toNumber();
+        if (data.discount_amount !== undefined) updateData.discount_amount = new Decimal(data.discount_amount).toNumber();
+        if (data.min_qty !== undefined) updateData.min_qty = data.min_qty;
+        if (data.max_qty !== undefined) updateData.max_qty = data.max_qty;
+        if (data.is_active !== undefined) updateData.is_active = data.is_active;
+        if (data.display_on_pos !== undefined) updateData.display_on_pos = data.display_on_pos;
+        if (data.is_batch !== undefined) updateData.is_batch = data.is_batch;
+        if (data.auto_fill_on_demand_sheet !== undefined) updateData.auto_fill_on_demand_sheet = data.auto_fill_on_demand_sheet;
+        if (data.non_inventory_item !== undefined) updateData.non_inventory_item = data.non_inventory_item;
+        if (data.is_deal !== undefined) updateData.is_deal = data.is_deal;
+        if (data.is_featured !== undefined) updateData.is_featured = data.is_featured;
 
-        relationFields.forEach(field => {
-            const value = data[field];
-            if (value) {
-                const relationName = field.split('_')[0];
-                relations[relationName] = { connect: { id: value } };
-            }
-        });
-
-        return relations;
+        return updateData;
     }
 
     private buildRelationIncludes(data: CreateProductInput) {
@@ -60,50 +163,240 @@ export class ProductService {
         ];
 
         relationFields.forEach(field => {
-            if (data[field]) {
                 const relationName = field.split('_')[0];
                 includes[relationName] = true;
-            }
         });
 
         return includes;
     }
 
     async createProduct(data: CreateProductInput): Promise<Product> {
-        // Validate SKU uniqueness and get last product code in parallel
-        const [existingSku, lastProduct] = await Promise.all([
-            prisma.product.findUnique({
-                where: { sku: data.sku },
+        // Generate SKU if not provided
+        const sku = data.sku || await this.generateSKU(data.name);
+
+        // Check SKU uniqueness
+        const existingSku = await prisma.product.findUnique({
+            where: { sku },
                 select: { id: true }
-            }),
-            prisma.product.findFirst({
-                orderBy: { created_at: 'desc' },
-                select: { code: true }
-            })
-        ]);
+        });
 
         if (existingSku) {
             throw new AppError(400, 'Product with this SKU already exists');
         }
 
+        // Get last product code
+        const lastProduct = await prisma.product.findFirst({
+            orderBy: { created_at: 'desc' },
+            select: { code: true }
+        });
+
         const newCode = lastProduct ? (parseInt(lastProduct.code) + 1).toString() : '1000';
 
         // Start transaction for atomic operations
         return await prisma.$transaction(async (tx) => {
+            console.log('🚀 Starting transaction for product creation...');
+            
+            // First, ensure all "Unknown" entries exist
+            const unknownEntries = await this.ensureUnknownEntriesExist(tx);
+            console.log('✅ Unknown entries ensured:', unknownEntries);
+            
+            // Build product data
+            const productData = this.buildProductData(data, newCode);
+
+            // Build relations using existing or unknown entries
+            const relations = await this.verifyAndFixRelationsForCreate(data, this.buildRelationsWithUnknownEntries(data, unknownEntries), tx);
+            console.log('📦 Relations built:', JSON.stringify(relations, null, 2));
+
+            // Combine all data
+            const finalData = {
+                ...productData,
+                sku,
+                ...relations
+            };
+
+            console.log('📤 Final data being sent to Prisma:');
+            console.log(JSON.stringify(finalData, null, 2));
+
             // Create the product
             const product = await tx.product.create({
-                data: {
-                    ...this.buildProductData(data, newCode),
-                    ...this.buildRelationData(data)
-                },
+                data: finalData,
                 include: this.buildRelationIncludes(data)
             });
 
+            console.log('✅ Product created successfully with ID:', product.id);
             return product;
         }, {
             maxWait: 20000, // 20 seconds
             timeout: 15000  // 15 seconds,
         });
+    }
+
+    private async ensureUnknownEntriesExist(tx: any) {
+        const unknownEntries: Record<string, string> = {};
+        
+        const models = [
+            { name: 'unit', codePrefix: 'UNIT' },
+            { name: 'category', codePrefix: 'CAT' },
+            { name: 'tax', codePrefix: 'TAX' },
+            { name: 'supplier', codePrefix: 'SUP' },
+            { name: 'brand', codePrefix: 'BRA' },
+            { name: 'color', codePrefix: 'COL' },
+            { name: 'size', codePrefix: 'SIZ' },
+            { name: 'subcategory', codePrefix: 'SUB' }
+        ];
+
+        for (const model of models) {
+            const unknownId = await this.getOrCreateUnknownEntry(model.name, model.codePrefix, tx);
+            unknownEntries[model.name] = unknownId;
+        }
+
+        return unknownEntries;
+    }
+
+    private buildRelationsWithUnknownEntries(data: CreateProductInput, unknownEntries: Record<string, string>) {
+        const relations: Record<string, { connect: { id: string } }> = {};
+        
+        // Map of field names to their corresponding model names
+        const fieldToModel: Record<string, string> = {
+            'unit_id': 'unit',
+            'category_id': 'category',
+            'tax_id': 'tax',
+            'supplier_id': 'supplier',
+            'brand_id': 'brand',
+            'color_id': 'color',
+            'size_id': 'size',
+            'subcategory_id': 'subcategory'
+        };
+
+        // Process each field
+        for (const [field, modelName] of Object.entries(fieldToModel)) {
+            const value = (data as any)[field];
+            const relationName = field.split('_')[0];
+            
+            if (value) {
+                // Use provided ID - but we'll verify it exists in the transaction
+                relations[relationName] = { connect: { id: value } };
+                console.log(`✅ Using provided ${relationName} with ID: ${value}`);
+            } else {
+                // Use unknown entry
+                const unknownId = unknownEntries[modelName];
+                relations[relationName] = { connect: { id: unknownId } };
+                console.log(`✅ Using unknown ${relationName} with ID: ${unknownId}`);
+            }
+        }
+
+        console.log('📦 Final relations object:', JSON.stringify(relations, null, 2));
+        return relations;
+    }
+
+    private async verifyAndFixRelationsForCreate(data: CreateProductInput, initialRelations: Record<string, { connect: { id: string } }>, tx: any) {
+        const verifiedRelations: Record<string, { connect: { id: string } }> = {};
+        
+        // Map of field names to their corresponding model names
+        const fieldToModel: Record<string, string> = {
+            'unit_id': 'unit',
+            'category_id': 'category',
+            'tax_id': 'tax',
+            'supplier_id': 'supplier',
+            'brand_id': 'brand',
+            'color_id': 'color',
+            'size_id': 'size',
+            'subcategory_id': 'subcategory'
+        };
+
+        // Verify each relation
+        for (const [field, modelName] of Object.entries(fieldToModel)) {
+            const value = (data as any)[field];
+            const relationName = field.split('_')[0];
+            
+            if (value) {
+                // Verify the provided ID exists
+                try {
+                    const existingRecord = await tx[modelName].findUnique({
+                        where: { id: value },
+                        select: { id: true }
+                    });
+                    
+                    if (existingRecord) {
+                        verifiedRelations[relationName] = { connect: { id: value } };
+                        console.log(`✅ Verified existing ${relationName} with ID: ${value}`);
+                    } else {
+                        // ID doesn't exist, use unknown entry
+                        const unknownId = await this.getOrCreateUnknownEntry(modelName, modelName.toUpperCase(), tx);
+                        verifiedRelations[relationName] = { connect: { id: unknownId } };
+                        console.log(`❌ Provided ${relationName} ID ${value} not found, using unknown with ID: ${unknownId}`);
+                    }
+                } catch (error) {
+                    // Error occurred, use unknown entry
+                    const unknownId = await this.getOrCreateUnknownEntry(modelName, modelName.toUpperCase(), tx);
+                    verifiedRelations[relationName] = { connect: { id: unknownId } };
+                    console.log(`❌ Error verifying ${relationName} ID ${value}, using unknown with ID: ${unknownId}`);
+                }
+            } else {
+                // Use unknown entry
+                const unknownId = await this.getOrCreateUnknownEntry(modelName, modelName.toUpperCase(), tx);
+                verifiedRelations[relationName] = { connect: { id: unknownId } };
+                console.log(`✅ Using unknown ${relationName} with ID: ${unknownId}`);
+            }
+        }
+
+        return verifiedRelations;
+    }
+
+    private async verifyAndFixRelationsForUpdate(data: UpdateProductInput, initialRelations: Record<string, { connect: { id: string } }>, tx: any) {
+        const verifiedRelations: Record<string, { connect: { id: string } }> = {};
+        
+        // Map of field names to their corresponding model names
+        const fieldToModel: Record<string, string> = {
+            'unit_id': 'unit',
+            'category_id': 'category',
+            'tax_id': 'tax',
+            'supplier_id': 'supplier',
+            'brand_id': 'brand',
+            'color_id': 'color',
+            'size_id': 'size',
+            'subcategory_id': 'subcategory'
+        };
+
+        // Verify each relation that was provided in the update
+        for (const [field, modelName] of Object.entries(fieldToModel)) {
+            const value = (data as any)[field];
+            if (value !== undefined) { // Only process fields that are explicitly provided
+                const relationName = field.split('_')[0];
+                
+                if (value) {
+                    // Verify the provided ID exists
+                    try {
+                        const existingRecord = await tx[modelName].findUnique({
+                            where: { id: value },
+                            select: { id: true }
+                        });
+                        
+                        if (existingRecord) {
+                            verifiedRelations[relationName] = { connect: { id: value } };
+                            console.log(`✅ Verified existing ${relationName} with ID: ${value}`);
+                        } else {
+                            // ID doesn't exist, use unknown entry
+                            const unknownId = await this.getOrCreateUnknownEntry(modelName, modelName.toUpperCase(), tx);
+                            verifiedRelations[relationName] = { connect: { id: unknownId } };
+                            console.log(`❌ Provided ${relationName} ID ${value} not found, using unknown with ID: ${unknownId}`);
+                        }
+                    } catch (error) {
+                        // Error occurred, use unknown entry
+                        const unknownId = await this.getOrCreateUnknownEntry(modelName, modelName.toUpperCase(), tx);
+                        verifiedRelations[relationName] = { connect: { id: unknownId } };
+                        console.log(`❌ Error verifying ${relationName} ID ${value}, using unknown with ID: ${unknownId}`);
+                    }
+                } else {
+                    // Use unknown entry for null/empty values
+                    const unknownId = await this.getOrCreateUnknownEntry(modelName, modelName.toUpperCase(), tx);
+                    verifiedRelations[relationName] = { connect: { id: unknownId } };
+                    console.log(`✅ Using unknown ${relationName} with ID: ${unknownId}`);
+                }
+            }
+        }
+
+        return verifiedRelations;
     }
 
     async processProductImages(productId: string, files: Express.Multer.File[]) {
@@ -178,33 +471,26 @@ export class ProductService {
             }
         }
 
-        return prisma.product.update({
+        // Use transaction for atomic operations
+        return await prisma.$transaction(async (tx) => {
+            console.log('🚀 Starting transaction for product update...');
+            
+            // First, ensure all "Unknown" entries exist
+            const unknownEntries = await this.ensureUnknownEntriesExist(tx);
+            console.log('✅ Unknown entries ensured:', unknownEntries);
+            
+            // Build relations using existing or unknown entries
+            const relations = await this.verifyAndFixRelationsForUpdate(data, this.buildUpdateRelationsWithUnknownEntries(data, unknownEntries), tx);
+            console.log('📦 Update relations built:', JSON.stringify(relations, null, 2));
+
+            return tx.product.update({
             where: { id },
             data: {
                 // Scalar fields
-                name: data.name,
-                sku: data.sku,
-                is_active: data.is_active,
-                is_deal: data.is_deal,
-                non_inventory_item: data.non_inventory_item,
-                auto_fill_on_demand_sheet: data.auto_fill_on_demand_sheet,
-                is_batch: data.is_batch,
-                display_on_pos: data.display_on_pos,
-                is_featured: data.is_featured,
-                purchase_rate: data.purchase_rate !== undefined ? new Decimal(data.purchase_rate).toNumber() : undefined,
-                sales_rate_exc_dis_and_tax: data.sales_rate_exc_dis_and_tax !== undefined ? new Decimal(data.sales_rate_exc_dis_and_tax).toNumber() : undefined,
-                sales_rate_inc_dis_and_tax: data.sales_rate_inc_dis_and_tax !== undefined ? new Decimal(data.sales_rate_inc_dis_and_tax).toNumber() : undefined,
-                discount_amount: data.discount_amount !== undefined ? new Decimal(data.discount_amount).toNumber() : undefined,
+                    ...this.buildUpdateProductData(data),
 
-                // Relation fields using `connect`
-                tax: data.tax_id ? { connect: { id: data.tax_id } } : undefined,
-                size: data.size_id ? { connect: { id: data.size_id } } : undefined,
-                color: data.color_id ? { connect: { id: data.color_id } } : undefined,
-                supplier: data.supplier_id ? { connect: { id: data.supplier_id } } : undefined,
-                unit: data.unit_id ? { connect: { id: data.unit_id } } : undefined,
-                brand: data.brand_id ? { connect: { id: data.brand_id } } : undefined,
-                subcategory: data.subcategory_id ? { connect: { id: data.subcategory_id } } : undefined,
-                category: data.category_id ? { connect: { id: data.category_id } } : undefined,
+                    // Relation fields using the relations object
+                    ...relations,
             },
             include: {
                 unit: true,
@@ -217,6 +503,47 @@ export class ProductService {
                 size: true,
             },
         });
+        }, {
+            maxWait: 20000, // 20 seconds
+            timeout: 15000  // 15 seconds,
+        });
+    }
+
+    private buildUpdateRelationsWithUnknownEntries(data: UpdateProductInput, unknownEntries: Record<string, string>) {
+        const relations: Record<string, { connect: { id: string } }> = {};
+        
+        // Map of field names to their corresponding model names
+        const fieldToModel: Record<string, string> = {
+            'unit_id': 'unit',
+            'category_id': 'category',
+            'tax_id': 'tax',
+            'supplier_id': 'supplier',
+            'brand_id': 'brand',
+            'color_id': 'color',
+            'size_id': 'size',
+            'subcategory_id': 'subcategory'
+        };
+
+        // Process each field that is provided in the update
+        for (const [field, modelName] of Object.entries(fieldToModel)) {
+            const value = (data as any)[field];
+            if (value !== undefined) { // Only process fields that are explicitly provided
+                const relationName = field.split('_')[0];
+                
+                if (value) {
+                    // Use provided ID - will be verified in verifyAndFixRelations
+                    relations[relationName] = { connect: { id: value } };
+                    console.log(`✅ Using provided ${relationName} with ID: ${value}`);
+                } else {
+                    // Use unknown entry for null/empty values
+                    const unknownId = unknownEntries[modelName];
+                    relations[relationName] = { connect: { id: unknownId } };
+                    console.log(`✅ Using unknown ${relationName} with ID: ${unknownId}`);
+                }
+            }
+        }
+
+        return relations;
     }
 
     async toggleProductStatus(id: string) {

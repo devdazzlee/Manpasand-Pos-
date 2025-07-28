@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import { ApiResponse } from "../utils/apiResponse";
 import { StockService } from "../services/stock.service";
+import { AppError } from "../utils/apiError";
 
 const stockService = new StockService();
 
@@ -18,12 +19,16 @@ const adjustStockController = asyncHandler(async (req: Request, res: Response) =
 });
 
 const getStocksController = asyncHandler(async (req: Request, res: Response) => {
-    const stocks = await stockService.getStockByBranch(req.user?.branch_id as string as string);
+    const branchId = (req.query.branchId as string) || req.user?.branch_id;
+    if (!branchId) throw new AppError(400, "Branch ID is required");
+    const stocks = await stockService.getStockByBranch(branchId);
     new ApiResponse(stocks, "Stocks retrieved successfully").send(res);
 });
 
 const getStockMovementsController = asyncHandler(async (req: Request, res: Response) => {
-    const movements = await stockService.getStockMovements(req.user?.branch_id as string as string);
+    const branchId = (req.query.branchId as string) || req.user?.branch_id;
+    if (!branchId) throw new AppError(400, "Branch ID is required");
+    const movements = await stockService.getStockMovements(branchId);
     new ApiResponse(movements, "Stock movement history retrieved").send(res);
 });
 
