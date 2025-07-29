@@ -10,33 +10,24 @@ import {
   Package,
   Users,
   BarChart3,
-  SettingsIcon,
   LogOut,
   History,
   UserCheck,
   Truck,
   Grid3X3,
-  Tag,
   StoreIcon as CashRegisterIcon,
-  Receipt,
-  Calculator,
   ChevronDown,
   ChevronRight,
   RotateCcw,
-  Calendar,
   CreditCard,
   Gift,
   Clock,
   Shield,
-  Database,
-  Zap,
-  MapPin,
   Bell,
-  FileText,
-  Pause,
   TagIcon as PriceTag,
   ListOrdered,
   StoreIcon,
+  Barcode,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -85,6 +76,7 @@ const menuSections: SidebarMenuSection[] = [
       { id: "orders", label: "Orders", icon: ListOrdered },
       { id: "suppliers", label: "Suppliers", icon: Truck },
       { id: "returns", label: "Returns & Refunds", icon: RotateCcw },
+      { id: "barcode-generater", label: "Barcode Generater", icon: Barcode },
       // { id: "reservations", label: "Reservations", icon: Calendar },
       // { id: "layaway-holds", label: "Layaway & Holds", icon: Pause },
       // { id: "promotions", label: "Promotions", icon: Tag },
@@ -148,6 +140,7 @@ const menuSections: SidebarMenuSection[] = [
 export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
   const [expandedSections, setExpandedSections] = useState<string[]>([
     "sales",
+    "barcode-generater",
     "inventory",
     "people",
     "finance",
@@ -162,6 +155,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
   // Tabs to show for ADMIN
   const adminTabIds = [
     "dashboard",
+    "barcode-generater",
     "cash-register",
     "notifications",
     "new-sale",
