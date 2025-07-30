@@ -12,8 +12,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
-import { Search, Plus, Edit, Package, AlertTriangle, Upload, X, ImageIcon } from "lucide-react"
+import { Search, Plus, Edit, Package, AlertTriangle, Upload, X, ImageIcon, RefreshCw } from "lucide-react"
 import apiClient from "@/lib/apiClient"
+import { usePosData } from "@/hooks/use-pos-data"
 
 // Image compression utility
 const compressImage = (file: File, quality = 0.7, maxWidth = 800, maxHeight = 600): Promise<File> => {
@@ -105,6 +106,11 @@ interface Product {
   created_at: string
   updated_at: string
   images?: { id: string; image_url: string }[]
+  available_stock?: number
+  current_stock?: number
+  reserved_stock?: number
+  minimum_stock?: number
+  maximum_stock?: number
 }
 
 interface ProductFormData {
@@ -172,7 +178,7 @@ const ProductForm = ({
   sizes: DropdownOption[]
   imagePreviews: string[]
   handleRemoveImage: (index: number) => void
-  fileInputRef: React.RefObject<HTMLInputElement>
+  fileInputRef: React.RefObject<HTMLInputElement | null>
   handleImageSelect: (event: React.ChangeEvent<HTMLInputElement>) => void
 }) => {
   const hasErrors = Object.values(formErrors).some((error) => !!error)
@@ -600,6 +606,14 @@ const ProductForm = ({
 export default function Inventory() {
   const { toast } = useToast()
 
+  // Global store data
+  const { 
+    products: globalProducts, 
+    categories: globalCategories, 
+    isAnyLoading: globalLoading,
+    refreshAllData 
+  } = usePosData()
+
   // State for products and pagination
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
@@ -613,7 +627,7 @@ export default function Inventory() {
   const [selectedCategory, setSelectedCategory] = useState("all")
   const [selectedSubcategory, setSelectedSubcategory] = useState("all")
 
-  // State for dropdown options
+  // State for dropdown options (these will be loaded from global store)
   const [units, setUnits] = useState<DropdownOption[]>([])
   const [taxes, setTaxes] = useState<DropdownOption[]>([])
   const [categories, setCategories] = useState<DropdownOption[]>([])
@@ -727,17 +741,22 @@ export default function Inventory() {
     loadDropdownData()
   }, [])
 
-  // Load products when filters change
+  // Load products when filters change or global products change
   useEffect(() => {
+    if (globalProducts.length > 0) {
     loadProducts()
-  }, [currentPage, searchTerm, selectedCategory, selectedSubcategory, pageSize])
+    }
+  }, [currentPage, searchTerm, selectedCategory, selectedSubcategory, pageSize, globalProducts])
 
   const loadDropdownData = async () => {
     try {
+      // Use global categories data
+      setCategories(globalCategories)
+
+      // Load other dropdown data that's not in global store
       const [
         unitsData,
         taxesData,
-        categoriesData,
         subcategoriesData,
         suppliersData,
         brandsData,
@@ -746,7 +765,6 @@ export default function Inventory() {
       ] = await Promise.all([
         apiService.getUnits(),
         apiService.getTaxes(),
-        apiService.getCategories(),
         apiService.getSubcategories(),
         apiService.getSuppliers(),
         apiService.getBrands(),
@@ -756,7 +774,6 @@ export default function Inventory() {
 
       setUnits(unitsData.data || unitsData)
       setTaxes(taxesData.data || taxesData)
-      setCategories(categoriesData.data || categoriesData)
       setSubcategories(subcategoriesData.data || subcategoriesData)
       setSuppliers(suppliersData.data || suppliersData)
       setBrands(brandsData.data || brandsData)
@@ -774,35 +791,77 @@ export default function Inventory() {
   const loadProducts = async () => {
     setLoading(true)
     try {
-      const params: any = {
-        page: currentPage,
-        limit: pageSize === 0 ? 100000 : pageSize, // 0 means 'All', set a very high number
-        search: searchTerm || undefined,
-        category_id: selectedCategory === "all" ? undefined : selectedCategory,
-        subcategory_id: selectedSubcategory === "all" ? undefined : selectedSubcategory,
+      // Use global products data instead of making API calls
+      let filteredProducts = [...globalProducts]
+
+      // Apply search filter
+      if (searchTerm) {
+        filteredProducts = filteredProducts.filter(product =>
+          product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+          (product.sku && product.sku.toLowerCase().includes(searchTerm.toLowerCase()))
+        )
       }
-      if (pageSize === 0) delete params.page // remove page param for 'All'
-      const response = await apiService.getProducts(params)
 
-      // Handle inconsistent API responses for the product list
-      const productsArray = Array.isArray(response) ? response : response?.data || []
-      const total = Array.isArray(response) ? productsArray.length : response?.meta?.total || 0
+      // Apply category filter
+      if (selectedCategory !== "all") {
+        filteredProducts = filteredProducts.filter(product =>
+          product.categoryId === selectedCategory
+        )
+      }
 
-      const productsData = productsArray.map((product: any) => ({
-        ...product,
-        purchase_rate: parseFloat(product.purchase_rate) || 0,
-        sales_rate_exc_dis_and_tax: parseFloat(product.sales_rate_exc_dis_and_tax) || 0,
-        sales_rate_inc_dis_and_tax: parseFloat(product.sales_rate_inc_dis_and_tax) || 0,
-        discount_amount: product.discount_amount ? parseFloat(product.discount_amount) : undefined,
-        min_qty: product.min_qty ? parseInt(product.min_qty) : undefined,
-        max_qty: product.max_qty ? parseInt(product.max_qty) : undefined,
-        sku: product.sku ? String(product.sku) : "",
-        pct_or_hs_code: product.pct_or_hs_code ? String(product.pct_or_hs_code) : undefined,
-        description: product.description ? String(product.description) : undefined,
+      // Apply subcategory filter
+      if (selectedSubcategory !== "all") {
+        filteredProducts = filteredProducts.filter(product =>
+          product.subcategoryId && product.subcategoryId === selectedSubcategory
+        )
+      }
+
+      // Apply pagination
+      const total = filteredProducts.length
+      let paginatedProducts = filteredProducts
+      
+      if (pageSize !== 0) {
+        const startIndex = (currentPage - 1) * pageSize
+        const endIndex = startIndex + pageSize
+        paginatedProducts = filteredProducts.slice(startIndex, endIndex)
+      }
+
+      // Transform to match the Product interface
+      const productsData = paginatedProducts.map((product: any) => ({
+        id: product.id,
+        name: product.name,
+        sku: product.sku || "",
+        code: product.code || "",
+        pct_or_hs_code: product.pct_or_hs_code,
+        description: product.description,
+        purchase_rate: product.purchase_rate || 0,
+        sales_rate_exc_dis_and_tax: product.sales_rate_exc_dis_and_tax || 0,
+        sales_rate_inc_dis_and_tax: product.sales_rate_inc_dis_and_tax || 0,
+        discount_amount: product.discount_amount,
+        min_qty: product.min_qty,
+        max_qty: product.max_qty,
+        is_active: product.is_active ?? true,
+        display_on_pos: product.display_on_pos ?? true,
+        is_batch: product.is_batch ?? false,
+        auto_fill_on_demand_sheet: product.auto_fill_on_demand_sheet ?? false,
+        non_inventory_item: product.non_inventory_item ?? false,
+        is_deal: product.is_deal ?? false,
+        is_featured: product.is_featured ?? false,
+        unit: { id: product.unitId, name: product.unitName },
+        tax: { id: product.taxId, name: product.taxName },
+        category: { id: product.categoryId, name: product.category },
+        subcategory: { id: product.subcategoryId, name: product.subcategory },
+        supplier: { id: product.supplierId, name: product.supplierName },
+        brand: { id: product.brandId, name: product.brandName },
+        color: { id: product.colorId, name: product.colorName },
+        size: { id: product.sizeId, name: product.sizeName },
+        created_at: product.created_at || new Date().toISOString(),
+        updated_at: product.updated_at || new Date().toISOString(),
+        images: product.images || [],
       }))
 
       setProducts(productsData)
-      setTotalProducts(total || productsData.length)
+      setTotalProducts(total)
     } catch (error) {
       console.error("Failed to load products:", error)
       toast({
@@ -1033,6 +1092,9 @@ export default function Inventory() {
           <div>
             <h1 className="text-3xl font-bold text-gray-900">Product Management</h1>
             <p className="text-gray-600">Manage your products and inventory</p>
+            {globalLoading && (
+              <p className="text-sm text-blue-600 mt-1">Loading data from cache...</p>
+            )}
           </div>
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
             <DialogTrigger asChild>
@@ -1170,6 +1232,7 @@ export default function Inventory() {
                       <TableHead>SKU</TableHead>
                       <TableHead>Category</TableHead>
                       <TableHead>Unit</TableHead>
+                      <TableHead>Stock</TableHead>
                       <TableHead>Purchase Rate</TableHead>
                       <TableHead>Sales Rate</TableHead>
                       <TableHead>Status</TableHead>
@@ -1190,8 +1253,20 @@ export default function Inventory() {
                           </div>
                         </TableCell>
                         <TableCell>{product.sku}</TableCell>
-                        <TableCell>{product.category_id || "-"}</TableCell>
-                        <TableCell>{product.unit_id || "-"}</TableCell>
+                        <TableCell>{product.category?.name || "-"}</TableCell>
+                        <TableCell>{product.unit?.name || "-"}</TableCell>
+                        <TableCell>
+                          <div className="text-sm">
+                            <div className="font-medium">
+                              {product.available_stock ?? product.current_stock ?? 0}
+                            </div>
+                            {product.reserved_stock && product.reserved_stock > 0 && (
+                              <div className="text-xs text-gray-500">
+                                Reserved: {product.reserved_stock}
+                              </div>
+                            )}
+                          </div>
+                        </TableCell>
                         <TableCell>{product.purchase_rate.toFixed(2)}</TableCell>
                         <TableCell>{product.sales_rate_exc_dis_and_tax.toFixed(2)}</TableCell>
                         <TableCell>

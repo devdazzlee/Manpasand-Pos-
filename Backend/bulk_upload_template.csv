@@ -1,0 +1,4 @@
+name,purchase_rate,sales_rate_exc_dis_and_tax,sales_rate_inc_dis_and_tax,unit_name,category_name,subcategory_name,tax_name,supplier_name,brand_name,color_name,size_name,description,pct_or_hs_code,sku,discount_amount,min_qty,max_qty,is_active,display_on_pos,is_batch,auto_fill_on_demand_sheet,non_inventory_item,is_deal,is_featured
+"Sample Product 1",100.00,120.00,130.00,"Pieces","Electronics","Smartphones","VAT","Supplier A","Brand X","Black","Large","Sample description","123456","SKU001",10.00,10,50,true,true,false,false,false,false,false
+"Sample Product 2",50.00,60.00,65.00,"Kg","Food","Beverages","GST","Supplier B","Brand Y","Red","Medium","Another description","789012","SKU002",5.00,5,20,true,true,false,false,false,false,false
+"Sample Product 3",200.00,250.00,270.00,"Boxes","Clothing","T-Shirts","Tax","Supplier C","Brand Z","Blue","Small","Third product","345678","SKU003",20.00,15,100,true,true,false,false,false,false,false 

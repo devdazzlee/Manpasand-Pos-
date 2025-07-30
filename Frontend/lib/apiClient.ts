@@ -10,6 +10,16 @@ const apiClient = axios.create({
   },
 });
 
+function isTokenExpired(token: string): boolean {
+  try {
+    const { exp } = jwtDecode<JWTPayload>(token);
+    // exp is in seconds; Date.now() is ms
+    return Date.now() >= exp * 1000;
+  } catch {
+    return true;
+  }
+}
+
 // Request interceptor to add auth token
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {

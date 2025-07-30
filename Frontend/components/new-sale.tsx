@@ -11,8 +11,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { LoadingSpinner } from "@/components/ui/loading-spinner"
 import { useLoading } from "@/hooks/use-loading"
 import { useToast } from "@/hooks/use-toast"
-import { Search, Plus, Minus, Trash2, CreditCard, DollarSign, Scan } from "lucide-react"
+import { Search, Plus, Minus, Trash2, CreditCard, DollarSign, Scan, RefreshCw } from "lucide-react"
 import apiClient from "@/lib/apiClient"
+import { usePosData } from "@/hooks/use-pos-data"
 
 interface CartItem {
   id: string
@@ -29,97 +30,59 @@ interface Product {
   category: string
   stock: number
   categoryId: string
+  available_stock?: number
+  current_stock?: number
+  reserved_stock?: number
+  minimum_stock?: number
+  maximum_stock?: number
 }
 
-interface SuspendedSale {
-  id: string
-  items: CartItem[]
-  total: number
-  timestamp: string
-  customerName?: string
-}
 
 export function NewSale() {
   const [cart, setCart] = useState<CartItem[]>([])
   const [selectedCategory, setSelectedCategory] = useState("all")
   const [searchTerm, setSearchTerm] = useState("")
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
-  const [productsLoading, setProductsLoading] = useState(false)
-  const [suspendedSales, setSuspendedSales] = useState<SuspendedSale[]>([])
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(null)
-  const [products, setProducts] = useState<Product[]>([])
-  const [categories, setCategories] = useState<any[]>([])
   const { loading: paymentLoading, withLoading: withPaymentLoading } = useLoading()
   const [scanLoading, setScanLoading] = useState(false)
-  const { loading: suspendLoading, withLoading: withSuspendLoading } = useLoading()
   const { toast } = useToast()
-  const [customers, setCustomers] = useState<any[]>([])
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null)
 
-  console.log("customers >>>>>>>>>>", customers)
-  const getProducts = async () => {
-    try {
-      const res = await apiClient.get("/products")
-      // Map API data to your Product type
-      const apiProducts = res.data.data.map((item: any) => ({
-        id: item.id,
-        name: item.name,
-        price: Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? item.purchase_rate ?? 0),
-        category: item.category?.name || "Uncategorized",
-        categoryId: item.category?.id || "",
-        stock: item.max_qty ?? 0, // or use another field if you have actual stock
-      }))
-      setProducts(apiProducts)
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Failed to load products",
-        description: "Could not fetch products from server",
-      })
-    }
-  }
-  const getCategories = async () => {
-    try {
-      const res = await apiClient.get("/categories")
-      // Add "All" as the first option
-      setCategories([{ id: "all", name: "All" }, ...res.data.data])
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Failed to load categories",
-        description: "Could not fetch categories from server",
-      })
-    }
-  }
-  const getCustomer = async () => {
-    const res = await apiClient.get("/customer")
-    setCustomers(res.data.data)
-  }
-
-  const createSale = async () => {
-    const res = await apiClient.post("/sale", {
-      customer_id: 1,
-      total: total,
-      items: cart,
-    })
-  }
-
+  // Global store with custom hook
+  const { 
+    products, 
+    categories, 
+    customers, 
+    productsLoading, 
+    categoriesLoading, 
+    customersLoading,
+    isAnyLoading,
+    refreshAllData,
+    fetchProducts, 
+    fetchCategories, 
+    fetchCustomers 
+  } = usePosData()
   useEffect(() => {
     const fetchData = async () => {
-      setProductsLoading(true)
-      await Promise.all([getProducts(), getCategories(), getCustomer()])
-      setProductsLoading(false)
+      try {
+        // Fetch data from global store (will use cache if available)
+        await Promise.all([
+          fetchProducts(),
+          fetchCategories(),
+          fetchCustomers()
+        ])
+    } catch (error) {
+      toast({
+        variant: "destructive",
+          title: "Failed to load data",
+          description: "Could not fetch data from server",
+        })
+      }
     }
     fetchData()
-  }, [])
+  }, [fetchProducts, fetchCategories, fetchCustomers, toast])
 
-  // Load suspended sales from localStorage on component mount
-  useEffect(() => {
-    const saved = localStorage.getItem("suspendedSales")
-    if (saved) {
-      setSuspendedSales(JSON.parse(saved))
-    }
-  }, [])
 
 
 
@@ -131,12 +94,13 @@ export function NewSale() {
 
   const addToCart = async (product: Product) => {
     // Check stock availability
+    const availableStock = product.available_stock ?? product.stock
     const currentQuantity = cart.find((item) => item.id === product.id)?.quantity || 0
-    if (currentQuantity >= product.stock) {
+    if (currentQuantity >= availableStock) {
       toast({
         variant: "destructive",
         title: "Insufficient Stock",
-        description: `Only ${product.stock} units available for ${product.name}`,
+        description: `Only ${availableStock} units available for ${product.name}`,
       })
       return
     }
@@ -173,12 +137,13 @@ export function NewSale() {
 
     if (item && product) {
       const newQuantity = item.quantity + change
+      const availableStock = product.available_stock ?? product.stock
 
-      if (newQuantity > product.stock) {
+      if (newQuantity > availableStock) {
         toast({
           variant: "destructive",
           title: "Insufficient Stock",
-          description: `Only ${product.stock} units available`,
+          description: `Only ${availableStock} units available`,
         })
         return
       }
@@ -348,46 +313,7 @@ Thank you for shopping with us!
     })
   }
 
-  const handleSuspendSale = async () => {
-    if (cart.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "Empty Cart",
-        description: "Cannot suspend an empty sale",
-      })
-      return
-    }
 
-    await withSuspendLoading(async () => {
-      try {
-        await new Promise((resolve) => setTimeout(resolve, 1000))
-
-        const suspendedSale: SuspendedSale = {
-          id: `SUSP${Date.now().toString().slice(-6)}`,
-          items: [...cart],
-          total,
-          timestamp: new Date().toISOString(),
-        }
-
-        const suspended = [...suspendedSales, suspendedSale]
-        setSuspendedSales(suspended)
-        localStorage.setItem("suspendedSales", JSON.stringify(suspended))
-
-        setCart([])
-
-        toast({
-          title: "Sale Suspended",
-          description: `Sale ${suspendedSale.id} has been suspended`,
-        })
-      } catch (error) {
-        toast({
-          variant: "destructive",
-          title: "Suspend Failed",
-          description: "Could not suspend the sale",
-        })
-      }
-    })
-  }
 
   const handleBarcodeScan = async () => {
     setScanLoading(true)
@@ -415,10 +341,8 @@ Thank you for shopping with us!
   }
 
   const handleCategoryChange = async (categoryId: string) => {
-    setProductsLoading(true)
     setSelectedCategory(categoryId)
-    await new Promise((resolve) => setTimeout(resolve, 500))
-    setProductsLoading(false)
+    // No need to set loading state as we're using cached data
   }
 
   return (
@@ -428,14 +352,25 @@ Thank you for shopping with us!
         <div className="mb-6">
           <div className="flex items-center justify-between mb-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">New Sale</h1>
+              <h1 className="text-3xl font-bold text-gray-900">New Sales</h1>
               {lastTransactionId && <p className="text-sm text-green-600">Last transaction: {lastTransactionId}</p>}
             </div>
+            <div className="flex items-center space-x-2">
+              <LoadingButton 
+                variant="outline" 
+                size="icon"
+                loading={isAnyLoading}
+                onClick={refreshAllData}
+                title="Refresh Data"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </LoadingButton>
             {cart.length > 0 && (
               <Button variant="outline" onClick={clearCart}>
                 Clear Cart
               </Button>
             )}
+            </div>
           </div>
           <div className="flex items-center space-x-4">
             <div className="relative flex-1 max-w-md">
@@ -531,7 +466,7 @@ Thank you for shopping with us!
                       <p
                         className={`text-sm ${isOutOfStock ? "text-red-500" : isLowStock ? "text-yellow-600" : "text-gray-500"}`}
                       >
-                        Stock: {product.stock}
+                        Stock: {product.available_stock ?? product.stock}
                       </p>
                       {isOutOfStock && <Badge variant="destructive">Out of Stock</Badge>}
                       {isLowStock && (
@@ -619,15 +554,7 @@ Thank you for shopping with us!
                 <CreditCard className="h-4 w-4 mr-2" />
                 Process Payment
               </LoadingButton>
-              <LoadingButton
-                variant="outline"
-                className="w-full"
-                loading={suspendLoading}
-                onClick={handleSuspendSale}
-                disabled={cart.length === 0}
-              >
-                Suspend Sale
-              </LoadingButton>
+              
             </div>
           </div>
         )}

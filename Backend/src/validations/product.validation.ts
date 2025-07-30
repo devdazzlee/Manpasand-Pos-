@@ -54,6 +54,7 @@ export const listProductsSchema = z.object({
         subcategory_id: z.string().optional(),
         is_active: z.string().optional(),
         display_on_pos: z.string().optional(),
+        branch_id: z.string().optional(),
     }),
 });
 

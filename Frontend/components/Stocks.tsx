@@ -32,10 +32,12 @@ import {
   Edit,
   Users,
   Loader2,
+  RefreshCw,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
+import { usePosData } from "@/hooks/use-pos-data";
 
 interface Product {
   id: string;
@@ -68,8 +70,15 @@ interface Movement {
 
 export function Stocks() {
   const { toast } = useToast();
+  
+  // Global store data
+  const { 
+    products: globalProducts, 
+    isAnyLoading: globalLoading,
+    refreshAllData 
+  } = usePosData();
+  
   // Data lists
-  const [products, setProducts] = useState<Product[]>([]);
   const [branches, setBranches] = useState<Branch[]>([]);
   const [stocks, setStocks] = useState<Stock[]>([]);
   const [history, setHistory] = useState<Movement[]>([]);
@@ -99,16 +108,12 @@ export function Stocks() {
     reason: "",
   });
 
-  // 1) Fetch products & branches on mount
+  // 1) Fetch branches on mount
   useEffect(() => {
     const loadMeta = async () => {
       setIsInitialLoading(true);
       try {
-        const [pRes, bRes] = await Promise.all([
-          apiClient.get(`${API_BASE}/products?limit=100`),
-          apiClient.get(`${API_BASE}/branches?limit=100`),
-        ]);
-        setProducts(pRes.data.data);
+        const bRes = await apiClient.get(`${API_BASE}/branches?limit=100`);
         setBranches(bRes.data.data);
         toast({
           title: "Success",
@@ -273,8 +278,20 @@ export function Stocks() {
           <p className="text-gray-600">
             Create, adjust and view stock levels & history
           </p>
+          {globalLoading && (
+            <p className="text-sm text-blue-600 mt-1">Loading data from cache...</p>
+          )}
         </div>
         <div className="flex space-x-2">
+          <Button
+            variant="outline"
+            size="icon"
+            onClick={refreshAllData}
+            disabled={globalLoading}
+            title="Refresh Data"
+          >
+            <RefreshCw className={`h-4 w-4 ${globalLoading ? 'animate-spin' : ''}`} />
+          </Button>
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
             <DialogTrigger asChild>
               <Button>
@@ -298,7 +315,7 @@ export function Stocks() {
                     }
                   >
                     <option value="">Select product</option>
-                    {products.map((p) => (
+                    {globalProducts.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>
@@ -376,7 +393,7 @@ export function Stocks() {
                     }
                   >
                     <option value="">Select product</option>
-                    {products.map((p) => (
+                    {globalProducts.map((p) => (
                       <option key={p.id} value={p.id}>
                         {p.name}
                       </option>

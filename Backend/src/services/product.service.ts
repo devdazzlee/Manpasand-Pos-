@@ -5,6 +5,7 @@ import { CreateProductInput, UpdateProductInput } from '../validations/product.v
 import { Decimal } from 'decimal.js';
 import { startOfMonth } from 'date-fns';
 import { s3Service } from './common/s3BucketService';
+import { randomUUID } from 'crypto';
 
 type RelationField =
     | 'unit_id' | 'tax_id' | 'category_id' | 'subcategory_id'
@@ -75,6 +76,91 @@ export class ProductService {
             return unknownEntry.id;
         } catch (error) {
             console.error(`❌ Error in getOrCreateUnknownEntry for ${modelName}:`, error);
+            throw error;
+        }
+    }
+
+    private async getOrCreateEntryByName(modelName: string, entryName: string, codePrefix: string, tx?: any) {
+        if (!entryName || entryName.trim() === '') {
+            // If no name provided, use unknown entry
+            return await this.getOrCreateUnknownEntry(modelName, codePrefix, tx);
+        }
+
+        const trimmedName = entryName.trim();
+        
+        // Use transaction context if provided, otherwise use regular prisma
+        const prismaClient = tx || prisma;
+        
+        try {
+            console.log(`🔍 Looking for existing ${modelName} with name: "${trimmedName}"`);
+            
+            // Try to find existing entry by name
+            let entry = await prismaClient[modelName].findFirst({
+                where: { name: trimmedName }
+            });
+
+            if (entry) {
+                console.log(`✅ Found existing ${modelName} with ID: ${entry.id}`);
+            } else {
+                console.log(`❌ No existing ${modelName} found, creating new one...`);
+                
+                // If not found, create it
+                const timestamp = Date.now().toString().slice(-6);
+                const uniqueSlug = `${trimmedName.toLowerCase().replace(/\s+/g, '-')}-${timestamp}`;
+                
+                // Get last entry for code generation
+                const lastEntry = await prismaClient[modelName].findFirst({
+                    orderBy: { created_at: 'desc' },
+                    select: { code: true }
+                });
+                
+                let newCode = `${Date.now().toString().slice(-4)}-${randomUUID().slice(0, 5)}`;
+
+                if (lastEntry && lastEntry.code) {
+                    const lastCodeNum = parseInt(lastEntry.code);
+                    newCode = !isNaN(lastCodeNum) ? (lastCodeNum + 1).toString() : `${Date.now().toString().slice(-6)}`;
+                }                
+                
+                // Create data object with any type to allow additional properties
+                let modelData: any = {
+                    name: trimmedName,
+                    code: newCode,
+                    is_active: true,
+                    display_on_pos: true,
+                };
+
+                // Add model-specific fields
+                switch (modelName) {
+                    case 'tax':
+                        modelData.percentage = 0;
+                        break;
+                    case 'category':
+                        modelData.slug = uniqueSlug;
+                        break;
+                    case 'subcategory':
+                        // Subcategory doesn't have slug field, so just use base data
+                        break;
+                    case 'unit':
+                    case 'supplier':
+                    case 'brand':
+                    case 'color':
+                    case 'size':
+                        // These models only need base data
+                        break;
+                }
+                
+                console.log(`📝 Creating ${modelName} with data:`, modelData);
+                
+                entry = await prismaClient[modelName].create({
+                    data: modelData
+                });
+                
+                console.log(`✅ Created ${modelName} with ID: ${entry.id}`);
+            }
+
+            return entry.id;
+        } catch (error) {
+            console.error(`❌ Error in getOrCreateEntryByName for ${modelName}:`, error);
             throw error;
         }
     }
@@ -562,6 +648,7 @@ export class ProductService {
         subcategory_id,
         is_active = true,
         display_on_pos = true,
+        branch_id,
     }: {
         page?: number;
         limit?: number;
@@ -570,6 +657,7 @@ export class ProductService {
         subcategory_id?: string;
         is_active?: boolean;
         display_on_pos?: boolean;
+        branch_id?: string;
     }) {
         const where: Prisma.ProductWhereInput = {};
 
@@ -612,6 +700,15 @@ export class ProductService {
                     brand: true,
                     color: true,
                     tax: true,
+                    stock: branch_id ? {
+                        where: { branch_id },
+                        select: {
+                            current_quantity: true,
+                            reserved_quantity: true,
+                            minimum_quantity: true,
+                            maximum_quantity: true,
+                        }
+                    } : true,
                     _count: {
                         select: { order_items: true },
                     },
@@ -619,20 +716,51 @@ export class ProductService {
             }),
             prisma.product.count({ where }),
         ]);
+        console.log("products >>>", products)
+        // return {
+        //     data: products.map(p => {
+        //         // Calculate available stock
+        //         let currentStock = 0;
+        //         let reservedStock = 0;
+        //         let minimumStock = 0;
+        //         let maximumStock = 0;
 
-        return {
-            data: products.map(p => ({
-                ...p,
-                order_count: p._count.order_items,
-                _count: undefined,
-            })),
-            meta: {
-                total,
-                page,
-                limit,
-                totalPages: Math.ceil(total / limit),
-            },
-        };
+        //         if (branch_id && p.stock && Array.isArray(p.stock) && p.stock.length > 0) {
+        //             // Single branch stock
+        //             const stockData = p.stock[0];
+        //             currentStock = stockData.current_quantity || 0;
+        //             reservedStock = stockData.reserved_quantity || 0;
+        //             minimumStock = stockData.minimum_quantity || 0;
+        //             maximumStock = stockData.maximum_quantity || 0;
+        //         } else if (p.stock && Array.isArray(p.stock)) {
+        //             // Multiple branches - sum up all stock
+        //             p.stock.forEach((stockItem: any) => {
+        //                 currentStock += stockItem.current_quantity || 0;
+        //                 reservedStock += stockItem.reserved_quantity || 0;
+        //                 minimumStock += stockItem.minimum_quantity || 0;
+        //                 maximumStock += stockItem.maximum_quantity || 0;
+        //             });
+        //         }
+
+        //         return {
+        //             ...p,
+        //             current_stock: currentStock,
+        //             reserved_stock: reservedStock,
+        //             available_stock: currentStock - reservedStock,
+        //             minimum_stock: minimumStock,
+        //             maximum_stock: maximumStock,
+        //             order_count: p._count.order_items,
+        //             _count: undefined,
+        //             stock: undefined, // Remove the raw stock data
+        //         };
+        //     }),
+        //     meta: {
+        //         total,
+        //         page,
+        //         limit,
+        //         totalPages: Math.ceil(total / limit),
+        //     },
+        // };
     }
 
     async getFeaturedProducts() {
@@ -722,5 +850,126 @@ export class ProductService {
         });
 
         return products;
+    }
+
+    async createProductFromBulkUpload(data: any): Promise<Product & {
+        unit: any;
+        category: any;
+        subcategory: any;
+        tax: any;
+        supplier: any;
+        brand: any;
+        color: any;
+        size: any;
+    }> {
+        // Generate SKU if not provided
+        const sku = data.sku || await this.generateSKU(data.name);
+
+        // Check SKU uniqueness
+        const existingSku = await prisma.product.findUnique({
+            where: { sku },
+            select: { id: true }
+        });
+
+        if (existingSku) {
+            throw new AppError(400, 'Product with this SKU already exists');
+        }
+
+        // Get last product code
+        const lastProduct = await prisma.product.findFirst({
+            orderBy: { created_at: 'desc' },
+            select: { code: true }
+        });
+
+        const newCode = lastProduct ? (parseInt(lastProduct.code) + 1).toString() : '1000';
+
+        // Start transaction for atomic operations
+        return await prisma.$transaction(async (tx) => {
+            console.log('🚀 Starting transaction for bulk product creation...');
+            
+            // Build product data
+            const productData = this.buildProductData(data, newCode);
+
+            // Build relations using names from the sheet
+            const relations = await this.buildRelationsFromNames(data, tx);
+            console.log('📦 Relations built from names:', JSON.stringify(relations, null, 2));
+
+            // Combine all data
+            const finalData = {
+                ...productData,
+                sku,
+                ...relations
+            };
+
+            console.log('📤 Final data being sent to Prisma:');
+            console.log(JSON.stringify(finalData, null, 2));
+
+            // Create the product
+            const product = await tx.product.create({
+                data: finalData,
+                include: {
+                    unit: true,
+                    category: true,
+                    subcategory: true,
+                    tax: true,
+                    supplier: true,
+                    brand: true,
+                    color: true,
+                    size: true,
+                }
+            }) as Product & {
+                unit: any;
+                category: any;
+                subcategory: any;
+                tax: any;
+                supplier: any;
+                brand: any;
+                color: any;
+                size: any;
+            };
+
+            console.log('✅ Product created successfully with ID:', product.id);
+            return product;
+        }, {
+            maxWait: 20000, // 20 seconds
+            timeout: 15000  // 15 seconds,
+        });
+    }
+
+    private async buildRelationsFromNames(data: any, tx: any) {
+        const relations: Record<string, { connect: { id: string } }> = {};
+        
+        // Map of field names to their corresponding model names and code prefixes
+        const fieldToModel: Record<string, { model: string, codePrefix: string }> = {
+            'unit_name': { model: 'unit', codePrefix: 'UNIT' },
+            'category_name': { model: 'category', codePrefix: 'CAT' },
+            'tax_name': { model: 'tax', codePrefix: 'TAX' },
+            'supplier_name': { model: 'supplier', codePrefix: 'SUP' },
+            'brand_name': { model: 'brand', codePrefix: 'BRA' },
+            'color_name': { model: 'color', codePrefix: 'COL' },
+            'size_name': { model: 'size', codePrefix: 'SIZ' },
+            'subcategory_name': { model: 'subcategory', codePrefix: 'SUB' }
+        };
+
+        // Process each field
+        for (const [fieldName, modelInfo] of Object.entries(fieldToModel)) {
+            const value = data[fieldName];
+            const relationName = modelInfo.model;
+            
+            if (value) {
+                // Use name-based lookup and creation
+                const entryId = await this.getOrCreateEntryByName(modelInfo.model, value, modelInfo.codePrefix, tx);
+                relations[relationName] = { connect: { id: entryId } };
+                console.log(`✅ Using ${relationName} with name: "${value}" and ID: ${entryId}`);
+            } else {
+                // Use unknown entry
+                const unknownId = await this.getOrCreateUnknownEntry(modelInfo.model, modelInfo.codePrefix, tx);
+                relations[relationName] = { connect: { id: unknownId } };
+                console.log(`✅ Using unknown ${relationName} with ID: ${unknownId}`);
+            }
+        }
+
+        console.log('📦 Final relations object from names:', JSON.stringify(relations, null, 2));
+        return relations;
     }
 }
