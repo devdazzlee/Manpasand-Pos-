@@ -717,50 +717,50 @@ export class ProductService {
             prisma.product.count({ where }),
         ]);
         console.log("products >>>", products)
-        // return {
-        //     data: products.map(p => {
-        //         // Calculate available stock
-        //         let currentStock = 0;
-        //         let reservedStock = 0;
-        //         let minimumStock = 0;
-        //         let maximumStock = 0;
+        return {
+            data: products.map(p => {
+                // Calculate available stock
+                let currentStock = 0;
+                let reservedStock = 0;
+                let minimumStock = 0;
+                let maximumStock = 0;
 
-        //         if (branch_id && p.stock && Array.isArray(p.stock) && p.stock.length > 0) {
-        //             // Single branch stock
-        //             const stockData = p.stock[0];
-        //             currentStock = stockData.current_quantity || 0;
-        //             reservedStock = stockData.reserved_quantity || 0;
-        //             minimumStock = stockData.minimum_quantity || 0;
-        //             maximumStock = stockData.maximum_quantity || 0;
-        //         } else if (p.stock && Array.isArray(p.stock)) {
-        //             // Multiple branches - sum up all stock
-        //             p.stock.forEach((stockItem: any) => {
-        //                 currentStock += stockItem.current_quantity || 0;
-        //                 reservedStock += stockItem.reserved_quantity || 0;
-        //                 minimumStock += stockItem.minimum_quantity || 0;
-        //                 maximumStock += stockItem.maximum_quantity || 0;
-        //             });
-        //         }
+                if (branch_id && p.stock && Array.isArray(p.stock) && p.stock.length > 0) {
+                    // Single branch stock
+                    const stockData = p.stock[0];
+                    currentStock = stockData.current_quantity || 0;
+                    reservedStock = stockData.reserved_quantity || 0;
+                    minimumStock = stockData.minimum_quantity || 0;
+                    maximumStock = stockData.maximum_quantity || 0;
+                } else if (p.stock && Array.isArray(p.stock)) {
+                    // Multiple branches - sum up all stock
+                    p.stock.forEach((stockItem: any) => {
+                        currentStock += stockItem.current_quantity || 0;
+                        reservedStock += stockItem.reserved_quantity || 0;
+                        minimumStock += stockItem.minimum_quantity || 0;
+                        maximumStock += stockItem.maximum_quantity || 0;
+                    });
+                }
 
-        //         return {
-        //             ...p,
-        //             current_stock: currentStock,
-        //             reserved_stock: reservedStock,
-        //             available_stock: currentStock - reservedStock,
-        //             minimum_stock: minimumStock,
-        //             maximum_stock: maximumStock,
-        //             order_count: p._count.order_items,
-        //             _count: undefined,
-        //             stock: undefined, // Remove the raw stock data
-        //         };
-        //     }),
-        //     meta: {
-        //         total,
-        //         page,
-        //         limit,
-        //         totalPages: Math.ceil(total / limit),
-        //     },
-        // };
+                return {
+                    ...p,
+                    current_stock: currentStock,
+                    reserved_stock: reservedStock,
+                    available_stock: currentStock - reservedStock,
+                    minimum_stock: minimumStock,
+                    maximum_stock: maximumStock,
+                    order_count: p._count.order_items,
+                    _count: undefined,
+                    stock: undefined, // Remove the raw stock data
+                };
+            }),
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            },
+        };
     }
 
     async getFeaturedProducts() {
