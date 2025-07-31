@@ -202,6 +202,17 @@ export function NewSale() {
     }
   }
 
+  const printReceipt = (receiptContent: string) => {
+    const printWindow = window.open('', '', 'width=600,height=600');
+    if (printWindow) {
+      printWindow.document.write('<pre>' + receiptContent + '</pre>');
+      printWindow.document.close();
+      printWindow.focus();
+      printWindow.print();
+      printWindow.close();
+    }
+  };
+
   const downloadReceipt = (receiptData: any) => {
     const receiptContent = `
 MANPASAND POS SYSTEM
@@ -239,6 +250,9 @@ Thank you for shopping with us!
     a.click()
     document.body.removeChild(a)
     URL.revokeObjectURL(url)
+
+    // Print logic
+    printReceipt(receiptContent);
   }
 
   const handlePayment = async (method: string) => {

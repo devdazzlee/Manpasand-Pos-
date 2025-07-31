@@ -20,14 +20,18 @@ const adjustStockController = asyncHandler(async (req: Request, res: Response) =
 
 const getStocksController = asyncHandler(async (req: Request, res: Response) => {
     const branchId = (req.query.branchId as string) || req.user?.branch_id;
-    if (!branchId) throw new AppError(400, "Branch ID is required");
+    if (!branchId || branchId === "null" || branchId === "undefined" || branchId === "") {
+        throw new AppError(400, "Branch ID is required");
+    }
     const stocks = await stockService.getStockByBranch(branchId);
     new ApiResponse(stocks, "Stocks retrieved successfully").send(res);
 });
 
 const getStockMovementsController = asyncHandler(async (req: Request, res: Response) => {
     const branchId = (req.query.branchId as string) || req.user?.branch_id;
-    if (!branchId) throw new AppError(400, "Branch ID is required");
+    if (!branchId || branchId === "null" || branchId === "undefined" || branchId === "") {
+        throw new AppError(400, "Branch ID is required");
+    }
     const movements = await stockService.getStockMovements(branchId);
     new ApiResponse(movements, "Stock movement history retrieved").send(res);
 });
