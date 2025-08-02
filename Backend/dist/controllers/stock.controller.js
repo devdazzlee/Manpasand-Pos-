@@ -7,6 +7,7 @@ exports.getStockMovementsController = exports.getStocksController = exports.adju
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const stock_service_1 = require("../services/stock.service");
+const apiError_1 = require("../utils/apiError");
 const stockService = new stock_service_1.StockService();
 const createStockController = (0, asyncHandler_1.default)(async (req, res) => {
     console.log("User ID:", req.user?.id, req.user?.role);
@@ -20,12 +21,20 @@ const adjustStockController = (0, asyncHandler_1.default)(async (req, res) => {
 });
 exports.adjustStockController = adjustStockController;
 const getStocksController = (0, asyncHandler_1.default)(async (req, res) => {
-    const stocks = await stockService.getStockByBranch(req.user?.branch_id);
+    const branchId = req.query.branchId || req.user?.branch_id;
+    if (!branchId || branchId === "null" || branchId === "undefined" || branchId === "") {
+        throw new apiError_1.AppError(400, "Branch ID is required");
+    }
+    const stocks = await stockService.getStockByBranch(branchId);
     new apiResponse_1.ApiResponse(stocks, "Stocks retrieved successfully").send(res);
 });
 exports.getStocksController = getStocksController;
 const getStockMovementsController = (0, asyncHandler_1.default)(async (req, res) => {
-    const movements = await stockService.getStockMovements(req.user?.branch_id);
+    const branchId = req.query.branchId || req.user?.branch_id;
+    if (!branchId || branchId === "null" || branchId === "undefined" || branchId === "") {
+        throw new apiError_1.AppError(400, "Branch ID is required");
+    }
+    const movements = await stockService.getStockMovements(branchId);
     new apiResponse_1.ApiResponse(movements, "Stock movement history retrieved").send(res);
 });
 exports.getStockMovementsController = getStockMovementsController;

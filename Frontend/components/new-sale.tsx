@@ -93,19 +93,20 @@ export function NewSale() {
   })
 
   const addToCart = async (product: Product) => {
-    // Check stock availability (disabled for testing - allows negative stock)
+    // For testing: Allow negative sales (stock can go below 0)
+    // Comment out stock validation for testing purposes
+    /*
     const availableStock = product.available_stock ?? product.stock
     const currentQuantity = cart.find((item) => item.id === product.id)?.quantity || 0
-    
-    // Commented out stock check for testing purposes
-    // if (currentQuantity >= availableStock) {
-    //   toast({
-    //     variant: "destructive",
-    //     title: "Insufficient Stock",
-    //     description: `Only ${availableStock} units available for ${product.name}`,
-    //   })
-    //   return
-    // }
+    if (currentQuantity >= availableStock) {
+      toast({
+        variant: "destructive",
+        title: "Insufficient Stock",
+        description: `Only ${availableStock} units available for ${product.name}`,
+      })
+      return
+    }
+    */
 
     // Simulate API call delay
     await new Promise((resolve) => setTimeout(resolve, 300))
@@ -137,20 +138,23 @@ export function NewSale() {
     const item = cart.find((item) => item.id === id)
     const product = products.find((p) => p.id === id)
 
+    // For testing: Allow negative sales (stock can go below 0)
+    // Comment out stock validation for testing purposes
+    /*
     if (item && product) {
       const newQuantity = item.quantity + change
       const availableStock = product.available_stock ?? product.stock
 
-      // Commented out stock check for testing purposes
-      // if (newQuantity > availableStock) {
-      //   toast({
-      //     variant: "destructive",
-      //     title: "Insufficient Stock",
-      //     description: `Only ${availableStock} units available`,
-      //   })
-      //   return
-      // }
+      if (newQuantity > availableStock) {
+        toast({
+          variant: "destructive",
+          title: "Insufficient Stock",
+          description: `Only ${availableStock} units available`,
+        })
+        return
+      }
     }
+    */
 
     setCart(
       cart
@@ -370,6 +374,7 @@ Thank you for shopping with us!
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">New Sales</h1>
+              <p className="text-sm text-orange-600 font-medium">⚠️ TESTING MODE: Negative sales allowed</p>
               {lastTransactionId && <p className="text-sm text-green-600">Last transaction: {lastTransactionId}</p>}
             </div>
             <div className="flex items-center space-x-2">
@@ -468,9 +473,8 @@ Thank you for shopping with us!
               return (
                 <Card
                   key={product.id}
-                  className={`cursor-pointer hover:shadow-md transition-shadow ${isOutOfStock ? "opacity-50 cursor-not-allowed" : ""
-                    }`}
-                  onClick={() => !isOutOfStock && addToCart(product)}
+                  className={`cursor-pointer hover:shadow-md transition-shadow`}
+                  onClick={() => addToCart(product)}
                 >
                   <CardContent className="p-4">
                     <div className="aspect-square bg-gray-100 rounded-lg mb-3 flex items-center justify-center relative">
@@ -481,11 +485,10 @@ Thank you for shopping with us!
                     <p className="text-lg font-bold text-blue-600">Rs {product.price.toFixed(2)}</p>
                     <div className="flex items-center justify-between mt-2">
                       <p
-                        className={`text-sm ${isOutOfStock ? "text-red-500" : isLowStock ? "text-yellow-600" : "text-gray-500"}`}
+                        className={`text-sm ${isLowStock ? "text-yellow-600" : "text-gray-500"}`}
                       >
                         Stock: {product.available_stock ?? product.stock}
                       </p>
-                      {isOutOfStock && <Badge variant="destructive">Out of Stock</Badge>}
                       {isLowStock && (
                         <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
                           Low Stock

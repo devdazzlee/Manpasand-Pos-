@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getRecentSaleItemProductNameAndPrice = exports.getTodaySalesController = exports.refundSaleController = exports.createSaleController = exports.getSaleByIdController = exports.getSalesController = void 0;
+exports.getRecentSaleItemProductNameAndPrice = exports.getTodaySalesController = exports.refundSaleController = exports.createSaleController = exports.getSaleByIdController = exports.getSalesForReturnsController = exports.getSalesController = void 0;
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const sales_service_1 = require("../services/sales.service");
 const apiResponse_1 = require("../utils/apiResponse");
@@ -13,6 +13,11 @@ const getSalesController = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(sales, "Sales fetched successfully").send(res);
 });
 exports.getSalesController = getSalesController;
+const getSalesForReturnsController = (0, asyncHandler_1.default)(async (req, res) => {
+    const sales = await saleService.getSalesForReturns({ branchId: req.user?.branch_id });
+    new apiResponse_1.ApiResponse(sales, "Sales eligible for returns fetched successfully").send(res);
+});
+exports.getSalesForReturnsController = getSalesForReturnsController;
 const getSaleByIdController = (0, asyncHandler_1.default)(async (req, res) => {
     const sale = await saleService.getSaleById(req.params.saleId);
     new apiResponse_1.ApiResponse(sale, "Sale details fetched").send(res);
@@ -28,7 +33,7 @@ const createSaleController = (0, asyncHandler_1.default)(async (req, res) => {
 });
 exports.createSaleController = createSaleController;
 const refundSaleController = (0, asyncHandler_1.default)(async (req, res) => {
-    const { customerId, returnedItems = [], exchangedItems = [] } = req.body;
+    const { customerId, returnedItems = [], exchangedItems = [], notes } = req.body;
     const originalSaleId = req.params.saleId;
     const createdBy = req.user.id;
     const branchId = req.user?.branch_id;

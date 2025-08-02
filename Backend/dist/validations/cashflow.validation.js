@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listCashFlowsSchema = exports.getCashFlowByDateSchema = exports.addClosingSchema = exports.createExpenseSchema = exports.createOpeningSchema = void 0;
+exports.listCashFlowsSchema = exports.getExpensesByDateSchema = exports.getCashFlowByDateSchema = exports.addClosingSchema = exports.createExpenseSchema = exports.createOpeningSchema = void 0;
 const zod_1 = require("zod");
 exports.createOpeningSchema = zod_1.z.object({
     body: zod_1.z.object({
@@ -10,7 +10,6 @@ exports.createOpeningSchema = zod_1.z.object({
 });
 exports.createExpenseSchema = zod_1.z.object({
     body: zod_1.z.object({
-        cashflow_id: zod_1.z.string().uuid(),
         particular: zod_1.z.string().min(1),
         amount: zod_1.z.number().positive(),
     }),
@@ -24,6 +23,13 @@ exports.addClosingSchema = zod_1.z.object({
 exports.getCashFlowByDateSchema = zod_1.z.object({
     query: zod_1.z.object({
         date: zod_1.z.string().refine((val) => !isNaN(Date.parse(val)), {
+            message: 'Invalid date format',
+        }),
+    }),
+});
+exports.getExpensesByDateSchema = zod_1.z.object({
+    query: zod_1.z.object({
+        date: zod_1.z.string().optional().refine((val) => !val || !isNaN(Date.parse(val)), {
             message: 'Invalid date format',
         }),
     }),

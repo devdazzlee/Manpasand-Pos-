@@ -21,9 +21,6 @@ class ShiftAssignmentService {
                 employee_id,
                 end_date: null,
             },
-            include: {
-                shift: true,
-            },
             orderBy: {
                 start_date: 'desc',
             },
@@ -33,7 +30,6 @@ class ShiftAssignmentService {
     async getShiftHistory(employee_id) {
         return await client_1.prisma.shiftAssignment.findMany({
             where: { employee_id },
-            include: { shift: true },
             orderBy: { start_date: 'desc' },
         });
     }
@@ -47,6 +43,26 @@ class ShiftAssignmentService {
             data: {
                 end_date,
             },
+        });
+    }
+    // Get all shifts (optionally with filters/pagination)
+    async getAllShifts() {
+        return await client_1.prisma.shiftAssignment.findMany({
+            orderBy: { start_date: 'desc' },
+            include: { employee: true },
+        });
+    }
+    // Update a shift by ID
+    async updateShift(id, data) {
+        return await client_1.prisma.shiftAssignment.update({
+            where: { id },
+            data,
+        });
+    }
+    // Delete a shift by ID
+    async deleteShift(id) {
+        return await client_1.prisma.shiftAssignment.delete({
+            where: { id },
         });
     }
 }

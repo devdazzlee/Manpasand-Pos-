@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.endCurrentShift = exports.getShiftHistory = exports.getCurrentShift = exports.assignShift = void 0;
+exports.deleteShift = exports.updateShift = exports.getAllShifts = exports.endCurrentShift = exports.getShiftHistory = exports.getCurrentShift = exports.assignShift = void 0;
 const shiftAssignment_service_1 = require("../services/shiftAssignment.service");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
@@ -32,5 +32,24 @@ exports.endCurrentShift = (0, asyncHandler_1.default)(async (req, res) => {
     const { employee_id } = req.params;
     await shiftAssignmentService.endCurrentShift(employee_id);
     new apiResponse_1.ApiResponse(null, 'Current shift ended successfully', 200).send(res);
+});
+exports.getAllShifts = (0, asyncHandler_1.default)(async (req, res) => {
+    const shifts = await shiftAssignmentService.getAllShifts();
+    new apiResponse_1.ApiResponse(shifts, 'All shifts fetched successfully', 200).send(res);
+});
+exports.updateShift = (0, asyncHandler_1.default)(async (req, res) => {
+    const { id } = req.params;
+    const { shift_time, start_date, end_date } = req.body;
+    const updated = await shiftAssignmentService.updateShift(id, {
+        shift_time,
+        start_date: start_date ? new Date(start_date) : undefined,
+        end_date: end_date ? new Date(end_date) : undefined,
+    });
+    new apiResponse_1.ApiResponse(updated, 'Shift updated successfully', 200).send(res);
+});
+exports.deleteShift = (0, asyncHandler_1.default)(async (req, res) => {
+    const { id } = req.params;
+    await shiftAssignmentService.deleteShift(id);
+    new apiResponse_1.ApiResponse(null, 'Shift deleted successfully', 200).send(res);
 });
 //# sourceMappingURL=shiftAssignment.controller.js.map

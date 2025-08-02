@@ -14,5 +14,8 @@ router.post('/', (0, validation_middleware_1.validate)(shiftAssignment_validatio
 router.get('/current/:employee_id', (0, validation_middleware_1.validate)(shiftAssignment_validation_1.employeeIdParamSchema), shiftAssignment_controller_1.getCurrentShift);
 router.get('/history/:employee_id', (0, validation_middleware_1.validate)(shiftAssignment_validation_1.employeeIdParamSchema), shiftAssignment_controller_1.getShiftHistory);
 router.patch('/end/:employee_id', (0, validation_middleware_1.validate)(shiftAssignment_validation_1.employeeIdParamSchema), shiftAssignment_controller_1.endCurrentShift);
+router.get('/', shiftAssignment_controller_1.getAllShifts);
+router.patch('/:id', shiftAssignment_controller_1.updateShift);
+router.delete('/:id', shiftAssignment_controller_1.deleteShift);
 exports.default = router;
 //# sourceMappingURL=shiftAssignment.routes.js.map
