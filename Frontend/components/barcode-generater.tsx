@@ -1,86 +1,88 @@
-"use client"
+"use client";
 
-import { useState, useRef, useEffect, useMemo } from "react"
-import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Printer, Package, Search, Loader2 } from "lucide-react"
-import Barcode from "react-barcode"
-import apiClient from "@/lib/apiClient"
-import { DatePicker } from "./ui/date-picker"
-import { PageLoader } from "./ui/page-loader"
+import { useState, useRef, useEffect, useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Printer, Package, Search, Loader2, RefreshCw } from "lucide-react";
+import Barcode from "react-barcode";
+import { DatePicker } from "./ui/date-picker";
+import { PageLoader } from "./ui/page-loader";
+import { usePosData } from "@/hooks/use-pos-data";
+import { useToast } from "@/hooks/use-toast";
 
 interface Product {
-  id: string
-  code: string
-  name: string
-  sku: string
-  sales_rate_exc_dis_and_tax: string
-  unit: {
-    id: string
-    name: string
-  }
-  category: {
-    name: string
-  }
-  brand: {
-    name: string
-  }
+  id: string;
+  code?: string;
+  name: string;
+  sku?: string;
+  sales_rate_exc_dis_and_tax?: number;
+  unitName?: string;
+  category?: string;
+  brandName?: string;
 }
 
 export default function BarcodeGenerator() {
-  const [products, setProducts] = useState<Product[]>([])
-  const [loading, setLoading] = useState(false)
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [packageDate, setPackageDate] = useState<Date>()
-  const [expiryDate, setExpiryDate] = useState<Date>()
-  const [netWeight, setNetWeight] = useState("")
-  const [searchTerm, setSearchTerm] = useState("")
-  const [error, setError] = useState<string | null>(null)
-  const printRef = useRef<HTMLDivElement>(null)
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [packageDate, setPackageDate] = useState<Date>();
+  const [expiryDate, setExpiryDate] = useState<Date>();
+  const [netWeight, setNetWeight] = useState("");
+  const [searchTerm, setSearchTerm] = useState("");
+  const printRef = useRef<HTMLDivElement>(null);
+  const { toast } = useToast();
 
-  // Fetch products from API
-  const getProducts = async () => {
-    setLoading(true)
-    setError(null)
-    try {
-      const response = await apiClient.get("/products")
-      console.log("🚀 ~ getProducts ~ response:", response.data.data)
-      setProducts(response.data.data || [])
-    } catch (error: any) {
-      console.error("Error fetching products:", error)
-      setError("Failed to fetch products. Please try again.")
-    } finally {
-      setLoading(false)
-    }
-  }
+  // Global store with custom hook
+  const {
+    products,
+    productsLoading,
+    isAnyLoading,
+    refreshAllData,
+    fetchProducts,
+  } = usePosData();
 
   useEffect(() => {
-    getProducts()
-  }, [])
+    const fetchData = async () => {
+      try {
+        await fetchProducts();
+      } catch (error) {
+        toast({
+          variant: "destructive",
+          title: "Failed to load data",
+          description: "Could not fetch products from server",
+        });
+      }
+    };
+    fetchData();
+  }, [fetchProducts, toast]);
 
   // Filter products based on search term
   const filteredProducts = useMemo(() => {
-    if (!searchTerm) return products
+    if (!searchTerm) return products;
 
     return products.filter(
       (product) =>
         product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.sku.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        product.code.toLowerCase().includes(searchTerm.toLowerCase()),
-    )
-  }, [products, searchTerm])
+        (product.sku &&
+          product.sku.toLowerCase().includes(searchTerm.toLowerCase()))
+    );
+  }, [products, searchTerm]);
 
   const handleProductSelect = (productId: string) => {
-    const product = products.find((p) => p.id === productId)
-    setSelectedProduct(product || null)
+    const product = products.find((p) => p.id === productId);
+    setSelectedProduct(product || null);
     // Reset form when selecting new product
-    setNetWeight("")
-    setPackageDate(undefined)
-    setExpiryDate(undefined)
-  }
+    setNetWeight("");
+    setPackageDate(undefined);
+    setExpiryDate(undefined);
+  };
 
   const handlePrint = () => {
     if (printRef.current && selectedProduct) {
@@ -169,20 +171,19 @@ export default function BarcodeGenerator() {
   };
 
   const formatDate = (date: Date | undefined) => {
-    if (!date) return "__/__/____"
+    if (!date) return "__/__/____";
     return date.toLocaleDateString("en-GB", {
       day: "2-digit",
       month: "2-digit",
       year: "numeric",
-    })
-  }
+    });
+  };
 
-  const isFormValid = selectedProduct && packageDate && expiryDate && netWeight.trim()
+  const isFormValid =
+    selectedProduct && packageDate && expiryDate && netWeight.trim();
 
-  if (loading && products.length === 0) {
-    return (
-        <PageLoader message="Barcode Generater..." />
-    )
+  if (productsLoading && products.length === 0) {
+    return <PageLoader message="Barcode Generator..." />;
   }
 
   return (
@@ -197,15 +198,6 @@ export default function BarcodeGenerator() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {error && (
-              <div className="bg-red-50 border border-red-200 text-red-700 px-3 py-2 rounded-md text-sm">
-                {error}
-                <Button variant="outline" size="sm" onClick={getProducts} className="ml-2 bg-transparent">
-                  Retry
-                </Button>
-              </div>
-            )}
-
             {/* Search */}
             <div className="space-y-2">
               <Label htmlFor="search">Search Products</Label>
@@ -223,8 +215,13 @@ export default function BarcodeGenerator() {
 
             {/* Product Selection */}
             <div className="space-y-2">
-              <Label htmlFor="product">Select Product ({filteredProducts.length} found)</Label>
-              <Select onValueChange={handleProductSelect} value={selectedProduct?.id || ""}>
+              <Label htmlFor="product">
+                Select Product ({filteredProducts.length} found)
+              </Label>
+              <Select
+                onValueChange={handleProductSelect}
+                value={selectedProduct?.id || ""}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="Choose a product" />
                 </SelectTrigger>
@@ -234,7 +231,8 @@ export default function BarcodeGenerator() {
                       <div className="flex flex-col">
                         <span className="font-medium">{product.name}</span>
                         <span className="text-xs text-gray-500">
-                          SKU: {product.sku} | Rs {product.sales_rate_exc_dis_and_tax}
+                          SKU: {product.sku} | Rs{" "}
+                          {product.sales_rate_exc_dis_and_tax}
                         </span>
                       </div>
                     </SelectItem>
@@ -254,16 +252,18 @@ export default function BarcodeGenerator() {
                     <strong>SKU:</strong> {selectedProduct.sku}
                   </div>
                   <div className="text-sm">
-                    <strong>Price:</strong> Rs {selectedProduct.sales_rate_exc_dis_and_tax}
+                    <strong>Price:</strong> Rs{" "}
+                    {selectedProduct.sales_rate_exc_dis_and_tax}
                   </div>
                   <div className="text-sm">
-                    <strong>Unit:</strong> {selectedProduct.unit.name}
+                    <strong>Unit:</strong> {selectedProduct.unitName || "N/A"}
                   </div>
                   <div className="text-sm">
-                    <strong>Brand:</strong> {selectedProduct.brand.name}
+                    <strong>Brand:</strong> {selectedProduct.brandName || "N/A"}
                   </div>
                   <div className="text-sm">
-                    <strong>Category:</strong> {selectedProduct.category.name}
+                    <strong>Category:</strong>{" "}
+                    {selectedProduct.category || "N/A"}
                   </div>
                 </div>
 
@@ -282,15 +282,27 @@ export default function BarcodeGenerator() {
                 <div className="grid grid-cols-1 gap-4">
                   <div className="space-y-2">
                     <Label>Package Date *</Label>
-                    <DatePicker date={packageDate} onDateChange={setPackageDate} placeholder="Select package date" />
+                    <DatePicker
+                      date={packageDate}
+                      onDateChange={setPackageDate}
+                      placeholder="Select package date"
+                    />
                   </div>
                   <div className="space-y-2">
                     <Label>Expiry Date *</Label>
-                    <DatePicker date={expiryDate} onDateChange={setExpiryDate} placeholder="Select expiry date" />
+                    <DatePicker
+                      date={expiryDate}
+                      onDateChange={setExpiryDate}
+                      placeholder="Select expiry date"
+                    />
                   </div>
                 </div>
 
-                <Button onClick={handlePrint} className="w-full" disabled={!isFormValid}>
+                <Button
+                  onClick={handlePrint}
+                  className="w-full"
+                  disabled={!isFormValid}
+                >
                   <Printer className="h-4 w-4 mr-2" />
                   Print Barcode
                 </Button>
@@ -312,25 +324,29 @@ export default function BarcodeGenerator() {
                 style={{ width: "4in", height: "2.5in" }}
               >
                 <div className="brand-category text-center text-xs text-gray-600 mb-1">
-                  {selectedProduct.brand.name} | {selectedProduct.category.name}
+                  {selectedProduct.brandName || "N/A"} |{" "}
+                  {selectedProduct.category || "N/A"}
                 </div>
 
                 <div className="product-info text-center mb-2">
-                  <div className="product-name font-bold text-base mb-1 uppercase">{selectedProduct.name}</div>
+                  <div className="product-name font-bold text-base mb-1 uppercase">
+                    {selectedProduct.name}
+                  </div>
                   <div className="product-details text-xs space-y-1">
                     <div>
                       <strong>Net Wt:</strong> {netWeight || "Not specified"}
                     </div>
                     <div>
-                      <strong>Price:</strong> Rs {selectedProduct.sales_rate_exc_dis_and_tax} /{" "}
-                      {selectedProduct.unit.name}
+                      <strong>Price:</strong> Rs{" "}
+                      {selectedProduct.sales_rate_exc_dis_and_tax} /{" "}
+                      {selectedProduct.unitName || "N/A"}
                     </div>
                   </div>
                 </div>
 
                 <div className="barcode-container flex justify-center items-center flex-grow">
                   <Barcode
-                    value={selectedProduct.sku}
+                    value={selectedProduct.sku || selectedProduct.id}
                     width={1.2}
                     height={35}
                     fontSize={8}
@@ -360,8 +376,17 @@ export default function BarcodeGenerator() {
           <CardHeader>
             <CardTitle className="flex items-center justify-between">
               <span>Available Products</span>
-              <Button variant="outline" size="sm" onClick={getProducts} disabled={loading}>
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Refresh"}
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={refreshAllData}
+                disabled={isAnyLoading}
+              >
+                {isAnyLoading ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <RefreshCw className="h-4 w-4" />
+                )}
               </Button>
             </CardTitle>
           </CardHeader>
@@ -369,22 +394,30 @@ export default function BarcodeGenerator() {
             <div className="space-y-2 max-h-96 overflow-y-auto">
               {filteredProducts.length === 0 ? (
                 <div className="text-center text-gray-500 py-8">
-                  {searchTerm ? "No products found matching your search." : "No products available."}
+                  {searchTerm
+                    ? "No products found matching your search."
+                    : "No products available."}
                 </div>
               ) : (
                 filteredProducts.map((product) => (
                   <div
                     key={product.id}
                     className={`border rounded-lg p-3 hover:bg-gray-50 cursor-pointer transition-colors ${
-                      selectedProduct?.id === product.id ? "border-blue-500 bg-blue-50" : ""
+                      selectedProduct?.id === product.id
+                        ? "border-blue-500 bg-blue-50"
+                        : ""
                     }`}
                     onClick={() => handleProductSelect(product.id)}
                   >
                     <div className="font-medium text-sm">{product.name}</div>
-                    <div className="text-xs text-gray-600">SKU: {product.sku}</div>
-                    <div className="text-xs text-gray-600">Price: Rs {product.sales_rate_exc_dis_and_tax}</div>
                     <div className="text-xs text-gray-600">
-                      {product.brand.name} | {product.unit.name}
+                      SKU: {product.sku}
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      Price: Rs {product.sales_rate_exc_dis_and_tax}
+                    </div>
+                    <div className="text-xs text-gray-600">
+                      {product.brandName || "N/A"} | {product.unitName || "N/A"}
                     </div>
                   </div>
                 ))
@@ -394,5 +427,5 @@ export default function BarcodeGenerator() {
         </Card>
       </div>
     </div>
-  )
+  );
 }

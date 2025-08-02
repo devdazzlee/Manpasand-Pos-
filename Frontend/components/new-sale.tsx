@@ -93,17 +93,19 @@ export function NewSale() {
   })
 
   const addToCart = async (product: Product) => {
-    // Check stock availability
+    // Check stock availability (disabled for testing - allows negative stock)
     const availableStock = product.available_stock ?? product.stock
     const currentQuantity = cart.find((item) => item.id === product.id)?.quantity || 0
-    if (currentQuantity >= availableStock) {
-      toast({
-        variant: "destructive",
-        title: "Insufficient Stock",
-        description: `Only ${availableStock} units available for ${product.name}`,
-      })
-      return
-    }
+    
+    // Commented out stock check for testing purposes
+    // if (currentQuantity >= availableStock) {
+    //   toast({
+    //     variant: "destructive",
+    //     title: "Insufficient Stock",
+    //     description: `Only ${availableStock} units available for ${product.name}`,
+    //   })
+    //   return
+    // }
 
     // Simulate API call delay
     await new Promise((resolve) => setTimeout(resolve, 300))
@@ -139,14 +141,15 @@ export function NewSale() {
       const newQuantity = item.quantity + change
       const availableStock = product.available_stock ?? product.stock
 
-      if (newQuantity > availableStock) {
-        toast({
-          variant: "destructive",
-          title: "Insufficient Stock",
-          description: `Only ${availableStock} units available`,
-        })
-        return
-      }
+      // Commented out stock check for testing purposes
+      // if (newQuantity > availableStock) {
+      //   toast({
+      //     variant: "destructive",
+      //     title: "Insufficient Stock",
+      //     description: `Only ${availableStock} units available`,
+      //   })
+      //   return
+      // }
     }
 
     setCart(

@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,109 +19,91 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle } from "lucide-react"
+import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle, Loader2, Minus } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import apiClient from "@/lib/apiClient"
+
+interface Sale {
+  id: string
+  sale_number: string
+  customer?: {
+    name: string
+    email: string
+  }
+  sale_date: string
+  total_amount: number
+  sale_items: Array<{
+    id: string
+    product: {
+      id: string
+      name: string
+      sku: string
+    }
+    quantity: number
+    unit_price: number
+    line_total: number
+  }>
+}
 
 interface ReturnItem {
   id: string
-  saleId: string
-  customer: string
-  date: string
-  reason: string
-  amount: number
-  status: "pending" | "approved" | "rejected" | "completed"
-  method: "cash" | "card" | "store-credit" | "exchange"
-  notes?: string
-  items?: Array<{
+  sale_number: string
+  customer?: {
     name: string
+    email: string
+  }
+  sale_date: string
+  total_amount: number
+  status: "PENDING" | "COMPLETED" | "CANCELLED" | "REFUNDED" | "EXCHANGED"
+  payment_method: string
+  notes?: string
+  sale_items: Array<{
+    id: string
+    product: {
+      id: string
+      name: string
+      sku: string
+    }
     quantity: number
-    price: number
-    reason: string
+    unit_price: number
+    line_total: number
+    item_type: "ORIGINAL" | "RETURN" | "EXCHANGE"
   }>
-  processedBy?: string
-  processedDate?: string
 }
 
 interface NewReturn {
   saleId: string
-  customer: string
-  reason: string
-  method: string
+  customerId?: string
+  returnedItems: Array<{
+    productId: string
+    quantity: number
+  }>
+  exchangedItems: Array<{
+    productId: string
+    quantity: number
+    price: number
+  }>
   notes: string
-  amount: string
+}
+
+interface SelectedReturnItem {
+  productId: string
+  productName: string
+  sku: string
+  originalQuantity: number
+  returnQuantity: number
+  unitPrice: number
 }
 
 export function Returns() {
   const { toast } = useToast()
 
-  const [returns, setReturns] = useState<ReturnItem[]>([
-    {
-      id: "RET-001",
-      saleId: "SALE-1234",
-      customer: "John Doe",
-      date: "2024-01-15",
-      reason: "Defective",
-      amount: 2500,
-      status: "pending",
-      method: "cash",
-      notes: "Product stopped working after 2 days",
-      items: [{ name: "Wireless Headphones", quantity: 1, price: 2500, reason: "Defective - no sound" }],
-    },
-    {
-      id: "RET-002",
-      saleId: "SALE-1235",
-      customer: "Jane Smith",
-      date: "2024-01-14",
-      reason: "Wrong Size",
-      amount: 1800,
-      status: "approved",
-      method: "exchange",
-      notes: "Customer wants to exchange for larger size",
-      items: [{ name: "T-Shirt", quantity: 1, price: 1800, reason: "Size too small" }],
-      processedBy: "Manager",
-      processedDate: "2024-01-14",
-    },
-    {
-      id: "RET-003",
-      saleId: "SALE-1236",
-      customer: "Mike Johnson",
-      date: "2024-01-13",
-      reason: "Not Satisfied",
-      amount: 3200,
-      status: "completed",
-      method: "card",
-      notes: "Customer not happy with product quality",
-      items: [{ name: "Bluetooth Speaker", quantity: 1, price: 3200, reason: "Poor sound quality" }],
-      processedBy: "Sarah Johnson",
-      processedDate: "2024-01-13",
-    },
-    {
-      id: "RET-004",
-      saleId: "SALE-1237",
-      customer: "Emily Davis",
-      date: "2024-01-12",
-      reason: "Damaged",
-      amount: 4500,
-      status: "rejected",
-      method: "cash",
-      notes: "Damage appears to be customer-caused",
-      items: [{ name: "Laptop Charger", quantity: 1, price: 4500, reason: "Physical damage" }],
-      processedBy: "Manager",
-      processedDate: "2024-01-12",
-    },
-    {
-      id: "RET-005",
-      saleId: "SALE-1238",
-      customer: "Robert Brown",
-      date: "2024-01-15",
-      reason: "Wrong Item",
-      amount: 1200,
-      status: "pending",
-      method: "exchange",
-      notes: "Received wrong color variant",
-      items: [{ name: "Phone Case", quantity: 1, price: 1200, reason: "Wrong color - ordered black, got white" }],
-    },
-  ])
+  const [returns, setReturns] = useState<ReturnItem[]>([])
+  const [sales, setSales] = useState<Sale[]>([])
+  const [loading, setLoading] = useState(false)
+  const [salesLoading, setSalesLoading] = useState(false)
+  const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
+  const [selectedReturnItems, setSelectedReturnItems] = useState<SelectedReturnItem[]>([])
 
   const [isProcessOpen, setIsProcessOpen] = useState(false)
   const [selectedReturn, setSelectedReturn] = useState<ReturnItem | null>(null)
@@ -129,23 +111,67 @@ export function Returns() {
   const [searchTerm, setSearchTerm] = useState("")
   const [newReturn, setNewReturn] = useState<NewReturn>({
     saleId: "",
-    customer: "",
-    reason: "",
-    method: "",
+    customerId: "",
+    returnedItems: [],
+    exchangedItems: [],
     notes: "",
-    amount: "",
   })
+
+  // Fetch sales and returns data
+  const fetchSales = async () => {
+    setSalesLoading(true)
+    try {
+      const response = await apiClient.get("/sale/for-returns")
+      setSales(response.data.data || [])
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Failed to fetch sales",
+        description: "Could not load sales data",
+      })
+    } finally {
+      setSalesLoading(false)
+    }
+  }
+
+  const fetchReturns = async () => {
+    setLoading(true)
+    try {
+      // Fetch sales that have returns/exchanges (status REFUNDED or EXCHANGED)
+      const response = await apiClient.get("/sale")
+      const allSales = response.data.data || []
+      const returnSales = allSales.filter((sale: any) => 
+        sale.status === "REFUNDED" || sale.status === "EXCHANGED"
+      )
+      setReturns(returnSales)
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Failed to fetch returns",
+        description: "Could not load returns data",
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchSales()
+    fetchReturns()
+  }, [])
 
   const getStatusColor = (status: string) => {
     switch (status) {
-      case "pending":
+      case "PENDING":
         return "bg-yellow-100 text-yellow-800"
-      case "approved":
+      case "COMPLETED":
         return "bg-green-100 text-green-800"
-      case "rejected":
+      case "CANCELLED":
         return "bg-red-100 text-red-800"
-      case "completed":
+      case "REFUNDED":
         return "bg-blue-100 text-blue-800"
+      case "EXCHANGED":
+        return "bg-purple-100 text-purple-800"
       default:
         return "bg-gray-100 text-gray-800"
     }
@@ -155,9 +181,9 @@ export function Returns() {
     return returns.filter((returnItem) => {
       const matchesSearch =
         returnItem.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        returnItem.saleId.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        returnItem.customer.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        returnItem.reason.toLowerCase().includes(searchTerm.toLowerCase())
+        returnItem.sale_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        (returnItem.customer?.name && returnItem.customer.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
+        (returnItem.customer?.email && returnItem.customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
 
       return matchesSearch
     })
@@ -169,121 +195,122 @@ export function Returns() {
   }
 
   // Calculate stats
-  const todayReturns = returns.filter((r) => r.date === "2024-01-15").length
-  const todayValue = returns.filter((r) => r.date === "2024-01-15").reduce((sum, r) => sum + r.amount, 0)
-  const pendingReturns = returns.filter((r) => r.status === "pending").length
-  const returnRate = 2.3 // This would be calculated based on total sales
+  const today = new Date().toISOString().split('T')[0]
+  const todayReturns = returns.filter((r) => r.sale_date.startsWith(today)).length
+  const todayValue = returns.filter((r) => r.sale_date.startsWith(today)).reduce((sum, r) => sum + Number(r.total_amount), 0)
+  const pendingReturns = returns.filter((r) => r.status === "PENDING").length
+  const returnRate = returns.length > 0 ? ((returns.length / sales.length) * 100).toFixed(1) : "0.0"
 
-  const generateReturnId = () => {
-    const nextId = returns.length + 1
-    return `RET-${nextId.toString().padStart(3, "0")}`
-  }
-
-  const handleProcessReturn = () => {
-    if (!newReturn.saleId || !newReturn.customer || !newReturn.reason || !newReturn.method || !newReturn.amount) {
+  const handleProcessReturn = async () => {
+    if (!newReturn.saleId || (newReturn.returnedItems.length === 0 && newReturn.exchangedItems.length === 0)) {
       toast({
         title: "Missing Information",
-        description: "Please fill in all required fields.",
+        description: "Please select a sale and add items to return or exchange.",
         variant: "destructive",
       })
       return
     }
 
-    const returnItem: ReturnItem = {
-      id: generateReturnId(),
-      saleId: newReturn.saleId,
-      customer: newReturn.customer,
-      date: new Date().toISOString().split("T")[0],
-      reason: newReturn.reason,
-      amount: Number.parseFloat(newReturn.amount),
-      status: "pending",
-      method: newReturn.method as any,
-      notes: newReturn.notes,
-      items: [
-        {
-          name: "Product from " + newReturn.saleId,
-          quantity: 1,
-          price: Number.parseFloat(newReturn.amount),
-          reason: newReturn.reason,
-        },
-      ],
+    // Validate return quantities
+    const hasInvalidQuantity = selectedReturnItems.some(item => 
+      item.returnQuantity > item.originalQuantity
+    )
+    
+    if (hasInvalidQuantity) {
+      toast({
+        title: "Invalid Return Quantity",
+        description: "Return quantity cannot exceed original sale quantity.",
+        variant: "destructive",
+      })
+      return
     }
 
-    setReturns((prev) => [returnItem, ...prev])
-    setNewReturn({
-      saleId: "",
-      customer: "",
-      reason: "",
-      method: "",
-      notes: "",
-      amount: "",
-    })
-    setIsProcessOpen(false)
+    setLoading(true)
+    try {
+      const response = await apiClient.patch(`/sale/${newReturn.saleId}/refund`, {
+        customerId: newReturn.customerId || undefined,
+        returnedItems: newReturn.returnedItems,
+        exchangedItems: newReturn.exchangedItems,
+        notes: newReturn.notes,
+      })
 
-    toast({
-      title: "Return Processed",
-      description: `Return ${returnItem.id} has been created and is pending approval.`,
-    })
+      toast({
+        title: "Return Processed",
+        description: "Return has been processed successfully.",
+      })
+
+      // Refresh data
+      await fetchReturns()
+      await fetchSales()
+
+      setNewReturn({
+        saleId: "",
+        customerId: "",
+        returnedItems: [],
+        exchangedItems: [],
+        notes: "",
+      })
+      setSelectedReturnItems([])
+      setIsProcessOpen(false)
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Failed to process return",
+        description: error.response?.data?.message || "An error occurred while processing the return.",
+      })
+    } finally {
+      setLoading(false)
+    }
   }
 
-  const handleApproveReturn = (returnId: string) => {
-    setReturns((prev) =>
-      prev.map((returnItem) =>
-        returnItem.id === returnId
-          ? {
-            ...returnItem,
-            status: "approved" as const,
-            processedBy: "Current User",
-            processedDate: new Date().toISOString().split("T")[0],
-          }
-          : returnItem,
-      ),
-    )
-
-    toast({
-      title: "Return Approved",
-      description: `Return ${returnId} has been approved for processing.`,
-    })
+  const handleSaleSelect = (saleId: string) => {
+    const sale = sales.find(s => s.id === saleId)
+    setSelectedSale(sale || null)
+    setNewReturn(prev => ({ ...prev, saleId }))
+    
+    // Initialize selected return items
+    if (sale) {
+      const items: SelectedReturnItem[] = sale.sale_items.map(item => ({
+        productId: item.product.id,
+        productName: item.product.name,
+        sku: item.product.sku,
+        originalQuantity: item.quantity,
+        returnQuantity: 0,
+        unitPrice: item.unit_price
+      }))
+      setSelectedReturnItems(items)
+    } else {
+      setSelectedReturnItems([])
+    }
   }
 
-  const handleRejectReturn = (returnId: string) => {
-    setReturns((prev) =>
-      prev.map((returnItem) =>
-        returnItem.id === returnId
-          ? {
-            ...returnItem,
-            status: "rejected" as const,
-            processedBy: "Current User",
-            processedDate: new Date().toISOString().split("T")[0],
-          }
-          : returnItem,
-      ),
+  const handleReturnQuantityChange = (productId: string, quantity: number) => {
+    setSelectedReturnItems(prev => 
+      prev.map(item => 
+        item.productId === productId 
+          ? { ...item, returnQuantity: Math.max(0, Math.min(quantity, item.originalQuantity)) }
+          : item
+      )
     )
 
-    toast({
-      title: "Return Rejected",
-      description: `Return ${returnId} has been rejected.`,
-    })
-  }
-
-  const handleCompleteReturn = (returnId: string) => {
-    setReturns((prev) =>
-      prev.map((returnItem) =>
-        returnItem.id === returnId
-          ? {
-            ...returnItem,
-            status: "completed" as const,
-            processedBy: "Current User",
-            processedDate: new Date().toISOString().split("T")[0],
-          }
-          : returnItem,
-      ),
+    // Update newReturn.returnedItems
+    const updatedItems = selectedReturnItems.map(item => 
+      item.productId === productId 
+        ? { ...item, returnQuantity: Math.max(0, Math.min(quantity, item.originalQuantity)) }
+        : item
     )
 
-    toast({
-      title: "Return Completed",
-      description: `Return ${returnId} has been completed.`,
-    })
+    const returnedItems = updatedItems
+      .filter(item => item.returnQuantity > 0)
+      .map(item => ({
+        productId: item.productId,
+        quantity: item.returnQuantity
+      }))
+
+    setNewReturn(prev => ({
+      ...prev,
+      returnedItems
+    }))
   }
 
   const handleViewReturn = (returnItem: ReturnItem) => {
@@ -295,13 +322,11 @@ export function Returns() {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Return ID</TableHead>
           <TableHead>Sale ID</TableHead>
           <TableHead>Customer</TableHead>
           <TableHead>Date</TableHead>
-          <TableHead>Reason</TableHead>
           <TableHead>Amount</TableHead>
-          <TableHead>Method</TableHead>
+          <TableHead>Payment Method</TableHead>
           <TableHead>Status</TableHead>
           <TableHead>Actions</TableHead>
         </TableRow>
@@ -309,20 +334,18 @@ export function Returns() {
       <TableBody>
         {returnsData.length === 0 ? (
           <TableRow>
-            <TableCell colSpan={9} className="text-center py-8 text-gray-500">
+            <TableCell colSpan={7} className="text-center py-8 text-gray-500">
               No returns found
             </TableCell>
           </TableRow>
         ) : (
           returnsData.map((returnItem) => (
             <TableRow key={returnItem.id}>
-              <TableCell className="font-medium">{returnItem.id}</TableCell>
-              <TableCell>{returnItem.saleId}</TableCell>
-              <TableCell>{returnItem.customer}</TableCell>
-              <TableCell>{returnItem.date}</TableCell>
-              <TableCell>{returnItem.reason}</TableCell>
-              <TableCell>Rs {returnItem.amount.toLocaleString()}</TableCell>
-              <TableCell className="capitalize">{returnItem.method}</TableCell>
+              <TableCell className="font-medium">{returnItem.sale_number}</TableCell>
+              <TableCell>{returnItem.customer?.name || returnItem.customer?.email || "N/A"}</TableCell>
+              <TableCell>{new Date(returnItem.sale_date).toLocaleDateString()}</TableCell>
+              <TableCell>Rs {Number(returnItem.total_amount).toLocaleString()}</TableCell>
+              <TableCell className="capitalize">{returnItem.payment_method}</TableCell>
               <TableCell>
                 <Badge className={getStatusColor(returnItem.status)}>{returnItem.status}</Badge>
               </TableCell>
@@ -331,31 +354,6 @@ export function Returns() {
                   <Button variant="outline" size="sm" onClick={() => handleViewReturn(returnItem)}>
                     <Eye className="w-4 h-4" />
                   </Button>
-                  {returnItem.status === "pending" && (
-                    <>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleApproveReturn(returnItem.id)}
-                        className="text-green-600 hover:text-green-700"
-                      >
-                        <CheckCircle className="w-4 h-4" />
-                      </Button>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => handleRejectReturn(returnItem.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <XCircle className="w-4 h-4" />
-                      </Button>
-                    </>
-                  )}
-                  {returnItem.status === "approved" && (
-                    <Button variant="outline" size="sm" onClick={() => handleCompleteReturn(returnItem.id)}>
-                      Complete
-                    </Button>
-                  )}
                 </div>
               </TableCell>
             </TableRow>
@@ -379,81 +377,109 @@ export function Returns() {
               Process Return
             </Button>
           </DialogTrigger>
-          <DialogContent className="max-w-2xl">
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Process Return</DialogTitle>
               <DialogDescription>Process a customer return or refund</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="sale-id">Original Sale ID *</Label>
-                  <Input
-                    id="sale-id"
-                    placeholder="Enter sale ID"
-                    value={newReturn.saleId}
-                    onChange={(e) => setNewReturn((prev) => ({ ...prev, saleId: e.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="customer">Customer *</Label>
-                  <Input
-                    id="customer"
-                    placeholder="Customer name"
-                    value={newReturn.customer}
-                    onChange={(e) => setNewReturn((prev) => ({ ...prev, customer: e.target.value }))}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="reason">Return Reason *</Label>
-                  <Select
-                    value={newReturn.reason}
-                    onValueChange={(value) => setNewReturn((prev) => ({ ...prev, reason: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select reason" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Defective">Defective Product</SelectItem>
-                      <SelectItem value="Wrong Size">Wrong Size</SelectItem>
-                      <SelectItem value="Not Satisfied">Not Satisfied</SelectItem>
-                      <SelectItem value="Damaged">Damaged in Transit</SelectItem>
-                      <SelectItem value="Wrong Item">Wrong Item</SelectItem>
-                      <SelectItem value="Other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="amount">Return Amount *</Label>
-                  <Input
-                    id="amount"
-                    type="number"
-                    step="0.01"
-                    placeholder="0.00"
-                    value={newReturn.amount}
-                    onChange={(e) => setNewReturn((prev) => ({ ...prev, amount: e.target.value }))}
-                  />
-                </div>
-              </div>
               <div className="space-y-2">
-                <Label htmlFor="refund-method">Refund Method *</Label>
+                <Label htmlFor="sale-select">Select Sale *</Label>
                 <Select
-                  value={newReturn.method}
-                  onValueChange={(value) => setNewReturn((prev) => ({ ...prev, method: value }))}
+                  value={newReturn.saleId}
+                  onValueChange={handleSaleSelect}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Select method" />
+                    <SelectValue placeholder="Choose a sale to return" />
                   </SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="cash">Cash Refund</SelectItem>
-                    <SelectItem value="card">Card Refund</SelectItem>
-                    <SelectItem value="store-credit">Store Credit</SelectItem>
-                    <SelectItem value="exchange">Exchange</SelectItem>
+                    {sales.map((sale) => (
+                      <SelectItem key={sale.id} value={sale.id}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{sale.sale_number}</span>
+                          <span className="text-xs text-gray-500">
+                            {sale.customer?.name || sale.customer?.email || "No customer"} • Rs {Number(sale.total_amount).toLocaleString()}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
+
+              {selectedSale && (
+                <div className="bg-gray-50 p-3 rounded-md">
+                  <h4 className="font-medium mb-2">Selected Sale Details</h4>
+                  <div className="text-sm space-y-1">
+                    <div><strong>Sale Number:</strong> {selectedSale.sale_number}</div>
+                    <div><strong>Customer:</strong> {selectedSale.customer?.name || selectedSale.customer?.email || "N/A"}</div>
+                    <div><strong>Total Amount:</strong> Rs {Number(selectedSale.total_amount).toLocaleString()}</div>
+                    <div><strong>Items:</strong> {selectedSale.sale_items.length}</div>
+                  </div>
+                </div>
+              )}
+
+              {selectedReturnItems.length > 0 && (
+                <div className="space-y-2">
+                  <Label>Select Items to Return</Label>
+                  <div className="border rounded-lg p-4 space-y-3">
+                    {selectedReturnItems.map((item) => (
+                      <div key={item.productId} className="flex items-center justify-between p-3 bg-white rounded border">
+                        <div className="flex-1">
+                          <div className="font-medium">{item.productName}</div>
+                          <div className="text-sm text-gray-500">
+                            SKU: {item.sku} • Original Qty: {item.originalQuantity} • Price: Rs {Number(item.unitPrice).toLocaleString()}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleReturnQuantityChange(item.productId, item.returnQuantity - 1)}
+                            disabled={item.returnQuantity <= 0}
+                          >
+                            <Minus className="w-3 h-3" />
+                          </Button>
+                          <Input
+                            type="number"
+                            value={item.returnQuantity}
+                            onChange={(e) => handleReturnQuantityChange(item.productId, parseInt(e.target.value) || 0)}
+                            className="w-16 text-center"
+                            min={0}
+                            max={item.originalQuantity}
+                          />
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => handleReturnQuantityChange(item.productId, item.returnQuantity + 1)}
+                            disabled={item.returnQuantity >= item.originalQuantity}
+                          >
+                            <Plus className="w-3 h-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                  
+                  {/* Return Summary */}
+                  {selectedReturnItems.some(item => item.returnQuantity > 0) && (
+                    <div className="bg-blue-50 p-3 rounded-lg">
+                      <h4 className="font-medium text-blue-900 mb-2">Return Summary</h4>
+                      <div className="text-sm text-blue-800 space-y-1">
+                        <div>
+                          <strong>Items to Return:</strong> {selectedReturnItems.filter(item => item.returnQuantity > 0).length}
+                        </div>
+                        <div>
+                          <strong>Total Return Value:</strong> Rs {selectedReturnItems
+                            .reduce((total, item) => total + (item.returnQuantity * item.unitPrice), 0)
+                            .toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="space-y-2">
                 <Label htmlFor="notes">Notes</Label>
                 <Textarea
@@ -468,7 +494,10 @@ export function Returns() {
               <Button variant="outline" onClick={() => setIsProcessOpen(false)}>
                 Cancel
               </Button>
-              <Button onClick={handleProcessReturn}>Process Return</Button>
+              <Button onClick={handleProcessReturn} disabled={loading}>
+                {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                Process Return
+              </Button>
             </DialogFooter>
           </DialogContent>
         </Dialog>
@@ -520,9 +549,8 @@ export function Returns() {
       <Tabs defaultValue="all" className="space-y-4">
         <TabsList>
           <TabsTrigger value="all">All Returns ({filteredReturns.length})</TabsTrigger>
-          <TabsTrigger value="pending">Pending ({getFilteredReturnsByStatus("pending").length})</TabsTrigger>
-          <TabsTrigger value="approved">Approved ({getFilteredReturnsByStatus("approved").length})</TabsTrigger>
-          <TabsTrigger value="completed">Completed ({getFilteredReturnsByStatus("completed").length})</TabsTrigger>
+          <TabsTrigger value="REFUNDED">Refunded ({getFilteredReturnsByStatus("REFUNDED").length})</TabsTrigger>
+          <TabsTrigger value="EXCHANGED">Exchanged ({getFilteredReturnsByStatus("EXCHANGED").length})</TabsTrigger>
         </TabsList>
 
         <div className="flex gap-4">
@@ -547,33 +575,23 @@ export function Returns() {
           </Card>
         </TabsContent>
 
-        <TabsContent value="pending">
+        <TabsContent value="REFUNDED">
           <Card>
             <CardHeader>
-              <CardTitle>Pending Returns</CardTitle>
-              <CardDescription>Returns awaiting approval or rejection</CardDescription>
+              <CardTitle>Refunded Sales</CardTitle>
+              <CardDescription>Sales that have been refunded to customers</CardDescription>
             </CardHeader>
-            <CardContent>{renderReturnsTable(getFilteredReturnsByStatus("pending"))}</CardContent>
+            <CardContent>{renderReturnsTable(getFilteredReturnsByStatus("REFUNDED"))}</CardContent>
           </Card>
         </TabsContent>
 
-        <TabsContent value="approved">
+        <TabsContent value="EXCHANGED">
           <Card>
             <CardHeader>
-              <CardTitle>Approved Returns</CardTitle>
-              <CardDescription>Returns approved for processing</CardDescription>
+              <CardTitle>Exchanged Sales</CardTitle>
+              <CardDescription>Sales that have been exchanged for other products</CardDescription>
             </CardHeader>
-            <CardContent>{renderReturnsTable(getFilteredReturnsByStatus("approved"))}</CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="completed">
-          <Card>
-            <CardHeader>
-              <CardTitle>Completed Returns</CardTitle>
-              <CardDescription>Returns that have been fully processed</CardDescription>
-            </CardHeader>
-            <CardContent>{renderReturnsTable(getFilteredReturnsByStatus("completed"))}</CardContent>
+            <CardContent>{renderReturnsTable(getFilteredReturnsByStatus("EXCHANGED"))}</CardContent>
           </Card>
         </TabsContent>
       </Tabs>
@@ -588,55 +606,52 @@ export function Returns() {
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
-                  <h3 className="font-medium mb-2">Return Information</h3>
+                  <h3 className="font-medium mb-2">Sale Information</h3>
                   <div className="space-y-1 text-sm">
                     <div>
-                      <strong>Return ID:</strong> {selectedReturn.id}
+                      <strong>Sale ID:</strong> {selectedReturn.id}
                     </div>
                     <div>
-                      <strong>Original Sale:</strong> {selectedReturn.saleId}
+                      <strong>Sale Number:</strong> {selectedReturn.sale_number}
                     </div>
                     <div>
-                      <strong>Date:</strong> {selectedReturn.date}
-                    </div>
-                    <div>
-                      <strong>Reason:</strong> {selectedReturn.reason}
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <h3 className="font-medium mb-2">Customer & Status</h3>
-                  <div className="space-y-1 text-sm">
-                    <div>
-                      <strong>Customer:</strong> {selectedReturn.customer}
-                    </div>
-                    <div>
-                      <strong>Method:</strong> {selectedReturn.method}
+                      <strong>Date:</strong> {new Date(selectedReturn.sale_date).toLocaleDateString()}
                     </div>
                     <div>
                       <strong>Status:</strong>{" "}
                       <Badge className={getStatusColor(selectedReturn.status)}>{selectedReturn.status}</Badge>
                     </div>
+                  </div>
+                </div>
+                <div>
+                  <h3 className="font-medium mb-2">Customer & Payment</h3>
+                  <div className="space-y-1 text-sm">
                     <div>
-                      <strong>Amount:</strong> Rs {selectedReturn.amount.toLocaleString()}
+                      <strong>Customer:</strong> {selectedReturn.customer?.name || selectedReturn.customer?.email || "N/A"}
+                    </div>
+                    <div>
+                      <strong>Payment Method:</strong> {selectedReturn.payment_method}
+                    </div>
+                    <div>
+                      <strong>Total Amount:</strong> Rs {Number(selectedReturn.total_amount).toLocaleString()}
                     </div>
                   </div>
                 </div>
               </div>
 
-              {selectedReturn.items && (
+              {selectedReturn.sale_items && selectedReturn.sale_items.length > 0 && (
                 <div>
-                  <h3 className="font-medium mb-2">Returned Items</h3>
+                  <h3 className="font-medium mb-2">Sale Items</h3>
                   <div className="border rounded-lg p-4">
-                    {selectedReturn.items.map((item, index) => (
+                    {selectedReturn.sale_items.map((item, index) => (
                       <div key={index} className="flex justify-between items-center py-2">
                         <div>
-                          <div className="font-medium">{item.name}</div>
+                          <div className="font-medium">{item.product.name}</div>
                           <div className="text-sm text-gray-500">
-                            Qty: {item.quantity} • Reason: {item.reason}
+                            Qty: {item.quantity} • SKU: {item.product.sku} • Type: {item.item_type}
                           </div>
                         </div>
-                        <div className="font-medium">Rs {item.price.toLocaleString()}</div>
+                        <div className="font-medium">Rs {Number(item.line_total).toLocaleString()}</div>
                       </div>
                     ))}
                   </div>
@@ -649,59 +664,6 @@ export function Returns() {
                   <div className="bg-gray-50 p-3 rounded-lg text-sm">{selectedReturn.notes}</div>
                 </div>
               )}
-
-              {selectedReturn.processedBy && (
-                <div>
-                  <h3 className="font-medium mb-2">Processing Information</h3>
-                  <div className="text-sm space-y-1">
-                    <div>
-                      <strong>Processed by:</strong> {selectedReturn.processedBy}
-                    </div>
-                    <div>
-                      <strong>Processed date:</strong> {selectedReturn.processedDate}
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="flex space-x-2">
-                {selectedReturn.status === "pending" && (
-                  <>
-                    <Button
-                      className="flex-1"
-                      onClick={() => {
-                        handleApproveReturn(selectedReturn.id)
-                        setIsViewOpen(false)
-                      }}
-                    >
-                      <CheckCircle className="h-4 w-4 mr-2" />
-                      Approve Return
-                    </Button>
-                    <Button
-                      variant="outline"
-                      className="flex-1"
-                      onClick={() => {
-                        handleRejectReturn(selectedReturn.id)
-                        setIsViewOpen(false)
-                      }}
-                    >
-                      <XCircle className="h-4 w-4 mr-2" />
-                      Reject Return
-                    </Button>
-                  </>
-                )}
-                {selectedReturn.status === "approved" && (
-                  <Button
-                    className="flex-1"
-                    onClick={() => {
-                      handleCompleteReturn(selectedReturn.id)
-                      setIsViewOpen(false)
-                    }}
-                  >
-                    Complete Return
-                  </Button>
-                )}
-              </div>
             </div>
           )}
         </DialogContent>

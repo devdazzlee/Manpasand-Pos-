@@ -20,8 +20,8 @@ const refundSaleSchema = z.object({
         returnedItems: z
             .array(
                 z.object({
-                    productId: z.string().min(1),
-                    quantity: z.number().int().positive(),
+                    productId: z.string().min(1, "Product ID is required"),
+                    quantity: z.number().int().positive("Quantity must be positive"),
                 })
             )
             .optional()
@@ -29,13 +29,20 @@ const refundSaleSchema = z.object({
         exchangedItems: z
             .array(
                 z.object({
-                    productId: z.string().min(1),
-                    quantity: z.number().int().positive(),
-                    price: z.number().nonnegative(),
+                    productId: z.string().min(1, "Product ID is required"),
+                    quantity: z.number().int().positive("Quantity must be positive"),
+                    price: z.number().nonnegative("Price must be non-negative"),
                 })
             )
             .optional()
             .default([]),
+        notes: z.string().optional(),
+    }).refine((data) => {
+        // Ensure at least one item is being returned or exchanged
+        return data.returnedItems.length > 0 || data.exchangedItems.length > 0;
+    }, {
+        message: "At least one item must be returned or exchanged",
+        path: ["returnedItems"], // This will show the error on the returnedItems field
     }),
 });
 

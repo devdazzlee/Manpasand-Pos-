@@ -27,6 +27,22 @@ class SaleService {
         });
     }
 
+    async getSalesForReturns({ branchId }: { branchId?: string }) {
+        return prisma.sale.findMany({
+            where: { 
+                branch_id: branchId,
+                status: "COMPLETED" // Only completed sales can be returned
+            },
+            include: {
+                sale_items: {
+                    include: { product: true },
+                },
+                customer: true,
+            },
+            orderBy: { sale_date: "desc" },
+        });
+    }
+
     async getSaleById(saleId: string) {
         const sale = await prisma.sale.findUnique({
             where: { id: saleId },
@@ -335,6 +351,17 @@ class SaleService {
             });
 
             if (!originalSale) throw new AppError(400, 'Original sale not found');
+
+            // Validate return quantities against original sale
+            for (const ret of returnedItems) {
+                const originalItem = originalSale.sale_items.find((i) => i.product_id === ret.productId);
+                if (!originalItem) {
+                    throw new AppError(400, `Product ${ret.productId} not found in original sale`);
+                }
+                if (ret.quantity > originalItem.quantity) {
+                    throw new AppError(400, `Return quantity (${ret.quantity}) exceeds original sale quantity (${originalItem.quantity}) for product ${ret.productId}`);
+                }
+            }
 
             const productIds = [
                 ...returnedItems.map((i) => i.productId),

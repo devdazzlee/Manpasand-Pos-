@@ -3,6 +3,7 @@ import { authenticate, authorize } from "../middleware/auth.middleware";
 import { validate } from "../middleware/validation.middleware";
 import {
     getSalesController,
+    getSalesForReturnsController,
     getSaleByIdController,
     createSaleController,
     refundSaleController,
@@ -16,9 +17,10 @@ const router = Router();
 router.use(authenticate, authorize(["SUPER_ADMIN", "ADMIN"]));
 
 router.get("/recent", getRecentSaleItemProductNameAndPrice);
+router.get("/today", getTodaySalesController);
+router.get("/for-returns", getSalesForReturnsController);
 router.get("/", getSalesController);
 router.get("/:saleId", getSaleByIdController);
-router.get("/:saleId", getTodaySalesController);
 router.post("/", validate(createSaleSchema), createSaleController);
 router.patch("/:saleId/refund", validate(refundSaleSchema), refundSaleController);
 

@@ -10,6 +10,11 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
     new ApiResponse(sales, "Sales fetched successfully").send(res);
 });
 
+const getSalesForReturnsController = asyncHandler(async (req: Request, res: Response) => {
+    const sales = await saleService.getSalesForReturns({ branchId: req.user?.branch_id as string as string });
+    new ApiResponse(sales, "Sales eligible for returns fetched successfully").send(res);
+});
+
 const getSaleByIdController = asyncHandler(async (req: Request, res: Response) => {
     const sale = await saleService.getSaleById(req.params.saleId);
     new ApiResponse(sale, "Sale details fetched").send(res);
@@ -25,7 +30,7 @@ const createSaleController = asyncHandler(async (req: Request, res: Response) =>
 });
 
 const refundSaleController = asyncHandler(async (req: Request, res: Response) => {
-    const { customerId, returnedItems = [], exchangedItems = [] } = req.body;
+    const { customerId, returnedItems = [], exchangedItems = [], notes } = req.body;
     const originalSaleId = req.params.saleId;
     const createdBy = req.user!.id;
     const branchId = req.user?.branch_id as string;
@@ -55,6 +60,7 @@ const getRecentSaleItemProductNameAndPrice = asyncHandler(async (req: Request, r
 
 export {
     getSalesController,
+    getSalesForReturnsController,
     getSaleByIdController,
     createSaleController,
     refundSaleController,
