@@ -210,15 +210,36 @@ export function NewSale() {
   }
 
   const printReceipt = (receiptContent: string) => {
-    const printWindow = window.open('', '', 'width=600,height=600');
-    if (printWindow) {
-      printWindow.document.write('<pre>' + receiptContent + '</pre>');
-      printWindow.document.close();
-      printWindow.focus();
-      printWindow.print();
-      // printWindow.close();
-    }
+    // Open window in direct response to a user click
+    const printWindow = window.open('', '_blank', 'width=600,height=600');
+    if (!printWindow) return;
+  
+    // Write your receipt HTML
+    printWindow.document.open();
+    printWindow.document.write(`
+      <html>
+        <head>
+          <title>Receipt</title>
+          <style>
+            /* optional: make it look nice on paper */
+            body { font-family: monospace; white-space: pre; padding: 1rem; }
+          </style>
+        </head>
+        <body>
+          ${receiptContent}
+        </body>
+      </html>
+    `);
+    printWindow.document.close();
+  
+    // Wait for the document to finish loading, then print & close
+    printWindow.onload = () => {
+      printWindow.focus();      // Bring it to front
+      printWindow.print();      // Open print dialog
+      // printWindow.close();      // Close the tab/window when done
+    };
   };
+  
 
   const downloadReceipt = (receiptData: any) => {
     const receiptContent = `
