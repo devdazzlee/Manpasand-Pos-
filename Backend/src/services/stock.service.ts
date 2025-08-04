@@ -1,6 +1,7 @@
 import { Stock, StockMovement } from "@prisma/client";
 import { prisma } from '../prisma/client';
 import { AppError } from "../utils/apiError";
+import { addDecimal } from "../utils/helpers";
 
 class StockService {
     async createStock({ productId, branchId, quantity, createdBy }: {
@@ -54,8 +55,8 @@ class StockService {
 
             if (!stock) throw new AppError(404, "Stock not found");
 
-            const newQty = stock.current_quantity + quantityChange;
-            if (newQty < 0) throw new AppError(400, "Insufficient stock");
+            const newQty = addDecimal(stock.current_quantity, quantityChange);
+            if (newQty.lt(0)) throw new AppError(400, "Insufficient stock");
 
             await tx.stock.update({
                 where: {

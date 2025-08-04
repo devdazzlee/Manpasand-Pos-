@@ -4,7 +4,7 @@ exports.refundSaleSchema = exports.createSaleSchema = void 0;
 const zod_1 = require("zod");
 const saleItemSchema = zod_1.z.object({
     productId: zod_1.z.string(),
-    quantity: zod_1.z.number().int().min(1),
+    quantity: zod_1.z.number().positive("Quantity must be positive"),
     price: zod_1.z.number().nonnegative(),
 });
 const createSaleSchema = zod_1.z.object({
@@ -21,14 +21,14 @@ const refundSaleSchema = zod_1.z.object({
         returnedItems: zod_1.z
             .array(zod_1.z.object({
             productId: zod_1.z.string().min(1, "Product ID is required"),
-            quantity: zod_1.z.number().int().positive("Quantity must be positive"),
+            quantity: zod_1.z.number().positive("Quantity must be positive"),
         }))
             .optional()
             .default([]),
         exchangedItems: zod_1.z
             .array(zod_1.z.object({
             productId: zod_1.z.string().min(1, "Product ID is required"),
-            quantity: zod_1.z.number().int().positive("Quantity must be positive"),
+            quantity: zod_1.z.number().positive("Quantity must be positive"),
             price: zod_1.z.number().nonnegative("Price must be non-negative"),
         }))
             .optional()

@@ -48,6 +48,10 @@ export function NewSale() {
   const [scanLoading, setScanLoading] = useState(false)
   const { toast } = useToast()
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null)
+  const [quickAddDialogOpen, setQuickAddDialogOpen] = useState(false)
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
+  const [quickAddQuantity, setQuickAddQuantity] = useState("1")
+  const [quickAddTotalPrice, setQuickAddTotalPrice] = useState("")
 
   // Global store with custom hook
   const { 
@@ -92,7 +96,7 @@ export function NewSale() {
     return matchesCategory && matchesSearch
   })
 
-  const addToCart = async (product: Product) => {
+  const addToCart = async (product: Product, quantity: number = 1) => {
     // For testing: Allow negative sales (stock can go below 0)
     // Comment out stock validation for testing purposes
     /*
@@ -113,7 +117,7 @@ export function NewSale() {
 
     const existingItem = cart.find((item) => item.id === product.id)
     if (existingItem) {
-      setCart(cart.map((item) => (item.id === product.id ? { ...item, quantity: item.quantity + 1 } : item)))
+      setCart(cart.map((item) => (item.id === product.id ? { ...item, quantity: item.quantity + quantity } : item)))
     } else {
       setCart([
         ...cart,
@@ -121,7 +125,7 @@ export function NewSale() {
           id: product.id,
           name: product.name,
           price: product.price,
-          quantity: 1,
+          quantity: quantity,
           category: product.category,
         },
       ])
@@ -130,7 +134,7 @@ export function NewSale() {
     toast({
       className: "absolute top-2",
       title: "Item Added",
-      description: `${product.name} added to cart`,
+      description: `${product.name} (${quantity}) added to cart`,
     })
   }
 
@@ -160,12 +164,30 @@ export function NewSale() {
       cart
         .map((item) => {
           if (item.id === id) {
-            const newQuantity = item.quantity + change
+            const newQuantity = Number(item.quantity) + Number(change)
             return newQuantity > 0 ? { ...item, quantity: newQuantity } : item
           }
           return item
         })
         .filter((item) => item.quantity > 0),
+    )
+  }
+
+  const updateQuantityManual = (id: string, newQuantity: number) => {
+    // Validate quantity is positive
+    if (newQuantity <= 0) {
+      // Remove item if quantity is 0 or negative
+      setCart(cart.filter((item) => item.id !== id))
+      return
+    }
+
+    setCart(
+      cart.map((item) => {
+        if (item.id === id) {
+          return { ...item, quantity: Number(newQuantity) }
+        }
+        return item
+      })
     )
   }
 
@@ -382,6 +404,31 @@ Thank you for shopping with us!
     }
   }
 
+  const handleProductClick = (product: Product) => {
+    setSelectedProduct(product)
+    setQuickAddQuantity("1")
+    setQuickAddDialogOpen(true)
+  }
+
+  const handleQuickAdd = async () => {
+    if (!selectedProduct) return
+    const quantity = parseFloat(quickAddQuantity)
+    if (isNaN(quantity) || quantity <= 0) {
+      toast({
+        variant: "destructive",
+        title: "Invalid Quantity",
+        description: "Please enter a valid quantity greater than 0",
+      })
+      return
+    }
+
+    await addToCart(selectedProduct, quantity)
+    setQuickAddDialogOpen(false)
+    setSelectedProduct(null)
+    setQuickAddQuantity("1")
+    setQuickAddTotalPrice("")
+  }
+
   const handleCategoryChange = async (categoryId: string) => {
     setSelectedCategory(categoryId)
     // No need to set loading state as we're using cached data
@@ -488,19 +535,20 @@ Thank you for shopping with us!
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {filteredProducts.map((product) => {
               const cartItem = cart.find((item) => item.id === product.id)
-              const isOutOfStock = product.stock === 0
-              const isLowStock = product.stock <= 5 && product.stock > 0
+              const currentStock = product.available_stock ?? product.stock
+              const isOutOfStock = currentStock <= 0
+              const isLowStock = currentStock <= 5 && currentStock > 0
 
               return (
                 <Card
                   key={product.id}
                   className={`cursor-pointer hover:shadow-md transition-shadow`}
-                  onClick={() => addToCart(product)}
+                  onClick={() => handleProductClick(product)}
                 >
                   <CardContent className="p-4">
                     <div className="aspect-square bg-gray-100 rounded-lg mb-3 flex items-center justify-center relative">
                       <span className="text-2xl">🛒</span>
-                      {cartItem && <Badge className="absolute -top-2 -right-2 bg-blue-600">{cartItem.quantity}</Badge>}
+                      {cartItem && <Badge className="absolute -top-2 -right-2 bg-blue-600">{cartItem.quantity.toFixed(2)}</Badge>}
                     </div>
                     <h3 className="font-medium text-gray-900 mb-1">{product.name}</h3>
                     <p className="text-lg font-bold text-blue-600">Rs {product.price.toFixed(2)}</p>
@@ -508,7 +556,7 @@ Thank you for shopping with us!
                       <p
                         className={`text-sm ${isLowStock ? "text-yellow-600" : "text-gray-500"}`}
                       >
-                        Stock: {product.available_stock ?? product.stock}
+                        Stock: {(product.available_stock ?? product.stock).toFixed(2)}
                       </p>
                       {isLowStock && (
                         <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
@@ -530,7 +578,9 @@ Thank you for shopping with us!
       {/* Cart Section */}
       <div className="w-96 bg-white border-l border-gray-200 flex flex-col">
         <div className="p-6 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">Cart ({cart.length} items)</h2>
+          <h2 className="text-xl font-bold text-gray-900">
+            Cart ({cart.length} items • {cart.reduce((sum, item) => sum + item.quantity, 0).toFixed(2)} total qty)
+          </h2>
         </div>
 
         <div className="flex-1 overflow-auto p-6">
@@ -549,18 +599,46 @@ Thank you for shopping with us!
                     <p className="text-sm font-medium">Rs {(item.price * item.quantity).toFixed(2)}</p>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Button size="sm" variant="outline" onClick={() => updateQuantity(item.id, -1)}>
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => updateQuantity(item.id, -1)}
+                      className="h-8 w-8 p-0"
+                    >
                       <Minus className="h-3 w-3" />
                     </Button>
-                    <span className="w-8 text-center font-medium">{item.quantity}</span>
-                    <Button size="sm" variant="outline" onClick={() => updateQuantity(item.id, 1)}>
+                    
+                    <div className="flex flex-col items-center">
+                      <Input
+                        type="number"
+                        value={item.quantity}
+                        onChange={(e) => {
+                          const value = parseFloat(e.target.value)
+                          if (!isNaN(value)) {
+                            updateQuantityManual(item.id, value)
+                          }
+                        }}
+                        className="w-16 h-8 text-center text-sm"
+                        min="0"
+                        step="0.01"
+                        placeholder="0"
+                      />
+                    </div>
+                    
+                    <Button 
+                      size="sm" 
+                      variant="outline" 
+                      onClick={() => updateQuantity(item.id, 1)}
+                      className="h-8 w-8 p-0"
+                    >
                       <Plus className="h-3 w-3" />
                     </Button>
+                    
                     <Button
                       size="sm"
                       variant="outline"
                       onClick={() => removeFromCart(item.id)}
-                      className="text-red-600 hover:text-red-700"
+                      className="text-red-600 hover:text-red-700 h-8 w-8 p-0"
                     >
                       <Trash2 className="h-3 w-3" />
                     </Button>
@@ -635,6 +713,144 @@ Thank you for shopping with us!
                 <CreditCard className="h-6 w-6 mr-2" />
                 Card
               </LoadingButton>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Quick Add Dialog */}
+      <Dialog open={quickAddDialogOpen} onOpenChange={setQuickAddDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Quantity</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-gray-50 p-4 rounded-lg">
+              <div className="flex justify-between mb-2">
+                <span>Product:</span>
+                <span className="font-medium">{selectedProduct?.name}</span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span>Price:</span>
+                <span className="font-medium">Rs {selectedProduct?.price.toFixed(2)}</span>
+              </div>
+              <div className="flex justify-between mb-2">
+                <span>Current Stock:</span>
+                <span className="font-medium">
+                  {selectedProduct?.available_stock ?? selectedProduct?.stock}
+                </span>
+              </div>
+            </div>
+            
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Quantity</label>
+              <div className="flex items-center space-x-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const currentQty = parseFloat(quickAddQuantity) || 0
+                    setQuickAddQuantity((currentQty - 1 > 0 ? (currentQty - 1).toFixed(2) : "") )
+                    setQuickAddTotalPrice("") // Clear total price if manually changing quantity
+                  }}
+                  className="h-10 w-10 p-0"
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                
+                <Input
+                  type="number"
+                  value={quickAddQuantity}
+                  onChange={(e) => {
+                    const value = parseFloat(e.target.value)
+                    if (!isNaN(value)) {
+                      setQuickAddQuantity(value.toString())
+                      setQuickAddTotalPrice("") // Clear total price if manually changing quantity
+                    } else {
+                      setQuickAddQuantity("")
+                    }
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      handleQuickAdd()
+                    }
+                  }}
+                  className="flex-1 text-center"
+                  min="0"
+                  step="0.01"
+                  placeholder="Enter quantity"
+                />
+                
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    const currentQty = parseFloat(quickAddQuantity) || 0
+                    setQuickAddQuantity((currentQty + 1).toFixed(2))
+                    setQuickAddTotalPrice("") // Clear total price if manually changing quantity
+                  }}
+                  className="h-10 w-10 p-0"
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500">You can enter decimal values like 0.5, 0.25, etc.</p>
+              
+              {/* Quick Preset Buttons */}
+              <div className="flex flex-wrap gap-1 mt-2">
+                {[0.25, 0.5, 0.75, 1, 2, 5].map((preset) => (
+                  <Button
+                    key={preset}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setQuickAddQuantity(preset.toString())
+                      setQuickAddTotalPrice("")
+                    }}
+                    className="text-xs px-2 py-1 h-6"
+                  >
+                    {preset}
+                  </Button>
+                ))}
+              </div>
+            </div>
+            {/* Total Price Input */}
+            <div className="space-y-2 mt-2">
+              <label className="text-sm font-medium">Total Price</label>
+              <Input
+                type="number"
+                value={quickAddTotalPrice}
+                onChange={(e) => {
+                  setQuickAddTotalPrice(e.target.value)
+                  const price = parseFloat(e.target.value)
+                  if (!isNaN(price) && selectedProduct && selectedProduct.price > 0) {
+                    const qty = price / selectedProduct.price
+                    setQuickAddQuantity(qty > 0 ? qty.toFixed(2) : "")
+                  }
+                }}
+                className="flex-1 text-center"
+                min="0"
+                step="0.01"
+                placeholder="Enter total price"
+              />
+              <p className="text-xs text-gray-500">Enter the total price you want to spend. Quantity will be calculated automatically.</p>
+            </div>
+            
+            <div className="flex space-x-2">
+              <Button
+                onClick={handleQuickAdd}
+                className="flex-1"
+              >
+                <Plus className="h-4 w-4 mr-2" />
+                Add to Cart
+              </Button>
+              <Button
+                onClick={() => setQuickAddDialogOpen(false)}
+                variant="outline"
+                className="flex-1"
+              >
+                Cancel
+              </Button>
             </div>
           </div>
         </DialogContent>

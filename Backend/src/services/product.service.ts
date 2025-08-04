@@ -6,10 +6,14 @@ import { Decimal } from 'decimal.js';
 import { startOfMonth } from 'date-fns';
 import { s3Service } from './common/s3BucketService';
 import { randomUUID } from 'crypto';
+import { asNumber } from '../utils/helpers';
+
 
 type RelationField =
     | 'unit_id' | 'tax_id' | 'category_id' | 'subcategory_id'
     | 'supplier_id' | 'brand_id' | 'color_id' | 'size_id';
+
+type Numeric = number | Prisma.Decimal
 
 export class ProductService {
     private async getOrCreateUnknownEntry(modelName: string, codePrefix: string, tx?: any) {
@@ -720,10 +724,10 @@ export class ProductService {
         return {
             data: products.map(p => {
                 // Calculate available stock
-                let currentStock = 0;
-                let reservedStock = 0;
-                let minimumStock = 0;
-                let maximumStock = 0;
+                let currentStock: Numeric = 0;
+                let reservedStock: Numeric = 0;
+                let minimumStock: Numeric = 0;
+                let maximumStock: Numeric = 0;
 
                 if (branch_id && p.stock && Array.isArray(p.stock) && p.stock.length > 0) {
                     // Single branch stock
@@ -744,11 +748,11 @@ export class ProductService {
 
                 return {
                     ...p,
-                    current_stock: currentStock,
-                    reserved_stock: reservedStock,
-                    available_stock: currentStock - reservedStock,
-                    minimum_stock: minimumStock,
-                    maximum_stock: maximumStock,
+                    current_stock: asNumber(currentStock),
+                    reserved_stock: asNumber(reservedStock),
+                    available_stock: asNumber(currentStock) - asNumber(reservedStock),
+                    minimum_stock: asNumber(minimumStock),
+                    maximum_stock: asNumber(maximumStock),
                     order_count: p._count.order_items,
                     _count: undefined,
                     stock: undefined, // Remove the raw stock data

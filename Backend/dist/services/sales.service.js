@@ -14,14 +14,14 @@ class SaleService {
                 },
                 customer: true,
             },
-            orderBy: { sale_date: "desc" },
+            orderBy: { sale_date: 'desc' },
         });
     }
     async getSalesForReturns({ branchId }) {
         return client_2.prisma.sale.findMany({
             where: {
                 branch_id: branchId,
-                status: "COMPLETED" // Only completed sales can be returned
+                status: 'COMPLETED', // Only completed sales can be returned
             },
             include: {
                 sale_items: {
@@ -29,7 +29,7 @@ class SaleService {
                 },
                 customer: true,
             },
-            orderBy: { sale_date: "desc" },
+            orderBy: { sale_date: 'desc' },
         });
     }
     async getSaleById(saleId) {
@@ -43,10 +43,10 @@ class SaleService {
             },
         });
         if (!sale)
-            throw new apiError_1.AppError(404, "Sale not found");
+            throw new apiError_1.AppError(404, 'Sale not found');
         return sale;
     }
-    async createSale({ branchId, customerId, paymentMethod, items, createdBy }) {
+    async createSale({ branchId, customerId, paymentMethod, items, createdBy, }) {
         return client_2.prisma.$transaction(async (tx) => {
             const validations = [];
             if (customerId) {
@@ -58,12 +58,12 @@ class SaleService {
             validations.push(tx.branch.findUnique({ where: { id: branchId } }));
             const [customer, branch] = await Promise.all(validations);
             if (customerId && !customer) {
-                throw new apiError_1.AppError(400, "Invalid customer");
+                throw new apiError_1.AppError(400, 'Invalid customer');
             }
             if (!branch) {
-                throw new apiError_1.AppError(400, "Invalid branch");
+                throw new apiError_1.AppError(400, 'Invalid branch');
             }
-            const productIds = items.map(i => i.productId);
+            const productIds = items.map((i) => i.productId);
             const stocks = await tx.stock.findMany({
                 where: {
                     product_id: { in: productIds },
@@ -72,7 +72,7 @@ class SaleService {
             });
             let total = 0;
             for (const item of items) {
-                const stock = stocks.find(s => s.product_id === item.productId);
+                const stock = stocks.find((s) => s.product_id === item.productId);
                 // For testing: Create stock record if it doesn't exist
                 if (!stock) {
                     // Create a new stock record with 0 quantity for testing
@@ -127,10 +127,14 @@ class SaleService {
                     data: {
                         product_id: item.productId,
                         branch_id: branchId,
-                        movement_type: "SALE",
+                        movement_type: 'SALE',
                         quantity_change: -item.quantity,
-                        previous_qty: currentStock ? currentStock.current_quantity + item.quantity : 0,
-                        new_qty: currentStock ? currentStock.current_quantity : -item.quantity,
+                        previous_qty: currentStock
+                            ? currentStock.current_quantity.plus(item.quantity) // Decimal.plus(number)
+                            : new client_1.Prisma.Decimal(0),
+                        new_qty: currentStock
+                            ? currentStock.current_quantity // still a Decimal
+                            : new client_1.Prisma.Decimal(item.quantity),
                         created_by: createdBy,
                     },
                 });
@@ -143,11 +147,11 @@ class SaleService {
                     total_amount: total,
                     subtotal: total,
                     payment_method: paymentMethod,
-                    payment_status: "PAID",
-                    status: "COMPLETED",
+                    payment_status: 'PAID',
+                    status: 'COMPLETED',
                     created_by: createdBy,
                     sale_items: {
-                        create: items.map(item => ({
+                        create: items.map((item) => ({
                             product: { connect: { id: item.productId } },
                             quantity: item.quantity,
                             unit_price: item.price,
@@ -178,7 +182,7 @@ class SaleService {
             include: {
                 customer: true,
             },
-            orderBy: { sale_date: "desc" },
+            orderBy: { sale_date: 'desc' },
         });
     }
     // async createExchangeOrReturnSale({
@@ -307,7 +311,7 @@ class SaleService {
     //         });
     //         return sale;
     //     });
-    // }    
+    // }
     async createExchangeOrReturnSale({ originalSaleId, branchId, customerId, returnedItems, exchangedItems, createdBy, }) {
         return client_2.prisma.$transaction(async (tx) => {
             const originalSale = await tx.sale.findUnique({
@@ -322,7 +326,7 @@ class SaleService {
                 if (!originalItem) {
                     throw new apiError_1.AppError(400, `Product ${ret.productId} not found in original sale`);
                 }
-                if (ret.quantity > originalItem.quantity) {
+                if (ret.quantity > originalItem.quantity.toNumber()) {
                     throw new apiError_1.AppError(400, `Return quantity (${ret.quantity}) exceeds original sale quantity (${originalItem.quantity}) for product ${ret.productId}`);
                 }
             }
@@ -359,7 +363,7 @@ class SaleService {
                 const originalItem = originalSale.sale_items.find((i) => i.product_id === ret.productId);
                 if (!originalItem)
                     throw new apiError_1.AppError(400, `Product ${ret.productId} not in original sale`);
-                if (ret.quantity > originalItem.quantity) {
+                if (ret.quantity > originalItem.quantity.toNumber()) {
                     throw new apiError_1.AppError(400, `Return quantity exceeds original`);
                 }
                 // Update stock using upsert to handle both existing and new records
@@ -398,7 +402,9 @@ class SaleService {
                         branch_id: branchId,
                         movement_type: client_1.StockMovementType.RETURN,
                         quantity_change: ret.quantity,
-                        previous_qty: currentStock ? currentStock.current_quantity - ret.quantity : 0,
+                        previous_qty: currentStock
+                            ? currentStock.current_quantity.minus(ret.quantity) // Decimal.minus(number)
+                            : new client_1.Prisma.Decimal(0),
                         new_qty: currentStock ? currentStock.current_quantity : ret.quantity,
                         created_by: createdBy,
                         reference_id: originalSaleId,
@@ -476,8 +482,12 @@ class SaleService {
                         branch_id: branchId,
                         movement_type: client_1.StockMovementType.SALE,
                         quantity_change: -item.quantity,
-                        previous_qty: currentStock ? currentStock.current_quantity + item.quantity : 0,
-                        new_qty: currentStock ? currentStock.current_quantity : -item.quantity,
+                        previous_qty: currentStock
+                            ? currentStock.current_quantity.plus(item.quantity)
+                            : new client_1.Prisma.Decimal(0),
+                        new_qty: currentStock
+                            ? currentStock.current_quantity
+                            : new client_1.Prisma.Decimal(-item.quantity),
                         created_by: createdBy,
                         reference_id: originalSaleId,
                         reference_type: 'exchange',
@@ -528,10 +538,10 @@ class SaleService {
     async getRecentSaleItemsProductNameAndPrice(branchId) {
         const sale = await client_2.prisma.sale.findFirst({
             where: { branch_id: branchId },
-            orderBy: { sale_date: "desc" },
+            orderBy: { sale_date: 'desc' },
             include: {
                 sale_items: {
-                    orderBy: { id: "desc" },
+                    orderBy: { id: 'desc' },
                     take: 5,
                     include: { product: true },
                 },
@@ -539,7 +549,7 @@ class SaleService {
         });
         if (!sale || sale.sale_items.length === 0)
             return [];
-        return sale.sale_items.map(item => ({
+        return sale.sale_items.map((item) => ({
             productName: item.product.name,
             price: item.unit_price,
         }));

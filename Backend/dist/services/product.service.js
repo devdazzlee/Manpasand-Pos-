@@ -7,6 +7,7 @@ const decimal_js_1 = require("decimal.js");
 const date_fns_1 = require("date-fns");
 const s3BucketService_1 = require("./common/s3BucketService");
 const crypto_1 = require("crypto");
+const helpers_1 = require("../utils/helpers");
 class ProductService {
     async getOrCreateUnknownEntry(modelName, codePrefix, tx) {
         const unknownName = 'Unknown';
@@ -650,11 +651,11 @@ class ProductService {
                 }
                 return {
                     ...p,
-                    current_stock: currentStock,
-                    reserved_stock: reservedStock,
-                    available_stock: currentStock - reservedStock,
-                    minimum_stock: minimumStock,
-                    maximum_stock: maximumStock,
+                    current_stock: (0, helpers_1.asNumber)(currentStock),
+                    reserved_stock: (0, helpers_1.asNumber)(reservedStock),
+                    available_stock: (0, helpers_1.asNumber)(currentStock) - (0, helpers_1.asNumber)(reservedStock),
+                    minimum_stock: (0, helpers_1.asNumber)(minimumStock),
+                    maximum_stock: (0, helpers_1.asNumber)(maximumStock),
                     order_count: p._count.order_items,
                     _count: undefined,
                     stock: undefined, // Remove the raw stock data

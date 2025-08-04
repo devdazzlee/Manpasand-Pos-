@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.StockService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
+const helpers_1 = require("../utils/helpers");
 class StockService {
     async createStock({ productId, branchId, quantity, createdBy }) {
         return client_1.prisma.$transaction(async (tx) => {
@@ -39,8 +40,8 @@ class StockService {
             });
             if (!stock)
                 throw new apiError_1.AppError(404, "Stock not found");
-            const newQty = stock.current_quantity + quantityChange;
-            if (newQty < 0)
+            const newQty = (0, helpers_1.addDecimal)(stock.current_quantity, quantityChange);
+            if (newQty.lt(0))
                 throw new apiError_1.AppError(400, "Insufficient stock");
             await tx.stock.update({
                 where: {

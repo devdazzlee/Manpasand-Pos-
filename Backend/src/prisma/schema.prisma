@@ -310,11 +310,11 @@ model Stock {
   product           Product  @relation(fields: [product_id], references: [id])
   branch_id         String
   branch            Branch   @relation(fields: [branch_id], references: [id])
-  current_quantity  Int      @default(0)
-  reserved_quantity Int      @default(0)
-  minimum_quantity  Int      @default(0)
-  maximum_quantity  Int?
-  reorder_level     Int?
+  current_quantity  Decimal  @default(0)
+  reserved_quantity Decimal  @default(0)
+  minimum_quantity  Decimal  @default(0)
+  maximum_quantity  Decimal?
+  reorder_level     Decimal?
   last_updated      DateTime @default(now()) @updatedAt
   created_at        DateTime @default(now())
 
@@ -334,9 +334,9 @@ model StockMovement {
   movement_type   StockMovementType
   reference_id    String? // Links to sale_id, purchase_order_id, etc.
   reference_type  String? // 'sale', 'purchase', 'adjustment', 'transfer'
-  quantity_change Int // Positive for in, negative for out
-  previous_qty    Int
-  new_qty         Int
+  quantity_change Decimal // Positive for in, negative for out
+  previous_qty    Decimal
+  new_qty         Decimal
   unit_cost       Decimal?
   notes           String?
   created_by      String?
@@ -399,7 +399,7 @@ model SaleItem {
   sale             Sale         @relation(fields: [sale_id], references: [id], onDelete: Cascade)
   product_id       String
   product          Product      @relation(fields: [product_id], references: [id])
-  quantity         Int
+  quantity         Decimal
   unit_price       Decimal
   tax_rate         Decimal      @default(0)
   tax_amount       Decimal      @default(0)
@@ -450,8 +450,8 @@ model PurchaseOrderItem {
   purchase_order    PurchaseOrder @relation(fields: [purchase_order_id], references: [id], onDelete: Cascade)
   product_id        String
   product           Product       @relation(fields: [product_id], references: [id])
-  ordered_quantity  Int
-  received_quantity Int           @default(0)
+  ordered_quantity  Decimal
+  received_quantity Decimal           @default(0)
   unit_cost         Decimal
   total_cost        Decimal
   created_at        DateTime      @default(now())
@@ -538,7 +538,7 @@ model OrderItem {
   order       Order    @relation(fields: [order_id], references: [id])
   product_id  String
   product     Product  @relation(fields: [product_id], references: [id])
-  quantity    Int
+  quantity    Decimal
   price       Decimal
   total_price Decimal
   created_at  DateTime @default(now())

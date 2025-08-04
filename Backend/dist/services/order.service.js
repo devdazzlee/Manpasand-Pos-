@@ -68,7 +68,7 @@ class OrderService {
                     throw new apiError_1.AppError(400, `Product not found: ${item.productId}`);
                 }
                 // Find stock record with sufficient quantity
-                const stock = stockRecords.find(s => s.product_id === item.productId && s.current_quantity >= item.quantity);
+                const stock = stockRecords.find(s => s.product_id === item.productId && s.current_quantity.gte(item.quantity));
                 if (!stock) {
                     throw new apiError_1.AppError(400, `Insufficient stock for product ${product.name}`);
                 }
@@ -100,7 +100,7 @@ class OrderService {
                         movement_type: 'SALE',
                         quantity_change: -item.quantity,
                         previous_qty: stock.current_quantity,
-                        new_qty: stock.current_quantity - item.quantity,
+                        new_qty: stock.current_quantity.minus(item.quantity),
                     },
                 }));
             }
