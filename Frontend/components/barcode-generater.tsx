@@ -238,46 +238,166 @@ export default function BarcodeGenerator() {
     setExpiryDate(undefined);
   };
 
-  const handleZPLPrint = () => {
-    if (!selectedProduct) return
-
-    // ZPL command for GC420t (4" x 2.5" label)
-    const zplCommand = `
-^XA
-^CF0,30
-^FO50,30^FD${selectedProduct.brandName || ""} ${selectedProduct.category || ""}^FS
-^CF0,40
-^FO50,70^FD${selectedProduct.name}^FS
-^CF0,25
-^FO50,120^FDWeight: ${selectedProduct.weight || "N/A"}^FS
-^FO200,120^FDPrice: ${selectedProduct.sales_rate_exc_dis_and_tax || "N/A"}^FS
-^FO50,150^BY2,3,50
-^FD${selectedProduct.sku || selectedProduct.code || 'NO_CODE'}^FS
-^FD${selectedProduct.barcode}^FS
-^CF0,20
-^FO50,220^FDMFG: ${selectedProduct.mfgDate || "N/A"}^FS
-^FO200,220^FDEXP: ${selectedProduct.expDate || "N/A"}^FS
-^XZ`
-
-    // Send ZPL to printer (requires printer to be set up as raw printer)
-    const printWindow = window.open("", "_blank")
-    if (printWindow) {
-      printWindow.document.write(`
+ const handlePrint = () => {
+    if (printRef.current && selectedProduct) {
+      const printWindow = window.open("", "_blank")
+      if (printWindow) {
+        printWindow.document.write(`
         <html>
-          <head><title>ZPL Print</title></head>
+          <head>
+            <title>Barcode Label - ${selectedProduct.name}</title>
+            <style>
+              /* ZEBRA GC420t DIRECT PRINT OPTIMIZED CSS */
+              @page {
+                size: 4in 2.5in; /* Use inches for better Zebra compatibility */
+                margin: 0in;
+                padding: 0in;
+              }
+              
+              html, body { 
+                font-family: Arial, sans-serif; 
+                margin: 0; 
+                padding: 0;
+                background: white;
+                width: 4in;
+                height: 2.5in;
+                overflow: hidden;
+                box-sizing: border-box;
+                font-size: 8pt; /* Base font size for Zebra */
+              }
+              
+              .barcode-label {
+                width: 3.9in; /* Slightly smaller than page */
+                height: 2.4in; /* Slightly smaller than page */
+                border: 1pt solid #000;
+                padding: 0.05in;
+                margin: 0.05in;
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                box-sizing: border-box;
+                position: relative;
+                page-break-inside: avoid !important;
+                page-break-after: avoid !important;
+                page-break-before: avoid !important;
+                break-inside: avoid !important;
+              }
+              
+              .brand-category {
+                font-size: 6pt;
+                text-align: center;
+                color: #666;
+                margin-bottom: 0.02in;
+                line-height: 1;
+                height: 0.15in;
+              }
+              
+              .product-info {
+                text-align: center;
+                margin-bottom: 0.05in;
+                height: 0.6in;
+              }
+              
+              .product-name {
+                font-weight: bold;
+                font-size: 10pt;
+                margin-bottom: 0.02in;
+                text-transform: uppercase;
+                line-height: 1;
+                height: 0.25in;
+                overflow: hidden;
+              }
+              
+              .product-details {
+                font-size: 8pt;
+                margin-bottom: 0.02in;
+                line-height: 1;
+                height: 0.3in;
+              }
+              
+              .barcode-container {
+                text-align: center;
+                margin: 0.05in 0;
+                flex-grow: 1;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 0.8in;
+                max-height: 0.8in;
+              }
+              
+              .dates {
+                font-size: 6pt;
+                display: flex;
+                justify-content: space-between;
+                font-weight: bold;
+                border-top: 1pt solid #000;
+                padding-top: 0.02in;
+                line-height: 1;
+                height: 0.2in;
+              }
+              
+              * {
+                box-sizing: border-box;
+                -webkit-print-color-adjust: exact !important;
+                color-adjust: exact !important;
+                print-color-adjust: exact !important;
+              }
+              
+              svg {
+                max-width: 100%;
+                height: auto;
+                max-height: 0.7in;
+                width: auto;
+              }
+              
+              @media print {
+                @page {
+                  size: 4in 2.5in !important;
+                  margin: 0in !important;
+                  padding: 0in !important;
+                }
+                
+                html, body { 
+                  margin: 0 !important; 
+                  padding: 0 !important;
+                  width: 4in !important;
+                  height: 2.5in !important;
+                  overflow: hidden !important;
+                }
+                
+                .barcode-label { 
+                  border: 1pt solid #000 !important; 
+                  page-break-inside: avoid !important;
+                  page-break-after: avoid !important;
+                  page-break-before: avoid !important;
+                  break-inside: avoid !important;
+                  width: 3.9in !important;
+                  height: 2.4in !important;
+                }
+                
+                /* Force single page */
+                body::after {
+                  content: "";
+                  display: block;
+                  page-break-after: always;
+                }
+              }
+            </style>
+          </head>
           <body>
-            <pre style="font-family: monospace; white-space: pre-wrap;">${zplCommand}</pre>
-            <script>
-              // Auto-print the ZPL command
-              setTimeout(() => {
-                window.print();
-                window.close();
-              }, 500);
-            </script>
+            ${printRef.current.innerHTML}
           </body>
         </html>
       `)
-      printWindow.document.close()
+        printWindow.document.close()
+        printWindow.focus()
+
+        setTimeout(() => {
+          printWindow.print()
+          printWindow.close()
+        }, 1000)
+      }
     }
   }
 
@@ -410,7 +530,7 @@ export default function BarcodeGenerator() {
                 </div>
 
                 <Button
-                  onClick={handleZPLPrint}
+                  onClick={handlePrint}
                   className="w-full"
                   disabled={!isFormValid}
                 >
