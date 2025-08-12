@@ -172,7 +172,7 @@ const Suppliers: React.FC = () => {
       await apiClient.patch(`${API_BASE}/suppliers/${id}/toggle-status`);
       fetchList();
     } catch (e) {
-      console.error(e);
+      console.log(e);
     }
   };
 

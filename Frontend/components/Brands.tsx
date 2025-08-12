@@ -54,7 +54,7 @@ const Brands: React.FC = () => {
       const res = await apiClient.get(`${API_BASE}/brands`, { params: { search: q } });
       setBrands(res.data.data);
     } catch (e) {
-      console.error(e);
+      console.log(e);
     } finally {
       setLoading(false);
     }
@@ -128,7 +128,7 @@ const Brands: React.FC = () => {
       await apiClient.patch(`${API_BASE}/brands/${id}/toggle-display`);
       fetchBrands();
     } catch (e) {
-      console.error(e);
+      console.log(e);
     }
   };
 

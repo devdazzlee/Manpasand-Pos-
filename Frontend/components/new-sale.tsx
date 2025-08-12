@@ -1,72 +1,88 @@
-"use client"
+"use client";
 
-import { useState, useEffect } from "react"
-import { Button } from "@/components/ui/button"
-import { LoadingButton } from "@/components/ui/loading-button"
-import { Input } from "@/components/ui/input"
-import { Card, CardContent } from "@/components/ui/card"
-import { Badge } from "@/components/ui/badge"
-import { Separator } from "@/components/ui/separator"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { LoadingSpinner } from "@/components/ui/loading-spinner"
-import { useLoading } from "@/hooks/use-loading"
-import { useToast } from "@/hooks/use-toast"
-import { Search, Plus, Minus, Trash2, CreditCard, DollarSign, Scan, RefreshCw } from "lucide-react"
-import apiClient from "@/lib/apiClient"
-import { usePosData } from "@/hooks/use-pos-data"
+import { useState, useEffect } from "react";
+import { Button } from "@/components/ui/button";
+import { LoadingButton } from "@/components/ui/loading-button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { useLoading } from "@/hooks/use-loading";
+import { useToast } from "@/hooks/use-toast";
+import {
+  Search,
+  Plus,
+  Minus,
+  Trash2,
+  CreditCard,
+  DollarSign,
+  Scan,
+  RefreshCw,
+} from "lucide-react";
+import apiClient from "@/lib/apiClient";
+import { usePosData } from "@/hooks/use-pos-data";
 
 interface CartItem {
-  id: string
-  name: string
-  price: number
-  quantity: number
-  category: string
+  id: string;
+  name: string;
+  price: number;
+  quantity: number;
+  category: string;
 }
 
 interface Product {
-  id: string
-  name: string
-  price: number
-  category: string
-  stock: number
-  categoryId: string
-  available_stock?: number
-  current_stock?: number
-  reserved_stock?: number
-  minimum_stock?: number
-  maximum_stock?: number
+  id: string;
+  name: string;
+  price: number;
+  category: string;
+  stock: number;
+  categoryId: string;
+  available_stock?: number;
+  current_stock?: number;
+  reserved_stock?: number;
+  minimum_stock?: number;
+  maximum_stock?: number;
 }
 
-
 export function NewSale() {
-  const [cart, setCart] = useState<CartItem[]>([])
-  const [selectedCategory, setSelectedCategory] = useState("all")
-  const [searchTerm, setSearchTerm] = useState("")
-  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false)
-  const [lastTransactionId, setLastTransactionId] = useState<string | null>(null)
-  const { loading: paymentLoading, withLoading: withPaymentLoading } = useLoading()
-  const [scanLoading, setScanLoading] = useState(false)
-  const { toast } = useToast()
-  const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null)
-  const [quickAddDialogOpen, setQuickAddDialogOpen] = useState(false)
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null)
-  const [quickAddQuantity, setQuickAddQuantity] = useState("1")
-  const [quickAddTotalPrice, setQuickAddTotalPrice] = useState("")
+  const [cart, setCart] = useState<CartItem[]>([]);
+  const [selectedCategory, setSelectedCategory] = useState("all");
+  const [searchTerm, setSearchTerm] = useState("");
+  const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [lastTransactionId, setLastTransactionId] = useState<string | null>(
+    null
+  );
+  const { loading: paymentLoading, withLoading: withPaymentLoading } =
+    useLoading();
+  const [scanLoading, setScanLoading] = useState(false);
+  const { toast } = useToast();
+  const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
+  const [quickAddDialogOpen, setQuickAddDialogOpen] = useState(false);
+  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  const [quickAddQuantity, setQuickAddQuantity] = useState("1");
+  const [quickAddTotalPrice, setQuickAddTotalPrice] = useState("");
 
   // Global store with custom hook
-  const { 
-    products, 
-    categories, 
-    customers, 
-    productsLoading, 
-    categoriesLoading, 
+  const {
+    products,
+    categories,
+    customers,
+    productsLoading,
+    categoriesLoading,
     customersLoading,
     isAnyLoading,
     refreshAllData,
-    fetchProducts, 
-    fetchCategories, 
-    fetchCustomers 
-  } = usePosData()
+    fetchProducts,
+    fetchCategories,
+    fetchCustomers,
+  } = usePosData();
   useEffect(() => {
     const fetchData = async () => {
       try {
@@ -74,27 +90,27 @@ export function NewSale() {
         await Promise.all([
           fetchProducts(),
           fetchCategories(),
-          fetchCustomers()
-        ])
-    } catch (error) {
-      toast({
-        variant: "destructive",
+          fetchCustomers(),
+        ]);
+      } catch (error) {
+        toast({
+          variant: "destructive",
           title: "Failed to load data",
           description: "Could not fetch data from server",
-        })
+        });
       }
-    }
-    fetchData()
-  }, [fetchProducts, fetchCategories, fetchCustomers, toast])
-
-
-
+    };
+    fetchData();
+  }, [fetchProducts, fetchCategories, fetchCustomers, toast]);
 
   const filteredProducts = products.filter((product) => {
-    const matchesCategory = selectedCategory === "all" || product.categoryId === selectedCategory
-    const matchesSearch = product.name.toLowerCase().includes(searchTerm.toLowerCase())
-    return matchesCategory && matchesSearch
-  })
+    const matchesCategory =
+      selectedCategory === "all" || product.categoryId === selectedCategory;
+    const matchesSearch = product.name
+      .toLowerCase()
+      .includes(searchTerm.toLowerCase());
+    return matchesCategory && matchesSearch;
+  });
 
   const addToCart = async (product: Product, quantity: number = 1) => {
     // For testing: Allow negative sales (stock can go below 0)
@@ -113,11 +129,17 @@ export function NewSale() {
     */
 
     // Simulate API call delay
-    await new Promise((resolve) => setTimeout(resolve, 300))
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
-    const existingItem = cart.find((item) => item.id === product.id)
+    const existingItem = cart.find((item) => item.id === product.id);
     if (existingItem) {
-      setCart(cart.map((item) => (item.id === product.id ? { ...item, quantity: item.quantity + quantity } : item)))
+      setCart(
+        cart.map((item) =>
+          item.id === product.id
+            ? { ...item, quantity: item.quantity + quantity }
+            : item
+        )
+      );
     } else {
       setCart([
         ...cart,
@@ -128,19 +150,19 @@ export function NewSale() {
           quantity: quantity,
           category: product.category,
         },
-      ])
+      ]);
     }
 
     toast({
       className: "absolute top-2",
       title: "Item Added",
       description: `${product.name} (${quantity}) added to cart`,
-    })
-  }
+    });
+  };
 
   const updateQuantity = (id: string, change: number) => {
-    const item = cart.find((item) => item.id === id)
-    const product = products.find((p) => p.id === id)
+    const item = cart.find((item) => item.id === id);
+    const product = products.find((p) => p.id === id);
 
     // For testing: Allow negative sales (stock can go below 0)
     // Comment out stock validation for testing purposes
@@ -164,61 +186,67 @@ export function NewSale() {
       cart
         .map((item) => {
           if (item.id === id) {
-            const newQuantity = Number(item.quantity) + Number(change)
-            return newQuantity > 0 ? { ...item, quantity: newQuantity } : item
+            const newQuantity = Number(item.quantity) + Number(change);
+            return newQuantity > 0 ? { ...item, quantity: newQuantity } : item;
           }
-          return item
+          return item;
         })
-        .filter((item) => item.quantity > 0),
-    )
-  }
+        .filter((item) => item.quantity > 0)
+    );
+  };
 
   const updateQuantityManual = (id: string, newQuantity: number) => {
     // Validate quantity is positive
     if (newQuantity <= 0) {
       // Remove item if quantity is 0 or negative
-      setCart(cart.filter((item) => item.id !== id))
-      return
+      setCart(cart.filter((item) => item.id !== id));
+      return;
     }
 
     setCart(
       cart.map((item) => {
         if (item.id === id) {
-          return { ...item, quantity: Number(newQuantity) }
+          return { ...item, quantity: Number(newQuantity) };
         }
-        return item
+        return item;
       })
-    )
-  }
+    );
+  };
 
   const removeFromCart = (id: string) => {
-    const item = cart.find((item) => item.id === id)
-    setCart(cart.filter((item) => item.id !== id))
+    const item = cart.find((item) => item.id === id);
+    setCart(cart.filter((item) => item.id !== id));
 
     if (item) {
       toast({
         title: "Item Removed",
         description: `${item.name} removed from cart`,
-      })
+      });
     }
-  }
+  };
 
   const clearCart = () => {
-    setCart([])
+    setCart([]);
     toast({
       title: "Cart Cleared",
       description: "All items removed from cart",
-    })
-  }
+    });
+  };
 
-  const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
-  const total = subtotal
+  const subtotal = cart.reduce(
+    (sum, item) => sum + item.price * item.quantity,
+    0
+  );
+  const total = subtotal;
 
   const generateTransactionId = () => {
-    return `TXN${Date.now().toString().slice(-6)}`
-  }
+    return `TXN${Date.now().toString().slice(-6)}`;
+  };
 
-  const generateReceiptData = (transactionId: string, paymentMethod: string) => {
+  const generateReceiptData = (
+    transactionId: string,
+    paymentMethod: string
+  ) => {
     return {
       transactionId,
       timestamp: new Date().toISOString(),
@@ -228,14 +256,14 @@ export function NewSale() {
       paymentMethod,
       cashier: "Admin User",
       store: "MANPASAND Store #001",
-    }
-  }
+    };
+  };
 
   const printReceipt = (receiptContent: string) => {
     // Open window in direct response to a user click
-    const printWindow = window.open('', '_blank', 'width=600,height=600');
+    const printWindow = window.open("", "_blank", "width=600,height=600");
     if (!printWindow) return;
-  
+
     // Write your receipt HTML
     printWindow.document.open();
     printWindow.document.write(`
@@ -244,7 +272,22 @@ export function NewSale() {
           <title>Receipt</title>
           <style>
             /* optional: make it look nice on paper */
-            body { font-family: monospace; white-space: pre; padding: 1rem; }
+            @media print {
+            @page {
+              size: auto; /* Let the content determine the height */
+              margin: 0; 
+            }
+            body {
+              margin: 0;
+              padding: 10px; /* Add a little padding for looks */
+            }
+          }
+
+
+          body { 
+            font-family: monospace; 
+            white-space: pre; /* Keeps your formatting */
+          }
           </style>
         </head>
         <body>
@@ -253,15 +296,14 @@ export function NewSale() {
       </html>
     `);
     printWindow.document.close();
-  
+
     // Wait for the document to finish loading, then print & close
     printWindow.onload = () => {
-      printWindow.focus();      // Bring it to front
-      printWindow.print();      // Open print dialog
+      printWindow.focus(); // Bring it to front
+      printWindow.print(); // Open print dialog
       // printWindow.close();      // Close the tab/window when done
     };
   };
-  
 
   const downloadReceipt = (receiptData: any) => {
     const receiptContent = `
@@ -275,11 +317,13 @@ Cashier: ${receiptData.cashier}
 
 ITEMS:
 ${receiptData.items
-        .map(
-          (item: CartItem) =>
-            `${item.name} x${item.quantity} @ Rs ${item.price.toFixed(2)} = Rs ${(item.price * item.quantity).toFixed(2)}`,
-        )
-        .join("\n")}
+  .map(
+    (item: CartItem) =>
+      `${item.name} x${item.quantity} @ Rs ${item.price.toFixed(2)} = Rs ${(
+        item.price * item.quantity
+      ).toFixed(2)}`
+  )
+  .join("\n")}
 
 --------------------------------
 Subtotal: Rs ${receiptData.subtotal.toFixed(2)}
@@ -289,43 +333,43 @@ Payment Method: ${receiptData.paymentMethod}
 
 Thank you for shopping with us!
 ================================
-    `
+    `;
 
-    const blob = new Blob([receiptContent], { type: "text/plain" })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement("a")
-    a.href = url
-    a.download = `receipt-${receiptData.transactionId}.txt`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
+    const blob = new Blob([receiptContent], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `receipt-${receiptData.transactionId}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
 
     // Print logic
     printReceipt(receiptContent);
-  }
+  };
 
   const handlePayment = async (method: string) => {
     await withPaymentLoading(async () => {
       try {
         // Prepare items for API
-        const saleItems = cart.map(item => ({
+        const saleItems = cart.map((item) => ({
           productId: item.id,
           quantity: item.quantity,
           price: item.price,
-        }))
+        }));
 
         // Get branchId from localStorage (key: 'branch')
-        let branchId = ""
+        let branchId = "";
         try {
-          const branchStr = localStorage.getItem("branch")
-          console.log(branchStr)
+          const branchStr = localStorage.getItem("branch");
+          console.log(branchStr);
           if (branchStr) {
-            const branchObj = branchStr
-            branchId = branchStr || ""
+            const branchObj = branchStr;
+            branchId = branchStr || "";
           }
         } catch (e) {
-          branchId = ""
+          branchId = "";
         }
 
         // Prepare payload
@@ -333,106 +377,107 @@ Thank you for shopping with us!
           items: saleItems,
           paymentMethod: method === "Cash" ? "CASH" : "CARD",
           branchId,
-        }
+        };
         if (selectedCustomer) {
-          payload.customerId = selectedCustomer
+          payload.customerId = selectedCustomer;
         }
 
         // Call create sale API
-        await apiClient.post("/sale", payload)
+        await apiClient.post("/sale", payload);
 
         // (You can keep your local transaction/receipt logic if you want)
-        const transactionId = generateTransactionId()
-        const receiptData = generateReceiptData(transactionId, method)
+        const transactionId = generateTransactionId();
+        const receiptData = generateReceiptData(transactionId, method);
 
         // Save transaction to local storage (simulate database)
-        const transactions = JSON.parse(localStorage.getItem("transactions") || "[]")
-        transactions.push(receiptData)
-        localStorage.setItem("transactions", JSON.stringify(transactions))
+        const transactions = JSON.parse(
+          localStorage.getItem("transactions") || "[]"
+        );
+        transactions.push(receiptData);
+        localStorage.setItem("transactions", JSON.stringify(transactions));
 
-        setLastTransactionId(transactionId)
-        setCart([])
-        setPaymentDialogOpen(false)
+        setLastTransactionId(transactionId);
+        setCart([]);
+        setPaymentDialogOpen(false);
 
         toast({
           title: "Payment Successful",
           description: `Transaction ${transactionId} completed via ${method}`,
-        })
+        });
 
         // Auto-download receipt
         setTimeout(() => {
-          downloadReceipt(receiptData)
+          downloadReceipt(receiptData);
           toast({
             title: "Receipt Downloaded",
             description: "Receipt has been saved to your downloads",
-          })
-        }, 1000)
+          });
+        }, 1000);
       } catch (error) {
         toast({
           variant: "destructive",
           title: "Payment Failed",
           description: "There was an error processing your payment",
-        })
+        });
       }
-    })
-  }
-
-
+    });
+  };
 
   const handleBarcodeScan = async () => {
-    setScanLoading(true)
+    setScanLoading(true);
     try {
       // Simulate barcode scanning
-      await new Promise((resolve) => setTimeout(resolve, 1500))
+      await new Promise((resolve) => setTimeout(resolve, 1500));
 
       // Simulate finding a product by barcode
-      const randomProduct = products[Math.floor(Math.random() * products.length)]
-      await addToCart(randomProduct)
+      const randomProduct =
+        products[Math.floor(Math.random() * products.length)];
+      await addToCart(randomProduct);
 
       toast({
         title: "Barcode Scanned",
         description: `Found ${randomProduct.name}`,
-      })
+      });
     } catch (error) {
       toast({
         variant: "destructive",
         title: "Scan Failed",
         description: "Could not read barcode",
-      })
+      });
     } finally {
-      setScanLoading(false)
+      setScanLoading(false);
     }
-  }
+  };
 
   const handleProductClick = (product: Product) => {
-    setSelectedProduct(product)
-    setQuickAddQuantity("1")
-    setQuickAddDialogOpen(true)
-  }
+    setSelectedProduct(product);
+    setQuickAddQuantity("1");
+    setQuickAddDialogOpen(true);
+  };
 
   const handleQuickAdd = async () => {
-    if (!selectedProduct) return
-    const quantity = parseFloat(quickAddQuantity)
+    if (!selectedProduct) return;
+    const quantity = parseFloat(quickAddQuantity);
     if (isNaN(quantity) || quantity <= 0) {
       toast({
         variant: "destructive",
         title: "Invalid Quantity",
         description: "Please enter a valid quantity greater than 0",
-      })
-      return
+      });
+      return;
     }
 
-    await addToCart(selectedProduct, quantity)
-    setQuickAddDialogOpen(false)
-    setSelectedProduct(null)
-    setQuickAddQuantity("1")
-    setQuickAddTotalPrice("")
-  }
+    await addToCart(selectedProduct, quantity);
+    setQuickAddDialogOpen(false);
+    setSelectedProduct(null);
+    setQuickAddQuantity("1");
+    setQuickAddTotalPrice("");
+  };
 
   const handleCategoryChange = async (categoryId: string) => {
-    setSelectedCategory(categoryId)
+    setSelectedCategory(categoryId);
     // No need to set loading state as we're using cached data
-  }
+  };
 
   return (
     <div className="flex h-screen">
@@ -442,12 +487,18 @@ Thank you for shopping with us!
           <div className="flex items-center justify-between mb-4">
             <div>
               <h1 className="text-3xl font-bold text-gray-900">New Sales</h1>
-              <p className="text-sm text-orange-600 font-medium">⚠️ TESTING MODE: Negative sales allowed</p>
-              {lastTransactionId && <p className="text-sm text-green-600">Last transaction: {lastTransactionId}</p>}
+              <p className="text-sm text-orange-600 font-medium">
+                ⚠️ TESTING MODE: Negative sales allowed
+              </p>
+              {lastTransactionId && (
+                <p className="text-sm text-green-600">
+                  Last transaction: {lastTransactionId}
+                </p>
+              )}
             </div>
             <div className="flex items-center space-x-2">
-              <LoadingButton 
-                variant="outline" 
+              <LoadingButton
+                variant="outline"
                 size="icon"
                 loading={isAnyLoading}
                 onClick={refreshAllData}
@@ -455,11 +506,11 @@ Thank you for shopping with us!
               >
                 <RefreshCw className="h-4 w-4" />
               </LoadingButton>
-            {cart.length > 0 && (
-              <Button variant="outline" onClick={clearCart}>
-                Clear Cart
-              </Button>
-            )}
+              {cart.length > 0 && (
+                <Button variant="outline" onClick={clearCart}>
+                  Clear Cart
+                </Button>
+              )}
             </div>
           </div>
           <div className="flex items-center space-x-4">
@@ -472,7 +523,12 @@ Thank you for shopping with us!
                 className="pl-10"
               />
             </div>
-            <LoadingButton variant="outline" size="icon" loading={scanLoading} onClick={handleBarcodeScan}>
+            <LoadingButton
+              variant="outline"
+              size="icon"
+              loading={scanLoading}
+              onClick={handleBarcodeScan}
+            >
               <Scan className="h-4 w-4" />
             </LoadingButton>
           </div>
@@ -488,23 +544,31 @@ Thank you for shopping with us!
               className="whitespace-nowrap"
               disabled={productsLoading}
             >
-              {productsLoading && selectedCategory === category.id && <LoadingSpinner size="sm" className="mr-2" />}
+              {productsLoading && selectedCategory === category.id && (
+                <LoadingSpinner size="sm" className="mr-2" />
+              )}
               {category.name}
             </Button>
           ))}
         </div>
 
         <div className="mb-4 max-w-xs bg-white text-black">
-          <label className="block text-sm font-medium text-gray-700 mb-1">Customer (optional)</label>
+          <label className="block text-sm font-medium text-gray-700 mb-1">
+            Customer (optional)
+          </label>
           <select
             className="w-full border rounded px-3 py-2"
-            style={{ color: 'black', backgroundColor: 'white' }}
+            style={{ color: "black", backgroundColor: "white" }}
             value={selectedCustomer ?? ""}
-            onChange={e => setSelectedCustomer(e.target.value || null)}
+            onChange={(e) => setSelectedCustomer(e.target.value || null)}
           >
             <option value="">Select customer</option>
             {customers.map((customer: any) => (
-              <option className="text-black" key={customer.id} value={customer.id}>
+              <option
+                className="text-black"
+                key={customer.id}
+                value={customer.id}
+              >
                 <span className="text-black">{customer.email}</span>
                 asdasdas
               </option>
@@ -529,15 +593,17 @@ Thank you for shopping with us!
         ) : filteredProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-64 col-span-full">
             <span className="text-2xl mb-2">🛒</span>
-            <p className="text-gray-500 text-lg">No products found in this category.</p>
+            <p className="text-gray-500 text-lg">
+              No products found in this category.
+            </p>
           </div>
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {filteredProducts.map((product) => {
-              const cartItem = cart.find((item) => item.id === product.id)
-              const currentStock = product.available_stock ?? product.stock
-              const isOutOfStock = currentStock <= 0
-              const isLowStock = currentStock <= 5 && currentStock > 0
+              const cartItem = cart.find((item) => item.id === product.id);
+              const currentStock = product.available_stock ?? product.stock;
+              const isOutOfStock = currentStock <= 0;
+              const isLowStock = currentStock <= 5 && currentStock > 0;
 
               return (
                 <Card
@@ -548,18 +614,32 @@ Thank you for shopping with us!
                   <CardContent className="p-4">
                     <div className="aspect-square bg-gray-100 rounded-lg mb-3 flex items-center justify-center relative">
                       <span className="text-2xl">🛒</span>
-                      {cartItem && <Badge className="absolute -top-2 -right-2 bg-blue-600">{cartItem.quantity.toFixed(2)}</Badge>}
+                      {cartItem && (
+                        <Badge className="absolute -top-2 -right-2 bg-blue-600">
+                          {cartItem.quantity.toFixed(2)}
+                        </Badge>
+                      )}
                     </div>
-                    <h3 className="font-medium text-gray-900 mb-1">{product.name}</h3>
-                    <p className="text-lg font-bold text-blue-600">Rs {product.price.toFixed(2)}</p>
+                    <h3 className="font-medium text-gray-900 mb-1">
+                      {product.name}
+                    </h3>
+                    <p className="text-lg font-bold text-blue-600">
+                      Rs {product.price.toFixed(2)}
+                    </p>
                     <div className="flex items-center justify-between mt-2">
                       <p
-                        className={`text-sm ${isLowStock ? "text-yellow-600" : "text-gray-500"}`}
+                        className={`text-sm ${
+                          isLowStock ? "text-yellow-600" : "text-gray-500"
+                        }`}
                       >
-                        Stock: {(product.available_stock ?? product.stock).toFixed(2)}
+                        Stock:{" "}
+                        {(product.available_stock ?? product.stock).toFixed(2)}
                       </p>
                       {isLowStock && (
-                        <Badge variant="secondary" className="bg-yellow-100 text-yellow-800">
+                        <Badge
+                          variant="secondary"
+                          className="bg-yellow-100 text-yellow-800"
+                        >
                           Low Stock
                         </Badge>
                       )}
@@ -569,7 +649,7 @@ Thank you for shopping with us!
                     </Badge>
                   </CardContent>
                 </Card>
-              )
+              );
             })}
           </div>
         )}
@@ -579,7 +659,9 @@ Thank you for shopping with us!
       <div className="w-96 bg-white border-l border-gray-200 flex flex-col">
         <div className="p-6 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">
-            Cart ({cart.length} items • {cart.reduce((sum, item) => sum + item.quantity, 0).toFixed(2)} total qty)
+            Cart ({cart.length} items •{" "}
+            {cart.reduce((sum, item) => sum + item.quantity, 0).toFixed(2)}{" "}
+            total qty)
           </h2>
         </div>
 
@@ -592,30 +674,37 @@ Thank you for shopping with us!
           ) : (
             <div className="space-y-4">
               {cart.map((item) => (
-                <div key={item.id} className="flex items-center justify-between p-3 border rounded-lg">
+                <div
+                  key={item.id}
+                  className="flex items-center justify-between p-3 border rounded-lg"
+                >
                   <div className="flex-1">
                     <h4 className="font-medium text-gray-900">{item.name}</h4>
-                    <p className="text-sm text-gray-500">Rs {item.price.toFixed(2)} each</p>
-                    <p className="text-sm font-medium">Rs {(item.price * item.quantity).toFixed(2)}</p>
+                    <p className="text-sm text-gray-500">
+                      Rs {item.price.toFixed(2)} each
+                    </p>
+                    <p className="text-sm font-medium">
+                      Rs {(item.price * item.quantity).toFixed(2)}
+                    </p>
                   </div>
                   <div className="flex items-center space-x-2">
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => updateQuantity(item.id, -1)}
                       className="h-8 w-8 p-0"
                     >
                       <Minus className="h-3 w-3" />
                     </Button>
-                    
+
                     <div className="flex flex-col items-center">
                       <Input
                         type="number"
                         value={item.quantity}
                         onChange={(e) => {
-                          const value = parseFloat(e.target.value)
+                          const value = parseFloat(e.target.value);
                           if (!isNaN(value)) {
-                            updateQuantityManual(item.id, value)
+                            updateQuantityManual(item.id, value);
                           }
                         }}
                         className="w-16 h-8 text-center text-sm"
@@ -624,16 +713,16 @@ Thank you for shopping with us!
                         placeholder="0"
                       />
                     </div>
-                    
-                    <Button 
-                      size="sm" 
-                      variant="outline" 
+
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => updateQuantity(item.id, 1)}
                       className="h-8 w-8 p-0"
                     >
                       <Plus className="h-3 w-3" />
                     </Button>
-                    
+
                     <Button
                       size="sm"
                       variant="outline"
@@ -673,7 +762,6 @@ Thank you for shopping with us!
                 <CreditCard className="h-4 w-4 mr-2" />
                 Process Payment
               </LoadingButton>
-              
             </div>
           </div>
         )}
@@ -732,7 +820,9 @@ Thank you for shopping with us!
               </div>
               <div className="flex justify-between mb-2">
                 <span>Price:</span>
-                <span className="font-medium">Rs {selectedProduct?.price.toFixed(2)}</span>
+                <span className="font-medium">
+                  Rs {selectedProduct?.price.toFixed(2)}
+                </span>
               </div>
               <div className="flex justify-between mb-2">
                 <span>Current Stock:</span>
@@ -741,7 +831,7 @@ Thank you for shopping with us!
                 </span>
               </div>
             </div>
-            
+
             <div className="space-y-2">
               <label className="text-sm font-medium">Quantity</label>
               <div className="flex items-center space-x-2">
@@ -749,30 +839,32 @@ Thank you for shopping with us!
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    const currentQty = parseFloat(quickAddQuantity) || 0
-                    setQuickAddQuantity((currentQty - 1 > 0 ? (currentQty - 1).toFixed(2) : "") )
-                    setQuickAddTotalPrice("") // Clear total price if manually changing quantity
+                    const currentQty = parseFloat(quickAddQuantity) || 0;
+                    setQuickAddQuantity(
+                      currentQty - 1 > 0 ? (currentQty - 1).toFixed(2) : ""
+                    );
+                    setQuickAddTotalPrice(""); // Clear total price if manually changing quantity
                   }}
                   className="h-10 w-10 p-0"
                 >
                   <Minus className="h-4 w-4" />
                 </Button>
-                
+
                 <Input
                   type="number"
                   value={quickAddQuantity}
                   onChange={(e) => {
-                    const value = parseFloat(e.target.value)
+                    const value = parseFloat(e.target.value);
                     if (!isNaN(value)) {
-                      setQuickAddQuantity(value.toString())
-                      setQuickAddTotalPrice("") // Clear total price if manually changing quantity
+                      setQuickAddQuantity(value.toString());
+                      setQuickAddTotalPrice(""); // Clear total price if manually changing quantity
                     } else {
-                      setQuickAddQuantity("")
+                      setQuickAddQuantity("");
                     }
                   }}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      handleQuickAdd()
+                    if (e.key === "Enter") {
+                      handleQuickAdd();
                     }
                   }}
                   className="flex-1 text-center"
@@ -780,22 +872,24 @@ Thank you for shopping with us!
                   step="0.01"
                   placeholder="Enter quantity"
                 />
-                
+
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => {
-                    const currentQty = parseFloat(quickAddQuantity) || 0
-                    setQuickAddQuantity((currentQty + 1).toFixed(2))
-                    setQuickAddTotalPrice("") // Clear total price if manually changing quantity
+                    const currentQty = parseFloat(quickAddQuantity) || 0;
+                    setQuickAddQuantity((currentQty + 1).toFixed(2));
+                    setQuickAddTotalPrice(""); // Clear total price if manually changing quantity
                   }}
                   className="h-10 w-10 p-0"
                 >
                   <Plus className="h-4 w-4" />
                 </Button>
               </div>
-              <p className="text-xs text-gray-500">You can enter decimal values like 0.5, 0.25, etc.</p>
-              
+              <p className="text-xs text-gray-500">
+                You can enter decimal values like 0.5, 0.25, etc.
+              </p>
+
               {/* Quick Preset Buttons */}
               <div className="flex flex-wrap gap-1 mt-2">
                 {[0.25, 0.5, 0.75, 1, 2, 5].map((preset) => (
@@ -804,8 +898,8 @@ Thank you for shopping with us!
                     variant="outline"
                     size="sm"
                     onClick={() => {
-                      setQuickAddQuantity(preset.toString())
-                      setQuickAddTotalPrice("")
+                      setQuickAddQuantity(preset.toString());
+                      setQuickAddTotalPrice("");
                     }}
                     className="text-xs px-2 py-1 h-6"
                   >
@@ -821,11 +915,15 @@ Thank you for shopping with us!
                 type="number"
                 value={quickAddTotalPrice}
                 onChange={(e) => {
-                  setQuickAddTotalPrice(e.target.value)
-                  const price = parseFloat(e.target.value)
-                  if (!isNaN(price) && selectedProduct && selectedProduct.price > 0) {
-                    const qty = price / selectedProduct.price
-                    setQuickAddQuantity(qty > 0 ? qty.toFixed(2) : "")
+                  setQuickAddTotalPrice(e.target.value);
+                  const price = parseFloat(e.target.value);
+                  if (
+                    !isNaN(price) &&
+                    selectedProduct &&
+                    selectedProduct.price > 0
+                  ) {
+                    const qty = price / selectedProduct.price;
+                    setQuickAddQuantity(qty > 0 ? qty.toFixed(2) : "");
                   }
                 }}
                 className="flex-1 text-center"
@@ -833,14 +931,14 @@ Thank you for shopping with us!
                 step="0.01"
                 placeholder="Enter total price"
               />
-              <p className="text-xs text-gray-500">Enter the total price you want to spend. Quantity will be calculated automatically.</p>
+              <p className="text-xs text-gray-500">
+                Enter the total price you want to spend. Quantity will be
+                calculated automatically.
+              </p>
             </div>
-            
+
             <div className="flex space-x-2">
-              <Button
-                onClick={handleQuickAdd}
-                className="flex-1"
-              >
+              <Button onClick={handleQuickAdd} className="flex-1">
                 <Plus className="h-4 w-4 mr-2" />
                 Add to Cart
               </Button>
@@ -856,5 +954,5 @@ Thank you for shopping with us!
         </DialogContent>
       </Dialog>
     </div>
-  )
+  );
 }

@@ -5,7 +5,7 @@ export const connectDB = async () => {
     await prisma.$connect();
     console.log('PostgreSQL Connected...');
   } catch (err) {
-    console.error('Database connection error:', err);
+    console.log('Database connection error:', err);
     process.exit(1);
   }
 };

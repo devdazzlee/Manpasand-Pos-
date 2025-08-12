@@ -159,7 +159,7 @@ class CategoryService {
             console.log('Category images processed successfully:', imageUrls);
         }
         catch (error) {
-            console.error('Error processing category images:', error);
+            console.log('Error processing category images:', error);
             const err = error;
             // 3. On failure, create FAILED image records with error messages
             await client_1.prisma.categoryImages.createMany({

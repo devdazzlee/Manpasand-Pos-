@@ -47,7 +47,7 @@ const Sizes: React.FC = () => {
       const res = await apiClient.get(`${API_BASE}/sizes`, { params: { search: q } });
       setSizes(res.data.data);
     } catch (err) {
-      console.error(err);
+      console.log(err);
     } finally {
       setLoading(false);
     }

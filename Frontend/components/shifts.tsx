@@ -95,7 +95,7 @@ export function Shifts() {
       }))
       setEmployees(apiEmployees)
     } catch (error) {
-      console.error("Error fetching employees:", error)
+      console.log("Error fetching employees:", error)
     }
   }
 
@@ -118,7 +118,7 @@ export function Shifts() {
       }));
       setShifts(apiShifts);
     } catch (error) {
-      console.error("Error fetching shifts:", error);
+      console.log("Error fetching shifts:", error);
     }
   };
 
@@ -184,7 +184,7 @@ export function Shifts() {
         })
         await getAllShifts()
       } catch (error) {
-        console.error("Error assigning shift:", error)
+        console.log("Error assigning shift:", error)
       } finally {
         setLoading(false)
       }
@@ -227,7 +227,7 @@ export function Shifts() {
         setEditingShift(null);
         await getAllShifts();
       } catch (error) {
-        console.error("Error updating shift:", error);
+        console.log("Error updating shift:", error);
       } finally {
         setLoading(false);
       }
@@ -252,7 +252,7 @@ export function Shifts() {
         setEndShiftSales("")
         await getAllShifts()
       } catch (error) {
-        console.error("Error ending shift:", error)
+        console.log("Error ending shift:", error)
       } finally {
         setLoading(false)
       }
@@ -266,7 +266,7 @@ export function Shifts() {
       await apiClient.delete(`/shift-assignment/${shiftId}`);
       await getAllShifts();
     } catch (error) {
-      console.error("Error deleting shift:", error);
+      console.log("Error deleting shift:", error);
     } finally {
       setLoading(false);
     }

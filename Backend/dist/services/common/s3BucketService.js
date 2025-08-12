@@ -44,7 +44,7 @@ class S3Service {
             return this.getPublicUrl(fileName);
         }
         catch (error) {
-            console.error(`Upload failed:`, error);
+            console.log(`Upload failed:`, error);
             if (retries > 0) {
                 await new Promise(resolve => setTimeout(resolve, 1000 * (4 - retries)));
                 return this.uploadImage(file, retries - 1);
@@ -80,7 +80,7 @@ class S3Service {
     //     console.log('Image processing complete. Output size:', output.length);
     //     return output;
     //   } catch (err) {
-    //     console.error('Sharp processing error:', err);
+    //     console.log('Sharp processing error:', err);
     //     throw err;
     //   }
     // }

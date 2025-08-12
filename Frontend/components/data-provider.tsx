@@ -27,7 +27,7 @@ export function DataProvider({ children }: DataProviderProps) {
         ])
         console.log('✅ All data initialized successfully')
       } catch (error) {
-        console.error('❌ Failed to initialize data:', error)
+        console.log('❌ Failed to initialize data:', error)
         toast({
           variant: "destructive",
           title: "Data Loading Error",

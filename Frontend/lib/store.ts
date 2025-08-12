@@ -193,7 +193,7 @@ export const useStore = create<StoreState>()(
           
           console.log(`Loaded ${apiProducts.length} products`)
         } catch (error) {
-          console.error('Failed to fetch products:', error)
+          console.log('Failed to fetch products:', error)
           set({ productsLoading: false })
           throw error
         }
@@ -226,7 +226,7 @@ export const useStore = create<StoreState>()(
           
           console.log(`Loaded ${categories.length} categories`)
         } catch (error) {
-          console.error('Failed to fetch categories:', error)
+          console.log('Failed to fetch categories:', error)
           set({ categoriesLoading: false })
           throw error
         }
@@ -258,7 +258,7 @@ export const useStore = create<StoreState>()(
           
           console.log(`Loaded ${res.data.data.length} customers`)
         } catch (error) {
-          console.error('Failed to fetch customers:', error)
+          console.log('Failed to fetch customers:', error)
           set({ customersLoading: false })
           throw error
         }

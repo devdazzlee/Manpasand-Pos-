@@ -120,7 +120,7 @@ export function Stocks() {
           description: "Stock metadata loaded successfully",
         });
       } catch (e: any) {
-        console.error(e);
+        console.log(e);
         let errorMessage = "Failed to load stock metadata";
         if (e.response?.data?.message) errorMessage = e.response.data.message;
         else if (e.message) errorMessage = e.message;
@@ -161,7 +161,7 @@ export function Stocks() {
           description: "Stock data loaded successfully",
         });
       } catch (e: any) {
-        console.error(e);
+        console.log(e);
         let errorMessage = "Failed to load stock data";
         if (e.response?.data?.message) errorMessage = e.response.data.message;
         else if (e.message) errorMessage = e.message;
@@ -207,7 +207,7 @@ export function Stocks() {
         description: "Stock added successfully",
       });
     } catch (e: any) {
-      console.error(e);
+      console.log(e);
       let errorMessage = "Failed to add stock";
       if (e.response?.data?.message) errorMessage = e.response.data.message;
       else if (e.message) errorMessage = e.message;
@@ -242,7 +242,7 @@ export function Stocks() {
         description: "Stock adjusted successfully",
       });
     } catch (e: any) {
-      console.error(e);
+      console.log(e);
       let errorMessage = "Failed to adjust stock";
       if (e.response?.data?.message) errorMessage = e.response.data.message;
       else if (e.message) errorMessage = e.message;

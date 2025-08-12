@@ -193,7 +193,7 @@ export class CategoryService {
       console.log('Category images processed successfully:', imageUrls);
 
     } catch (error) {
-      console.error('Error processing category images:', error);
+      console.log('Error processing category images:', error);
       const err = error as Error;
 
       // 3. On failure, create FAILED image records with error messages

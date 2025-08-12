@@ -863,7 +863,7 @@ export default function Inventory() {
       setProducts(productsData)
       setTotalProducts(total)
     } catch (error) {
-      console.error("Failed to load products:", error)
+      console.log("Failed to load products:", error)
       toast({
         title: "Error",
         description: "Failed to load products",

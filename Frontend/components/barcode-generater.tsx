@@ -32,6 +32,7 @@ interface Product {
 
 export default function BarcodeGenerator() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
+  console.log("🚀 ~ BarcodeGenerator ~ selectedProduct:", selectedProduct);
   const [packageDate, setPackageDate] = useState<Date>();
   const [expiryDate, setExpiryDate] = useState<Date>();
   const [netWeight, setNetWeight] = useState("");
@@ -63,6 +64,155 @@ export default function BarcodeGenerator() {
     fetchData();
   }, [fetchProducts, toast]);
 
+  const parseWeightToGrams = (weightInput: any) => {
+    if (!weightInput || weightInput.trim() === "") return 0;
+
+    const input = weightInput.toLowerCase().trim();
+    let weight = 0;
+
+    // Extract number from input
+    const numberMatch = input.match(/(\d+\.?\d*)/);
+    if (!numberMatch) return 0;
+
+    const number = parseFloat(numberMatch[1]);
+
+    // Convert to grams based on unit
+    if (input.includes("kg")) {
+      weight = number * 1000; // Convert kg to grams
+    } else if (input.includes("g") && !input.includes("kg")) {
+      weight = number; // Already in grams
+    } else if (input.includes("ml") || input.includes("l")) {
+      // For liquids, assume 1ml = 1g, 1l = 1000g
+      if (input.includes("ml")) {
+        weight = number;
+      } else if (input.includes("l")) {
+        weight = number * 1000;
+      }
+    } else {
+      // No unit specified, assume grams
+      weight = number;
+    }
+
+    return weight;
+  };
+
+  const calculatePriceByWeight = (netWeightInput: any, basePrice: any) => {
+    if (!netWeightInput || !basePrice) return basePrice || 0;
+
+    const input = netWeightInput.toLowerCase().trim();
+
+    // Extract number (including decimals)
+    const numberMatch = input.match(/(\d+\.?\d*)/);
+    if (!numberMatch) return basePrice;
+
+    const weightValue = parseFloat(numberMatch[1]);
+    if (weightValue <= 0) return basePrice;
+
+    let multiplier = 1; // Default multiplier (1kg = base price)
+
+    // WEIGHT UNITS (convert everything to kg equivalent)
+    if (input.includes("kg") || input.includes("kilo")) {
+      multiplier = weightValue; // 1kg = 1x base price
+    } else if (
+      input.includes("g") &&
+      !input.includes("kg") &&
+      !input.includes("mg")
+    ) {
+      multiplier = weightValue / 1000; // 1000g = 1kg
+    } else if (input.includes("mg")) {
+      multiplier = weightValue / 1000000; // 1,000,000mg = 1kg
+    } else if (input.includes("lb") || input.includes("pound")) {
+      multiplier = weightValue * 0.453592; // 1lb = 0.453592kg
+    } else if (input.includes("oz") && !input.includes("fl")) {
+      multiplier = weightValue * 0.0283495; // 1oz = 0.0283495kg
+    } else if (input.includes("ton") || input.includes("tonne")) {
+      multiplier = weightValue * 1000; // 1 ton = 1000kg
+    }
+
+    // VOLUME UNITS (treat 1L = 1kg for liquids)
+    else if (
+      input.includes("l") &&
+      !input.includes("ml") &&
+      !input.includes("fl")
+    ) {
+      multiplier = weightValue; // 1L = 1kg (water density)
+    } else if (input.includes("ml") || input.includes("milliliter")) {
+      multiplier = weightValue / 1000; // 1000ml = 1L = 1kg
+    } else if (input.includes("fl oz") || input.includes("fluid ounce")) {
+      multiplier = weightValue * 0.0295735; // 1 fl oz = 29.5735ml
+    } else if (input.includes("cup")) {
+      multiplier = weightValue * 0.236588; // 1 cup = 236.588ml
+    } else if (input.includes("pint")) {
+      multiplier = weightValue * 0.473176; // 1 pint = 473.176ml
+    } else if (input.includes("quart")) {
+      multiplier = weightValue * 0.946353; // 1 quart = 946.353ml
+    } else if (input.includes("gallon")) {
+      multiplier = weightValue * 3.78541; // 1 gallon = 3.78541L
+    }
+
+    // PAKISTANI/INDIAN UNITS
+    else if (input.includes("ser") || input.includes("seer")) {
+      multiplier = weightValue * 0.933105; // 1 seer = 933.105g
+    } else if (input.includes("maund")) {
+      multiplier = weightValue * 37.3242; // 1 maund = 37.3242kg
+    } else if (input.includes("tola")) {
+      multiplier = weightValue * 0.01166; // 1 tola = 11.66g
+    }
+
+    // PIECE/COUNT UNITS
+    else if (
+      input.includes("pc") ||
+      input.includes("piece") ||
+      input.includes("pcs")
+    ) {
+      multiplier = weightValue; // 1 piece = base price
+    } else if (input.includes("dozen")) {
+      multiplier = weightValue * 12; // 1 dozen = 12 pieces
+    } else if (input.includes("pack") || input.includes("packet")) {
+      multiplier = weightValue; // 1 pack = base price
+    }
+
+    // DEFAULT: If no unit specified, assume grams
+    else {
+      multiplier = weightValue / 1000; // Assume grams if no unit
+    }
+
+    const finalPrice = basePrice * multiplier;
+    return finalPrice.toFixed(2);
+  };
+
+  // Format display function for better readability
+  const formatWeightDisplay = (netWeightInput: any) => {
+    if (!netWeightInput) return "Not specified";
+
+    const input = netWeightInput.toLowerCase().trim();
+    const numberMatch = input.match(/(\d+\.?\d*)/);
+    if (!numberMatch) return netWeightInput;
+
+    const number = parseFloat(numberMatch[1]);
+
+    // Return formatted with proper unit
+    if (input.includes("kg")) return `${number}kg`;
+    if (input.includes("g") && !input.includes("kg") && !input.includes("mg"))
+      return `${number}g`;
+    if (input.includes("mg")) return `${number}mg`;
+    if (input.includes("lb")) return `${number}lb`;
+    if (input.includes("oz") && !input.includes("fl")) return `${number}oz`;
+    if (input.includes("l") && !input.includes("ml")) return `${number}L`;
+    if (input.includes("ml")) return `${number}ml`;
+    if (input.includes("fl oz")) return `${number}fl oz`;
+    if (input.includes("cup")) return `${number} cup${number > 1 ? "s" : ""}`;
+    if (input.includes("pint")) return `${number} pint${number > 1 ? "s" : ""}`;
+    if (input.includes("ser")) return `${number} seer`;
+    if (input.includes("maund")) return `${number} maund`;
+    if (input.includes("tola")) return `${number} tola`;
+    if (input.includes("pc") || input.includes("piece")) return `${number} pcs`;
+    if (input.includes("dozen")) return `${number} dozen`;
+
+    // Default: assume grams
+    return `${number}g`;
+  };
+
   // Filter products based on search term
   const filteredProducts = useMemo(() => {
     if (!searchTerm) return products;
@@ -89,83 +239,139 @@ export default function BarcodeGenerator() {
       const printWindow = window.open("", "_blank");
       if (printWindow) {
         printWindow.document.write(`
-          <html>
-            <head>
-              <title>Barcode Label - ${selectedProduct.name}</title>
-              <style>
-                body { 
-                  font-family: Arial, sans-serif; 
-                  margin: 0; 
-                  padding: 20px;
-                  background: white;
+        <html>
+          <head>
+            <title>Barcode Label - ${selectedProduct.name}</title>
+            <style>
+              /* CRITICAL: Remove all margins and set exact page size */
+              @page {
+                size: 4in 2.5in; /* Exact label size */
+                margin: 0; /* No margins */
+                padding: 0;
+              }
+              
+              body { 
+                font-family: Arial, sans-serif; 
+                margin: 0; 
+                padding: 0;
+                background: white;
+                width: 4in;
+                height: 2.5in;
+                overflow: hidden; /* Prevent content overflow */
+              }
+              
+              .barcode-label {
+                width: 100%; /* Use full available width */
+                height: 100%; /* Use full available height */
+                border: 2px solid #000;
+                padding: 6px; /* Reduced padding */
+                display: flex;
+                flex-direction: column;
+                justify-content: space-between;
+                box-sizing: border-box; /* Include border in dimensions */
+              }
+              
+              .brand-category {
+                font-size: 8px;
+                text-align: center;
+                color: #666;
+                margin-bottom: 2px;
+                line-height: 1;
+              }
+              
+              .product-info {
+                text-align: center;
+                margin-bottom: 3px;
+              }
+              
+              .product-name {
+                font-weight: bold;
+                font-size: 14px; /* Slightly smaller */
+                margin-bottom: 2px;
+                text-transform: uppercase;
+                line-height: 1.1;
+              }
+              
+              .product-details {
+                font-size: 10px; /* Smaller font */
+                margin-bottom: 3px;
+                line-height: 1.1;
+              }
+              
+              .barcode-container {
+                text-align: center;
+                margin: 2px 0;
+                flex-grow: 1;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                min-height: 40px; /* Ensure barcode has space */
+              }
+              
+              .dates {
+                font-size: 8px; /* Smaller font */
+                display: flex;
+                justify-content: space-between;
+                font-weight: bold;
+                border-top: 1px solid #000;
+                padding-top: 1px;
+                line-height: 1;
+              }
+              
+              /* Remove any default styling that might cause issues */
+              * {
+                box-sizing: border-box;
+              }
+              
+              /* Ensure barcode SVG fits properly */
+              svg {
+                max-width: 100%;
+                height: auto;
+              }
+              
+              @media print {
+                @page {
+                  size: 4in 2.5in;
+                  margin: 0;
                 }
-                .barcode-label {
+                
+                body { 
+                  margin: 0; 
+                  padding: 0; 
                   width: 4in;
                   height: 2.5in;
-                  border: 2px solid #000;
-                  padding: 8px;
-                  display: flex;
-                  flex-direction: column;
-                  justify-content: space-between;
-                  page-break-after: always;
+                  -webkit-print-color-adjust: exact;
+                  color-adjust: exact;
                 }
-                .product-info {
-                  text-align: center;
-                  margin-bottom: 4px;
+                
+                .barcode-label { 
+                  border: 2px solid #000 !important; 
+                  margin: 0;
+                  padding: 6px;
+                  width: 100%;
+                  height: 100%;
                 }
-                .product-name {
-                  font-weight: bold;
-                  font-size: 16px;
-                  margin-bottom: 2px;
-                  text-transform: uppercase;
+                
+                /* Ensure content doesn't break across pages */
+                * {
+                  page-break-inside: avoid;
                 }
-                .product-details {
-                  font-size: 11px;
-                  margin-bottom: 4px;
-                  line-height: 1.2;
-                }
-                .barcode-container {
-                  text-align: center;
-                  margin: 4px 0;
-                  flex-grow: 1;
-                  display: flex;
-                  align-items: center;
-                  justify-content: center;
-                }
-                .dates {
-                  font-size: 9px;
-                  display: flex;
-                  justify-content: space-between;
-                  font-weight: bold;
-                  border-top: 1px solid #000;
-                  padding-top: 2px;
-                }
-                .brand-category {
-                  font-size: 9px;
-                  text-align: center;
-                  color: #666;
-                  margin-bottom: 2px;
-                }
-                @media print {
-                  body { margin: 0; padding: 0; }
-                  .barcode-label { 
-                    border: 2px solid #000; 
-                    margin: 0;
-                  }
-                }
-              </style>
-            </head>
-            <body>
-              ${printRef.current.innerHTML}
-            </body>
-          </html>
-        `);
+              }
+            </style>
+          </head>
+          <body>
+            ${printRef.current.innerHTML}
+          </body>
+        </html>
+      `);
         printWindow.document.close();
         printWindow.focus();
+
+        // Wait longer for content to fully render
         setTimeout(() => {
           printWindow.print();
           printWindow.close();
-        }, 500); // Add a delay to ensure content is rendered
+        }, 1000);
       }
     }
   };
@@ -334,19 +540,32 @@ export default function BarcodeGenerator() {
                   </div>
                   <div className="product-details text-xs space-y-1">
                     <div>
-                      <strong>Net Wt:</strong> {netWeight || "Not specified"}
+                      <strong>Net Wt:</strong> {formatWeightDisplay(netWeight)}
                     </div>
                     <div>
-                      <strong>Price:</strong> Rs{" "}
-                      {selectedProduct.sales_rate_exc_dis_and_tax} /{" "}
-                      {selectedProduct.unitName || "N/A"}
+                      <strong>Price:</strong>{" "}
+                      {netWeight
+                        ? calculatePriceByWeight(
+                            netWeight,
+                            selectedProduct.sales_rate_exc_dis_and_tax
+                          )
+                        : selectedProduct.sales_rate_exc_dis_and_tax}
                     </div>
                   </div>
                 </div>
 
                 <div className="barcode-container flex justify-center items-center flex-grow">
                   <Barcode
-                    value={selectedProduct.sku || selectedProduct.id}
+                    value={
+                      selectedProduct.sku +
+                      "-" +
+                      Math.round(
+                        calculatePriceByWeight(
+                          netWeight,
+                          selectedProduct.sales_rate_exc_dis_and_tax
+                        )
+                      )
+                    }
                     width={1.2}
                     height={35}
                     fontSize={8}

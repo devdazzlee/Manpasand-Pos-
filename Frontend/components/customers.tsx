@@ -78,7 +78,7 @@ export function Customers() {
         description: "Customers loaded successfully",
       });
     } catch (err: any) {
-      console.error(err);
+      console.log(err);
       let errorMessage = "Failed to load customers";
       if (err.response?.data?.message) errorMessage = err.response.data.message;
       else if (err.message) errorMessage = err.message;
@@ -124,7 +124,7 @@ export function Customers() {
       });
       fetchCustomers();
     } catch (err: any) {
-      console.error(err);
+      console.log(err);
       let errorMessage = "Failed to create customer";
       if (err.response?.data?.message) errorMessage = err.response.data.message;
       else if (err.message) errorMessage = err.message;
@@ -157,7 +157,7 @@ export function Customers() {
       });
       fetchCustomers();
     } catch (err: any) {
-      console.error(err);
+      console.log(err);
       let errorMessage = "Failed to update customer";
       if (err.response?.data?.message) errorMessage = err.response.data.message;
       else if (err.message) errorMessage = err.message;
@@ -181,7 +181,7 @@ export function Customers() {
       });
       fetchCustomers();
     } catch (err: any) {
-      console.error(err);
+      console.log(err);
       let errorMessage = "Failed to delete customer";
       if (err.response?.data?.message) errorMessage = err.response.data.message;
       else if (err.message) errorMessage = err.message;

@@ -56,7 +56,7 @@ export function DashboardHome() {
         setTopProducts(response.data.data)
       }
     } catch (error) {
-      console.error("Error fetching top products:", error)
+      console.log("Error fetching top products:", error)
       toast({
         variant: "destructive",
         title: "Error",
@@ -73,7 +73,7 @@ export function DashboardHome() {
         setRecentSales(response.data.data)
       }
     } catch (error) {
-      console.error("Error fetching recent sales:", error)
+      console.log("Error fetching recent sales:", error)
       toast({
         variant: "destructive",
         title: "Error",
@@ -89,7 +89,7 @@ export function DashboardHome() {
         setStats(response.data.data)
       }
     } catch (error) {
-      console.error("Error fetching stats:", error)
+      console.log("Error fetching stats:", error)
       toast({
         variant: "destructive",
         title: "Error",

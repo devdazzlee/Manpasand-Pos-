@@ -73,7 +73,7 @@ const Subcategories: React.FC = () => {
       });
       setList(res.data.data);
     } catch (e) {
-      console.error(e);
+      console.log(e);
     } finally {
       setLoading(false);
     }
@@ -85,7 +85,7 @@ const Subcategories: React.FC = () => {
       setCurrent(res.data.data);
       setDetailOpen(true);
     } catch (e) {
-      console.error(e);
+      console.log(e);
     }
   };
 
@@ -136,7 +136,7 @@ const Subcategories: React.FC = () => {
       setEditOpen(false);
       fetchList();
     } catch (e) {
-      console.error(e);
+      console.log(e);
       alert("Submission failed");
     } finally {
       setSubmitting(false);
@@ -148,7 +148,7 @@ const Subcategories: React.FC = () => {
       await apiClient.patch(`${API_BASE}/subcategories/${id}/toggle-status`);
       fetchList();
     } catch (e) {
-      console.error(e);
+      console.log(e);
     }
   };
 

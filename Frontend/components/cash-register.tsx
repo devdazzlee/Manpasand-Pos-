@@ -186,7 +186,7 @@ export function CashRegister() {
       setTodayDrawerExists(false);
       return null;
     } catch (error) {
-      console.error("Error checking today drawer:", error);
+      console.log("Error checking today drawer:", error);
       setTodayDrawerExists(false);
       return null;
     }
@@ -224,7 +224,7 @@ export function CashRegister() {
         description: "Check console for API response details",
       });
     } catch (error: any) {
-      console.error("API Test Error:", error);
+      console.log("API Test Error:", error);
       toast({
         title: "API Test Failed",
         description: error.message || "Check console for details",
@@ -254,7 +254,7 @@ export function CashRegister() {
       // Refresh the data
       await fetchDrawerAndExpenses();
     } catch (error: any) {
-      console.error("Test Create Error:", error);
+      console.log("Test Create Error:", error);
       toast({
         title: "Test Create Failed",
         description: error.message || "Check console for details",
@@ -340,7 +340,7 @@ export function CashRegister() {
         setTodayDrawerExists(false);
       }
     } catch (err: any) {
-      console.error("Error fetching drawer data:", err);
+      console.log("Error fetching drawer data:", err);
       setCashDrawer(null);
       setRecentTransactions([]);
 
@@ -455,7 +455,7 @@ export function CashRegister() {
       setOpeningAmount("");
       await fetchDrawerAndExpenses();
     } catch (err: any) {
-      console.error("Error opening drawer:", err); // Debug log
+      console.log("Error opening drawer:", err); // Debug log
       toast({
         title: "Error",
         description:

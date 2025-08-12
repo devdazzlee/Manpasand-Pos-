@@ -58,7 +58,7 @@ const Orders: React.FC = () => {
         description: "Orders data loaded successfully",
       });
     } catch (err: any) {
-      console.error("Metadata load failed", err);
+      console.log("Metadata load failed", err);
       
       // Extract error message from API response
       let errorMessage = "Failed to load orders data";
@@ -90,7 +90,7 @@ const Orders: React.FC = () => {
         description: "Orders loaded successfully",
       });
     } catch (err: any) {
-      console.error("Orders load failed", err);
+      console.log("Orders load failed", err);
       
       // Extract error message from API response
       let errorMessage = "Failed to load orders";
@@ -123,7 +123,7 @@ const Orders: React.FC = () => {
       resetForm();
       fetchOrders();
     } catch (err: any) {
-      console.error("Order creation failed", err);
+      console.log("Order creation failed", err);
       
       // Extract error message from API response
       let errorMessage = "Failed to create order";
@@ -157,7 +157,7 @@ const Orders: React.FC = () => {
       });
       fetchOrders();
     } catch (err: any) {
-      console.error("Cancel failed", err);
+      console.log("Cancel failed", err);
       
       // Extract error message from API response
       let errorMessage = "Failed to cancel order";
@@ -185,7 +185,7 @@ const Orders: React.FC = () => {
       });
       fetchOrders();
     } catch (err: any) {
-      console.error("Status update failed", err);
+      console.log("Status update failed", err);
       
       // Extract error message from API response
       let errorMessage = "Failed to update order status";
@@ -210,7 +210,7 @@ const Orders: React.FC = () => {
       setSelectedOrder(res.data.data);
       setIsDetailOpen(true);
     } catch (err: any) {
-      console.error("Fetch detail failed", err);
+      console.log("Fetch detail failed", err);
       
       // Extract error message from API response
       let errorMessage = "Failed to load order details";

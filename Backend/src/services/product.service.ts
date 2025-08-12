@@ -79,7 +79,7 @@ export class ProductService {
 
             return unknownEntry.id;
         } catch (error) {
-            console.error(`❌ Error in getOrCreateUnknownEntry for ${modelName}:`, error);
+            console.log(`❌ Error in getOrCreateUnknownEntry for ${modelName}:`, error);
             throw error;
         }
     }
@@ -164,7 +164,7 @@ export class ProductService {
 
             return entry.id;
         } catch (error) {
-            console.error(`❌ Error in getOrCreateEntryByName for ${modelName}:`, error);
+            console.log(`❌ Error in getOrCreateEntryByName for ${modelName}:`, error);
             throw error;
         }
     }

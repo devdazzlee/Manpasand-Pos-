@@ -268,7 +268,7 @@ export function Categories() {
       const response = await apiClient.get("/branches?is_active=true&limit=100")
       setBranches(response.data.data || [])
     } catch (error: any) {
-      console.error("Error fetching branches:", error)
+      console.log("Error fetching branches:", error)
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to fetch branches",
@@ -286,7 +286,7 @@ export function Categories() {
       const response = await apiClient.get("/categories")
       setCategories(response.data.data || [])
     } catch (error: any) {
-      console.error("Error fetching categories:", error)
+      console.log("Error fetching categories:", error)
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to fetch categories",
@@ -339,7 +339,7 @@ export function Categories() {
       }
       setIsAddDialogOpen(false)
     } catch (error: any) {
-      console.error("Error creating category:", error)
+      console.log("Error creating category:", error)
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to create category",
@@ -376,7 +376,7 @@ export function Categories() {
       setEditingCategory(null)
       setEditImagePreview(null)
     } catch (error: any) {
-      console.error("Error updating category:", error)
+      console.log("Error updating category:", error)
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to update category",
@@ -403,7 +403,7 @@ export function Categories() {
         categories.map((c) => (c.id === id ? { ...c, status: c.status === "active" ? "inactive" : "active" } : c)),
       )
     } catch (error: any) {
-      console.error("Error toggling category status:", error)
+      console.log("Error toggling category status:", error)
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to update category status",
@@ -429,7 +429,7 @@ export function Categories() {
 
       setCategories(categories.filter((c) => c.id !== id))
     } catch (error: any) {
-      console.error("Error deleting category:", error)
+      console.log("Error deleting category:", error)
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to delete category",

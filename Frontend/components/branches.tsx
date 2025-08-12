@@ -126,7 +126,7 @@ export function Branches() {
         setCurrentPage(1)
       }
     } catch (error: any) {
-      console.error("Error fetching branches:", error)
+      console.log("Error fetching branches:", error)
       setBranches([])
       setTotalPages(1)
       setTotalBranches(0)
@@ -176,7 +176,7 @@ export function Branches() {
         setIsAddDialogOpen(false)
       }
     } catch (error: any) {
-      console.error("Error creating branch:", error)
+      console.log("Error creating branch:", error)
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to create branch",
@@ -215,7 +215,7 @@ export function Branches() {
         setEditingBranch(null)
       }
     } catch (error: any) {
-      console.error("Error updating branch:", error)
+      console.log("Error updating branch:", error)
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to update branch",
@@ -242,7 +242,7 @@ export function Branches() {
         setBranches(branches.map((b) => (b.id === id ? { ...b, is_active: !b.is_active } : b)))
       }
     } catch (error: any) {
-      console.error("Error toggling branch status:", error)
+      console.log("Error toggling branch status:", error)
       toast({
         title: "Error",
         description: error.response?.data?.message || "Failed to update branch status",
