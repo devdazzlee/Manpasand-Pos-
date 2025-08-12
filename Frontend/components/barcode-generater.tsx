@@ -24,10 +24,14 @@ interface Product {
   code?: string;
   name: string;
   sku?: string;
+  barcode?: string;
   sales_rate_exc_dis_and_tax?: number;
   unitName?: string;
   category?: string;
   brandName?: string;
+  weight?: string;
+  mfgDate?: string;
+  expDate?: string;
 }
 
 export default function BarcodeGenerator() {
@@ -234,139 +238,48 @@ export default function BarcodeGenerator() {
     setExpiryDate(undefined);
   };
 
-  const handlePrint = () => {
-    if (printRef.current && selectedProduct) {
-      const printWindow = window.open("", "_blank");
-      if (printWindow) {
-        printWindow.document.write(`
+  const handleZPLPrint = () => {
+    if (!selectedProduct) return
+
+    // ZPL command for GC420t (4" x 2.5" label)
+    const zplCommand = `
+^XA
+^CF0,30
+^FO50,30^FD${selectedProduct.brandName || ""} ${selectedProduct.category || ""}^FS
+^CF0,40
+^FO50,70^FD${selectedProduct.name}^FS
+^CF0,25
+^FO50,120^FDWeight: ${selectedProduct.weight || "N/A"}^FS
+^FO200,120^FDPrice: ${selectedProduct.sales_rate_exc_dis_and_tax || "N/A"}^FS
+^FO50,150^BY2,3,50
+^FD${selectedProduct.sku || selectedProduct.code || 'NO_CODE'}^FS
+^FD${selectedProduct.barcode}^FS
+^CF0,20
+^FO50,220^FDMFG: ${selectedProduct.mfgDate || "N/A"}^FS
+^FO200,220^FDEXP: ${selectedProduct.expDate || "N/A"}^FS
+^XZ`
+
+    // Send ZPL to printer (requires printer to be set up as raw printer)
+    const printWindow = window.open("", "_blank")
+    if (printWindow) {
+      printWindow.document.write(`
         <html>
-          <head>
-            <title>Barcode Label - ${selectedProduct.name}</title>
-            <style>
-              /* ZEBRA PRINTER OPTIMIZED CSS */
-              @page {
-                size: 101.6mm 63.5mm; /* Exact millimeter dimensions */
-                margin: 0mm; /* Zero margins critical for Zebra */
-                padding: 0mm;
-              }
-              
-              body { 
-                font-family: Arial, sans-serif; 
-                margin: 0mm; 
-                padding: 1.5mm; /* Minimal padding */
-                background: white;
-                width: 101.6mm;
-                height: 63.5mm;
-                overflow: hidden;
-                box-sizing: border-box;
-              }
-              
-              .barcode-label {
-                width: 98.6mm; /* Account for padding */
-                height: 60.5mm; /* Account for padding */
-                border: 0.5mm solid #000;
-                padding: 1.5mm;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                box-sizing: border-box;
-                position: relative;
-              }
-              
-              .brand-category {
-                font-size: 2.1mm; /* 6pt */
-                text-align: center;
-                color: #666;
-                margin-bottom: 0.5mm;
-                line-height: 1;
-              }
-              
-              .product-info {
-                text-align: center;
-                margin-bottom: 1mm;
-              }
-              
-              .product-name {
-                font-weight: bold;
-                font-size: 3.5mm; /* 10pt */
-                margin-bottom: 0.5mm;
-                text-transform: uppercase;
-                line-height: 1.1;
-              }
-              
-              .product-details {
-                font-size: 2.8mm; /* 8pt */
-                margin-bottom: 1mm;
-                line-height: 1.1;
-              }
-              
-              .barcode-container {
-                text-align: center;
-                margin: 1mm 0;
-                flex-grow: 1;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                min-height: 12mm;
-              }
-              
-              .dates {
-                font-size: 2.1mm; /* 6pt */
-                display: flex;
-                justify-content: space-between;
-                font-weight: bold;
-                border-top: 0.3mm solid #000;
-                padding-top: 0.3mm;
-                line-height: 1;
-              }
-              
-              * {
-                box-sizing: border-box;
-                -webkit-print-color-adjust: exact;
-                color-adjust: exact;
-              }
-              
-              svg {
-                max-width: 100%;
-                height: auto;
-                max-height: 12mm;
-              }
-              
-              @media print {
-                @page {
-                  size: 101.6mm 63.5mm;
-                  margin: 0mm;
-                }
-                
-                body { 
-                  margin: 0mm; 
-                  padding: 1.5mm;
-                  width: 101.6mm;
-                  height: 63.5mm;
-                }
-                
-                .barcode-label { 
-                  border: 0.5mm solid #000 !important; 
-                  page-break-inside: avoid;
-                }
-              }
-            </style>
-          </head>
+          <head><title>ZPL Print</title></head>
           <body>
-            ${printRef.current.innerHTML}
+            <pre style="font-family: monospace; white-space: pre-wrap;">${zplCommand}</pre>
+            <script>
+              // Auto-print the ZPL command
+              setTimeout(() => {
+                window.print();
+                window.close();
+              }, 500);
+            </script>
           </body>
         </html>
-      `);
-        printWindow.document.close();
-        printWindow.focus();
-
-        setTimeout(() => {
-          printWindow.print();
-          printWindow.close();
-        }, 1000);
-      }
+      `)
+      printWindow.document.close()
     }
-  };
+  }
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return "__/__/____";
@@ -497,7 +410,7 @@ export default function BarcodeGenerator() {
                 </div>
 
                 <Button
-                  onClick={handlePrint}
+                  onClick={handleZPLPrint}
                   className="w-full"
                   disabled={!isFormValid}
                 >
