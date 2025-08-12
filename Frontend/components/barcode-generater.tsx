@@ -74,7 +74,7 @@ export default function BarcodeGenerator() {
     const numberMatch = input.match(/(\d+\.?\d*)/);
     if (!numberMatch) return 0;
 
-    const number = parseFloat(numberMatch[1]);
+    const number = Number.parseFloat(numberMatch[1]);
 
     // Convert to grams based on unit
     if (input.includes("kg")) {
@@ -105,7 +105,7 @@ export default function BarcodeGenerator() {
     const numberMatch = input.match(/(\d+\.?\d*)/);
     if (!numberMatch) return basePrice;
 
-    const weightValue = parseFloat(numberMatch[1]);
+    const weightValue = Number.parseFloat(numberMatch[1]);
     if (weightValue <= 0) return basePrice;
 
     let multiplier = 1; // Default multiplier (1kg = base price)
@@ -189,7 +189,7 @@ export default function BarcodeGenerator() {
     const numberMatch = input.match(/(\d+\.?\d*)/);
     if (!numberMatch) return netWeightInput;
 
-    const number = parseFloat(numberMatch[1]);
+    const number = Number.parseFloat(numberMatch[1]);
 
     // Return formatted with proper unit
     if (input.includes("kg")) return `${number}kg`;
@@ -243,117 +243,110 @@ export default function BarcodeGenerator() {
           <head>
             <title>Barcode Label - ${selectedProduct.name}</title>
             <style>
-              /* CRITICAL: Remove all margins and set exact page size */
+              /* ZEBRA PRINTER OPTIMIZED CSS */
               @page {
-                size: 4in 2.5in; /* Exact label size */
-                margin: 0; /* No margins */
-                padding: 0;
+                size: 101.6mm 63.5mm; /* Exact millimeter dimensions */
+                margin: 0mm; /* Zero margins critical for Zebra */
+                padding: 0mm;
               }
               
               body { 
                 font-family: Arial, sans-serif; 
-                margin: 0; 
-                padding: 0;
+                margin: 0mm; 
+                padding: 1.5mm; /* Minimal padding */
                 background: white;
-                width: 4in;
-                height: 2.5in;
-                overflow: hidden; /* Prevent content overflow */
+                width: 101.6mm;
+                height: 63.5mm;
+                overflow: hidden;
+                box-sizing: border-box;
               }
               
               .barcode-label {
-                width: 100%; /* Use full available width */
-                height: 100%; /* Use full available height */
-                border: 2px solid #000;
-                padding: 6px; /* Reduced padding */
+                width: 98.6mm; /* Account for padding */
+                height: 60.5mm; /* Account for padding */
+                border: 0.5mm solid #000;
+                padding: 1.5mm;
                 display: flex;
                 flex-direction: column;
                 justify-content: space-between;
-                box-sizing: border-box; /* Include border in dimensions */
+                box-sizing: border-box;
+                position: relative;
               }
               
               .brand-category {
-                font-size: 8px;
+                font-size: 2.1mm; /* 6pt */
                 text-align: center;
                 color: #666;
-                margin-bottom: 2px;
+                margin-bottom: 0.5mm;
                 line-height: 1;
               }
               
               .product-info {
                 text-align: center;
-                margin-bottom: 3px;
+                margin-bottom: 1mm;
               }
               
               .product-name {
                 font-weight: bold;
-                font-size: 14px; /* Slightly smaller */
-                margin-bottom: 2px;
+                font-size: 3.5mm; /* 10pt */
+                margin-bottom: 0.5mm;
                 text-transform: uppercase;
                 line-height: 1.1;
               }
               
               .product-details {
-                font-size: 10px; /* Smaller font */
-                margin-bottom: 3px;
+                font-size: 2.8mm; /* 8pt */
+                margin-bottom: 1mm;
                 line-height: 1.1;
               }
               
               .barcode-container {
                 text-align: center;
-                margin: 2px 0;
+                margin: 1mm 0;
                 flex-grow: 1;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                min-height: 40px; /* Ensure barcode has space */
+                min-height: 12mm;
               }
               
               .dates {
-                font-size: 8px; /* Smaller font */
+                font-size: 2.1mm; /* 6pt */
                 display: flex;
                 justify-content: space-between;
                 font-weight: bold;
-                border-top: 1px solid #000;
-                padding-top: 1px;
+                border-top: 0.3mm solid #000;
+                padding-top: 0.3mm;
                 line-height: 1;
               }
               
-              /* Remove any default styling that might cause issues */
               * {
                 box-sizing: border-box;
+                -webkit-print-color-adjust: exact;
+                color-adjust: exact;
               }
               
-              /* Ensure barcode SVG fits properly */
               svg {
                 max-width: 100%;
                 height: auto;
+                max-height: 12mm;
               }
               
               @media print {
                 @page {
-                  size: 4in 2.5in;
-                  margin: 0;
+                  size: 101.6mm 63.5mm;
+                  margin: 0mm;
                 }
                 
                 body { 
-                  margin: 0; 
-                  padding: 0; 
-                  width: 4in;
-                  height: 2.5in;
-                  -webkit-print-color-adjust: exact;
-                  color-adjust: exact;
+                  margin: 0mm; 
+                  padding: 1.5mm;
+                  width: 101.6mm;
+                  height: 63.5mm;
                 }
                 
                 .barcode-label { 
-                  border: 2px solid #000 !important; 
-                  margin: 0;
-                  padding: 6px;
-                  width: 100%;
-                  height: 100%;
-                }
-                
-                /* Ensure content doesn't break across pages */
-                * {
+                  border: 0.5mm solid #000 !important; 
                   page-break-inside: avoid;
                 }
               }
@@ -367,7 +360,6 @@ export default function BarcodeGenerator() {
         printWindow.document.close();
         printWindow.focus();
 
-        // Wait longer for content to fully render
         setTimeout(() => {
           printWindow.print();
           printWindow.close();
