@@ -260,49 +260,57 @@ export function NewSale() {
   };
 
   const printReceipt = (receiptContent: string) => {
-    // Open window in direct response to a user click
-    const printWindow = window.open("", "_blank", "width=600,height=600");
-    if (!printWindow) return;
+    const w = window.open("", "_blank", "width=480,height=600");
+    if (!w) return;
 
-    // Write your receipt HTML
-    printWindow.document.open();
-    printWindow.document.write(`
-      <html>
-        <head>
-          <title>Receipt</title>
-          <style>
-            /* optional: make it look nice on paper */
-            @media print {
+    w.document.open();
+    w.document.write(`
+    <html>
+      <head>
+        <title>Receipt</title>
+        <style>
+          /* General */
+          html, body { margin: 0; padding: 0; }
+          body { font-family: monospace; }
+
+          /* Wrap content to receipt width */
+          .receipt {
+            width: 80mm;            /* match your paper width: 58mm or 80mm */
+            padding: 6mm;           /* small padding */
+            box-sizing: border-box;
+            white-space: pre;       /* keep your formatting */
+            display: inline-block;  /* shrink-wrap to content height */
+            page-break-inside: avoid;
+          }
+
+          @media print {
             @page {
-              size: auto; /* Let the content determine the height */
-              margin: 0; 
+              size: 80mm auto;      /* width fixed, height grows with content (Chrome/Edge) */
+              margin: 0;            /* no extra margins */
             }
-            body {
+            html, body {
+              width: 80mm;
               margin: 0;
-              padding: 10px; /* Add a little padding for looks */
             }
           }
+        </style>
+      </head>
+      <body>
+        <div class="receipt">${receiptContent}</div>
+        <script>
+          window.onafterprint = () => window.close();
+        </script>
+      </body>
+    </html>
+  `);
+    w.document.close();
 
-
-          body { 
-            font-family: monospace; 
-            white-space: pre; /* Keeps your formatting */
-          }
-          </style>
-        </head>
-        <body>
-          ${receiptContent}
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-
-    // Wait for the document to finish loading, then print & close
-    printWindow.onload = () => {
-      printWindow.focus(); // Bring it to front
-      printWindow.print(); // Open print dialog
-      // printWindow.close();      // Close the tab/window when done
-    };
+    // Give the browser a tick to apply styles before printing
+    w.onload = () =>
+      setTimeout(() => {
+        w.focus();
+        w.print();
+      }, 150);
   };
 
   const downloadReceipt = (receiptData: any) => {
@@ -334,17 +342,6 @@ Payment Method: ${receiptData.paymentMethod}
 Thank you for shopping with us!
 ================================
     `;
-
-    const blob = new Blob([receiptContent], { type: "text/plain" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `receipt-${receiptData.transactionId}.txt`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    URL.revokeObjectURL(url);
-
     // Print logic
     printReceipt(receiptContent);
   };

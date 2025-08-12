@@ -47,124 +47,116 @@ class SaleService {
         return sale;
     }
     async createSale({ branchId, customerId, paymentMethod, items, createdBy, }) {
-        return client_2.prisma.$transaction(async (tx) => {
-            const validations = [];
-            if (customerId) {
-                validations.push(tx.customer.findUnique({ where: { id: customerId } }));
-            }
-            else {
-                validations.push(Promise.resolve(null));
-            }
-            validations.push(tx.branch.findUnique({ where: { id: branchId } }));
-            const [customer, branch] = await Promise.all(validations);
-            if (customerId && !customer) {
-                throw new apiError_1.AppError(400, 'Invalid customer');
-            }
-            if (!branch) {
-                throw new apiError_1.AppError(400, 'Invalid branch');
-            }
-            const productIds = items.map((i) => i.productId);
-            const stocks = await tx.stock.findMany({
-                where: {
-                    product_id: { in: productIds },
-                    branch_id: branchId,
-                },
-            });
-            let total = 0;
-            for (const item of items) {
-                const stock = stocks.find((s) => s.product_id === item.productId);
-                // For testing: Create stock record if it doesn't exist
-                if (!stock) {
-                    // Create a new stock record with 0 quantity for testing
-                    await tx.stock.create({
-                        data: {
-                            product_id: item.productId,
-                            branch_id: branchId,
-                            current_quantity: 0,
-                            minimum_quantity: 0,
-                            maximum_quantity: 1000,
-                            reserved_quantity: 0,
-                        },
-                    });
-                }
-                // For testing: Allow negative stock (comment out stock validation)
-                // if (stock && stock.current_quantity < item.quantity) throw new AppError(400, `Insufficient stock`);
-                total += item.price * item.quantity;
-            }
-            for (const item of items) {
-                // Use upsert to handle both existing and new stock records
-                await tx.stock.upsert({
-                    where: {
-                        product_id_branch_id: {
-                            product_id: item.productId,
-                            branch_id: branchId,
-                        },
-                    },
-                    update: {
-                        current_quantity: {
-                            decrement: item.quantity,
-                        },
-                    },
-                    create: {
-                        product_id: item.productId,
-                        branch_id: branchId,
-                        current_quantity: -item.quantity, // Start with negative quantity for testing
-                        minimum_quantity: 0,
-                        maximum_quantity: 1000,
-                        reserved_quantity: 0,
-                    },
-                });
-                // Get the current stock quantity after the upsert operation
-                const currentStock = await tx.stock.findUnique({
-                    where: {
-                        product_id_branch_id: {
-                            product_id: item.productId,
-                            branch_id: branchId,
-                        },
-                    },
-                });
-                await tx.stockMovement.create({
-                    data: {
-                        product_id: item.productId,
-                        branch_id: branchId,
-                        movement_type: 'SALE',
-                        quantity_change: -item.quantity,
-                        previous_qty: currentStock
-                            ? currentStock.current_quantity.plus(item.quantity) // Decimal.plus(number)
-                            : new client_1.Prisma.Decimal(0),
-                        new_qty: currentStock
-                            ? currentStock.current_quantity // still a Decimal
-                            : new client_1.Prisma.Decimal(item.quantity),
-                        created_by: createdBy,
-                    },
-                });
-            }
-            const sale = await tx.sale.create({
-                data: {
-                    sale_number: `SALE-${Date.now()}`,
-                    branch_id: branchId,
-                    customer_id: customerId,
-                    total_amount: total,
-                    subtotal: total,
-                    payment_method: paymentMethod,
-                    payment_status: 'PAID',
-                    status: 'COMPLETED',
-                    created_by: createdBy,
-                    sale_items: {
-                        create: items.map((item) => ({
-                            product: { connect: { id: item.productId } },
-                            quantity: item.quantity,
-                            unit_price: item.price,
-                            line_total: item.price * item.quantity,
-                        })),
-                    },
-                },
-                include: {
-                    sale_items: true,
-                },
-            });
-            return sale;
+        // 1) Validate OUTSIDE any interactive transaction
+        const [customer, branch] = await Promise.all([
+            customerId ? client_2.prisma.customer.findUnique({ where: { id: customerId } }) : null,
+            client_2.prisma.branch.findUnique({ where: { id: branchId } }),
+        ]);
+        if (customerId && !customer)
+            throw new apiError_1.AppError(400, 'Invalid customer');
+        if (!branch)
+            throw new apiError_1.AppError(400, 'Invalid branch');
+        if (!items.length)
+            throw new apiError_1.AppError(400, 'No items provided');
+        // 2) Pre-fetch stock snapshot once
+        const productIds = items.map(i => i.productId);
+        const stocks = await client_2.prisma.stock.findMany({
+            where: { product_id: { in: productIds }, branch_id: branchId },
         });
+        const stockMap = new Map(stocks.map(s => [s.product_id, s]));
+        // 3) Group same product lines and compute movements in memory
+        const grouped = items.reduce((acc, it) => {
+            const key = it.productId;
+            if (!acc[key])
+                acc[key] = { productId: it.productId, qty: new client_1.Prisma.Decimal(0) };
+            acc[key].qty = acc[key].qty.plus(it.quantity);
+            return acc;
+        }, {});
+        const movements = [];
+        for (const gp of Object.values(grouped)) {
+            const existing = stockMap.get(gp.productId);
+            const prev = new client_1.Prisma.Decimal(existing?.current_quantity ?? 0);
+            const change = gp.qty.mul(-1); // sale => decrement
+            const next = prev.plus(change);
+            // allow negative stock per your testing; add a check here if you want to block it
+            movements.push({
+                product_id: gp.productId,
+                previous_qty: prev,
+                new_qty: next,
+                quantity_change: change,
+            });
+            stockMap.set(gp.productId, {
+                ...(existing ?? {}),
+                product_id: gp.productId,
+                branch_id: branchId,
+                current_quantity: next,
+            });
+        }
+        // 4) Prepare all writes as a single non-interactive transaction (prevents P2028)
+        const total = items.reduce((s, it) => s + it.price * it.quantity, 0);
+        const ops = [];
+        // (a) Sale + items
+        ops.push(client_2.prisma.sale.create({
+            data: {
+                sale_number: `SALE-${Date.now()}`,
+                branch_id: branchId,
+                customer_id: customerId,
+                total_amount: new client_1.Prisma.Decimal(total),
+                subtotal: new client_1.Prisma.Decimal(total),
+                payment_method: paymentMethod,
+                payment_status: 'PAID',
+                status: 'COMPLETED',
+                created_by: createdBy,
+                sale_items: {
+                    create: items.map((item) => ({
+                        product: { connect: { id: item.productId } },
+                        quantity: new client_1.Prisma.Decimal(item.quantity),
+                        unit_price: new client_1.Prisma.Decimal(item.price),
+                        line_total: new client_1.Prisma.Decimal(item.price).mul(item.quantity),
+                    })),
+                },
+            },
+            include: { sale_items: true },
+        }));
+        // (b) Stock upserts (one per product)
+        for (const m of movements) {
+            const decAbs = m.quantity_change.abs(); // positive decrement amount
+            ops.push(client_2.prisma.stock.upsert({
+                where: {
+                    product_id_branch_id: {
+                        product_id: m.product_id,
+                        branch_id: branchId,
+                    },
+                },
+                update: {
+                    current_quantity: { decrement: decAbs },
+                },
+                create: {
+                    product_id: m.product_id,
+                    branch_id: branchId,
+                    current_quantity: m.new_qty, // start at computed value (can be negative)
+                    minimum_quantity: new client_1.Prisma.Decimal(0),
+                    maximum_quantity: new client_1.Prisma.Decimal(1000),
+                    reserved_quantity: new client_1.Prisma.Decimal(0),
+                },
+            }));
+        }
+        // (c) Stock movements (use computed prev/new; no read-after-write)
+        for (const m of movements) {
+            ops.push(client_2.prisma.stockMovement.create({
+                data: {
+                    product_id: m.product_id,
+                    branch_id: branchId,
+                    movement_type: 'SALE',
+                    quantity_change: m.quantity_change, // negative
+                    previous_qty: m.previous_qty,
+                    new_qty: m.new_qty,
+                    created_by: createdBy,
+                },
+            }));
+        }
+        const [sale] = await client_2.prisma.$transaction(ops);
+        return sale;
     }
     async getTodaySales({ branchId }) {
         const start = new Date();

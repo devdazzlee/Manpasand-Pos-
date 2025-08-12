@@ -545,9 +545,11 @@ export default function BarcodeGenerator() {
                     <div>
                       <strong>Price:</strong>{" "}
                       {netWeight
-                        ? calculatePriceByWeight(
-                            netWeight,
-                            selectedProduct.sales_rate_exc_dis_and_tax
+                        ? Math.round(
+                            calculatePriceByWeight(
+                              netWeight,
+                              selectedProduct.sales_rate_exc_dis_and_tax
+                            )
                           )
                         : selectedProduct.sales_rate_exc_dis_and_tax}
                     </div>
