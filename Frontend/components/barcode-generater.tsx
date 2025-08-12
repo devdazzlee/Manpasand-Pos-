@@ -247,83 +247,95 @@ export default function BarcodeGenerator() {
           <head>
             <title>Barcode Label - ${selectedProduct.name}</title>
             <style>
-              /* ZEBRA GC420t DIRECT PRINT OPTIMIZED CSS */
+              /* Enhanced Zebra GC420t CSS to prevent label splitting */
               @page {
-                size: 4in 2.5in; /* Use inches for better Zebra compatibility */
-                margin: 0in;
-                padding: 0in;
+                size: 101.6mm 63.5mm !important; /* Exact Zebra label size */
+                margin: 0mm !important;
+                padding: 0mm !important;
+                -webkit-print-color-adjust: exact;
+                color-adjust: exact;
               }
               
               html, body { 
                 font-family: Arial, sans-serif; 
-                margin: 0; 
-                padding: 0;
+                margin: 0 !important; 
+                padding: 0 !important;
                 background: white;
-                width: 4in;
-                height: 2.5in;
-                overflow: hidden;
+                width: 101.6mm !important;
+                height: 63.5mm !important;
+                overflow: hidden !important;
                 box-sizing: border-box;
-                font-size: 8pt; /* Base font size for Zebra */
-              }
-              
-              .barcode-label {
-                width: 3.9in; /* Slightly smaller than page */
-                height: 2.4in; /* Slightly smaller than page */
-                border: 1pt solid #000;
-                padding: 0.05in;
-                margin: 0.05in;
-                display: flex;
-                flex-direction: column;
-                justify-content: space-between;
-                box-sizing: border-box;
+                font-size: 8pt;
                 position: relative;
                 page-break-inside: avoid !important;
                 page-break-after: avoid !important;
                 page-break-before: avoid !important;
+              }
+              
+              .barcode-label {
+                width: 99mm !important; /* Slightly smaller for margins */
+                height: 61mm !important;
+                border: 0.5mm solid #000;
+                padding: 1mm;
+                margin: 1.3mm;
+                display: block !important; /* Force block layout */
+                position: absolute;
+                top: 0;
+                left: 0;
+                box-sizing: border-box;
+                page-break-inside: avoid !important;
+                page-break-after: avoid !important;
+                page-break-before: avoid !important;
                 break-inside: avoid !important;
+                orphans: 1;
+                widows: 1;
               }
               
               .brand-category {
                 font-size: 6pt;
                 text-align: center;
                 color: #666;
-                margin-bottom: 0.02in;
-                line-height: 1;
-                height: 0.15in;
+                margin-bottom: 1mm;
+                line-height: 1.1;
+                height: 4mm;
+                overflow: hidden;
               }
               
               .product-info {
                 text-align: center;
-                margin-bottom: 0.05in;
-                height: 0.6in;
+                margin-bottom: 2mm;
+                height: 15mm;
+                overflow: hidden;
               }
               
               .product-name {
                 font-weight: bold;
                 font-size: 10pt;
-                margin-bottom: 0.02in;
+                margin-bottom: 1mm;
                 text-transform: uppercase;
-                line-height: 1;
-                height: 0.25in;
+                line-height: 1.1;
+                height: 8mm;
                 overflow: hidden;
+                display: block;
               }
               
               .product-details {
                 font-size: 8pt;
-                margin-bottom: 0.02in;
-                line-height: 1;
-                height: 0.3in;
+                margin-bottom: 1mm;
+                line-height: 1.1;
+                height: 6mm;
+                overflow: hidden;
               }
               
               .barcode-container {
                 text-align: center;
-                margin: 0.05in 0;
-                flex-grow: 1;
+                margin: 2mm 0;
+                height: 20mm;
+                max-height: 20mm;
+                overflow: hidden;
                 display: flex;
                 align-items: center;
                 justify-content: center;
-                height: 0.8in;
-                max-height: 0.8in;
               }
               
               .dates {
@@ -331,56 +343,70 @@ export default function BarcodeGenerator() {
                 display: flex;
                 justify-content: space-between;
                 font-weight: bold;
-                border-top: 1pt solid #000;
-                padding-top: 0.02in;
-                line-height: 1;
-                height: 0.2in;
+                border-top: 0.5mm solid #000;
+                padding-top: 1mm;
+                line-height: 1.1;
+                height: 6mm;
+                overflow: hidden;
+                position: absolute;
+                bottom: 1mm;
+                left: 1mm;
+                right: 1mm;
               }
               
               * {
-                box-sizing: border-box;
+                box-sizing: border-box !important;
                 -webkit-print-color-adjust: exact !important;
                 color-adjust: exact !important;
                 print-color-adjust: exact !important;
+                page-break-inside: avoid !important;
               }
               
               svg {
-                max-width: 100%;
+                max-width: 90mm;
                 height: auto;
-                max-height: 0.7in;
+                max-height: 18mm;
                 width: auto;
               }
               
+              /* Force single page printing for Zebra */
               @media print {
                 @page {
-                  size: 4in 2.5in !important;
-                  margin: 0in !important;
-                  padding: 0in !important;
+                  size: 101.6mm 63.5mm !important;
+                  margin: 0mm !important;
+                  padding: 0mm !important;
                 }
                 
                 html, body { 
                   margin: 0 !important; 
                   padding: 0 !important;
-                  width: 4in !important;
-                  height: 2.5in !important;
+                  width: 101.6mm !important;
+                  height: 63.5mm !important;
                   overflow: hidden !important;
+                  page-break-inside: avoid !important;
+                  page-break-after: avoid !important;
+                  page-break-before: avoid !important;
                 }
                 
                 .barcode-label { 
-                  border: 1pt solid #000 !important; 
+                  border: 0.5mm solid #000 !important; 
                   page-break-inside: avoid !important;
                   page-break-after: avoid !important;
                   page-break-before: avoid !important;
                   break-inside: avoid !important;
-                  width: 3.9in !important;
-                  height: 2.4in !important;
+                  width: 99mm !important;
+                  height: 61mm !important;
+                  position: absolute !important;
+                  top: 0 !important;
+                  left: 0 !important;
                 }
                 
-                /* Force single page */
-                body::after {
-                  content: "";
-                  display: block;
-                  page-break-after: always;
+                /* Prevent any page breaks */
+                * {
+                  page-break-inside: avoid !important;
+                  page-break-after: avoid !important;
+                  page-break-before: avoid !important;
+                  break-inside: avoid !important;
                 }
               }
             </style>
