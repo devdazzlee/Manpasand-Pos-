@@ -238,40 +238,106 @@ export default function BarcodeGenerator() {
     setExpiryDate(undefined);
   };
 
-const handlePrint = () => {
-  if (!printRef.current || !selectedProduct) return;
-  const w = window.open("", "_blank", "width=400,height=300");
-  if (!w) return;
+  const handlePrint = () => {
+    if (!printRef.current || !selectedProduct) return;
 
-  w.document.write(`
+    // take only the INSIDE of your label (avoid any preview sizing)
+    const src =
+      printRef.current.querySelector(".barcode-label") || printRef.current;
+    const content = src.innerHTML;
+
+    const w = window.open("", "_blank", "width=500,height=400");
+    if (!w) return;
+
+    w.document.write(`
   <html>
     <head>
-      <title>Label - ${selectedProduct.name}</title>
+      <title>${selectedProduct.name}</title>
       <style>
+        /* One physical page = one physical label */
         @page { size: 50mm 30mm; margin: 0; }
-        html, body {
-          width: 50mm; height: 30mm; margin: 0; padding: 0; overflow: hidden;
+        html, body { width: 50mm; height: 30mm; margin: 0; padding: 0; overflow: hidden; }
+
+        :root{
+          /* 203-dpi prints look sharp at 6pt increments (6/12/18…) */
+          --fs-title: 10pt;  /* product name */
+          --fs-body:  9pt;   /* Net Wt / Price */
+          --fs-small: 7pt;   /* dates */
         }
-        .label {
+
+        .print-label{
           width: 50mm; height: 30mm; box-sizing: border-box;
-          padding: 1mm; display: flex; flex-direction: column; justify-content: space-between;
-          page-break-inside: avoid;
+          padding: 1mm 3mm;               /* 3mm left/right ≈ quiet zone */
+          display: grid;
+          grid-template-rows: auto auto 1fr auto;
+          gap: 0.6mm;
+          font-family: Arial, sans-serif;
         }
-        svg,img.barcode{ max-width:100%; max-height:12mm; height:auto; }
+
+        .title{
+          font-size: var(--fs-title);
+          font-weight: 700;
+          text-align: center;
+          line-height: 1.05;
+          text-transform: uppercase;
+        }
+
+        .row{
+          display: flex; justify-content: space-between; align-items: baseline;
+          font-size: var(--fs-body);
+          font-weight: 700;
+        }
+
+        .barcode-wrap{
+          display:flex; align-items:center; justify-content:center;
+          min-height: 12mm;                /* room for a tall barcode */
+        }
+
+        .dates{
+          display:flex; justify-content:space-between; font-size: var(--fs-small);
+          border-top: 0.2mm solid #000; padding-top: 0.5mm; line-height:1.1;
+          font-weight: 700;
+        }
+
+        /* Prevent any inherited inline sizes from the preview */
+        [style*="width:"], [style*="height:"] { width:auto !important; height:auto !important; }
+        svg { max-width:100%; height:auto; max-height: 14mm; } /* room for taller barcode */
       </style>
     </head>
     <body>
-      <div class="label">
-        ${printRef.current.innerHTML}
+      <div class="print-label">
+        <div class="title">${selectedProduct.name}</div>
+
+        <div class="row">
+          <div>Net Wt: ${formatWeightDisplay(netWeight)}</div>
+          <div>Price: ${
+            netWeight
+              ? Math.round(
+                  calculatePriceByWeight(
+                    netWeight,
+                    selectedProduct.sales_rate_exc_dis_and_tax
+                  )
+                )
+              : selectedProduct.sales_rate_exc_dis_and_tax
+          }</div>
+        </div>
+
+        <div class="barcode-wrap">
+          ${src.querySelector(".barcode-container")?.innerHTML ?? ""}
+        </div>
+
+        <div class="dates">
+          <span>PKG: ${formatDate(packageDate)}</span>
+          <span>EXP: ${formatDate(expiryDate)}</span>
+        </div>
       </div>
       <script>
-        onload = () => { print(); setTimeout(() => close(), 300); };
+        window.onload = () => { window.print(); setTimeout(() => window.close(), 300); };
       </script>
     </body>
   </html>`);
-  w.document.close();
-};
-
+    w.document.close();
+  };
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return "__/__/____";
@@ -465,9 +531,10 @@ const handlePrint = () => {
                         )
                       )
                     }
-                    width={1.2}
-                    height={35}
-                    fontSize={8}
+                    width={2.2} // thicker bars than 1.2
+                    height={90} // ~9mm tall barcode
+                    fontSize={12} // larger human-readable text
+                    textMargin={2}
                     margin={0}
                     background="transparent"
                   />
