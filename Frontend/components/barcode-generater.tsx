@@ -238,7 +238,7 @@ export default function BarcodeGenerator() {
     setExpiryDate(undefined);
   };
 
-   const handlePrint = () => {
+  const handlePrint = () => {
     if (!printRef.current || !selectedProduct) return;
 
     // Data
@@ -252,6 +252,10 @@ export default function BarcodeGenerator() {
     );
     const pkg = formatDate(packageDate);
     const exp = formatDate(expiryDate);
+    console.log("packageDate", packageDate);
+    console.log("expiryDate", expiryDate);
+    console.log("🚀 ~ handlePrint ~ pkg:", pkg);
+    console.log("🚀 ~ handlePrint ~ exp:", exp);
 
     // Make long titles a bit smaller so they fit on one line/row
     let titlePt = 12;
@@ -308,7 +312,7 @@ export default function BarcodeGenerator() {
         <div class="title">${name}</div>
         <div class="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
         <div class="bc">${barcodeSVG}</div>
-        <div class="dates"><span>PKG: ${formatDate(packageDate)}</span><span>EXP: ${formatDate(expiryDate)}</span></div>
+        <div class="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
       </div>
       <script>onload=()=>{print(); setTimeout(()=>close(), 300)}</script>
     </body>
