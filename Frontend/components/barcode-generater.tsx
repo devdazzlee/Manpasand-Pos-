@@ -238,29 +238,34 @@ export default function BarcodeGenerator() {
     setExpiryDate(undefined);
   };
 
-  const handlePrint = () => {
+   const handlePrint = () => {
     if (!printRef.current || !selectedProduct) return;
 
-    // build data
+    // Data
+    const name = (selectedProduct.name || "").toUpperCase();
+    const weight = formatWeightDisplay(netWeight);
     const price = Math.round(
       calculatePriceByWeight(
         netWeight,
         selectedProduct.sales_rate_exc_dis_and_tax
       )
     );
-    const name = (selectedProduct.name || "").toUpperCase();
-    const weight = formatWeightDisplay(netWeight);
     const pkg = formatDate(packageDate);
     const exp = formatDate(expiryDate);
 
-    // take the rendered barcode SVG from your preview (with displayValue={false})
+    // Make long titles a bit smaller so they fit on one line/row
+    let titlePt = 12;
+    if (name.length > 20) titlePt = 11;
+    if (name.length > 26) titlePt = 10;
+    if (name.length > 32) titlePt = 9;
+
+    // Clone the barcode SVG from your preview and give it a physical size
     const svg = printRef.current.querySelector(".barcode-container svg");
     let barcodeSVG = "";
     if (svg) {
       const clone = svg.cloneNode(true) as SVGElement;
-      // force physical size so bars render/print
-      clone.setAttribute("width", "44mm");
-      clone.setAttribute("height", "12.5mm"); // tall enough, still fits
+      clone.setAttribute("width", "42mm"); // leaves ~4 mm total quiet zones
+      clone.setAttribute("height", "12mm"); // tall but still fits
       barcodeSVG = clone.outerHTML;
     }
 
@@ -268,41 +273,46 @@ export default function BarcodeGenerator() {
     if (!w) return;
 
     w.document.write(`
-    <html>
-      <head>
-        <title>${name}</title>
-        <style>
-          @page { size: 50mm 30mm; margin: 0; }
-          html, body { width:50mm; height:30mm; margin:0; padding:0; overflow:hidden; }
+  <html>
+    <head>
+      <title>${name}</title>
+      <style>
+        /* one physical page = one physical label */
+        @page { size: 50mm 30mm; margin: 0; }
+        html, body { width: 50mm; height: 30mm; margin:0; padding:0; overflow:hidden; }
 
-          /* sizes tuned to keep total height < 30mm */
-          :root{ --fs-title: 12pt; --fs-body: 10pt; --fs-small: 8.5pt; }
+        :root{
+          --fs-title: ${titlePt}pt;
+          --fs-body:  10pt;
+          --fs-small: 8.5pt;
+        }
 
-          .label {
-            width:50mm; height:30mm; box-sizing:border-box;
-            padding: 1mm 3mm;                /* ~3mm quiet zones */
-            display:grid; gap:.4mm;
-            grid-template-rows: 5.2mm 4.2mm 1fr 4mm; /* fits within 30mm incl. padding */
-            font-family: Arial, sans-serif;
-          }
-          .title { font: 700 var(--fs-title)/1.05 Arial; text-align:center; text-transform:uppercase; }
-          .row   { display:flex; justify-content:space-between; font:700 var(--fs-body)/1.05 Arial; }
-          .bc    { display:flex; align-items:center; justify-content:center; }
-          .bc svg{ display:block; }           /* we set width/height on the SVG above */
-          .dates { display:flex; justify-content:space-between; font:700 var(--fs-small)/1.05 Arial;
-                   border-top:.25mm solid #000; padding-top:.5mm; }
-        </style>
-      </head>
-      <body>
-        <div class="label">
-          <div class="title">${name}</div>
-          <div class="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
-          <div class="bc">${barcodeSVG}</div>
-          <div class="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
-        </div>
-        <script>onload=()=>{print(); setTimeout(()=>close(), 300)}</script>
-      </body>
-    </html>`);
+        .label{
+          width: 50mm; height: 30mm; box-sizing: border-box;
+          padding: 1mm 4mm;                         /* ~quiet zones left/right */
+          display: grid;
+          grid-template-rows: auto auto 1fr auto;   /* FLEX rows – no overlap */
+          gap: 0.5mm;
+          font-family: Arial, sans-serif;
+        }
+        .title{ font: 700 var(--fs-title)/1.05 Arial; text-align:center; text-transform:uppercase; }
+        .row{ display:flex; justify-content:space-between; font:700 var(--fs-body)/1.05 Arial; }
+        .bc{ display:flex; align-items:center; justify-content:center; }
+        .bc svg{ display:block; }                   /* we set width/height on the SVG itself */
+        .dates{ display:flex; justify-content:space-between; font:700 var(--fs-small)/1.1 Arial;
+                border-top: .25mm solid #000; padding-top: .5mm; }
+      </style>
+    </head>
+    <body>
+      <div class="label">
+        <div class="title">${name}</div>
+        <div class="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
+        <div class="bc">${barcodeSVG}</div>
+        <div class="dates"><span>PKG: ${formatDate(packageDate)}</span><span>EXP: ${formatDate(expiryDate)}</span></div>
+      </div>
+      <script>onload=()=>{print(); setTimeout(()=>close(), 300)}</script>
+    </body>
+  </html>`);
     w.document.close();
   };
 
