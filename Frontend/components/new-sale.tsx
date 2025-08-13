@@ -245,7 +245,10 @@ export function NewSale() {
 
   const generateReceiptData = (
     transactionId: string,
-    paymentMethod: string
+    paymentMethod: string,
+    cart: CartItem[],
+    subtotal: number,
+    total: number
   ) => {
     return {
       transactionId,
@@ -254,7 +257,7 @@ export function NewSale() {
       subtotal,
       total,
       paymentMethod,
-      cashier: "Admin User",
+      cashier: "Muhammad",
       store: "MANPASAND Store #001",
     };
   };
@@ -271,26 +274,206 @@ export function NewSale() {
         <style>
           /* General */
           html, body { margin: 0; padding: 0; }
-          body { font-family: monospace; }
+          body { 
+            font-family: 'Courier New', monospace; 
+            background: #f5f5f5;
+            display: flex;
+            justify-content: center;
+            align-items: flex-start;
+            min-height: 100vh;
+            padding: 20px 0;
+          }
 
           /* Wrap content to receipt width */
           .receipt {
-            width: 80mm;            /* match your paper width: 58mm or 80mm */
-            padding: 6mm;           /* small padding */
+            width: 80mm;            
+            padding: 6mm;           
             box-sizing: border-box;
-            white-space: pre;       /* keep your formatting */
-            display: inline-block;  /* shrink-wrap to content height */
+            background: white;
+            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            border-radius: 4px;
+            display: inline-block;  
             page-break-inside: avoid;
+            text-align: center;     
+            font-size: 12px;        
+            line-height: 1.3;       
+            color: #333;
           }
 
+          /* Enhanced logo and header styling */
+          .logo {
+            font-size: 32px;
+            margin-bottom: 8px;
+            filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3));
+          }
+          
+          .store-header {
+            font-weight: bold;
+            font-size: 18px;
+            margin-bottom: 4px;
+            letter-spacing: 1px;
+            color: #2c3e50;
+          }
+          
+          .tagline {
+            font-size: 11px;
+            margin-bottom: 6px;
+            color: #7f8c8d;
+            font-style: italic;
+          }
+          
+          .address {
+            font-size: 10px;
+            margin-bottom: 2px;
+            color: #555;
+          }
+          
+          /* Improved divider styling */
+          .divider {
+            margin: 6px 0;
+            color: #bdc3c7;
+            font-weight: normal;
+          }
+          
+          .receipt-info {
+            text-align: left;
+            font-size: 11px;
+            margin: 3px 0;
+            color: #2c3e50;
+          }
+          
+          .receipt-number {
+            font-weight: bold;
+            color: #e74c3c;
+          }
+          
+          .items-header {
+            text-align: left;
+            font-weight: bold;
+            margin: 6px 0 4px 0;
+            color: #2c3e50;
+            background: #ecf0f1;
+            padding: 2px 0;
+            border-radius: 2px;
+          }
+          
+          .item-row {
+            text-align: left;
+            font-size: 11px;
+            margin: 2px 0;
+            padding: 1px 0;
+            border-bottom: 1px dotted #ecf0f1;
+          }
+          
+          .item-name {
+            color: #2c3e50;
+          }
+          
+          .item-details {
+            color: #7f8c8d;
+            font-size: 10px;
+            margin-left: 4px;
+          }
+          
+          /* Enhanced totals section */
+          .totals {
+            text-align: right;
+            font-size: 11px;
+            margin: 2px 0;
+            color: #555;
+          }
+          
+          .subtotal-section {
+            border-top: 1px solid #ecf0f1;
+            padding-top: 4px;
+            margin-top: 6px;
+          }
+          
+          .grand-total {
+            font-weight: bold;
+            font-size: 14px;
+            color: #27ae60;
+            background: #f8f9fa;
+            padding: 4px;
+            border-radius: 3px;
+            margin: 4px 0;
+          }
+          
+          .discount {
+            color: #e74c3c;
+          }
+          
+          .tax {
+            color: #f39c12;
+          }
+          
+          .payment-info {
+            text-align: left;
+            font-size: 11px;
+            margin: 2px 0;
+            color: #2c3e50;
+          }
+          
+          .payment-method {
+            font-weight: bold;
+            color: #3498db;
+          }
+          
+          /* Enhanced promo and barcode styling */
+          .promo {
+            background: #fff3cd;
+            border: 1px dashed #ffc107;
+            border-radius: 4px;
+            padding: 4px;
+            margin: 8px 0;
+            font-size: 10px;
+            color: #856404;
+          }
+          
+          .barcode-section {
+            margin: 12px 0 8px 0;
+            padding: 8px;
+            background: #f8f9fa;
+            border-radius: 4px;
+          }
+          
+          .barcode {
+            font-family: 'Courier New', monospace;
+            font-size: 16px;
+            letter-spacing: 0.5px;
+            margin: 4px 0;
+            color: #2c3e50;
+          }
+          
+          .barcode-number {
+            font-size: 12px;
+            font-weight: bold;
+            color: #7f8c8d;
+          }
+          
+          .thank-you {
+            font-size: 12px;
+            margin-top: 8px;
+            font-weight: bold;
+            color: #27ae60;
+            border-top: 2px solid #ecf0f1;
+            padding-top: 6px;
+          }
+
+          /* Print-specific improvements */
           @media print {
             @page {
-              size: 80mm auto;      /* width fixed, height grows with content (Chrome/Edge) */
-              margin: 0;            /* no extra margins */
+              size: 80mm auto;      
+              margin: 0;            
             }
             html, body {
               width: 80mm;
               margin: 0;
+              background: white;
+            }
+            .receipt {
+              box-shadow: none;
+              border-radius: 0;
             }
           }
         </style>
@@ -314,34 +497,86 @@ export function NewSale() {
   };
 
   const downloadReceipt = (receiptData: any) => {
+    const finalTotal = receiptData.subtotal;
+
     const receiptContent = `
-MANPASAND POS SYSTEM
-${receiptData.store}
-================================
+<div class="logo">
+  <img src="/logo.png?height=40&width=120" alt="MANPASAND Logo" style="max-width: 100%; height: 40px; object-fit: contain;" />
+</div>
+<div class="store-header">MANPASAND GENERAL STORE</div>
+<div class="tagline">Quality • Service • Value</div>
+<div class="address">Main Shahrah-e-Faisal, Karachi</div>
+<div class="address">STRN 12-345679  STRN 12-3456789</div>
+<div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
 
-Transaction ID: ${receiptData.transactionId}
-Date: ${new Date(receiptData.timestamp).toLocaleString()}
-Cashier: ${receiptData.cashier}
+<div class="receipt-info">Receipt # <span class="receipt-number">${
+      receiptData.transactionId
+    }</span></div>
+<div class="receipt-info">${new Date(receiptData.timestamp).toLocaleDateString(
+      "en-US",
+      {
+        month: "short",
+        day: "2-digit",
+        year: "numeric",
+      }
+    )} ${new Date(receiptData.timestamp).toLocaleTimeString("en-US", {
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: true,
+    })}                    ${receiptData.cashier}</div>
+<div class="receipt-info">Cashier: Walk-in                Customer: Walk-in</div>
 
-ITEMS:
+<div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+
+<div class="items-header">ITEM                    QTY      RATE</div>
 ${receiptData.items
-  .map(
-    (item: CartItem) =>
-      `${item.name} x${item.quantity} @ Rs ${item.price.toFixed(2)} = Rs ${(
-        item.price * item.quantity
-      ).toFixed(2)}`
-  )
-  .join("\n")}
+  .map((item: CartItem) => {
+    const itemName =
+      item.name.length > 20 ? item.name.substring(0, 17) + "..." : item.name;
+    const qty = `${item.quantity} pc`;
+    const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
 
---------------------------------
-Subtotal: Rs ${receiptData.subtotal.toFixed(2)}
-TOTAL: Rs ${receiptData.total.toFixed(2)}
+    return `<div class="item-row">
+      <span class="item-name">${itemName.padEnd(20)}</span> 
+      <span>${qty.padStart(6)}</span> 
+      <span>${rate.padStart(10)}</span>
+      ${
+        item.name.length > 20
+          ? `<div class="item-details">${item.name}</div>`
+          : ""
+      }
+    </div>`;
+  })
+  .join("")}
 
-Payment Method: ${receiptData.paymentMethod}
+<div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
 
-Thank you for shopping with us!
-================================
-    `;
+<div class="subtotal-section">
+  <div class="totals">Subtotal              PKR ${receiptData.subtotal.toFixed(
+    2
+  )}</div>
+  <div class="totals grand-total">Grand Total           PKR ${finalTotal.toFixed(
+    2
+  )}</div>
+</div>
+
+<div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+
+<div class="payment-info">Payment Method: <span class="payment-method">${receiptData.paymentMethod.toUpperCase()}</span></div>
+<div class="payment-info">Amount Paid:            PKR ${(
+      finalTotal + 152
+    ).toFixed(2)}</div>
+
+<div class="promo">🎉 Promo: Buy 2 get 1 free on select items!</div>
+
+<div class="barcode-section">
+  <div class="barcode">|||||||||||||||||||||||||||</div>
+  <div class="barcode-number">${receiptData.transactionId}</div>
+</div>
+
+<div class="thank-you">Thank you for shopping with us!</div>
+<div style="font-size: 10px; color: #7f8c8d; margin-top: 4px;">Visit us again soon! 🛒</div>
+  `;
     // Print logic
     printReceipt(receiptContent);
   };
@@ -384,7 +619,13 @@ Thank you for shopping with us!
 
         // (You can keep your local transaction/receipt logic if you want)
         const transactionId = generateTransactionId();
-        const receiptData = generateReceiptData(transactionId, method);
+        const receiptData = generateReceiptData(
+          transactionId,
+          method,
+          cart,
+          subtotal,
+          total
+        );
 
         // Save transaction to local storage (simulate database)
         const transactions = JSON.parse(
