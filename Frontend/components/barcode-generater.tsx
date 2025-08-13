@@ -238,194 +238,40 @@ export default function BarcodeGenerator() {
     setExpiryDate(undefined);
   };
 
- const handlePrint = () => {
-    if (printRef.current && selectedProduct) {
-      const printWindow = window.open("", "_blank")
-      if (printWindow) {
-        printWindow.document.write(`
-        <html>
-          <head>
-            <title>Barcode Label - ${selectedProduct.name}</title>
-            <style>
-              /* Enhanced Zebra GC420t CSS to prevent label splitting */
-              @page {
-                size: 101.6mm 63.5mm !important; /* Exact Zebra label size */
-                margin: 0mm !important;
-                padding: 0mm !important;
-                -webkit-print-color-adjust: exact;
-                color-adjust: exact;
-              }
-              
-              html, body { 
-                font-family: Arial, sans-serif; 
-                margin: 0 !important; 
-                padding: 0 !important;
-                background: white;
-                width: 101.6mm !important;
-                height: 63.5mm !important;
-                overflow: hidden !important;
-                box-sizing: border-box;
-                font-size: 8pt;
-                position: relative;
-                page-break-inside: avoid !important;
-                page-break-after: avoid !important;
-                page-break-before: avoid !important;
-              }
-              
-              .barcode-label {
-                width: 99mm !important; /* Slightly smaller for margins */
-                height: 61mm !important;
-                border: 0.5mm solid #000;
-                padding: 1mm;
-                margin: 1.3mm;
-                display: block !important; /* Force block layout */
-                position: absolute;
-                top: 0;
-                left: 0;
-                box-sizing: border-box;
-                page-break-inside: avoid !important;
-                page-break-after: avoid !important;
-                page-break-before: avoid !important;
-                break-inside: avoid !important;
-                orphans: 1;
-                widows: 1;
-              }
-              
-              .brand-category {
-                font-size: 6pt;
-                text-align: center;
-                color: #666;
-                margin-bottom: 1mm;
-                line-height: 1.1;
-                height: 4mm;
-                overflow: hidden;
-              }
-              
-              .product-info {
-                text-align: center;
-                margin-bottom: 2mm;
-                height: 15mm;
-                overflow: hidden;
-              }
-              
-              .product-name {
-                font-weight: bold;
-                font-size: 10pt;
-                margin-bottom: 1mm;
-                text-transform: uppercase;
-                line-height: 1.1;
-                height: 8mm;
-                overflow: hidden;
-                display: block;
-              }
-              
-              .product-details {
-                font-size: 8pt;
-                margin-bottom: 1mm;
-                line-height: 1.1;
-                height: 6mm;
-                overflow: hidden;
-              }
-              
-              .barcode-container {
-                text-align: center;
-                margin: 2mm 0;
-                height: 20mm;
-                max-height: 20mm;
-                overflow: hidden;
-                display: flex;
-                align-items: center;
-                justify-content: center;
-              }
-              
-              .dates {
-                font-size: 6pt;
-                display: flex;
-                justify-content: space-between;
-                font-weight: bold;
-                border-top: 0.5mm solid #000;
-                padding-top: 1mm;
-                line-height: 1.1;
-                height: 6mm;
-                overflow: hidden;
-                position: absolute;
-                bottom: 1mm;
-                left: 1mm;
-                right: 1mm;
-              }
-              
-              * {
-                box-sizing: border-box !important;
-                -webkit-print-color-adjust: exact !important;
-                color-adjust: exact !important;
-                print-color-adjust: exact !important;
-                page-break-inside: avoid !important;
-              }
-              
-              svg {
-                max-width: 90mm;
-                height: auto;
-                max-height: 18mm;
-                width: auto;
-              }
-              
-              /* Force single page printing for Zebra */
-              @media print {
-                @page {
-                  size: 101.6mm 63.5mm !important;
-                  margin: 0mm !important;
-                  padding: 0mm !important;
-                }
-                
-                html, body { 
-                  margin: 0 !important; 
-                  padding: 0 !important;
-                  width: 101.6mm !important;
-                  height: 63.5mm !important;
-                  overflow: hidden !important;
-                  page-break-inside: avoid !important;
-                  page-break-after: avoid !important;
-                  page-break-before: avoid !important;
-                }
-                
-                .barcode-label { 
-                  border: 0.5mm solid #000 !important; 
-                  page-break-inside: avoid !important;
-                  page-break-after: avoid !important;
-                  page-break-before: avoid !important;
-                  break-inside: avoid !important;
-                  width: 99mm !important;
-                  height: 61mm !important;
-                  position: absolute !important;
-                  top: 0 !important;
-                  left: 0 !important;
-                }
-                
-                /* Prevent any page breaks */
-                * {
-                  page-break-inside: avoid !important;
-                  page-break-after: avoid !important;
-                  page-break-before: avoid !important;
-                  break-inside: avoid !important;
-                }
-              }
-            </style>
-          </head>
-          <body>
-            ${printRef.current.innerHTML}
-          </body>
-        </html>
-      `)
-        printWindow.document.close()
-        printWindow.focus()
+const handlePrint = () => {
+  if (!printRef.current || !selectedProduct) return;
+  const w = window.open("", "_blank", "width=400,height=300");
+  if (!w) return;
 
-        setTimeout(() => {
-          printWindow.print()
-          printWindow.close()
-        }, 1000)
-      }
-    }
-  }
+  w.document.write(`
+  <html>
+    <head>
+      <title>Label - ${selectedProduct.name}</title>
+      <style>
+        @page { size: 50mm 30mm; margin: 0; }
+        html, body {
+          width: 50mm; height: 30mm; margin: 0; padding: 0; overflow: hidden;
+        }
+        .label {
+          width: 50mm; height: 30mm; box-sizing: border-box;
+          padding: 1mm; display: flex; flex-direction: column; justify-content: space-between;
+          page-break-inside: avoid;
+        }
+        svg,img.barcode{ max-width:100%; max-height:12mm; height:auto; }
+      </style>
+    </head>
+    <body>
+      <div class="label">
+        ${printRef.current.innerHTML}
+      </div>
+      <script>
+        onload = () => { print(); setTimeout(() => close(), 300); };
+      </script>
+    </body>
+  </html>`);
+  w.document.close();
+};
+
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return "__/__/____";
