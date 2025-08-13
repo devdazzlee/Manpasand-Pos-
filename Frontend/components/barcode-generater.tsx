@@ -238,87 +238,130 @@ export default function BarcodeGenerator() {
     setExpiryDate(undefined);
   };
 
-  const handlePrint = () => {
-    if (!printRef.current || !selectedProduct) return;
+const handlePrint = () => {
+  if (!printRef.current || !selectedProduct) return;
 
-    // Data
-    const name = (selectedProduct.name || "").toUpperCase();
-    const weight = formatWeightDisplay(netWeight);
-    const price = Math.round(
-      calculatePriceByWeight(
-        netWeight,
-        selectedProduct.sales_rate_exc_dis_and_tax
-      )
-    );
-    const pkg = formatDate(packageDate);
-    const exp = formatDate(expiryDate);
-    console.log("packageDate", packageDate);
-    console.log("expiryDate", expiryDate);
-    console.log("🚀 ~ handlePrint ~ pkg:", pkg);
-    console.log("🚀 ~ handlePrint ~ exp:", exp);
+  // Data
+  const name   = (selectedProduct.name || "").toUpperCase();
+  const weight = formatWeightDisplay(netWeight);
+  const price  = Math.round(
+    calculatePriceByWeight(netWeight, selectedProduct.sales_rate_exc_dis_and_tax)
+  );
+  const pkg    = formatDate(packageDate);
+  const exp    = formatDate(expiryDate);
 
-    // Make long titles a bit smaller so they fit on one line/row
-    let titlePt = 12;
-    if (name.length > 20) titlePt = 11;
-    if (name.length > 26) titlePt = 10;
-    if (name.length > 32) titlePt = 9;
+  // Clone the barcode SVG from your preview & give a physical width
+  const svg = printRef.current.querySelector(".barcode-container svg");
+  let barcodeSVG = "";
+  if (svg) {
+    const clone = svg.cloneNode(true) as SVGElement;
+    clone.setAttribute("width", "42mm");  // keep quiet zones
+    clone.removeAttribute("height");      // height via --bc-h
+    barcodeSVG = clone.outerHTML;
+  }
 
-    // Clone the barcode SVG from your preview and give it a physical size
-    const svg = printRef.current.querySelector(".barcode-container svg");
-    let barcodeSVG = "";
-    if (svg) {
-      const clone = svg.cloneNode(true) as SVGElement;
-      clone.setAttribute("width", "42mm"); // leaves ~4 mm total quiet zones
-      clone.setAttribute("height", "12mm"); // tall but still fits
-      barcodeSVG = clone.outerHTML;
-    }
+  const w = window.open("", "_blank", "width=640,height=520");
+  if (!w) return;
 
-    const w = window.open("", "_blank", "width=600,height=450");
-    if (!w) return;
-
-    w.document.write(`
+  w.document.write(`
   <html>
     <head>
       <title>${name}</title>
       <style>
-        /* one physical page = one physical label */
         @page { size: 50mm 30mm; margin: 0; }
         html, body { width: 50mm; height: 30mm; margin:0; padding:0; overflow:hidden; }
 
         :root{
-          --fs-title: ${titlePt}pt;
-          --fs-body:  10pt;
-          --fs-small: 8.5pt;
+          --fs-title: 12pt;
+          --fs-body:  10pt;   /* will auto-shrink if too wide */
+          --fs-small: 8.5pt;  /* will auto-shrink if too wide */
+          --bc-h:     12mm;   /* will auto-shrink if too tall */
         }
 
         .label{
           width: 50mm; height: 30mm; box-sizing: border-box;
-          padding: 1mm 4mm;                         /* ~quiet zones left/right */
+          padding: 1mm 3.5mm;               /* balanced left/right quiet zones */
           display: grid;
-          grid-template-rows: auto auto 1fr auto;   /* FLEX rows – no overlap */
-          gap: 0.5mm;
+          grid-template-rows: auto auto 1fr auto;
+          gap: .45mm;
           font-family: Arial, sans-serif;
         }
-        .title{ font: 700 var(--fs-title)/1.05 Arial; text-align:center; text-transform:uppercase; }
-        .row{ display:flex; justify-content:space-between; font:700 var(--fs-body)/1.05 Arial; }
+
+        .title{
+          font: 700 var(--fs-title)/1.05 Arial;
+          text-align:center; text-transform:uppercase;
+        }
+
+        .row, .dates{
+          display:flex; justify-content:space-between; align-items:flex-end;
+          gap: 1.2mm;                /* ensures visible spacing */
+          white-space: nowrap;       /* no wrapping; we’ll shrink if needed */
+        }
+        .row   { font: 700 var(--fs-body)/1.05 Arial; }
+        .dates { font: 700 var(--fs-small)/1.05 Arial; border-top:.22mm solid #000; padding-top:.5mm; }
+
+        .row span, .dates span { min-width:0; }     /* allow width-fit calc */
+
         .bc{ display:flex; align-items:center; justify-content:center; }
-        .bc svg{ display:block; }                   /* we set width/height on the SVG itself */
-        .dates{ display:flex; justify-content:space-between; font:700 var(--fs-small)/1.1 Arial;
-                border-top: .25mm solid #000; padding-top: .5mm; }
+        .bc svg{ height: var(--bc-h); width: 42mm; display:block; }
       </style>
     </head>
     <body>
-      <div class="label">
-        <div class="title">${name}</div>
-        <div class="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
+      <div class="label" id="label">
+        <div class="title" id="ttl">${name}</div>
+        <div class="row"   id="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
         <div class="bc">${barcodeSVG}</div>
-        <div class="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
+        <div class="dates" id="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
       </div>
-      <script>onload=()=>{print(); setTimeout(()=>close(), 300)}</script>
+
+      <script>
+        const root = document.documentElement;
+
+        function shrinkVar(varName, step, minVal, unit){
+          const v = parseFloat(getComputedStyle(root).getPropertyValue(varName));
+          if (v <= minVal) return false;
+          root.style.setProperty(varName, (v - step) + unit);
+          return true;
+        }
+
+        // Keep vertical fit (one sticker only)
+        function fitHeight(){
+          const box = document.getElementById('label');
+          let guard = 16;
+          while (box.scrollHeight > box.clientHeight && guard-- > 0){
+            // shrink barcode first, then small text, then body, then title
+            if (shrinkVar('--bc-h',     0.5, 9.5, 'mm')) continue;
+            if (shrinkVar('--fs-small', 0.3, 7.5, 'pt')) continue;
+            if (shrinkVar('--fs-body',  0.5, 8.5, 'pt')) continue;
+            if (shrinkVar('--fs-title', 0.5, 9.0, 'pt')) continue;
+            break;
+          }
+        }
+
+        // Keep each row within label width (prevents “pushed to the right”)
+        function fitWidth(id, varName, minPt){
+          const el = document.getElementById(id);
+          let guard = 16;
+          while (el.scrollWidth > el.clientWidth && guard-- > 0){
+            if (!shrinkVar(varName, 0.5, minPt, 'pt')) break;
+          }
+        }
+
+        window.onload = () => {
+          // First make sure rows fit horizontally
+          fitWidth('row',   '--fs-body',  8.5);
+          fitWidth('dates', '--fs-small', 7.5);
+          // Then ensure total fits vertically
+          fitHeight();
+          window.print();
+          setTimeout(() => window.close(), 300);
+        };
+      </script>
     </body>
   </html>`);
-    w.document.close();
-  };
+  w.document.close();
+};
+
 
   const formatDate = (date: Date | undefined) => {
     if (!date) return "__/__/____";
