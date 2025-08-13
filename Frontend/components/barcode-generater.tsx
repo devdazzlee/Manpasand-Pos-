@@ -241,6 +241,7 @@ export default function BarcodeGenerator() {
   const handlePrint = () => {
     if (!printRef.current || !selectedProduct) return;
 
+    // Data
     const name = (selectedProduct.name || "").toUpperCase();
     const weight = formatWeightDisplay(netWeight);
     const price = Math.round(
@@ -252,17 +253,17 @@ export default function BarcodeGenerator() {
     const pkg = formatDate(packageDate);
     const exp = formatDate(expiryDate);
 
-    // clone barcode SVG and give it a physical width; height via CSS var
+    // Clone the already-rendered SVG barcode and give a physical width
     const svg = printRef.current.querySelector(".barcode-container svg");
     let barcodeSVG = "";
     if (svg) {
       const clone = svg.cloneNode(true) as SVGElement;
-      clone.setAttribute("width", "41.5mm"); // slight safety vs 42mm
-      clone.removeAttribute("height");
+      clone.setAttribute("width", "41.5mm"); // leaves left/right quiet zones
+      clone.removeAttribute("height"); // height will be set via CSS var --bc-h
       barcodeSVG = clone.outerHTML;
     }
 
-    const w = window.open("", "_blank", "width=640,height=520");
+    const w = window.open("", "_blank", "width=660,height=520");
     if (!w) return;
 
     w.document.write(`
@@ -274,27 +275,34 @@ export default function BarcodeGenerator() {
         html, body { width: 50mm; height: 30mm; margin:0; padding:0; overflow:hidden; }
 
         :root{
+          /* starting sizes; we will shrink only as needed */
           --fs-title: 12pt;
-          --fs-body:   9.8pt;   /* start a hair smaller */
+          --fs-body:   9.8pt;
           --fs-small:  8.2pt;
           --bc-h:     12mm;
         }
 
         .label{
           width:50mm; height:30mm; box-sizing:border-box;
-          padding: 1mm 3mm;                       /* a bit more room than 3.5mm */
-          display:grid; grid-template-rows:auto auto 1fr auto;
+          padding: 1mm 3mm;                  /* balanced quiet zones */
+          display:grid;
+          grid-template-rows: auto auto 1fr auto;  /* dates always get their own row */
           gap:.45mm; font-family: Arial, sans-serif;
         }
 
-        .title{ font:700 var(--fs-title)/1.05 Arial; text-align:center; text-transform:uppercase; }
+        .title{
+          font:700 var(--fs-title)/1.05 Arial;
+          text-align:center; text-transform:uppercase;
+          word-break: break-word;
+        }
 
         .row,.dates{
           display:flex; justify-content:space-between; align-items:flex-end;
           gap: 1mm; white-space:nowrap;
         }
         .row   { font:700 var(--fs-body)/1.05 Arial; }
-        .dates { font:700 var(--fs-small)/1.05 Arial; border-top:.22mm solid #000; padding-top:.5mm; }
+        .dates { font:700 var(--fs-small)/1.05 Arial;
+                 border-top:.22mm solid #000; padding-top:.5mm; }
 
         .bc{ display:flex; align-items:center; justify-content:center; }
         .bc svg{ height: var(--bc-h); width:41.5mm; display:block; }
@@ -302,42 +310,55 @@ export default function BarcodeGenerator() {
     </head>
     <body>
       <div class="label" id="label">
-        <div class="title">${name}</div>
-        <div class="row" id="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
+        <div class="title" id="ttl">${name}</div>
+        <div class="row"   id="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
         <div class="bc">${barcodeSVG}</div>
         <div class="dates" id="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
       </div>
 
       <script>
         const root = document.documentElement;
+        const pxPerMM = 96/25.4;
 
-        function shrinkVar(varName, step, min, unit){
+        function shrinkVar(varName, step, minVal, unit){
           const v = parseFloat(getComputedStyle(root).getPropertyValue(varName));
-          if (v <= min) return false;
+          if (v <= minVal) return false;
           root.style.setProperty(varName, (v - step) + unit);
           return true;
         }
 
-        // measure two-span row and shrink its font var until it fits
+        // 1) Title guard: keep title ≤ maxTitleMM high by shrinking it first
+        function fitTitle(maxTitleMM){
+          const ttl = document.getElementById('ttl');
+          let guard = 20;
+          while (ttl.getBoundingClientRect().height > maxTitleMM*pxPerMM && guard-- > 0){
+            if (!shrinkVar('--fs-title', 0.5, 9.0, 'pt')) break;
+          }
+        }
+
+        // 2) Width-fit: for "Net Wt / Price" and "PKG / EXP"
         function fitRowWidth(id, varName, minPt){
           const row = document.getElementById(id);
           if (!row) return;
           const spans = row.querySelectorAll('span');
           if (spans.length < 2) return;
-          const getW = el => el.getBoundingClientRect().width;
+          const w0 = () => spans[0].getBoundingClientRect().width;
+          const w1 = () => spans[1].getBoundingClientRect().width;
           const gap = parseFloat(getComputedStyle(row).gap) || 0;
+          const rw  = () => row.getBoundingClientRect().width;
 
           let guard = 20;
-          while ((getW(spans[0]) + getW(spans[1]) + gap) > row.getBoundingClientRect().width && guard-- > 0){
+          while ((w0() + w1() + gap) > rw() && guard-- > 0){
             if (!shrinkVar(varName, 0.5, minPt, 'pt')) break;
           }
         }
 
-        // keep total height within 30mm (single sticker)
+        // 3) Height-fit: keep everything inside 30mm
         function fitHeight(){
           const box = document.getElementById('label');
-          let guard = 16;
+          let guard = 18;
           while (box.scrollHeight > box.clientHeight && guard-- > 0){
+            // shrink barcode first, then small text, then body, then title as last resort
             if (shrinkVar('--bc-h',     0.5, 9.5, 'mm')) continue;
             if (shrinkVar('--fs-small', 0.3, 7.2, 'pt')) continue;
             if (shrinkVar('--fs-body',  0.5, 8.2, 'pt')) continue;
@@ -347,11 +368,10 @@ export default function BarcodeGenerator() {
         }
 
         window.onload = () => {
-          // 1) fit both rows horizontally
+          fitTitle(9.5);                 // cap title height first
           fitRowWidth('row',   '--fs-body',  8.2);
           fitRowWidth('dates', '--fs-small', 7.2);
-          // 2) ensure the whole label fits vertically
-          fitHeight();
+          fitHeight();                   // ensure one 50×30mm page
           print(); setTimeout(()=>close(), 300);
         };
       </script>
