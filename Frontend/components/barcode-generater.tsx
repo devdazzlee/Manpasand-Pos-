@@ -241,22 +241,28 @@ export default function BarcodeGenerator() {
   const handlePrint = () => {
     if (!printRef.current || !selectedProduct) return;
 
-    // Values
+    // build data
     const price = Math.round(
       calculatePriceByWeight(
         netWeight,
         selectedProduct.sales_rate_exc_dis_and_tax
       )
     );
-    const name = selectedProduct.name?.toUpperCase() ?? "";
+    const name = (selectedProduct.name || "").toUpperCase();
     const weight = formatWeightDisplay(netWeight);
     const pkg = formatDate(packageDate);
     const exp = formatDate(expiryDate);
 
-    // Grab ONLY the rendered barcode SVG from your preview and remove inline size attrs
-    const svgEl = printRef.current.querySelector(".barcode-container svg");
-    let barcodeSvg = svgEl ? svgEl.outerHTML : "";
-    barcodeSvg = barcodeSvg.replace(/\s(width|height)="[^"]*"/g, ""); // let CSS control size
+    // take the rendered barcode SVG from your preview (with displayValue={false})
+    const svg = printRef.current.querySelector(".barcode-container svg");
+    let barcodeSVG = "";
+    if (svg) {
+      const clone = svg.cloneNode(true) as SVGElement;
+      // force physical size so bars render/print
+      clone.setAttribute("width", "44mm");
+      clone.setAttribute("height", "12.5mm"); // tall enough, still fits
+      barcodeSVG = clone.outerHTML;
+    }
 
     const w = window.open("", "_blank", "width=600,height=450");
     if (!w) return;
@@ -266,66 +272,37 @@ export default function BarcodeGenerator() {
       <head>
         <title>${name}</title>
         <style>
-          /* One physical page = one physical label */
           @page { size: 50mm 30mm; margin: 0; }
-          html, body { width: 50mm; height: 30mm; margin: 0; padding: 0; overflow: hidden; }
+          html, body { width:50mm; height:30mm; margin:0; padding:0; overflow:hidden; }
 
-          :root{
-            /* 203-dpi prints look clean around these sizes */
-            --fs-title: 12pt;
-            --fs-body:  9.5pt;
-            --fs-small: 8pt;
-          }
+          /* sizes tuned to keep total height < 30mm */
+          :root{ --fs-title: 12pt; --fs-body: 10pt; --fs-small: 8.5pt; }
 
-          .print-label{
-            width: 50mm; height: 30mm; box-sizing: border-box;
-            padding: 1mm 3mm;                      /* ~3 mm quiet zones left/right for scanning */
-            display: grid;
-            grid-template-rows: auto auto 1fr auto;
-            gap: 0.6mm;
+          .label {
+            width:50mm; height:30mm; box-sizing:border-box;
+            padding: 1mm 3mm;                /* ~3mm quiet zones */
+            display:grid; gap:.4mm;
+            grid-template-rows: 5.2mm 4.2mm 1fr 4mm; /* fits within 30mm incl. padding */
             font-family: Arial, sans-serif;
           }
-
-          .title{
-            font-size: var(--fs-title);
-            font-weight: 700;
-            text-align: center;
-            line-height: 1.05;
-            text-transform: uppercase;
-          }
-
-          .row{ display:flex; justify-content:space-between; font-weight:700; font-size:var(--fs-body); }
-
-          .barcode{
-            display:flex; align-items:center; justify-content:center;
-            min-height: 14mm;                      /* tall barcode area */
-          }
-
-          /* Scale the SVG barcode to fill width nicely */
-          .barcode svg{ width: 44mm; max-height: 16mm; display:block; }
-
-          .dates{
-            display:flex; justify-content:space-between; font-weight:700;
-            font-size: var(--fs-small); border-top: 0.2mm solid #000; padding-top: 0.6mm;
-          }
-
-          /* Nuke any inline sizes that may sneak in from preview nodes */
-          [style*="width:"], [style*="height:"] { width:auto !important; height:auto !important; }
+          .title { font: 700 var(--fs-title)/1.05 Arial; text-align:center; text-transform:uppercase; }
+          .row   { display:flex; justify-content:space-between; font:700 var(--fs-body)/1.05 Arial; }
+          .bc    { display:flex; align-items:center; justify-content:center; }
+          .bc svg{ display:block; }           /* we set width/height on the SVG above */
+          .dates { display:flex; justify-content:space-between; font:700 var(--fs-small)/1.05 Arial;
+                   border-top:.25mm solid #000; padding-top:.5mm; }
         </style>
       </head>
       <body>
-        <div class="print-label">
+        <div class="label">
           <div class="title">${name}</div>
           <div class="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
-          <div class="barcode">${barcodeSvg}</div>
+          <div class="bc">${barcodeSVG}</div>
           <div class="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
         </div>
-        <script>
-          window.onload = () => { window.print(); setTimeout(() => window.close(), 300); };
-        </script>
+        <script>onload=()=>{print(); setTimeout(()=>close(), 300)}</script>
       </body>
-    </html>
-  `);
+    </html>`);
     w.document.close();
   };
 
@@ -511,21 +488,16 @@ export default function BarcodeGenerator() {
 
                 <div className="barcode-container flex justify-center items-center flex-grow">
                   <Barcode
-                    value={
-                      selectedProduct.sku +
-                      "-" +
-                      Math.round(
-                        calculatePriceByWeight(
-                          netWeight,
-                          selectedProduct.sales_rate_exc_dis_and_tax
-                        )
+                    value={`${selectedProduct.sku}-${Math.round(
+                      calculatePriceByWeight(
+                        netWeight,
+                        selectedProduct.sales_rate_exc_dis_and_tax
                       )
-                    }
+                    )}`}
                     format="CODE128"
-                    width={2.6} // bar thickness (module width)
-                    height={110} // bar height in px
-                    fontSize={14} // human-readable text
-                    textMargin={2}
+                    displayValue={false} // IMPORTANT: saves vertical space
+                    width={2.4} // thicker bars
+                    height={110} // tall in preview; we resize in print window
                     margin={0}
                     background="transparent"
                   />
