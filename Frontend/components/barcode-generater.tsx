@@ -241,101 +241,91 @@ export default function BarcodeGenerator() {
   const handlePrint = () => {
     if (!printRef.current || !selectedProduct) return;
 
-    // take only the INSIDE of your label (avoid any preview sizing)
-    const src =
-      printRef.current.querySelector(".barcode-label") || printRef.current;
-    const content = src.innerHTML;
+    // Values
+    const price = Math.round(
+      calculatePriceByWeight(
+        netWeight,
+        selectedProduct.sales_rate_exc_dis_and_tax
+      )
+    );
+    const name = selectedProduct.name?.toUpperCase() ?? "";
+    const weight = formatWeightDisplay(netWeight);
+    const pkg = formatDate(packageDate);
+    const exp = formatDate(expiryDate);
 
-    const w = window.open("", "_blank", "width=500,height=400");
+    // Grab ONLY the rendered barcode SVG from your preview and remove inline size attrs
+    const svgEl = printRef.current.querySelector(".barcode-container svg");
+    let barcodeSvg = svgEl ? svgEl.outerHTML : "";
+    barcodeSvg = barcodeSvg.replace(/\s(width|height)="[^"]*"/g, ""); // let CSS control size
+
+    const w = window.open("", "_blank", "width=600,height=450");
     if (!w) return;
 
     w.document.write(`
-  <html>
-    <head>
-      <title>${selectedProduct.name}</title>
-      <style>
-        /* One physical page = one physical label */
-        @page { size: 50mm 30mm; margin: 0; }
-        html, body { width: 50mm; height: 30mm; margin: 0; padding: 0; overflow: hidden; }
+    <html>
+      <head>
+        <title>${name}</title>
+        <style>
+          /* One physical page = one physical label */
+          @page { size: 50mm 30mm; margin: 0; }
+          html, body { width: 50mm; height: 30mm; margin: 0; padding: 0; overflow: hidden; }
 
-        :root{
-          /* 203-dpi prints look sharp at 6pt increments (6/12/18…) */
-          --fs-title: 10pt;  /* product name */
-          --fs-body:  9pt;   /* Net Wt / Price */
-          --fs-small: 7pt;   /* dates */
-        }
+          :root{
+            /* 203-dpi prints look clean around these sizes */
+            --fs-title: 12pt;
+            --fs-body:  9.5pt;
+            --fs-small: 8pt;
+          }
 
-        .print-label{
-          width: 50mm; height: 30mm; box-sizing: border-box;
-          padding: 1mm 3mm;               /* 3mm left/right ≈ quiet zone */
-          display: grid;
-          grid-template-rows: auto auto 1fr auto;
-          gap: 0.6mm;
-          font-family: Arial, sans-serif;
-        }
+          .print-label{
+            width: 50mm; height: 30mm; box-sizing: border-box;
+            padding: 1mm 3mm;                      /* ~3 mm quiet zones left/right for scanning */
+            display: grid;
+            grid-template-rows: auto auto 1fr auto;
+            gap: 0.6mm;
+            font-family: Arial, sans-serif;
+          }
 
-        .title{
-          font-size: var(--fs-title);
-          font-weight: 700;
-          text-align: center;
-          line-height: 1.05;
-          text-transform: uppercase;
-        }
+          .title{
+            font-size: var(--fs-title);
+            font-weight: 700;
+            text-align: center;
+            line-height: 1.05;
+            text-transform: uppercase;
+          }
 
-        .row{
-          display: flex; justify-content: space-between; align-items: baseline;
-          font-size: var(--fs-body);
-          font-weight: 700;
-        }
+          .row{ display:flex; justify-content:space-between; font-weight:700; font-size:var(--fs-body); }
 
-        .barcode-wrap{
-          display:flex; align-items:center; justify-content:center;
-          min-height: 12mm;                /* room for a tall barcode */
-        }
+          .barcode{
+            display:flex; align-items:center; justify-content:center;
+            min-height: 14mm;                      /* tall barcode area */
+          }
 
-        .dates{
-          display:flex; justify-content:space-between; font-size: var(--fs-small);
-          border-top: 0.2mm solid #000; padding-top: 0.5mm; line-height:1.1;
-          font-weight: 700;
-        }
+          /* Scale the SVG barcode to fill width nicely */
+          .barcode svg{ width: 44mm; max-height: 16mm; display:block; }
 
-        /* Prevent any inherited inline sizes from the preview */
-        [style*="width:"], [style*="height:"] { width:auto !important; height:auto !important; }
-        svg { max-width:100%; height:auto; max-height: 14mm; } /* room for taller barcode */
-      </style>
-    </head>
-    <body>
-      <div class="print-label">
-        <div class="title">${selectedProduct.name}</div>
+          .dates{
+            display:flex; justify-content:space-between; font-weight:700;
+            font-size: var(--fs-small); border-top: 0.2mm solid #000; padding-top: 0.6mm;
+          }
 
-        <div class="row">
-          <div>Net Wt: ${formatWeightDisplay(netWeight)}</div>
-          <div>Price: ${
-            netWeight
-              ? Math.round(
-                  calculatePriceByWeight(
-                    netWeight,
-                    selectedProduct.sales_rate_exc_dis_and_tax
-                  )
-                )
-              : selectedProduct.sales_rate_exc_dis_and_tax
-          }</div>
+          /* Nuke any inline sizes that may sneak in from preview nodes */
+          [style*="width:"], [style*="height:"] { width:auto !important; height:auto !important; }
+        </style>
+      </head>
+      <body>
+        <div class="print-label">
+          <div class="title">${name}</div>
+          <div class="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
+          <div class="barcode">${barcodeSvg}</div>
+          <div class="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
         </div>
-
-        <div class="barcode-wrap">
-          ${src.querySelector(".barcode-container")?.innerHTML ?? ""}
-        </div>
-
-        <div class="dates">
-          <span>PKG: ${formatDate(packageDate)}</span>
-          <span>EXP: ${formatDate(expiryDate)}</span>
-        </div>
-      </div>
-      <script>
-        window.onload = () => { window.print(); setTimeout(() => window.close(), 300); };
-      </script>
-    </body>
-  </html>`);
+        <script>
+          window.onload = () => { window.print(); setTimeout(() => window.close(), 300); };
+        </script>
+      </body>
+    </html>
+  `);
     w.document.close();
   };
 
@@ -531,9 +521,10 @@ export default function BarcodeGenerator() {
                         )
                       )
                     }
-                    width={2.2} // thicker bars than 1.2
-                    height={90} // ~9mm tall barcode
-                    fontSize={12} // larger human-readable text
+                    format="CODE128"
+                    width={2.6} // bar thickness (module width)
+                    height={110} // bar height in px
+                    fontSize={14} // human-readable text
                     textMargin={2}
                     margin={0}
                     background="transparent"
