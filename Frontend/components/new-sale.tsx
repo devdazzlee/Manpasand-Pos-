@@ -268,232 +268,211 @@ export function NewSale() {
 
     w.document.open();
     w.document.write(`
-    <html>
-      <head>
-        <title>Receipt</title>
-        <style>
-          /* General */
-          html, body { margin: 0; padding: 0; }
-          body { 
-            font-family: 'Courier New', monospace; 
-            background: #f5f5f5;
-            display: flex;
-            justify-content: center;
-            align-items: flex-start;
-            min-height: 100vh;
-            padding: 20px 0;
-          }
+  <html>
+    <head>
+      <title>Receipt</title>
+      <style>
+        /* Thermal printer optimized styles */
+        html, body { 
+          margin: 0; 
+          padding: 0; 
+          background: white;
+        }
+        
+        body { 
+          font-family: 'Courier New', monospace; 
+          font-size: 12px;
+          line-height: 1.2;
+          color: black;
+          display: flex;
+          justify-content: center;
+          padding: 10px;
+        }
 
-          /* Wrap content to receipt width */
+        .receipt {
+          width: 80mm;
+          max-width: 300px;
+          background: white;
+          color: black;
+          text-align: center;
+          padding: 5mm;
+          box-sizing: border-box;
+        }
+
+        
+        .store-header {
+          font-weight: bold;
+          font-size: 16px;
+          margin-bottom: 4px;
+          color: black;
+        }
+        
+        .tagline, .address {
+          font-size: 10px;
+          margin-bottom: 2px;
+          color: black;
+        }
+        
+        /* Simple divider - just dashes */
+        .divider {
+          margin: 4px 0;
+          color: black;
+          font-weight: normal;
+          border: none;
+          text-align: center;
+        }
+        
+        .receipt-info, .payment-info {
+          text-align: left;
+          font-size: 10px;
+          margin: 2px 0;
+          color: black;
+        }
+        
+        .receipt-number, .payment-method {
+          font-weight: bold;
+          color: black;
+        }
+        
+        .items-header {
+          text-align: left;
+          font-weight: bold;
+          margin: 6px 0 4px 0;
+          color: black;
+          border-top: 1px solid black;
+          border-bottom: 1px solid black;
+          padding: 2px 0;
+        }
+        
+        .item-row {
+          text-align: left;
+          font-size: 10px;
+          margin: 1px 0;
+          color: black;
+        }
+        
+        .item-name {
+          color: black;
+          font-weight: normal;
+        }
+        
+        .item-details {
+          color: black;
+          font-size: 9px;
+          margin-left: 4px;
+        }
+        
+        .totals {
+          text-align: right;
+          font-size: 10px;
+          margin: 2px 0;
+          color: black;
+        }
+        
+        .subtotal-section {
+          border-top: 1px solid black;
+          padding-top: 4px;
+          margin-top: 6px;
+        }
+        
+        .grand-total {
+          font-weight: bold;
+          font-size: 12px;
+          color: black;
+          margin: 4px 0;
+          border-top: 1px solid black;
+          border-bottom: 1px solid black;
+          padding: 2px 0;
+        }
+        
+        .promo {
+          border: 1px solid black;
+          padding: 4px;
+          margin: 6px 0;
+          font-size: 9px;
+          color: black;
+          text-align: center;
+        }
+        
+        .barcode-section {
+          margin: 8px 0;
+          text-align: center;
+        }
+        
+        .barcode {
+          font-family: 'Courier New', monospace;
+          font-size: 14px;
+          margin: 4px 0;
+          color: black;
+          font-weight: bold;
+        }
+        
+        .barcode-number {
+          font-size: 10px;
+          color: black;
+        }
+        
+        .thank-you {
+          font-size: 11px;
+          margin-top: 8px;
+          font-weight: bold;
+          color: black;
+          border-top: 1px solid black;
+          padding-top: 4px;
+        }
+
+        /* Print optimization */
+        @media print {
+          @page {
+            size: 80mm auto;
+            margin: 0;
+          }
+          
+          html, body {
+            width: 80mm;
+            margin: 0;
+            padding: 0;
+            background: white !important;
+            color: black !important;
+          }
+          
           .receipt {
-            width: 80mm;            
-            padding: 6mm;           
-            box-sizing: border-box;
-            background: white;
-            box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-            border-radius: 4px;
-            display: inline-block;  
-            page-break-inside: avoid;
-            text-align: center;     
-            font-size: 12px;        
-            line-height: 1.3;       
-            color: #333;
-          }
-
-          /* Enhanced logo and header styling */
-          .logo {
-            font-size: 32px;
-            margin-bottom: 8px;
-            filter: drop-shadow(1px 1px 2px rgba(0,0,0,0.3));
+            width: 100%;
+            margin: 0;
+            padding: 2mm;
+            box-shadow: none;
           }
           
-          .store-header {
-            font-weight: bold;
-            font-size: 18px;
-            margin-bottom: 4px;
-            letter-spacing: 1px;
-            color: #2c3e50;
+          /* Force black text for printing */
+          * {
+            color: black !important;
+            background: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           
-          .tagline {
-            font-size: 11px;
-            margin-bottom: 6px;
-            color: #7f8c8d;
-            font-style: italic;
+          /* Ensure borders print */
+          .divider, .items-header, .subtotal-section, .grand-total, .promo, .thank-you {
+            border-color: black !important;
           }
-          
-          .address {
-            font-size: 10px;
-            margin-bottom: 2px;
-            color: #555;
-          }
-          
-          /* Improved divider styling */
-          .divider {
-            margin: 6px 0;
-            color: #bdc3c7;
-            font-weight: normal;
-          }
-          
-          .receipt-info {
-            text-align: left;
-            font-size: 11px;
-            margin: 3px 0;
-            color: #2c3e50;
-          }
-          
-          .receipt-number {
-            font-weight: bold;
-            color: #e74c3c;
-          }
-          
-          .items-header {
-            text-align: left;
-            font-weight: bold;
-            margin: 6px 0 4px 0;
-            color: #2c3e50;
-            background: #ecf0f1;
-            padding: 2px 0;
-            border-radius: 2px;
-          }
-          
-          .item-row {
-            text-align: left;
-            font-size: 11px;
-            margin: 2px 0;
-            padding: 1px 0;
-            border-bottom: 1px dotted #ecf0f1;
-          }
-          
-          .item-name {
-            color: #2c3e50;
-          }
-          
-          .item-details {
-            color: #7f8c8d;
-            font-size: 10px;
-            margin-left: 4px;
-          }
-          
-          /* Enhanced totals section */
-          .totals {
-            text-align: right;
-            font-size: 11px;
-            margin: 2px 0;
-            color: #555;
-          }
-          
-          .subtotal-section {
-            border-top: 1px solid #ecf0f1;
-            padding-top: 4px;
-            margin-top: 6px;
-          }
-          
-          .grand-total {
-            font-weight: bold;
-            font-size: 14px;
-            color: #27ae60;
-            background: #f8f9fa;
-            padding: 4px;
-            border-radius: 3px;
-            margin: 4px 0;
-          }
-          
-          .discount {
-            color: #e74c3c;
-          }
-          
-          .tax {
-            color: #f39c12;
-          }
-          
-          .payment-info {
-            text-align: left;
-            font-size: 11px;
-            margin: 2px 0;
-            color: #2c3e50;
-          }
-          
-          .payment-method {
-            font-weight: bold;
-            color: #3498db;
-          }
-          
-          /* Enhanced promo and barcode styling */
-          .promo {
-            background: #fff3cd;
-            border: 1px dashed #ffc107;
-            border-radius: 4px;
-            padding: 4px;
-            margin: 8px 0;
-            font-size: 10px;
-            color: #856404;
-          }
-          
-          .barcode-section {
-            margin: 12px 0 8px 0;
-            padding: 8px;
-            background: #f8f9fa;
-            border-radius: 4px;
-          }
-          
-          .barcode {
-            font-family: 'Courier New', monospace;
-            font-size: 16px;
-            letter-spacing: 0.5px;
-            margin: 4px 0;
-            color: #2c3e50;
-          }
-          
-          .barcode-number {
-            font-size: 12px;
-            font-weight: bold;
-            color: #7f8c8d;
-          }
-          
-          .thank-you {
-            font-size: 12px;
-            margin-top: 8px;
-            font-weight: bold;
-            color: #27ae60;
-            border-top: 2px solid #ecf0f1;
-            padding-top: 6px;
-          }
-
-          /* Print-specific improvements */
-          @media print {
-            @page {
-              size: 80mm auto;      
-              margin: 0;            
-            }
-            html, body {
-              width: 80mm;
-              margin: 0;
-              background: white;
-            }
-            .receipt {
-              box-shadow: none;
-              border-radius: 0;
-            }
-          }
-        </style>
-      </head>
-      <body>
-        <div class="receipt">${receiptContent}</div>
-        <script>
-          window.onafterprint = () => window.close();
-        </script>
-      </body>
-    </html>
-  `);
+        }
+      </style>
+    </head>
+    <body>
+      <div class="receipt">${receiptContent}</div>
+      <script>
+        window.onafterprint = () => window.close();
+      </script>
+    </body>
+  </html>
+`);
     w.document.close();
 
-    // Give the browser a tick to apply styles before printing
     w.onload = () =>
       setTimeout(() => {
         w.focus();
         w.print();
-      }, 150);
+      }, 200);
   };
 
   const downloadReceipt = (receiptData: any) => {
@@ -501,13 +480,13 @@ export function NewSale() {
 
     const receiptContent = `
 <div class="logo">
-  <img src="/logo.png?height=40&width=120" alt="MANPASAND Logo" style="max-width: 100%; height: 40px; object-fit: contain;" />
+  <img src="/logo.png?height=40&width=120" alt="MANPASAND Logo" style="max-width: 100%; height: 40px;" />
 </div>
 <div class="store-header">MANPASAND GENERAL STORE</div>
 <div class="tagline">Quality • Service • Value</div>
 <div class="address">Main Shahrah-e-Faisal, Karachi</div>
 <div class="address">STRN 12-345679  STRN 12-3456789</div>
-<div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+<div class="divider">----------------------------------------</div>
 
 <div class="receipt-info">Receipt # <span class="receipt-number">${
       receiptData.transactionId
@@ -526,7 +505,7 @@ export function NewSale() {
     })}                    ${receiptData.cashier}</div>
 <div class="receipt-info">Cashier: Walk-in                Customer: Walk-in</div>
 
-<div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+<div class="divider">----------------------------------------</div>
 
 <div class="items-header">ITEM                    QTY      RATE</div>
 ${receiptData.items
@@ -549,7 +528,7 @@ ${receiptData.items
   })
   .join("")}
 
-<div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+<div class="divider">----------------------------------------</div>
 
 <div class="subtotal-section">
   <div class="totals">Subtotal              PKR ${receiptData.subtotal.toFixed(
@@ -560,14 +539,14 @@ ${receiptData.items
   )}</div>
 </div>
 
-<div class="divider">━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━</div>
+<div class="divider">----------------------------------------</div>
 
 <div class="payment-info">Payment Method: <span class="payment-method">${receiptData.paymentMethod.toUpperCase()}</span></div>
 <div class="payment-info">Amount Paid:            PKR ${(
       finalTotal + 152
     ).toFixed(2)}</div>
 
-<div class="promo">🎉 Promo: Buy 2 get 1 free on select items!</div>
+<div class="promo">Buy 2 get 1 free on select items!</div>
 
 <div class="barcode-section">
   <div class="barcode">|||||||||||||||||||||||||||</div>
@@ -575,9 +554,10 @@ ${receiptData.items
 </div>
 
 <div class="thank-you">Thank you for shopping with us!</div>
-<div style="font-size: 10px; color: #7f8c8d; margin-top: 4px;">Visit us again soon! 🛒</div>
-  `;
-    // Print logic
+<div style="font-size: 10px; margin-top: 4px;">Visit us again soon!</div>
+`;
+
+    // Print the receipt
     printReceipt(receiptContent);
   };
 
