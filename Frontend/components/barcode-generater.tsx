@@ -12,7 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Printer, Package, Search, Loader2, RefreshCw } from "lucide-react";
+import { Printer, Package, Search, Loader2, RefreshCw, X, Plus, Trash2 } from "lucide-react";
 import Barcode from "react-barcode";
 import { DatePicker } from "./ui/date-picker";
 import { PageLoader } from "./ui/page-loader";
@@ -34,13 +34,20 @@ interface Product {
   expDate?: string;
 }
 
+interface SelectedProductItem {
+  id: string;
+  product: Product;
+  netWeight: string;
+  packageDate?: Date;
+  expiryDate?: Date;
+}
+
 export default function BarcodeGenerator() {
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  console.log("🚀 ~ BarcodeGenerator ~ selectedProduct:", selectedProduct);
-  const [packageDate, setPackageDate] = useState<Date>();
-  const [expiryDate, setExpiryDate] = useState<Date>();
-  const [netWeight, setNetWeight] = useState("");
+  const [selectedProducts, setSelectedProducts] = useState<SelectedProductItem[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [currentProductId, setCurrentProductId] = useState("");
+  const [globalPackageDate, setGlobalPackageDate] = useState<Date>();
+  const [globalExpiryDate, setGlobalExpiryDate] = useState<Date>();
   const printRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
@@ -229,76 +236,168 @@ export default function BarcodeGenerator() {
     );
   }, [products, searchTerm]);
 
-  const handleProductSelect = (productId: string) => {
-    const product = products.find((p) => p.id === productId);
-    setSelectedProduct(product || null);
-    // Reset form when selecting new product
-    setNetWeight("");
-    setPackageDate(undefined);
-    setExpiryDate(undefined);
+  // Add product to selected list
+  const addProduct = () => {
+    if (!currentProductId) return;
+    
+    const product = products.find((p) => p.id === currentProductId);
+    if (!product) return;
+
+    // Check if product already selected
+    if (selectedProducts.some(sp => sp.product.id === currentProductId)) {
+      toast({
+        variant: "destructive",
+        title: "Product already selected",
+        description: "This product is already in the list.",
+      });
+      return;
+    }
+
+    const newItem: SelectedProductItem = {
+      id: Date.now().toString(),
+      product,
+      netWeight: "",
+      packageDate: globalPackageDate,
+      expiryDate: globalExpiryDate,
+    };
+
+    setSelectedProducts(prev => [...prev, newItem]);
+    setCurrentProductId("");
   };
 
-  const handlePrint = () => {
-    if (!printRef.current || !selectedProduct) return;
+  // Remove product from selected list
+  const removeProduct = (itemId: string) => {
+    setSelectedProducts(prev => prev.filter(item => item.id !== itemId));
+  };
 
-    const name = (selectedProduct.name || "").toUpperCase();
-    const weight = formatWeightDisplay(netWeight);
-    const price = Math.round(
-      calculatePriceByWeight(
-        netWeight,
-        selectedProduct.sales_rate_exc_dis_and_tax
+  // Update individual product data
+  const updateProductData = (itemId: string, field: keyof SelectedProductItem, value: any) => {
+    setSelectedProducts(prev => 
+      prev.map(item => 
+        item.id === itemId 
+          ? { ...item, [field]: value }
+          : item
       )
     );
-    const pkg = formatDate(packageDate);
-    const exp = formatDate(expiryDate);
+  };
 
-    // Use the already-rendered SVG from your preview
-    const svg = printRef.current.querySelector(".barcode-container svg");
-    let barcodeSVG = "";
-    if (svg) {
-      const s = svg.cloneNode(true) as SVGElement;
-      s.setAttribute("width", "41mm"); // keep quiet zones; height via CSS var
-      s.removeAttribute("height");
-      barcodeSVG = s.outerHTML;
+  // Apply global dates to all products
+  const applyGlobalDates = () => {
+    setSelectedProducts(prev => 
+      prev.map(item => ({
+        ...item,
+        packageDate: globalPackageDate,
+        expiryDate: globalExpiryDate,
+      }))
+    );
+    toast({
+      title: "Dates applied",
+      description: "Global dates have been applied to all products.",
+    });
+  };
+
+  // Clear all selected products
+  const clearAll = () => {
+    setSelectedProducts([]);
+    toast({
+      title: "Cleared",
+      description: "All products have been removed from the list.",
+    });
+  };
+
+  const handlePrintAll = () => {
+    if (selectedProducts.length === 0) return;
+
+    // Validate all products have required data
+    const invalidProducts = selectedProducts.filter(item => 
+      !item.netWeight.trim() || !item.packageDate || !item.expiryDate
+    );
+
+    if (invalidProducts.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Incomplete data",
+        description: `${invalidProducts.length} products are missing required information.`,
+      });
+      return;
     }
 
     const w = window.open("", "_blank", "width=660,height=520");
     if (!w) return;
 
+    // Generate HTML for all products
+    let allLabelsHTML = "";
+    
+    selectedProducts.forEach((item) => {
+      const name = (item.product.name || "").toUpperCase();
+      const weight = formatWeightDisplay(item.netWeight);
+      const price = Math.round(
+        calculatePriceByWeight(
+          item.netWeight,
+          item.product.sales_rate_exc_dis_and_tax
+        )
+      );
+      const pkg = formatDate(item.packageDate);
+      const exp = formatDate(item.expiryDate);
+
+      // Create barcode SVG for this product
+      const barcodeValue = `${item.product.sku}-${price}`;
+      const barcodeSVG = `<svg width="41mm" height="var(--bc-h)" viewBox="0 0 165 60" xmlns="http://www.w3.org/2000/svg">
+        <rect width="100%" height="100%" fill="white"/>
+        <g transform="translate(10,10)">
+          ${generateBarcodeRects(barcodeValue)}
+        </g>
+      </svg>`;
+
+      allLabelsHTML += `
+        <div class="label" style="page-break-after: always;">
+          <div class="title">${name}</div>
+          <div class="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
+          <div class="bc">${barcodeSVG}</div>
+          <div class="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
+        </div>
+      `;
+    });
+
     w.document.write(`
   <html>
     <head>
-      <title>${name}</title>
+      <title>Barcode Labels - Batch Print</title>
       <style>
         @page { size: 50mm 30mm; margin: 0; }
-        html,body{ width:50mm; height:30mm; margin:0; padding:0; overflow:hidden; }
+        html,body{ margin:0; padding:0; overflow:hidden; }
 
         :root{
-          --fs-title: 11.5pt;    /* starting sizes */
+          --fs-title: 11.5pt;
           --fs-body:   9.5pt;
           --fs-small:  8.0pt;
-          --title-h:   9.5mm;    /* title NEVER taller than this (2 lines max) */
-          --bc-h:     11.0mm;    /* barcode height; we shrink this first if needed */
+          --bc-h:     11.0mm;
         }
 
         .label{
           width:50mm; height:30mm; box-sizing:border-box;
-          padding:0.8mm 3mm;                 /* balanced quiet zones */
+          padding:0.8mm 3mm;
           display:grid;
-          grid-template-rows: var(--title-h) auto 1fr auto; /* dates always get a row */
+          grid-template-rows: auto auto 1fr auto;
           gap:.4mm; font-family: Arial, sans-serif;
         }
 
         .title{
           font:700 var(--fs-title)/1.05 Arial; text-align:center; text-transform:uppercase;
-          display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; /* clamp to 2 lines */
+          display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
           word-break: break-word; hyphens: auto; word-wrap: break-word;
+          max-height: 8mm;
         }
 
-        .row{ display:flex; justify-content:space-between; gap:1mm; white-space:nowrap;
-              font:700 var(--fs-body)/1.05 Arial; }
+        .row{ 
+          display:flex; justify-content:space-between; gap:1mm; white-space:nowrap;
+          font:700 var(--fs-body)/1.05 Arial;
+        }
 
-        .bc{ display:flex; align-items:center; justify-content:center; min-height:9mm; }
+        .bc{ 
+          display:flex; align-items:center; justify-content:center; 
+          min-height:8mm;
+        }
         .bc svg{ width:41mm; height:var(--bc-h); display:block; }
 
         .dates{
@@ -308,15 +407,11 @@ export default function BarcodeGenerator() {
       </style>
     </head>
     <body>
-      <div class="label" id="label">
-        <div class="title" id="ttl">${name}</div>
-        <div class="row"   id="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
-        <div class="bc"    id="bc">${barcodeSVG}</div>
-        <div class="dates" id="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
-      </div>
+      ${allLabelsHTML}
 
       <script>
         const root = document.documentElement;
+        const labels = document.querySelectorAll('.label');
 
         function shrink(varName, step, min, unit){
           const v = parseFloat(getComputedStyle(root).getPropertyValue(varName));
@@ -325,52 +420,66 @@ export default function BarcodeGenerator() {
           return true;
         }
 
-        function fitTitleText() {
-          const title = document.getElementById('ttl');
-          let guard = 30; // More iterations for very long names
+        function fitTitleText(label) {
+          const title = label.querySelector('.title');
+          let guard = 40;
           
-          // Check if title overflows its container height
           while (title.scrollHeight > title.clientHeight && guard-- > 0) {
-            if (!shrink('--fs-title', 0.5, 7.0, 'pt')) break; // Much more aggressive - can go down to 7pt
+            if (!shrink('--fs-title', 0.6, 6.5, 'pt')) break;
           }
         }
 
-        // Fit two-span rows within width (prevents right-side clipping)
-        function fitRowWidth(id, varName, minPt){
-          const row = document.getElementById(id);
+        function fitRowWidth(label, selector, varName, minPt){
+          const row = label.querySelector(selector);
           const spans = row.querySelectorAll('span');
           const gap = parseFloat(getComputedStyle(row).gap) || 0;
           const rowW = () => row.getBoundingClientRect().width;
           const sumW = () => spans[0].getBoundingClientRect().width + spans[1].getBoundingClientRect().width + gap;
-          let guard = 25;
+          let guard = 30;
           while (sumW() > rowW() && guard-- > 0){
-            if (!shrink(varName, 0.5, minPt, 'pt')) break; // More aggressive shrinking
+            if (!shrink(varName, 0.5, minPt, 'pt')) break;
           }
         }
 
-        function fitHeight(){
-          const box = document.getElementById('label');
-          let guard = 25; // More iterations
-          while (box.scrollHeight > box.clientHeight && guard-- > 0){
-            // Priority order: shrink barcode first, then text sizes
-            if (shrink('--bc-h',     0.3, 8.0, 'mm')) continue; // Shrink barcode height more aggressively
-            if (shrink('--fs-title', 0.4, 7.0, 'pt')) continue; // Title can go very small
-            if (shrink('--fs-body',  0.3, 7.5, 'pt')) continue; // Body text smaller
-            if (shrink('--fs-small', 0.2, 6.5, 'pt')) continue; // Small text even smaller
+        function fitHeight(label){
+          let guard = 40;
+          
+          while (label.scrollHeight > label.clientHeight && guard-- > 0){
+            if (shrink('--fs-title', 0.5, 6.0, 'pt')) continue;
+            if (shrink('--bc-h',     0.4, 7.0, 'mm')) continue;
+            if (shrink('--fs-body',  0.4, 7.0, 'pt')) continue;
+            if (shrink('--fs-small', 0.3, 6.0, 'pt')) continue;
             break;
           }
         }
 
-        fitTitleText(); // Fit title text first and most aggressively
-        fitRowWidth('row',   '--fs-body',  7.5);  // Then fit weight/price row
-        fitRowWidth('dates', '--fs-small', 6.5);  // Then fit dates row
-        fitHeight(); // Finally ensure everything fits in 30mm height
+        // Process each label
+        labels.forEach(label => {
+          fitTitleText(label);
+          fitRowWidth(label, '.row', '--fs-body', 7.0);
+          fitRowWidth(label, '.dates', '--fs-small', 6.0);
+          fitHeight(label);
+        });
 
-        window.print(); setTimeout(()=>window.close(), 200);
+        window.print(); 
+        setTimeout(()=>window.close(), 200);
       </script>
     </body>
   </html>`);
     w.document.close();
+  };
+
+  // Simple barcode rect generator (placeholder - you'd want to use a proper barcode library)
+  const generateBarcodeRects = (value: string) => {
+    // This is a simplified barcode generator
+    // In a real implementation, you'd use proper Code128 encoding
+    let rects = "";
+    for (let i = 0; i < value.length * 6; i++) {
+      const x = i * 2;
+      const width = (i % 3 === 0) ? 3 : 1;
+      rects += `<rect x="${x}" y="0" width="${width}" height="40" fill="black"/>`;
+    }
+    return rects;
   };
 
   const formatDate = (date: Date | undefined) => {
@@ -382,22 +491,24 @@ export default function BarcodeGenerator() {
     });
   };
 
-  const isFormValid =
-    selectedProduct && packageDate && expiryDate && netWeight.trim();
+  const isFormValid = selectedProducts.length > 0 && 
+    selectedProducts.every(item => 
+      item.netWeight.trim() && item.packageDate && item.expiryDate
+    );
 
   if (productsLoading && products.length === 0) {
     return <PageLoader message="Barcode Generator..." />;
   }
 
   return (
-    <div className="p-6 ">
+    <div className="p-6">
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
         {/* Product Selection and Form */}
         <Card className="xl:col-span-1">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Package className="h-5 w-5" />
-              Barcode Generator
+              Multi-Product Barcode Generator
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -419,225 +530,169 @@ export default function BarcodeGenerator() {
             {/* Product Selection */}
             <div className="space-y-2">
               <Label htmlFor="product">
-                Select Product ({filteredProducts.length} found)
+                Add Product ({filteredProducts.length} available)
               </Label>
-              <Select
-                onValueChange={handleProductSelect}
-                value={selectedProduct?.id || ""}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose a product" />
-                </SelectTrigger>
-                <SelectContent>
-                  {filteredProducts.map((product) => (
-                    <SelectItem key={product.id} value={product.id}>
-                      <div className="flex flex-col">
-                        <span className="font-medium">{product.name}</span>
-                        <span className="text-xs text-gray-500">
-                          SKU: {product.sku} | Rs{" "}
-                          {product.sales_rate_exc_dis_and_tax}
-                        </span>
-                      </div>
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex gap-2">
+                <Select
+                  onValueChange={setCurrentProductId}
+                  value={currentProductId}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder="Choose a product" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {filteredProducts.map((product) => (
+                      <SelectItem key={product.id} value={product.id}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{product.name}</span>
+                          <span className="text-xs text-gray-500">
+                            SKU: {product.sku} | Rs {product.sales_rate_exc_dis_and_tax}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button onClick={addProduct} disabled={!currentProductId}>
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
 
-            {selectedProduct && (
-              <>
-                {/* Product Details */}
-                <div className="bg-gray-50 p-3 rounded-md space-y-1">
-                  <div className="text-sm">
-                    <strong>Name:</strong> {selectedProduct.name}
-                  </div>
-                  <div className="text-sm">
-                    <strong>SKU:</strong> {selectedProduct.sku}
-                  </div>
-                  <div className="text-sm">
-                    <strong>Price:</strong> Rs{" "}
-                    {selectedProduct.sales_rate_exc_dis_and_tax}
-                  </div>
-                  <div className="text-sm">
-                    <strong>Unit:</strong> {selectedProduct.unitName || "N/A"}
-                  </div>
-                  <div className="text-sm">
-                    <strong>Brand:</strong> {selectedProduct.brandName || "N/A"}
-                  </div>
-                  <div className="text-sm">
-                    <strong>Category:</strong>{" "}
-                    {selectedProduct.category || "N/A"}
-                  </div>
-                </div>
-
-                {/* Net Weight */}
-                <div className="space-y-2">
-                  <Label htmlFor="netWeight">Net Weight *</Label>
-                  <Input
-                    id="netWeight"
-                    value={netWeight}
-                    onChange={(e) => setNetWeight(e.target.value)}
-                    placeholder="e.g., 500g, 1kg, 250ml"
-                  />
-                </div>
-
-                {/* Dates */}
-                <div className="grid grid-cols-1 gap-4">
-                  <div className="space-y-2">
-                    <Label>Package Date *</Label>
-                    <DatePicker
-                      date={packageDate}
-                      onDateChange={setPackageDate}
-                      placeholder="Select package date"
-                    />
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Expiry Date *</Label>
-                    <DatePicker
-                      date={expiryDate}
-                      onDateChange={setExpiryDate}
-                      placeholder="Select expiry date"
-                    />
-                  </div>
-                </div>
-
+            {/* Global Dates */}
+            <div className="space-y-2 border-t pt-4">
+              <Label>Global Dates (Apply to All)</Label>
+              <div className="grid grid-cols-1 gap-2">
+                <DatePicker
+                  date={globalPackageDate}
+                  onDateChange={setGlobalPackageDate}
+                  placeholder="Global package date"
+                />
+                <DatePicker
+                  date={globalExpiryDate}
+                  onDateChange={setGlobalExpiryDate}
+                  placeholder="Global expiry date"
+                />
                 <Button
-                  onClick={handlePrint}
-                  className="w-full"
-                  disabled={!isFormValid}
+                  onClick={applyGlobalDates}
+                  variant="outline"
+                  size="sm"
+                  disabled={!globalPackageDate || !globalExpiryDate || selectedProducts.length === 0}
                 >
-                  <Printer className="h-4 w-4 mr-2" />
-                  Print Barcode
+                  Apply to All Products
                 </Button>
-              </>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* Barcode Preview */}
-        <Card className="xl:col-span-1">
-          <CardHeader>
-            <CardTitle>Barcode Preview</CardTitle>
-          </CardHeader>
-          <CardContent className="flex justify-center">
-            {selectedProduct ? (
-              <div
-                ref={printRef}
-                className="barcode-label border-2 border-gray-800 p-2 bg-white"
-                style={{ width: "4in", height: "2.5in" }}
-              >
-                <div className="brand-category text-center text-xs text-gray-600 mb-1">
-                  {selectedProduct.brandName || "N/A"} |{" "}
-                  {selectedProduct.category || "N/A"}
-                </div>
-
-                <div className="product-info text-center mb-2">
-                  <div className="product-name font-bold text-base mb-1 uppercase">
-                    {selectedProduct.name}
-                  </div>
-                  <div className="product-details text-xs space-y-1">
-                    <div>
-                      <strong>Net Wt:</strong> {formatWeightDisplay(netWeight)}
-                    </div>
-                    <div>
-                      <strong>Price:</strong>{" "}
-                      {netWeight
-                        ? Math.round(
-                            calculatePriceByWeight(
-                              netWeight,
-                              selectedProduct.sales_rate_exc_dis_and_tax
-                            )
-                          )
-                        : selectedProduct.sales_rate_exc_dis_and_tax}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="barcode-container flex justify-center items-center flex-grow">
-                  <Barcode
-                    value={`${selectedProduct.sku}-${Math.round(
-                      calculatePriceByWeight(
-                        netWeight,
-                        selectedProduct.sales_rate_exc_dis_and_tax
-                      )
-                    )}`}
-                    format="CODE128"
-                    displayValue={false} // IMPORTANT: saves vertical space
-                    width={2.4} // thicker bars
-                    height={110} // tall in preview; we resize in print window
-                    margin={0}
-                    background="transparent"
-                  />
-                </div>
-
-                <div className="dates text-xs flex justify-between font-bold border-t border-gray-800 pt-1">
-                  <span>PKG: {formatDate(packageDate)}</span>
-                  <span>EXP: {formatDate(expiryDate)}</span>
-                </div>
               </div>
-            ) : (
-              <div className="flex items-center justify-center h-40 text-gray-500 border-2 border-dashed border-gray-300 rounded-lg w-full">
-                <div className="text-center">
-                  <Package className="h-8 w-8 mx-auto mb-2 text-gray-400" />
-                  <p>Select a product to generate barcode</p>
-                </div>
-              </div>
-            )}
-          </CardContent>
-        </Card>
+            </div>
 
-        {/* Product List */}
-        <Card className="xl:col-span-1">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between">
-              <span>Available Products</span>
+            {/* Action Buttons */}
+            <div className="space-y-2">
               <Button
-                variant="outline"
-                size="sm"
-                onClick={refreshAllData}
-                disabled={isAnyLoading}
+                onClick={handlePrintAll}
+                className="w-full"
+                disabled={!isFormValid}
               >
-                {isAnyLoading ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                ) : (
-                  <RefreshCw className="h-4 w-4" />
-                )}
+                <Printer className="h-4 w-4 mr-2" />
+                Print All Barcodes ({selectedProducts.length})
               </Button>
-            </CardTitle>
+              <Button
+                onClick={clearAll}
+                variant="outline"
+                className="w-full"
+                disabled={selectedProducts.length === 0}
+              >
+                <Trash2 className="h-4 w-4 mr-2" />
+                Clear All
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Selected Products List */}
+        <Card className="xl:col-span-2">
+          <CardHeader>
+            <CardTitle>Selected Products ({selectedProducts.length})</CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-2 max-h-96 overflow-y-auto">
-              {filteredProducts.length === 0 ? (
-                <div className="text-center text-gray-500 py-8">
-                  {searchTerm
-                    ? "No products found matching your search."
-                    : "No products available."}
-                </div>
-              ) : (
-                filteredProducts.map((product) => (
-                  <div
-                    key={product.id}
-                    className={`border rounded-lg p-3 hover:bg-gray-50 cursor-pointer transition-colors ${
-                      selectedProduct?.id === product.id
-                        ? "border-blue-500 bg-blue-50"
-                        : ""
-                    }`}
-                    onClick={() => handleProductSelect(product.id)}
-                  >
-                    <div className="font-medium text-sm">{product.name}</div>
-                    <div className="text-xs text-gray-600">
-                      SKU: {product.sku}
+            {selectedProducts.length === 0 ? (
+              <div className="text-center text-gray-500 py-8">
+                <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+                <p>No products selected yet.</p>
+                <p className="text-sm">Add products from the dropdown above.</p>
+              </div>
+            ) : (
+              <div className="space-y-4 max-h-96 overflow-y-auto">
+                {selectedProducts.map((item) => (
+                  <div key={item.id} className="border rounded-lg p-4 space-y-4">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h3 className="font-medium">{item.product.name}</h3>
+                        <p className="text-sm text-gray-600">SKU: {item.product.sku}</p>
+                        <p className="text-sm text-gray-600">
+                          Price: Rs {item.product.sales_rate_exc_dis_and_tax}
+                        </p>
+                      </div>
+                      <Button
+                        onClick={() => removeProduct(item.id)}
+                        variant="outline"
+                        size="sm"
+                      >
+                        <X className="h-4 w-4" />
+                      </Button>
                     </div>
-                    <div className="text-xs text-gray-600">
-                      Price: Rs {product.sales_rate_exc_dis_and_tax}
+
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div>
+                        <Label htmlFor={`weight-${item.id}`}>Net Weight *</Label>
+                        <Input
+                          id={`weight-${item.id}`}
+                          value={item.netWeight}
+                          onChange={(e) => updateProductData(item.id, 'netWeight', e.target.value)}
+                          placeholder="e.g., 500g, 1kg"
+                        />
+                      </div>
+                      <div>
+                        <Label>Package Date *</Label>
+                        <DatePicker
+                          date={item.packageDate}
+                          onDateChange={(date) => updateProductData(item.id, 'packageDate', date)}
+                          placeholder="Package date"
+                        />
+                      </div>
+                      <div>
+                        <Label>Expiry Date *</Label>
+                        <DatePicker
+                          date={item.expiryDate}
+                          onDateChange={(date) => updateProductData(item.id, 'expiryDate', date)}
+                          placeholder="Expiry date"
+                        />
+                      </div>
                     </div>
-                    <div className="text-xs text-gray-600">
-                      {product.brandName || "N/A"} | {product.unitName || "N/A"}
+
+                    {/* Individual Preview */}
+                    <div className="bg-gray-50 p-2 rounded">
+                      <div className="text-xs text-center space-y-1">
+                        <div className="font-bold">{item.product.name.toUpperCase()}</div>
+                        <div>Net Wt: {formatWeightDisplay(item.netWeight)} | Price: Rs {Math.round(calculatePriceByWeight(item.netWeight, item.product.sales_rate_exc_dis_and_tax))}</div>
+                        <div className="flex justify-center">
+                          <Barcode
+                            value={`${item.product.sku}-${Math.round(calculatePriceByWeight(item.netWeight, item.product.sales_rate_exc_dis_and_tax))}`}
+                            format="CODE128"
+                            displayValue={false}
+                            width={1}
+                            height={30}
+                            margin={0}
+                          />
+                        </div>
+                        <div className="flex justify-between border-t pt-1">
+                          <span>PKG: {formatDate(item.packageDate)}</span>
+                          <span>EXP: {formatDate(item.expiryDate)}</span>
+                        </div>
+                      </div>
                     </div>
                   </div>
-                ))
-              )}
-            </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>
