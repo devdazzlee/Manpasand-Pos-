@@ -68,7 +68,10 @@ export function NewSale() {
   const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
   const [quickAddQuantity, setQuickAddQuantity] = useState("1");
   const [quickAddTotalPrice, setQuickAddTotalPrice] = useState("");
-
+  const [branchName, setBranchName] = useState({
+    name: "",
+    address: "",
+  });
   // Global store with custom hook
   const {
     products,
@@ -91,6 +94,7 @@ export function NewSale() {
           fetchProducts(),
           fetchCategories(),
           fetchCustomers(),
+          getBranchName(),
         ]);
       } catch (error) {
         toast({
@@ -213,6 +217,25 @@ export function NewSale() {
     );
   };
 
+  const getBranchName = async () => {
+    try {
+      const branchId = localStorage.getItem("branch");
+      if (!branchId) throw new Error("No branch id in localStorage");
+
+      const data = await apiClient.get(`/branches/${branchId}`); // axios-style
+      setBranchName({
+        name: data.data.data.name || "",
+        address: data.data.data.address || "",
+      });
+      // setBranchName(data.data.data.name);
+      console.log("data", data.data);
+      // return data?.name ?? null; // or just `return data` if you need the whole object
+    } catch (err) {
+      console.error("Failed to fetch branch name:", err);
+      return null;
+    }
+  };
+
   const removeFromCart = (id: string) => {
     const item = cart.find((item) => item.id === id);
     setCart(cart.filter((item) => item.id !== id));
@@ -271,7 +294,7 @@ export function NewSale() {
   <html>
     <head>
       <title>Receipt</title>
-      <style>
+     <style>
         /* Thermal printer optimized styles */
         html, body { 
           margin: 0; 
@@ -283,7 +306,8 @@ export function NewSale() {
           font-family: 'Courier New', monospace; 
           font-size: 12px;
           line-height: 1.2;
-          color: black;
+          color: #000000;
+          font-weight: bold;
           display: flex;
           justify-content: center;
           padding: 10px;
@@ -293,7 +317,8 @@ export function NewSale() {
           width: 80mm;
           max-width: 300px;
           background: white;
-          color: black;
+          color: #000000;
+          font-weight: bold;
           text-align: center;
           padding: 5mm;
           box-sizing: border-box;
@@ -301,23 +326,22 @@ export function NewSale() {
 
         
         .store-header {
-          font-weight: bold;
+          font-weight: 900;
           font-size: 16px;
           margin-bottom: 4px;
-          color: black;
+          color: #000000;
         }
         
         .tagline, .address {
           font-size: 10px;
           margin-bottom: 2px;
-          color: black;
+          color: #000000;
+          font-weight: bold;
         }
-        
-        /* Simple divider - just dashes */
         .divider {
           margin: 4px 0;
-          color: black;
-          font-weight: normal;
+          color: #000000;
+          font-weight: bold;
           border: none;
           text-align: center;
         }
@@ -326,59 +350,137 @@ export function NewSale() {
           text-align: left;
           font-size: 10px;
           margin: 2px 0;
-          color: black;
+          color: #000000;
+          font-weight: bold;
         }
         
         .receipt-number, .payment-method {
-          font-weight: bold;
-          color: black;
+          font-weight: 900;
+          color: #000000;
         }
-        
-        .items-header {
-          text-align: left;
-          font-weight: bold;
-          margin: 6px 0 4px 0;
-          color: black;
-          border-top: 1px solid black;
-          border-bottom: 1px solid black;
-          padding: 2px 0;
+        .flex-item-row-cs{
+          display: flex;
+          justify-content: space-between;
+          align-items: center;           
+          width: 100%;
+          box-sizing: border-box;
         }
-        
-        .item-row {
-          text-align: left;
+
+        /* Improved items section with better grid layout */
+        .items-section {
+          margin: 6px 0;
           font-size: 10px;
-          margin: 1px 0;
-          color: black;
+          line-height: 1.3;
+          font-family: 'Courier New', monospace;
+          font-weight: bold;
         }
-        
+
+        .items-header {
+          display: flex;
+          justify-content: space-between;
+          font-weight: 900;
+          margin-bottom: 4px;
+          padding-bottom: 2px;
+          border-bottom: 1px solid #000;
+        }
+
+        .items-header .item-col {
+          flex: 2;
+          text-align: left;
+        }
+
+        .items-header .qty-col {
+          flex: 1;
+          text-align: center;
+          min-width: 60px;
+        }
+
+        .items-header .rate-col {
+          flex: 1;
+          text-align: right;
+          min-width: 80px;
+        }
+
+        .item-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: flex-start;
+          margin: 3px 0;
+          min-height: 16px;
+          font-weight: bold;
+        }
+
         .item-name {
-          color: black;
-          font-weight: normal;
+          flex: 2;
+          text-align: left;
+          word-wrap: break-word;
+          overflow-wrap: break-word;
+          hyphens: auto;
+          line-height: 1.2;
+          padding-right: 8px;
         }
-        
-        .item-details {
-          color: black;
+
+        .item-qty {
+          flex: 1;
+          text-align: center;
+          min-width: 60px;
+          white-space: nowrap;
+        }
+
+        .item-rate {
+          flex: 1;
+          text-align: right;
+          min-width: 80px;
+          white-space: nowrap;
+        }
+
+        /* Special styling for sub-items like "Packed in-store" */
+        .item-sub-row {
+          display: flex;
+          margin: 1px 0 3px 0;
+          font-style: italic;
+          opacity: 0.8;
           font-size: 9px;
-          margin-left: 4px;
+        }
+
+        .item-sub-name {
+          flex: 2;
+          text-align: left;
+          padding-left: 10px;
+          padding-right: 8px;
+        }
+
+        .item-sub-qty {
+          flex: 1;
+          text-align: center;
+          min-width: 60px;
+        }
+
+        .item-sub-rate {
+          flex: 1;
+          text-align: right;
+          min-width: 80px;
         }
         
         .totals {
           text-align: right;
           font-size: 10px;
           margin: 2px 0;
-          color: black;
+          color: #000000;
+          font-weight: bold;
         }
         
         .subtotal-section {
           border-top: 1px solid black;
           padding-top: 4px;
           margin-top: 6px;
+          font-weight: bold;
         }
         
         .grand-total {
-          font-weight: bold;
+          font-weight: 900;
           font-size: 12px;
-          color: black;
+          color: #000000;
           margin: 4px 0;
           border-top: 1px solid black;
           border-bottom: 1px solid black;
@@ -386,38 +488,54 @@ export function NewSale() {
         }
         
         .promo {
-          border: 1px solid black;
           padding: 4px;
           margin: 6px 0;
           font-size: 9px;
-          color: black;
-          text-align: center;
-        }
-        
-        .barcode-section {
-          margin: 8px 0;
-          text-align: center;
-        }
-        
-        .barcode {
-          font-family: 'Courier New', monospace;
-          font-size: 14px;
-          margin: 4px 0;
-          color: black;
+          color: #000000;
           font-weight: bold;
+          text-align: left;
+        }
+        
+        /* Improved barcode styling to look more like an actual barcode */
+        .barcode-section {
+          text-align: center;
+        }
+        
+       .barcode {
+          font-family: 'Courier New', monospace;
+          font-size: 24px;
+          margin: 6px 0;
+          color: #000000;
+          font-weight: bold;
+          letter-spacing: -1px;
+          background: linear-gradient(90deg, 
+            black 1px, white 1px, white 2px, black 2px, black 3px, white 3px,
+            white 4px, black 4px, black 6px, white 6px, white 7px, black 7px,
+            black 8px, white 8px, white 10px, black 10px, black 11px, white 11px,
+            white 12px, black 12px, black 14px, white 14px, white 15px, black 15px
+          );
+          background-size: 16px 100%;
+          background-repeat: repeat-x;
+          height: 40px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          color: transparent;
+          border: 1px solid #ddd;
         }
         
         .barcode-number {
           font-size: 10px;
-          color: black;
+          color: #000000;
+          margin-top: 4px;
+          font-weight: bold;
         }
         
         .thank-you {
           font-size: 11px;
           margin-top: 8px;
-          font-weight: bold;
-          color: black;
-          border-top: 1px solid black;
+          font-weight: 900;
+          color: #000000;
           padding-top: 4px;
         }
 
@@ -433,7 +551,7 @@ export function NewSale() {
             margin: 0;
             padding: 0;
             background: white !important;
-            color: black !important;
+            color: #000000 !important;
           }
           
           .receipt {
@@ -445,16 +563,13 @@ export function NewSale() {
           
           /* Force black text for printing */
           * {
-            color: black !important;
+            color: #000000 !important;
+            font-weight: bold !important;
             background: white !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          
-          /* Ensure borders print */
-          .divider, .items-header, .subtotal-section, .grand-total, .promo, .thank-you {
-            border-color: black !important;
-          }
+ 
         }
       </style>
     </head>
@@ -479,14 +594,14 @@ export function NewSale() {
     const finalTotal = receiptData.subtotal;
 
     const receiptContent = `
-<div class="logo">
+    <div class="logo">
   <img src="/logo.png?height=40&width=120" alt="MANPASAND Logo" style="max-width: 100%; height: 40px;" />
 </div>
 <div class="store-header">MANPASAND GENERAL STORE</div>
 <div class="tagline">Quality • Service • Value</div>
-<div class="address">Main Shahrah-e-Faisal, Karachi</div>
-<div class="address">STRN 12-345679  STRN 12-3456789</div>
-<div class="divider">----------------------------------------</div>
+<div className="address">${branchName.address + ', Karachi' || "Main Shahrah-e-Faisal, Karachi"}</div>
+
+<div class="divider">---------------------------------------</div>
 
 <div class="receipt-info">Receipt # <span class="receipt-number">${
       receiptData.transactionId
@@ -502,59 +617,76 @@ export function NewSale() {
       hour: "2-digit",
       minute: "2-digit",
       hour12: true,
-    })}                    ${receiptData.cashier}</div>
-<div class="receipt-info">Cashier: Walk-in                Customer: Walk-in</div>
-
-<div class="divider">----------------------------------------</div>
-
-<div class="items-header">ITEM                    QTY      RATE</div>
-${receiptData.items
-  .map((item: CartItem) => {
-    const itemName =
-      item.name.length > 20 ? item.name.substring(0, 17) + "..." : item.name;
-    const qty = `${item.quantity} pc`;
-    const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
-
-    return `<div class="item-row">
-      <span class="item-name">${itemName.padEnd(20)}</span> 
-      <span>${qty.padStart(6)}</span> 
-      <span>${rate.padStart(10)}</span>
-      ${
-        item.name.length > 20
-          ? `<div class="item-details">${item.name}</div>`
-          : ""
-      }
-    </div>`;
-  })
-  .join("")}
-
-<div class="divider">----------------------------------------</div>
-
-<div class="subtotal-section">
-  <div class="totals">Subtotal              PKR ${receiptData.subtotal.toFixed(
-    2
-  )}</div>
-  <div class="totals grand-total">Grand Total           PKR ${finalTotal.toFixed(
-    2
-  )}</div>
+    })}</div>
+<div class="flex-item-row-cs">
+  <div class="receipt-info">Cashier: Walk-in</div>
+  <div class="receipt-info">Walk-in</div>  
 </div>
 
-<div class="divider">----------------------------------------</div>
+<div class="divider">---------------------------------------</div>
 
-<div class="payment-info">Payment Method: <span class="payment-method">${receiptData.paymentMethod.toUpperCase()}</span></div>
-<div class="payment-info">Amount Paid:            PKR ${(
-      finalTotal + 152
-    ).toFixed(2)}</div>
+<div class="items-section">
+  <div class="items-header">
+    <div class="item-col">ITEM</div>
+    <div class="qty-col">QTY</div>
+    <div class="rate-col">RATE</div>
+  </div>
 
+  ${receiptData.items
+    .map((item: any) => {
+      const itemName =
+        item.name.length > 20 ? item.name.substring(0, 17) + "..." : item.name;
+      const qty = `${item.quantity} pc`;
+      const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
+
+      return `<div class="item-row">
+              <div class="item-name">${itemName}</div>
+              <div class="item-qty">${qty}</div>
+              <div class="item-rate">${rate}</div>
+            </div>
+            ${
+              item.name.length > 20
+                ? `<div class="item-sub-row"><div class="item-sub-name">${item.name}</div><div class="item-sub-qty"></div><div class="item-sub-rate"></div></div>`
+                : ""
+            }`;
+    })
+    .join("")}
+</div>
+
+<div class="divider">---------------------------------------</div>
+
+<div class="flex-item-row-cs">
+  <div class="receipt-info">Subtotal</div>
+  <div class="receipt-info">PKR ${receiptData.subtotal.toFixed(2)}</div>
+</div>
+<div class="flex-item-row-cs">
+  <div class="receipt-info">Discount</div>
+  <div class="receipt-info">- PKR 50.00</div>
+</div>
+<div class="flex-item-row-cs">
+  <div class="receipt-info">Grand Total</div>
+  <div class="receipt-info">PKR ${receiptData.subtotal.toFixed(2)}</div>
+</div>
+
+<div class="divider">---------------------------------------</div>
+<div class="flex-item-row-cs">
+  <div class="payment-info">Payment Method:</div>
+  <div class="payment-method">${receiptData.paymentMethod.toUpperCase()}</div>
+</div>
+<div class="flex-item-row-cs">
+  <div class="payment-info">Amount Paid:</div>
+  <div class="payment-method">PKR ${receiptData.subtotal.toFixed(2)}</div> 
+</div>
+    
 <div class="promo">Buy 2 get 1 free on select items!</div>
 
 <div class="barcode-section">
-  <div class="barcode">|||||||||||||||||||||||||||</div>
+  <div class="barcode">||||||||||||||||||||||</div>
   <div class="barcode-number">${receiptData.transactionId}</div>
 </div>
 
 <div class="thank-you">Thank you for shopping with us!</div>
-<div style="font-size: 10px; margin-top: 4px;">Visit us again soon!</div>
+<div style="font-size: 10px; margin-top: 4px; font-weight: bold; color: #000000;">Visit us again soon!</div>
 `;
 
     // Print the receipt
