@@ -285,7 +285,7 @@ export function NewSale() {
     };
   };
 
-  const printReceipt = (receiptContent: string) => {
+  const printReceipt = (receiptContent: string ) => {
     const w = window.open("", "_blank", "width=480,height=600");
     if (!w) return;
 
@@ -331,7 +331,7 @@ export function NewSale() {
         }
         
         .logo img {
-          max-width: 120px;
+          max-width: 160px;
           height: 40px;
           display: block;
           margin: 0 auto;
@@ -624,9 +624,17 @@ export function NewSale() {
     const finalTotal = receiptData.subtotal;
 
     const receiptContent = `
-    <div class="logo">
-      <img src="${window.location.origin}/logo.png" alt="MANPASAND Logo" style="max-width: 120px; height: 40px; display: block; margin: 0 auto; object-fit: contain;" />
-    </div>
+   <div class="logo">
+  <img 
+    src="${window.location.origin}/logo.png" 
+    alt="Logo" 
+    style="max-width:120px;height:40px;display:block;margin:0 auto;
+           object-fit:contain;
+           filter: grayscale(100%) contrast(200%);
+           image-rendering: pixelated;
+           -webkit-print-color-adjust: exact; 
+           print-color-adjust: exact;" />
+</div>
 <div class="store-header">MANPASAND GENERAL STORE</div>
 <div class="tagline">Quality • Service • Value</div>
 <div className="address">${branchName.address + ', Karachi' || "Main Shahrah-e-Faisal, Karachi"}</div>
