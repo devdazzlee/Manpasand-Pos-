@@ -324,6 +324,19 @@ export function NewSale() {
           box-sizing: border-box;
         }
 
+        /* Logo specific styles */
+        .logo {
+          text-align: center;
+          margin-bottom: 8px;
+        }
+        
+        .logo img {
+          max-width: 120px;
+          height: 40px;
+          display: block;
+          margin: 0 auto;
+          object-fit: contain;
+        }
         
         .store-header {
           font-weight: 900;
@@ -539,7 +552,7 @@ export function NewSale() {
           padding-top: 4px;
         }
 
-        /* Print optimization */
+        /* Print optimization - FIXED for logo visibility */
         @media print {
           @page {
             size: 80mm auto;
@@ -561,13 +574,30 @@ export function NewSale() {
             box-shadow: none;
           }
           
-          /* Force black text for printing */
+          /* Logo print styles - CRITICAL FIX */
+          .logo img {
+            max-width: 120px !important;
+            height: 40px !important;
+            display: block !important;
+            margin: 0 auto !important;
+            object-fit: contain !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+            opacity: 1 !important;
+            visibility: visible !important;
+          }
+          
+          /* Force black text for printing but preserve images */
           * {
             color: #000000 !important;
             font-weight: bold !important;
-            background: white !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
+          }
+          
+          /* Specific exclusion for images */
+          img {
+            background: none !important;
           }
  
         }
@@ -595,8 +625,8 @@ export function NewSale() {
 
     const receiptContent = `
     <div class="logo">
-  <img src="/logo.png?height=40&width=120" alt="MANPASAND Logo" style="max-width: 100%; height: 40px;" />
-</div>
+      <img src="${window.location.origin}/logo.png" alt="MANPASAND Logo" style="max-width: 120px; height: 40px; display: block; margin: 0 auto; object-fit: contain;" />
+    </div>
 <div class="store-header">MANPASAND GENERAL STORE</div>
 <div class="tagline">Quality • Service • Value</div>
 <div className="address">${branchName.address + ', Karachi' || "Main Shahrah-e-Faisal, Karachi"}</div>
