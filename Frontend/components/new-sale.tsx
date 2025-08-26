@@ -286,7 +286,7 @@ export function NewSale() {
   };
 
   const printReceipt = (receiptContent: string) => {
-    const w = window.open("", "_blank", "width=480,height=600");
+    const w = window.open("", "_blank", "width=800,height=600");
     if (!w) return;
 
     w.document.open();
@@ -304,32 +304,32 @@ export function NewSale() {
         background: white;
       }
       
-      body { 
-        font-family: 'Courier New', monospace; 
-        font-size: 20px; /* Increased significantly from 16px */
-        line-height: 1.3;
-        color: #000000;
-        font-weight: bold;
-        display: flex;
-        justify-content: center;
-        padding: 10px;
-      }
+       body { 
+          font-family: 'Courier New', monospace; 
+          font-size: 12px;
+          line-height: 1.2;
+          color: #000000;
+          font-weight: bold;
+          display: flex;
+          justify-content: center;
+          padding: 10px;
+        }
 
-      .receipt {
-        width: 80mm; /* Keeping original width as requested */
-        max-width: 80mm; /* Ensure it stays at 80mm */
-        background: white;
-        color: #000000;
-        font-weight: bold;
-        text-align: center;
-        padding: 5mm;
-        box-sizing: border-box;
-      }
+    .receipt {
+          width: 100mm;
+          max-width: 500px;
+          background: white;
+          color: #000000;
+          font-weight: bold;
+          text-align: center;
+          padding: 5mm;
+          box-sizing: border-box;
+        }
 
       /* Logo specific styles */
       .logo {
         text-align: center;
-        margin-bottom: 12px; /* Increased spacing */
+        margin-bottom: 12px; /* Increased from 8px */
       }
       
       .logo img {
@@ -342,31 +342,31 @@ export function NewSale() {
       
       .store-header {
         font-weight: 900;
-        font-size: 26px; /* Increased from 20px */
-        margin-bottom: 6px;
+        font-size: 24px; /* Increased from 16px */
+        margin-bottom: 6px; /* Increased from 4px */
         color: #000000;
       }
       
       .tagline, .address {
-        font-size: 18px; /* Increased from 14px */
-        margin-bottom: 4px;
+        font-size: 16px; /* Increased from 10px */
+        margin-bottom: 4px; /* Increased from 2px */
         color: #000000;
         font-weight: bold;
       }
       
       .divider {
-        margin: 8px 0;
+        margin: 6px 0; /* Increased from 4px */
         color: #000000;
         font-weight: bold;
         border: none;
         text-align: center;
-        font-size: 18px; /* Increased from 14px */
+        font-size: 16px; /* Added explicit size */
       }
       
       .receipt-info, .payment-info {
         text-align: left;
-        font-size: 18px; /* Increased from 14px */
-        margin: 4px 0;
+        font-size: 16px; /* Increased from 10px */
+        margin: 4px 0; /* Increased from 2px */
         color: #000000;
         font-weight: bold;
       }
@@ -386,9 +386,9 @@ export function NewSale() {
 
       /* Improved items section with larger fonts */
       .items-section {
-        margin: 8px 0;
-        font-size: 18px; /* Increased from 14px */
-        line-height: 1.4;
+        margin: 8px 0; /* Increased from 6px */
+        font-size: 16px; /* Increased from 10px */
+        line-height: 1.4; /* Increased from 1.3 */
         font-family: 'Courier New', monospace;
         font-weight: bold;
       }
@@ -397,10 +397,10 @@ export function NewSale() {
         display: flex;
         justify-content: space-between;
         font-weight: 900;
-        font-size: 20px; /* Increased from 15px */
-        margin-bottom: 6px;
-        padding-bottom: 3px;
-        border-bottom: 2px solid #000;
+        font-size: 18px; /* Increased - was not specified */
+        margin-bottom: 6px; /* Increased from 4px */
+        padding-bottom: 3px; /* Increased from 2px */
+        border-bottom: 2px solid #000; /* Made thicker from 1px */
       }
 
       .items-header .item-col {
@@ -411,23 +411,23 @@ export function NewSale() {
       .items-header .qty-col {
         flex: 1;
         text-align: center;
-        min-width: 70px;
+        min-width: 70px; /* Increased from 60px */
       }
 
       .items-header .rate-col {
         flex: 1;
         text-align: right;
-        min-width: 90px;
+        min-width: 90px; /* Increased from 80px */
       }
 
       .item-row {
         display: flex;
         justify-content: space-between;
         align-items: flex-start;
-        margin: 4px 0;
-        min-height: 24px; /* Increased from 20px */
+        margin: 4px 0; /* Increased from 3px */
+        min-height: 20px; /* Increased from 16px */
         font-weight: bold;
-        font-size: 18px; /* Increased from 14px */
+        font-size: 16px; /* Added explicit size */
       }
 
       .item-name {
@@ -436,81 +436,81 @@ export function NewSale() {
         word-wrap: break-word;
         overflow-wrap: break-word;
         hyphens: auto;
-        line-height: 1.3;
+        line-height: 1.3; /* Increased from 1.2 */
         padding-right: 8px;
       }
 
       .item-qty {
         flex: 1;
         text-align: center;
-        min-width: 70px; /* Increased */
+        min-width: 70px; /* Increased from 60px */
         white-space: nowrap;
       }
 
       .item-rate {
         flex: 1;
         text-align: right;
-        min-width: 90px; /* Increased */
+        min-width: 90px; /* Increased from 80px */
         white-space: nowrap;
       }
 
       /* Special styling for sub-items */
       .item-sub-row {
         display: flex;
-        margin: 2px 0 4px 0;
+        margin: 2px 0 4px 0; /* Increased from 1px 0 3px 0 */
         font-style: italic;
         opacity: 0.8;
-        font-size: 16px; /* Increased from 12px */
+        font-size: 14px; /* Increased from 9px */
       }
 
       .item-sub-name {
         flex: 2;
         text-align: left;
-        padding-left: 12px;
+        padding-left: 12px; /* Increased from 10px */
         padding-right: 8px;
       }
 
       .item-sub-qty {
         flex: 1;
         text-align: center;
-        min-width: 70px;
+        min-width: 70px; /* Increased from 60px */
       }
 
       .item-sub-rate {
         flex: 1;
         text-align: right;
-        min-width: 90px;
+        min-width: 90px; /* Increased from 80px */
       }
       
       .totals {
         text-align: right;
-        font-size: 18px; /* Increased from 14px */
-        margin: 4px 0;
+        font-size: 16px; /* Increased from 10px */
+        margin: 4px 0; /* Increased from 2px */
         color: #000000;
         font-weight: bold;
       }
       
       .subtotal-section {
-        border-top: 2px solid black;
-        padding-top: 6px;
-        margin-top: 8px;
+        border-top: 2px solid black; /* Made thicker from 1px */
+        padding-top: 6px; /* Increased from 4px */
+        margin-top: 8px; /* Increased from 6px */
         font-weight: bold;
       }
       
       .grand-total {
         font-weight: 900;
-        font-size: 20px; /* Increased from 16px */
+        font-size: 18px; /* Increased from 12px */
         color: #000000;
-        margin: 6px 0;
-        border-top: 2px solid black;
-        border-bottom: 2px solid black;
-        padding: 4px 0;
+        margin: 6px 0; /* Increased from 4px */
+        border-top: 2px solid black; /* Made thicker from 1px */
+        border-bottom: 2px solid black; /* Made thicker from 1px */
+        padding: 4px 0; /* Increased from 2px */
       }
       
       .promo {
-        padding: 6px;
-        margin: 8px 0;
-        font-size: 16px; /* Increased from 12px */
+        padding: 6px; /* Increased from 4px */
+        margin: 8px 0; /* Increased from 6px */
+        font-size: 14px; /* Increased from 9px */
         color: #000000;
         font-weight: bold;
         text-align: left;
@@ -519,11 +519,11 @@ export function NewSale() {
       /* Professional barcode styling */
       .barcode-section {
         text-align: center;
-        margin: 12px 0; /* Increased spacing */
+        margin: 10px 0; /* Increased spacing */
       }
       
       .barcode {
-        margin: 8px 0;
+        margin: 8px 0; /* Increased from 6px */
         display: flex;
         justify-content: center;
         align-items: center;
@@ -531,34 +531,34 @@ export function NewSale() {
       
       .barcode svg {
         max-width: 100%;
-        height: 60px; /* Increased barcode height */
+        height: 50px; /* Professional barcode height */
       }
       
       .barcode-number {
-        font-size: 16px; /* Increased from 12px */
+        font-size: 14px; /* Increased from 10px */
         color: #000000;
-        margin-top: 6px;
+        margin-top: 6px; /* Increased from 4px */
         font-weight: bold;
-        letter-spacing: 2px;
+        letter-spacing: 2px; /* Added for better readability */
       }
       
       .thank-you {
-        font-size: 19px; /* Increased from 15px */
-        margin-top: 12px;
+        font-size: 17px; /* Increased from 11px */
+        margin-top: 10px; /* Increased from 8px */
         font-weight: 900;
         color: #000000;
-        padding-top: 6px;
+        padding-top: 6px; /* Increased from 4px */
       }
 
       /* Print optimization */
       @media print {
         @page {
-          size: 80mm auto;
+          size: 100mm auto;
           margin: 0;
         }
         
         html, body {
-          width: 80mm;
+          width: 100mm;
           margin: 0;
           padding: 0;
           background: white !important;
@@ -566,11 +566,11 @@ export function NewSale() {
         }
         
         .receipt {
-          width: 100%;
-          margin: 0;
-          padding: 2mm;
-          box-shadow: none;
-        }
+            width: 100%;
+            margin: 0;
+            padding: 2mm;
+            box-shadow: none;
+          }
         
         /* Logo print styles */
         .logo img {
@@ -619,7 +619,7 @@ export function NewSale() {
             JsBarcode(barcodeElement, barcodeNumber, {
               format: "CODE128",
               width: 2,
-              height: 60,
+              height: 50,
               displayValue: false,
               margin: 0,
               background: "#ffffff",
@@ -628,7 +628,7 @@ export function NewSale() {
           } catch (error) {
             console.error('Barcode generation failed:', error);
             // Fallback to text-based barcode
-            barcodeElement.innerHTML = '<div style="font-family: monospace; font-size: 20px;">||||| |||| ||||| ||||</div>';
+            barcodeElement.innerHTML = '<div style="font-family: monospace; font-size: 18px;">||||| |||| ||||| ||||</div>';
           }
         }
         
@@ -702,7 +702,7 @@ export function NewSale() {
 ${receiptData.items
   .map((item: any) => {
     const itemName =
-      item.name.length > 18 ? item.name.substring(0, 15) + "..." : item.name;
+      item.name.length > 20 ? item.name.substring(0, 17) + "..." : item.name;
     const qty = `${item.quantity} pc`;
     const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
 
@@ -712,7 +712,7 @@ ${receiptData.items
             <div class="item-rate">${rate}</div>
           </div>
           ${
-            item.name.length > 18
+            item.name.length > 20
               ? `<div class="item-sub-row"><div class="item-sub-name">${item.name}</div><div class="item-sub-qty"></div><div class="item-sub-rate"></div></div>`
               : ""
           }`;
@@ -757,7 +757,7 @@ ${receiptData.items
 </div>
 
 <div class="thank-you">Thank you for shopping with us!</div>
-<div style="font-size: 17px; margin-top: 6px; font-weight: bold; color: #000000;">Visit us again soon!</div>
+<div style="font-size: 15px; margin-top: 6px; font-weight: bold; color: #000000;">Visit us again soon!</div>
 `;
 
     // Print the receipt
