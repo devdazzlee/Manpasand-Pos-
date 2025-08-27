@@ -668,7 +668,7 @@ export function NewSale() {
       branchName.address + ", Karachi" || "Main Shahrah-e-Faisal, Karachi"
     }</div>
 
-<div class="divider">---------------------------------------</div>
+<div class="divider">-------------------------------------</div>
 
 <div class="receipt-info">Receipt # <span class="receipt-number">${
       receiptData.transactionId
@@ -690,7 +690,7 @@ export function NewSale() {
 <div class="receipt-info">Walk-in</div>  
 </div>
 
-<div class="divider">---------------------------------------</div>
+<div class="divider">-------------------------------------</div>
 
 <div class="items-section">
 <div class="items-header">
@@ -720,7 +720,7 @@ ${receiptData.items
   .join("")}
 </div>
 
-<div class="divider">---------------------------------------</div>
+<div class="divider">-------------------------------------</div>
 
 <div class="flex-item-row-cs">
 <div class="receipt-info">Subtotal</div>
@@ -735,7 +735,7 @@ ${receiptData.items
 <div class="receipt-info">PKR ${receiptData.subtotal.toFixed(2)}</div>
 </div>
 
-<div class="divider">---------------------------------------</div>
+<div class="divider">-------------------------------------</div>
 <div class="flex-item-row-cs">
 <div class="payment-info">Payment Method:</div>
 <div class="payment-method">${receiptData.paymentMethod.toUpperCase()}</div>
