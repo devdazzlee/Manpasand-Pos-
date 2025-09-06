@@ -382,6 +382,7 @@ export function NewSale() {
         align-items: center;           
         width: 100%;
         box-sizing: border-box;
+        white-space: nowrap; /* Prevent line breaks */
       }
 
       /* Improved items section with larger fonts */
@@ -648,7 +649,9 @@ export function NewSale() {
   };
 
   const downloadReceipt = (receiptData: any, branchName: any) => {
-    const finalTotal = receiptData.subtotal;
+    // Calculate discount dynamically
+    const discount = receiptData.discount || 0;
+    const finalTotal = receiptData.subtotal - discount;
 
     const receiptContent = `
  <div class="logo">
@@ -662,8 +665,10 @@ export function NewSale() {
          -webkit-print-color-adjust: exact; 
          print-color-adjust: exact;" />
 </div>
-<div class="store-header">MANPASAND GENERAL STORE</div>
-<div class="tagline">Quality • Service • Value</div>
+<div class="store-header">${
+      receiptData.storeName || "MANPASAND GENERAL STORE"
+    }</div>
+<div class="tagline">${receiptData.tagline || "Quality • Service • Value"}</div>
 <div class="address">${
       branchName.address + ", Karachi" || "Main Shahrah-e-Faisal, Karachi"
     }</div>
@@ -686,8 +691,8 @@ export function NewSale() {
       hour12: true,
     })}</div>
 <div class="flex-item-row-cs">
-<div class="receipt-info">Cashier: Walk-in</div>
-<div class="receipt-info">Walk-in</div>  
+<div class="receipt-info">Cashier: ${receiptData.cashier || "Walk-in"}</div>
+<div class="receipt-info">${receiptData.customerType || "Walk-in"}</div>  
 </div>
 
 <div class="divider">-------------------------------------</div>
@@ -726,13 +731,18 @@ ${receiptData.items
 <div class="receipt-info">Subtotal</div>
 <div class="receipt-info">PKR ${receiptData.subtotal.toFixed(2)}</div>
 </div>
+${
+  discount > 0
+    ? `
 <div class="flex-item-row-cs">
 <div class="receipt-info">Discount</div>
-<div class="receipt-info">- PKR 50.00</div>
-</div>
+<div class="receipt-info">PKR ${discount.toFixed(2)}</div>
+</div>`
+    : ""
+}
 <div class="flex-item-row-cs">
 <div class="receipt-info">Grand Total</div>
-<div class="receipt-info">PKR ${receiptData.subtotal.toFixed(2)}</div>
+<div class="receipt-info">PKR ${finalTotal.toFixed(2)}</div>
 </div>
 
 <div class="divider">-------------------------------------</div>
@@ -742,10 +752,23 @@ ${receiptData.items
 </div>
 <div class="flex-item-row-cs">
 <div class="payment-info">Amount Paid:</div>
-<div class="payment-method">PKR ${receiptData.subtotal.toFixed(2)}</div> 
+<div class="payment-method">PKR ${
+      receiptData.amountPaid
+        ? receiptData.amountPaid.toFixed(2)
+        : finalTotal.toFixed(2)
+    }</div> 
 </div>
+${
+  receiptData.changeAmount && receiptData.changeAmount > 0
+    ? `
+<div class="flex-item-row-cs">
+<div class="payment-info">Change:</div>
+<div class="payment-method">PKR ${receiptData.changeAmount.toFixed(2)}</div>
+</div>`
+    : ""
+}
   
-<div class="promo">Buy 2 get 1 free on select items!</div>
+${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
 
 <div class="barcode-section">
 <div class="barcode">
@@ -756,8 +779,12 @@ ${receiptData.items
     }</div>
 </div>
 
-<div class="thank-you">Thank you for shopping with us!</div>
-<div style="font-size: 15px; margin-top: 6px; font-weight: bold; color: #000000;">Visit us again soon!</div>
+<div class="thank-you">${
+      receiptData.thankYouMessage || "Thank you for shopping with us!"
+    }</div>
+<div style="font-size: 15px; margin-top: 6px; font-weight: bold; color: #000000;">${
+      receiptData.footerMessage || "Visit us again soon!"
+    }</div>
 `;
 
     // Print the receipt
