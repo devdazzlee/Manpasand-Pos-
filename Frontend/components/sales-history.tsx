@@ -1,4 +1,4 @@
-"use client"
+"use client";
 
 import React, { useState, useEffect, useMemo } from "react";
 import apiClient from "@/lib/apiClient";
@@ -6,20 +6,53 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Popover,
+  PopoverTrigger,
+  PopoverContent,
+} from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
-import { Search, RefreshCw, Download, Printer, CalendarIcon, Eye, Loader2 } from "lucide-react";
-import { format, parseISO, isWithinInterval, startOfDay, endOfDay } from "date-fns";
+import {
+  Search,
+  RefreshCw,
+  Download,
+  Printer,
+  CalendarIcon,
+  Eye,
+  Loader2,
+} from "lucide-react";
+import {
+  format,
+  parseISO,
+  isWithinInterval,
+  startOfDay,
+  endOfDay,
+} from "date-fns";
 import { useToast } from "@/hooks/use-toast";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
 
 interface SaleItem {
   id: string;
-  product: { name: string };
+  product: { name: string; sku?: string };
   quantity: number;
+  unit_price?: string;
   line_total: string;
 }
 
@@ -33,10 +66,16 @@ interface Sale {
   sale_number: string;
   sale_date: string;
   total_amount: string;
+  subtotal?: string;
+  tax_amount?: string;
+  discount_amount?: string;
   payment_method: string;
+  payment_status?: string;
   status: string;
   customer: Customer | null;
   sale_items: SaleItem[];
+  notes?: string;
+  created_at?: string;
 }
 
 export function SalesHistory() {
@@ -50,13 +89,59 @@ export function SalesHistory() {
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
 
+  // Helper function to safely format currency
+  const formatCurrency = (
+    value: string | number | undefined,
+    showNegativeSymbol: boolean = true
+  ): string => {
+    if (!value && value !== 0) return "Rs 0.00";
+
+    const numValue = typeof value === "string" ? parseFloat(value) : value;
+
+    // Check if the number is valid
+    if (isNaN(numValue)) return "Rs 0.00";
+
+    // Handle negative values
+    if (numValue < 0) {
+      const absValue = Math.abs(numValue);
+      if (showNegativeSymbol) {
+        return `-Rs ${absValue.toFixed(2)}`;
+      } else {
+        // For display purposes, show absolute value
+        return `Rs ${absValue.toFixed(2)}`;
+      }
+    }
+
+    return `Rs ${numValue.toFixed(2)}`;
+  };
+
+  // Helper function to get sale type based on total amount
+  const getSaleType = (totalAmount: string): "sale" | "refund" | "return" => {
+    const amount = parseFloat(totalAmount);
+    if (isNaN(amount)) return "sale";
+    return amount < 0 ? "refund" : "sale";
+  };
+
   // Fetch sales
   const fetchSales = async () => {
     setLoading(true);
     try {
       const res = await apiClient.get<{ data: Sale[] }>("/sale");
-      setSales(res.data.data);
+
+      // Filter out or handle invalid sales data
+      const validSales = res.data.data.filter((sale) => {
+        // Basic validation
+        return (
+          sale.id &&
+          sale.sale_number &&
+          sale.sale_date &&
+          sale.total_amount !== undefined
+        );
+      });
+
+      setSales(validSales);
     } catch (err) {
+      console.error("Failed to fetch sales:", err);
       toast({ title: "Failed to load sales", variant: "destructive" });
     } finally {
       setLoading(false);
@@ -69,16 +154,30 @@ export function SalesHistory() {
 
   // Filtered
   const filtered = useMemo(() => {
-    return sales.filter(s => {
+    return sales.filter((s) => {
       // Search by sale number or customer email
       const term = searchTerm.toLowerCase();
-      if (term && !s.sale_number.toLowerCase().includes(term) && !(s.customer?.email.toLowerCase().includes(term))) {
+      if (
+        term &&
+        !s.sale_number.toLowerCase().includes(term) &&
+        !s.customer?.email.toLowerCase().includes(term)
+      ) {
         return false;
       }
       // Date filter
       if (startDate && endDate) {
-        const d = parseISO(s.sale_date);
-        if (!isWithinInterval(d, { start: startOfDay(startDate), end: endOfDay(endDate) })) {
+        try {
+          const d = parseISO(s.sale_date);
+          if (
+            !isWithinInterval(d, {
+              start: startOfDay(startDate),
+              end: endOfDay(endDate),
+            })
+          ) {
+            return false;
+          }
+        } catch (error) {
+          console.warn("Invalid date format for sale:", s.id, s.sale_date);
           return false;
         }
       }
@@ -88,16 +187,25 @@ export function SalesHistory() {
 
   // Export CSV
   const exportCSV = () => {
-    const header = ["Sale #", "Date", "Customer", "Payment", "Total", "Status"];
-    const rows = filtered.map(s => [
+    const header = [
+      "Sale #",
+      "Date",
+      "Customer",
+      "Payment",
+      "Total",
+      "Status",
+      "Type",
+    ];
+    const rows = filtered.map((s) => [
       s.sale_number,
       format(parseISO(s.sale_date), "yyyy-MM-dd"),
       s.customer?.email || "—",
       s.payment_method,
-      s.total_amount,
-      s.status
+      formatCurrency(s.total_amount, true), // Include negative symbol in export
+      s.status,
+      getSaleType(s.total_amount).toUpperCase(),
     ]);
-    const csv = [header, ...rows].map(r => r.join(",")).join("\n");
+    const csv = [header, ...rows].map((r) => r.join(",")).join("\n");
     const blob = new Blob([csv], { type: "text/csv" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -114,7 +222,7 @@ export function SalesHistory() {
   const handleViewSale = async (saleId: string) => {
     setViewLoading(true);
     // Simulate API call delay
-    const sale = sales.find(s => s.id === saleId) || null;
+    const sale = sales.find((s) => s.id === saleId) || null;
     setTimeout(() => {
       setViewSale(sale);
       setViewLoading(false);
@@ -154,7 +262,7 @@ export function SalesHistory() {
             className="pl-10"
             placeholder="Search sale # or customer"
             value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
+            onChange={(e) => setSearchTerm(e.target.value)}
           />
         </div>
         <Popover>
@@ -162,7 +270,10 @@ export function SalesHistory() {
             <Button variant="outline" className="flex items-center">
               <CalendarIcon className="mr-2 h-4 w-4" />
               {startDate && endDate
-                ? `${format(startDate, "MM/dd/yyyy")} - ${format(endDate, "MM/dd/yyyy")}`
+                ? `${format(startDate, "MM/dd/yyyy")} - ${format(
+                    endDate,
+                    "MM/dd/yyyy"
+                  )}`
                 : "Select date range"}
             </Button>
           </PopoverTrigger>
@@ -173,7 +284,7 @@ export function SalesHistory() {
                 <Calendar
                   mode="single"
                   selected={startDate}
-                  onSelect={date => date && setStartDate(date)}
+                  onSelect={(date) => date && setStartDate(date)}
                 />
               </div>
               <div>
@@ -181,12 +292,18 @@ export function SalesHistory() {
                 <Calendar
                   mode="single"
                   selected={endDate}
-                  onSelect={date => date && setEndDate(date)}
+                  onSelect={(date) => date && setEndDate(date)}
                 />
               </div>
             </div>
             <Separator className="my-2" />
-            <Button onClick={() => { setStartDate(undefined); setEndDate(undefined); }} className="w-full">
+            <Button
+              onClick={() => {
+                setStartDate(undefined);
+                setEndDate(undefined);
+              }}
+              className="w-full"
+            >
               Clear Dates
             </Button>
           </PopoverContent>
@@ -208,6 +325,7 @@ export function SalesHistory() {
                   <TableHead>Customer</TableHead>
                   <TableHead>Payment</TableHead>
                   <TableHead>Total</TableHead>
+                  <TableHead>Type</TableHead>
                   <TableHead>Status</TableHead>
                   <TableHead>Actions</TableHead>
                 </TableRow>
@@ -215,36 +333,74 @@ export function SalesHistory() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10">
+                    <TableCell colSpan={8} className="text-center py-10">
                       <Loader2 className="animate-spin h-6 w-6 text-gray-500 mx-auto" />
                     </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={7} className="text-center py-10 text-gray-500">
+                    <TableCell
+                      colSpan={8}
+                      className="text-center py-10 text-gray-500"
+                    >
                       No sales found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map(s => (
-                    <TableRow key={s.id}>
-                      <TableCell className="font-medium">{s.sale_number}</TableCell>
-                      <TableCell>{format(parseISO(s.sale_date), "MM/dd/yyyy")}</TableCell>
-                      <TableCell>{s.customer?.email || "—"}</TableCell>
-                      <TableCell>{s.payment_method}</TableCell>
-                      <TableCell>Rs {parseFloat(s.total_amount).toFixed(2)}</TableCell>
-                      <TableCell>
-                        <Badge variant={s.status === "COMPLETED" ? "default" : "outline"}>
-                          {s.status}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <Button size="sm" variant="ghost" onClick={() => handleViewSale(s.id)}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  ))
+                  filtered.map((s) => {
+                    const saleType = getSaleType(s.total_amount);
+                    const isNegative = parseFloat(s.total_amount) < 0;
+
+                    return (
+                      <TableRow
+                        key={s.id}
+                        className={isNegative ? "bg-red-50" : ""}
+                      >
+                        <TableCell className="font-medium">
+                          {s.sale_number}
+                        </TableCell>
+                        <TableCell>
+                          {format(parseISO(s.sale_date), "MM/dd/yyyy")}
+                        </TableCell>
+                        <TableCell>{s.customer?.email || "—"}</TableCell>
+                        <TableCell>{s.payment_method}</TableCell>
+                        <TableCell
+                          className={
+                            isNegative ? "text-red-600 font-medium" : ""
+                          }
+                        >
+                          {formatCurrency(s.total_amount)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              saleType === "refund" ? "destructive" : "default"
+                            }
+                          >
+                            {saleType.toUpperCase()}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={
+                              s.status === "COMPLETED" ? "default" : "outline"
+                            }
+                          >
+                            {s.status}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => handleViewSale(s.id)}
+                          >
+                            <Eye className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })
                 )}
               </TableBody>
             </Table>
@@ -265,23 +421,90 @@ export function SalesHistory() {
               <DialogHeader>
                 <DialogTitle>Sale Details</DialogTitle>
                 <DialogDescription>
-                  Sale #: <span className="font-semibold">{viewSale.sale_number}</span> | Date: {format(parseISO(viewSale.sale_date), "MM/dd/yyyy")} | Status: <Badge variant={viewSale.status === "COMPLETED" ? "default" : "outline"}>{viewSale.status}</Badge>
+                  Sale #:{" "}
+                  <span className="font-semibold">{viewSale.sale_number}</span>{" "}
+                  | Date: {format(parseISO(viewSale.sale_date), "MM/dd/yyyy")} |
+                  Status:{" "}
+                  <Badge
+                    variant={
+                      viewSale.status === "COMPLETED" ? "default" : "outline"
+                    }
+                  >
+                    {viewSale.status}
+                  </Badge>
+                  {getSaleType(viewSale.total_amount) === "refund" && (
+                    <Badge variant="destructive" className="ml-2">
+                      REFUND
+                    </Badge>
+                  )}
                 </DialogDescription>
               </DialogHeader>
               <div className="grid grid-cols-2 gap-4 mt-4">
                 <div>
-                  <div className="mb-2"><span className="font-medium">Payment Method:</span> {viewSale.payment_method}</div>
-                  <div className="mb-2"><span className="font-medium">Payment Status:</span> {viewSale.payment_status}</div>
-                  <div className="mb-2"><span className="font-medium">Subtotal:</span> Rs {parseFloat(viewSale.subtotal).toFixed(2)}</div>
-                  <div className="mb-2"><span className="font-medium">Tax:</span> Rs {parseFloat(viewSale.tax_amount).toFixed(2)}</div>
-                  <div className="mb-2"><span className="font-medium">Discount:</span> Rs {parseFloat(viewSale.discount_amount).toFixed(2)}</div>
-                  <div className="mb-2"><span className="font-medium">Total:</span> Rs {parseFloat(viewSale.total_amount).toFixed(2)}</div>
-                  {viewSale.notes && <div className="mb-2"><span className="font-medium">Notes:</span> {viewSale.notes}</div>}
+                  <div className="mb-2">
+                    <span className="font-medium">Payment Method:</span>{" "}
+                    {viewSale.payment_method}
+                  </div>
+                  {viewSale.payment_status && (
+                    <div className="mb-2">
+                      <span className="font-medium">Payment Status:</span>{" "}
+                      {viewSale.payment_status}
+                    </div>
+                  )}
+                  {viewSale.subtotal && (
+                    <div className="mb-2">
+                      <span className="font-medium">Subtotal:</span>{" "}
+                      {formatCurrency(viewSale.subtotal)}
+                    </div>
+                  )}
+                  {viewSale.tax_amount && (
+                    <div className="mb-2">
+                      <span className="font-medium">Tax:</span>{" "}
+                      {formatCurrency(viewSale.tax_amount)}
+                    </div>
+                  )}
+                  {viewSale.discount_amount && (
+                    <div className="mb-2">
+                      <span className="font-medium">Discount:</span>{" "}
+                      {formatCurrency(viewSale.discount_amount)}
+                    </div>
+                  )}
+                  <div className="mb-2">
+                    <span className="font-medium">Total:</span>
+                    <span
+                      className={
+                        parseFloat(viewSale.total_amount) < 0
+                          ? "text-red-600 font-medium"
+                          : ""
+                      }
+                    >
+                      {formatCurrency(viewSale.total_amount)}
+                    </span>
+                  </div>
+                  {viewSale.notes && (
+                    <div className="mb-2">
+                      <span className="font-medium">Notes:</span>{" "}
+                      {viewSale.notes}
+                    </div>
+                  )}
                 </div>
                 <div>
-                  <div className="mb-2"><span className="font-medium">Customer Email:</span> {viewSale.customer?.email || "—"}</div>
-                  <div className="mb-2"><span className="font-medium">Sale ID:</span> {viewSale.id}</div>
-                  <div className="mb-2"><span className="font-medium">Created At:</span> {format(parseISO(viewSale.created_at), "MM/dd/yyyy HH:mm")}</div>
+                  <div className="mb-2">
+                    <span className="font-medium">Customer Email:</span>{" "}
+                    {viewSale.customer?.email || "—"}
+                  </div>
+                  <div className="mb-2">
+                    <span className="font-medium">Sale ID:</span> {viewSale.id}
+                  </div>
+                  {viewSale.created_at && (
+                    <div className="mb-2">
+                      <span className="font-medium">Created At:</span>{" "}
+                      {format(
+                        parseISO(viewSale.created_at),
+                        "MM/dd/yyyy HH:mm"
+                      )}
+                    </div>
+                  )}
                 </div>
               </div>
               <Separator className="my-4" />
@@ -298,20 +521,29 @@ export function SalesHistory() {
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {viewSale.sale_items.map(item => (
+                    {viewSale.sale_items.map((item) => (
                       <TableRow key={item.id}>
                         <TableCell>{item.product?.name || "—"}</TableCell>
                         <TableCell>{item.product?.sku || "—"}</TableCell>
                         <TableCell>{item.quantity}</TableCell>
-                        <TableCell>Rs {parseFloat(item.unit_price || item.line_total).toFixed(2)}</TableCell>
-                        <TableCell>Rs {parseFloat(item.line_total).toFixed(2)}</TableCell>
+                        <TableCell>
+                          {formatCurrency(
+                            item.unit_price ||
+                              (
+                                parseFloat(item.line_total) / item.quantity
+                              ).toString()
+                          )}
+                        </TableCell>
+                        <TableCell>{formatCurrency(item.line_total)}</TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
               <DialogFooter>
-                <Button onClick={closeViewModal} variant="outline">Close</Button>
+                <Button onClick={closeViewModal} variant="outline">
+                  Close
+                </Button>
               </DialogFooter>
             </>
           ) : null}
