@@ -1,19 +1,19 @@
 import express from 'express';
 import {
-    createProduct,
-    getProduct,
-    updateProduct,
-    toggleProductStatus,
-    listProducts,
-    getFeaturedProducts,
-    getBestSellingProducts,
-    bulkUploadProducts,
+  createProduct,
+  getProduct,
+  updateProduct,
+  toggleProductStatus,
+  listProducts,
+  getFeaturedProducts,
+  getBestSellingProducts,
+  bulkUploadProducts,
 } from '../controllers/product.controller';
 import {
-    createProductSchema,
-    updateProductSchema,
-    getProductSchema,
-    listProductsSchema,
+  createProductSchema,
+  updateProductSchema,
+  getProductSchema,
+  listProductsSchema,
 } from '../validations/product.validation';
 import { validate } from '../middleware/validation.middleware';
 import { authenticate, authorize } from '../middleware/auth.middleware';
@@ -25,12 +25,14 @@ const router = express.Router();
 
 router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
-router.post('/', upload.array('images', 10), parseFormData, validate(createProductSchema), createProduct);
 router.post(
-  '/bulk-upload',
-  uploadBulk.single('file'), // Accept a single file with field name 'file'
-  bulkUploadProducts
+  '/',
+  upload.array('images', 10),
+  parseFormData,
+  validate(createProductSchema),
+  createProduct,
 );
+router.post('/bulk-upload', uploadBulk.single('file'), bulkUploadProducts);
 router.get('/', validate(listProductsSchema), listProducts);
 router.get('/featured', getFeaturedProducts);
 router.get('/best-selling', getBestSellingProducts);

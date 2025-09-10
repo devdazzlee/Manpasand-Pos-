@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { Input } from "@/components/ui/input";
@@ -85,7 +85,7 @@ export function NewSale() {
     fetchCategories,
     fetchCustomers,
   } = usePosData();
-  // Fetch initial data and focus search input
+  // Fetch initial data and maintain search input focus
   useEffect(() => {
     let mounted = true;
 
@@ -112,14 +112,43 @@ export function NewSale() {
 
     fetchData();
 
-    // Focus the search input
+    // Focus the search input initially without scrolling
     if (searchInputRef.current) {
-      searchInputRef.current.focus();
+      searchInputRef.current.focus({ preventScroll: true });
     }
 
-    // Cleanup function to prevent memory leaks and state updates after unmount
+    // Add event listener for keydown events (for barcode scanner)
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement;
+      // Only refocus if we're not in any form control
+      if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) && 
+          !target.closest('.discount-controls') && // Don't refocus if clicking in discount area
+          !target.closest('.cart-item-controls')) { // Don't refocus if clicking in cart items
+        searchInputRef.current?.focus();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    // Handle clicks on empty areas to refocus search
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      // Only refocus if clicking on the main background
+      if (target.classList.contains('h-screen') || 
+          (target === document.body && 
+           !target.closest('.discount-controls') && // Don't refocus if clicking in discount area
+           !target.closest('.cart-item-controls'))) { // Don't refocus if clicking in cart items
+        searchInputRef.current?.focus({ preventScroll: true });
+      }
+    };
+
+    document.addEventListener('click', handleClick);
+
+    // Cleanup function
     return () => {
       mounted = false;
+      document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('click', handleClick);
     };
   }, []); // Empty dependency array since we only want to fetch once on mount
 
@@ -367,9 +396,13 @@ export function NewSale() {
     0
   );
 
-  const discountAmount = globalDiscountType === 'percentage' 
-    ? (subtotal * globalDiscount) / 100 
-    : globalDiscount;
+  const discountAmount = useMemo(() => {
+    if (!globalDiscount) return 0;
+    
+    return globalDiscountType === 'percentage'
+      ? (subtotal * globalDiscount) / 100
+      : Math.min(globalDiscount, subtotal); // Ensure amount discount doesn't exceed subtotal
+  }, [globalDiscount, globalDiscountType, subtotal]);
   
   const total = Math.max(0, subtotal - discountAmount);
 
@@ -817,8 +850,7 @@ export function NewSale() {
 
 ${receiptData.items
   .map((item: any) => {
-    const itemName =
-      item.name.length > 20 ? item.name.substring(0, 17) + "..." : item.name;
+    const itemName = item.name 
     const qty = `${item.quantity} pc`;
     const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
 
@@ -827,11 +859,7 @@ ${receiptData.items
             <div class="item-qty">${qty}</div>
             <div class="item-rate">${rate}</div>
           </div>
-          ${
-            item.name.length > 20
-              ? `<div class="item-sub-row"><div class="item-sub-name">${item.name}</div><div class="item-sub-qty"></div><div class="item-sub-rate"></div></div>`
-              : ""
-          }`;
+          `;
   })
   .join("")}
 </div>
@@ -1009,7 +1037,19 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
   };
 
   const handleProductClick = (product: Product) => {
+    // Store current scroll position
+    const scrollPosition = window.scrollY;
+    
     addToCart(product, 1);
+    
+    // Refocus the search input after adding to cart without scrolling
+    if (searchInputRef.current) {
+      setTimeout(() => {
+        searchInputRef.current?.focus({ preventScroll: true });
+        // Restore scroll position
+        window.scrollTo(0, scrollPosition);
+      }, 100);
+    }
   };
 
   const handleCategoryChange = async (categoryId: string) => {
@@ -1044,32 +1084,13 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
               >
                 <RefreshCw className="h-4 w-4" />
               </LoadingButton>
-              {cart.length > 0 && (
-                <Button variant="outline" onClick={holdCurrentSale}>
-                  Hold Sale
-                </Button>
-              )}
               {holdSales.length > 0 && (
-                <div className="flex items-center">
-                  <Badge 
-                    variant="secondary" 
-                    className="mr-2 bg-blue-100 text-blue-800"
-                  >
-                    {holdSales.length} held
-                  </Badge>
-                  <Button
-                    variant="outline"
-                    onClick={() => {
-                      // Scroll the held sales list into view
-                      const element = document.getElementById('held-sales-list');
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth' });
-                      }
-                    }}
-                  >
-                    View Held Sales
-                  </Button>
-                </div>
+                <Badge 
+                  variant="secondary" 
+                  className="bg-blue-100 text-blue-800"
+                >
+                  {holdSales.length} sale{holdSales.length > 1 ? 's' : ''} on hold
+                </Badge>
               )}
             </div>
           </div>
@@ -1083,6 +1104,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
                 autoFocus
+                autoComplete="off"
               />
             </div>
             <LoadingButton
@@ -1305,7 +1327,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
               {cart.map((item) => (
                 <div
                   key={item.id}
-                  className="p-3 border rounded-lg space-y-2"
+                  className="p-3 border rounded-lg space-y-2 cart-item-controls"
                 >
                   <div className="flex justify-between items-start">
                     <h4 className="font-medium text-gray-900">{item.name}</h4>
@@ -1382,27 +1404,67 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
         {cart.length > 0 && (
           <div className="p-4 border-t border-gray-200 space-y-4">
             {/* Discount Controls */}
-            <div className="space-y-2">
+            <div className="space-y-2 discount-controls">
               <label className="text-sm font-medium">Discount</label>
               <div className="flex items-center gap-2">
                 <select
                   className="border rounded h-9 px-2"
                   value={globalDiscountType}
-                  onChange={(e) => setGlobalDiscountType(e.target.value as 'percentage' | 'amount')}
+                  onClick={(e) => e.stopPropagation()}
+                  onChange={(e) => {
+                    setGlobalDiscountType(e.target.value as 'percentage' | 'amount');
+                    // Reset discount value when changing type to prevent invalid values
+                    setGlobalDiscount(0);
+                  }}
                 >
                   <option value="percentage">%</option>
                   <option value="amount">Rs</option>
                 </select>
                 <Input
                   type="number"
-                  value={globalDiscount}
-                  onChange={(e) => setGlobalDiscount(parseFloat(e.target.value) || 0)}
+                  value={globalDiscount || ''}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    if (value === '') {
+                      setGlobalDiscount(0);
+                      return;
+                    }
+                    
+                    const numValue = parseFloat(value);
+                    if (isNaN(numValue)) return;
+                    
+                    if (globalDiscountType === 'percentage') {
+                      // For percentage, limit between 0 and 100
+                      if (numValue >= 0 && numValue <= 100) {
+                        setGlobalDiscount(numValue);
+                      }
+                    } else {
+                      // For amount, limit to non-negative and not exceeding subtotal
+                      if (numValue >= 0 && numValue <= subtotal) {
+                        setGlobalDiscount(numValue);
+                      }
+                    }
+                  }}
+                  onBlur={() => {
+                    // Format the number on blur
+                    if (globalDiscount) {
+                      setGlobalDiscount(Number(globalDiscount.toFixed(2)));
+                    }
+                  }}
                   className="flex-1"
                   min="0"
                   step={globalDiscountType === 'percentage' ? '1' : '0.01'}
-                  max={globalDiscountType === 'percentage' ? '100' : undefined}
+                  max={globalDiscountType === 'percentage' ? '100' : subtotal}
+                  placeholder={globalDiscountType === 'percentage' ? '0%' : '0.00'}
                 />
               </div>
+              {globalDiscount > 0 && (
+                <p className="text-sm text-green-600">
+                  Discount: {globalDiscountType === 'percentage' 
+                    ? `${globalDiscount}% (Rs ${discountAmount.toFixed(2)})` 
+                    : `Rs ${globalDiscount.toFixed(2)}`}
+                </p>
+              )}
             </div>
 
             {/* Totals */}
