@@ -86,34 +86,69 @@ export function NewSale() {
     fetchCategories,
     fetchCustomers,
   } = usePosData();
+  // Fetch initial data
   useEffect(() => {
+    let mounted = true;
+    
     const fetchData = async () => {
+      if (!mounted) return;
+      
       try {
-        // Fetch data from global store (will use cache if available)
         await Promise.all([
-          fetchProducts(),
+          fetchProducts(),  // Initial fetch with limit 100
           fetchCategories(),
           fetchCustomers(),
           getBranchName(),
         ]);
       } catch (error) {
+        if (mounted) {
+          toast({
+            variant: "destructive",
+            title: "Failed to load data",
+            description: "Could not fetch data from server",
+          });
+        }
+      }
+    };
+    
+    fetchData();
+    
+    // Cleanup function to prevent memory leaks and state updates after unmount
+    return () => {
+      mounted = false;
+    };
+  }, []); // Empty dependency array since we only want to fetch once on mount
+
+  // Handle search updates
+  useEffect(() => {
+    // Don't trigger search if searchTerm is empty
+    if (!searchTerm) {
+      // Reset to initial products when search is cleared
+      fetchProducts(true);
+      return;
+    }
+    
+    if (searchTerm.length < 2) return; // Don't search with less than 2 characters
+
+    const handleSearch = async () => {
+      try {
+        await fetchProducts(true, searchTerm);  // Force refresh with search term
+      } catch (error) {
         toast({
           variant: "destructive",
-          title: "Failed to load data",
-          description: "Could not fetch data from server",
+          title: "Search failed",
+          description: "Could not fetch search results",
         });
       }
     };
-    fetchData();
-  }, [fetchProducts, fetchCategories, fetchCustomers, toast]);
+
+    const debounceTimer = setTimeout(handleSearch, 300);  // Debounce search
+    return () => clearTimeout(debounceTimer);
+  }, [searchTerm]); // Remove fetchProducts and toast from dependencies
 
   const filteredProducts = products.filter((product) => {
-    const matchesCategory =
-      selectedCategory === "all" || product.categoryId === selectedCategory;
-    const matchesSearch = product.name
-      .toLowerCase()
-      .includes(searchTerm.toLowerCase());
-    return matchesCategory && matchesSearch;
+    // Only filter by category since search is now handled by the API
+    return selectedCategory === "all" || product.categoryId === selectedCategory;
   });
 
   const addToCart = async (product: Product, quantity: number = 1) => {

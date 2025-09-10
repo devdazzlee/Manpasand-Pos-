@@ -160,10 +160,10 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
     "notifications",
     "new-sale",
     "sales-history",
-    "inventory",
+    // "inventory",
     "orders",
     "returns",
-    "units",
+    // "units",
     "customers",
     "expenses",
   ];

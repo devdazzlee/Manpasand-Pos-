@@ -12,8 +12,18 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Printer, Package, Search, Loader2, RefreshCw, X, Plus, Trash2 } from "lucide-react";
-import Barcode from "react-barcode";
+import {
+  Printer,
+  Package,
+  Search,
+  Loader2,
+  RefreshCw,
+  X,
+  Plus,
+  Trash2,
+  Settings,
+} from "lucide-react";
+import JsBarcode from "jsbarcode";
 import { DatePicker } from "./ui/date-picker";
 import { PageLoader } from "./ui/page-loader";
 import { usePosData } from "@/hooks/use-pos-data";
@@ -38,18 +48,128 @@ interface SelectedProductItem {
   id: string;
   product: Product;
   netWeight: string;
-  packageDate?: Date;
+  packageDate: Date;
+  expiryDuration: string;
   expiryDate?: Date;
 }
 
+interface PrinterInfo {
+  name: string;
+  status: string;
+  isDefault: boolean;
+  type?: string;
+}
+
 export default function BarcodeGenerator() {
-  const [selectedProducts, setSelectedProducts] = useState<SelectedProductItem[]>([]);
+  const [selectedProducts, setSelectedProducts] = useState<
+    SelectedProductItem[]
+  >([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [currentProductId, setCurrentProductId] = useState("");
-  const [globalPackageDate, setGlobalPackageDate] = useState<Date>();
-  const [globalExpiryDate, setGlobalExpiryDate] = useState<Date>();
+  const [globalExpiryDuration, setGlobalExpiryDuration] = useState("");
+  const [printers, setPrinters] = useState<PrinterInfo[]>([]);
+  const [selectedPrinter, setSelectedPrinter] = useState("");
+  const [loadingPrinters, setLoadingPrinters] = useState(false);
+  const [printSettings, setPrintSettings] = useState({
+    copies: 1,
+    paperSize: "50x30mm",
+    orientation: "portrait" as const,
+  });
   const printRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
+
+  const expiryOptions = [
+    { value: "3", label: "3 Months" },
+    { value: "6", label: "6 Months" },
+    { value: "12", label: "12 Months" },
+    { value: "18", label: "18 Months" },
+    { value: "24", label: "24 Months" },
+    { value: "36", label: "36 Months" },
+  ];
+
+  const paperSizes = [
+    { value: "50x30mm", label: "50mm x 30mm (Standard)" },
+    { value: "60x40mm", label: "60mm x 40mm (Large)" },
+    { value: "40x25mm", label: "40mm x 25mm (Small)" },
+  ];
+
+  // Load available printers
+  const loadPrinters = async () => {
+    setLoadingPrinters(true);
+    try {
+      const response = await fetch("/api/printers");
+      const data = await response.json();
+
+      if (data.success && data.printers) {
+        setPrinters(data.printers);
+        // Set default printer if available
+        const defaultPrinter = data.printers.find(
+          (p: PrinterInfo) => p.isDefault
+        );
+        if (defaultPrinter && !selectedPrinter) {
+          setSelectedPrinter(defaultPrinter.name);
+        }
+        toast({
+          title: "Printers loaded",
+          description: `Found ${data.printers.length} printer(s)`,
+        });
+      } else {
+        setPrinters([]);
+        toast({
+          variant: "destructive",
+          title: "No printers found",
+          description: data.error || "No connected printers detected",
+        });
+      }
+    } catch (error) {
+      console.error("Error loading printers:", error);
+      setPrinters([]);
+      toast({
+        variant: "destructive",
+        title: "Error loading printers",
+        description:
+          "Could not connect to printer service. Printing will use browser default.",
+      });
+    } finally {
+      setLoadingPrinters(false);
+    }
+  };
+
+  // Generate proper barcode using JsBarcode
+  const generateBarcodeDataURL = (value: string): string => {
+    const canvas = document.createElement("canvas");
+    canvas.width = 300;
+    canvas.height = 80;
+
+    try {
+      JsBarcode(canvas, value, {
+        format: "CODE128",
+        width: 2,
+        height: 60,
+        displayValue: false,
+        margin: 10,
+        background: "#ffffff",
+        lineColor: "#000000",
+      });
+      return canvas.toDataURL("image/png");
+    } catch (error) {
+      console.error("Error generating barcode:", error);
+      // Fallback: return empty data URL
+      return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+    }
+  };
+
+  const calculateExpiryDate = (
+    packageDate: Date,
+    durationMonths: string
+  ): Date | undefined => {
+    if (!durationMonths) return undefined;
+    const months = parseInt(durationMonths, 10);
+    if (isNaN(months)) return undefined;
+    const expiry = new Date(packageDate);
+    expiry.setMonth(expiry.getMonth() + months);
+    return expiry;
+  };
 
   // Global store with custom hook
   const {
@@ -60,10 +180,20 @@ export default function BarcodeGenerator() {
     fetchProducts,
   } = usePosData();
 
+  // Load printers on component mount
+  useEffect(() => {
+    loadPrinters();
+  }, []);
+
+  // Handle initial load and search
   useEffect(() => {
     const fetchData = async () => {
       try {
-        await fetchProducts();
+        if (searchTerm.length >= 2) {
+          await fetchProducts(true, searchTerm);
+        } else {
+          await fetchProducts();
+        }
       } catch (error) {
         toast({
           variant: "destructive",
@@ -72,8 +202,10 @@ export default function BarcodeGenerator() {
         });
       }
     };
-    fetchData();
-  }, [fetchProducts, toast]);
+
+    const debounceTimer = setTimeout(fetchData, 300);
+    return () => clearTimeout(debounceTimer);
+  }, [searchTerm]);
 
   const parseWeightToGrams = (weightInput: any) => {
     if (!weightInput || weightInput.trim() === "") return 0;
@@ -81,26 +213,22 @@ export default function BarcodeGenerator() {
     const input = weightInput.toLowerCase().trim();
     let weight = 0;
 
-    // Extract number from input
     const numberMatch = input.match(/(\d+\.?\d*)/);
     if (!numberMatch) return 0;
 
     const number = Number.parseFloat(numberMatch[1]);
 
-    // Convert to grams based on unit
     if (input.includes("kg")) {
-      weight = number * 1000; // Convert kg to grams
+      weight = number * 1000;
     } else if (input.includes("g") && !input.includes("kg")) {
-      weight = number; // Already in grams
+      weight = number;
     } else if (input.includes("ml") || input.includes("l")) {
-      // For liquids, assume 1ml = 1g, 1l = 1000g
       if (input.includes("ml")) {
         weight = number;
       } else if (input.includes("l")) {
         weight = number * 1000;
       }
     } else {
-      // No unit specified, assume grams
       weight = number;
     }
 
@@ -111,88 +239,56 @@ export default function BarcodeGenerator() {
     if (!netWeightInput || !basePrice) return basePrice || 0;
 
     const input = netWeightInput.toLowerCase().trim();
-
-    // Extract number (including decimals)
     const numberMatch = input.match(/(\d+\.?\d*)/);
     if (!numberMatch) return basePrice;
 
     const weightValue = Number.parseFloat(numberMatch[1]);
     if (weightValue <= 0) return basePrice;
 
-    let multiplier = 1; // Default multiplier (1kg = base price)
+    let multiplier = 1;
 
-    // WEIGHT UNITS (convert everything to kg equivalent)
     if (input.includes("kg") || input.includes("kilo")) {
-      multiplier = weightValue; // 1kg = 1x base price
+      multiplier = weightValue;
     } else if (
       input.includes("g") &&
       !input.includes("kg") &&
       !input.includes("mg")
     ) {
-      multiplier = weightValue / 1000; // 1000g = 1kg
+      multiplier = weightValue / 1000;
     } else if (input.includes("mg")) {
-      multiplier = weightValue / 1000000; // 1,000,000mg = 1kg
+      multiplier = weightValue / 1000000;
     } else if (input.includes("lb") || input.includes("pound")) {
-      multiplier = weightValue * 0.453592; // 1lb = 0.453592kg
+      multiplier = weightValue * 0.453592;
     } else if (input.includes("oz") && !input.includes("fl")) {
-      multiplier = weightValue * 0.0283495; // 1oz = 0.0283495kg
-    } else if (input.includes("ton") || input.includes("tonne")) {
-      multiplier = weightValue * 1000; // 1 ton = 1000kg
-    }
-
-    // VOLUME UNITS (treat 1L = 1kg for liquids)
-    else if (
+      multiplier = weightValue * 0.0283495;
+    } else if (
       input.includes("l") &&
       !input.includes("ml") &&
       !input.includes("fl")
     ) {
-      multiplier = weightValue; // 1L = 1kg (water density)
+      multiplier = weightValue;
     } else if (input.includes("ml") || input.includes("milliliter")) {
-      multiplier = weightValue / 1000; // 1000ml = 1L = 1kg
-    } else if (input.includes("fl oz") || input.includes("fluid ounce")) {
-      multiplier = weightValue * 0.0295735; // 1 fl oz = 29.5735ml
-    } else if (input.includes("cup")) {
-      multiplier = weightValue * 0.236588; // 1 cup = 236.588ml
-    } else if (input.includes("pint")) {
-      multiplier = weightValue * 0.473176; // 1 pint = 473.176ml
-    } else if (input.includes("quart")) {
-      multiplier = weightValue * 0.946353; // 1 quart = 946.353ml
-    } else if (input.includes("gallon")) {
-      multiplier = weightValue * 3.78541; // 1 gallon = 3.78541L
-    }
-
-    // PAKISTANI/INDIAN UNITS
-    else if (input.includes("ser") || input.includes("seer")) {
-      multiplier = weightValue * 0.933105; // 1 seer = 933.105g
+      multiplier = weightValue / 1000;
+    } else if (input.includes("ser") || input.includes("seer")) {
+      multiplier = weightValue * 0.933105;
     } else if (input.includes("maund")) {
-      multiplier = weightValue * 37.3242; // 1 maund = 37.3242kg
-    } else if (input.includes("tola")) {
-      multiplier = weightValue * 0.01166; // 1 tola = 11.66g
-    }
-
-    // PIECE/COUNT UNITS
-    else if (
+      multiplier = weightValue * 37.3242;
+    } else if (
       input.includes("pc") ||
       input.includes("piece") ||
       input.includes("pcs")
     ) {
-      multiplier = weightValue; // 1 piece = base price
+      multiplier = weightValue;
     } else if (input.includes("dozen")) {
-      multiplier = weightValue * 12; // 1 dozen = 12 pieces
-    } else if (input.includes("pack") || input.includes("packet")) {
-      multiplier = weightValue; // 1 pack = base price
-    }
-
-    // DEFAULT: If no unit specified, assume grams
-    else {
-      multiplier = weightValue / 1000; // Assume grams if no unit
+      multiplier = weightValue * 12;
+    } else {
+      multiplier = weightValue / 1000;
     }
 
     const finalPrice = basePrice * multiplier;
     return finalPrice.toFixed(2);
   };
 
-  // Format display function for better readability
   const formatWeightDisplay = (netWeightInput: any) => {
     if (!netWeightInput) return "Not specified";
 
@@ -202,7 +298,6 @@ export default function BarcodeGenerator() {
 
     const number = Number.parseFloat(numberMatch[1]);
 
-    // Return formatted with proper unit
     if (input.includes("kg")) return `${number}kg`;
     if (input.includes("g") && !input.includes("kg") && !input.includes("mg"))
       return `${number}g`;
@@ -211,20 +306,14 @@ export default function BarcodeGenerator() {
     if (input.includes("oz") && !input.includes("fl")) return `${number}oz`;
     if (input.includes("l") && !input.includes("ml")) return `${number}L`;
     if (input.includes("ml")) return `${number}ml`;
-    if (input.includes("fl oz")) return `${number}fl oz`;
-    if (input.includes("cup")) return `${number} cup${number > 1 ? "s" : ""}`;
-    if (input.includes("pint")) return `${number} pint${number > 1 ? "s" : ""}`;
     if (input.includes("ser")) return `${number} seer`;
     if (input.includes("maund")) return `${number} maund`;
-    if (input.includes("tola")) return `${number} tola`;
     if (input.includes("pc") || input.includes("piece")) return `${number} pcs`;
     if (input.includes("dozen")) return `${number} dozen`;
 
-    // Default: assume grams
     return `${number}g`;
   };
 
-  // Filter products based on search term
   const filteredProducts = useMemo(() => {
     if (!searchTerm) return products;
 
@@ -236,15 +325,13 @@ export default function BarcodeGenerator() {
     );
   }, [products, searchTerm]);
 
-  // Add product to selected list
   const addProduct = () => {
     if (!currentProductId) return;
-    
+
     const product = products.find((p) => p.id === currentProductId);
     if (!product) return;
 
-    // Check if product already selected
-    if (selectedProducts.some(sp => sp.product.id === currentProductId)) {
+    if (selectedProducts.some((sp) => sp.product.id === currentProductId)) {
       toast({
         variant: "destructive",
         title: "Product already selected",
@@ -257,46 +344,67 @@ export default function BarcodeGenerator() {
       id: Date.now().toString(),
       product,
       netWeight: "",
-      packageDate: globalPackageDate,
-      expiryDate: globalExpiryDate,
+      packageDate: new Date(),
+      expiryDuration: "",
     };
 
-    setSelectedProducts(prev => [...prev, newItem]);
+    if (globalExpiryDuration) {
+      newItem.expiryDuration = globalExpiryDuration;
+      newItem.expiryDate = calculateExpiryDate(
+        newItem.packageDate,
+        globalExpiryDuration
+      );
+    }
+
+    setSelectedProducts((prev) => [...prev, newItem]);
     setCurrentProductId("");
   };
 
-  // Remove product from selected list
   const removeProduct = (itemId: string) => {
-    setSelectedProducts(prev => prev.filter(item => item.id !== itemId));
+    setSelectedProducts((prev) => prev.filter((item) => item.id !== itemId));
   };
 
-  // Update individual product data
-  const updateProductData = (itemId: string, field: keyof SelectedProductItem, value: any) => {
-    setSelectedProducts(prev => 
-      prev.map(item => 
-        item.id === itemId 
-          ? { ...item, [field]: value }
-          : item
-      )
+  const updateProductData = (
+    itemId: string,
+    field: keyof SelectedProductItem,
+    value: any
+  ) => {
+    setSelectedProducts((prev) =>
+      prev.map((item) => {
+        if (item.id === itemId) {
+          const updatedItem = { ...item, [field]: value };
+          if (field === "expiryDuration") {
+            updatedItem.expiryDate = calculateExpiryDate(
+              updatedItem.packageDate,
+              value
+            );
+          }
+          return updatedItem;
+        }
+        return item;
+      })
     );
   };
 
-  // Apply global dates to all products
   const applyGlobalDates = () => {
-    setSelectedProducts(prev => 
-      prev.map(item => ({
+    if (!globalExpiryDuration) return;
+
+    setSelectedProducts((prev) => {
+      const updated = prev.map((item) => ({
         ...item,
-        packageDate: globalPackageDate,
-        expiryDate: globalExpiryDate,
-      }))
-    );
-    toast({
-      title: "Dates applied",
-      description: "Global dates have been applied to all products.",
+        expiryDuration: globalExpiryDuration,
+        expiryDate: calculateExpiryDate(item.packageDate, globalExpiryDuration),
+      }));
+
+      toast({
+        title: "Expiry duration applied",
+        description: `Global expiry duration has been applied to all ${updated.length} products.`,
+      });
+
+      return updated;
     });
   };
 
-  // Clear all selected products
   const clearAll = () => {
     setSelectedProducts([]);
     toast({
@@ -308,9 +416,8 @@ export default function BarcodeGenerator() {
   const handlePrintAll = () => {
     if (selectedProducts.length === 0) return;
 
-    // Validate all products have required data
-    const invalidProducts = selectedProducts.filter(item => 
-      !item.netWeight.trim() || !item.packageDate || !item.expiryDate
+    const invalidProducts = selectedProducts.filter(
+      (item) => !item.netWeight.trim() || !item.packageDate || !item.expiryDate
     );
 
     if (invalidProducts.length > 0) {
@@ -322,164 +429,155 @@ export default function BarcodeGenerator() {
       return;
     }
 
-    const w = window.open("", "_blank", "width=660,height=520");
-    if (!w) return;
+    const printWindow = window.open("", "_blank", "width=800,height=600");
+    if (!printWindow) return;
 
-    // Generate HTML for all products
     let allLabelsHTML = "";
-    
+
     selectedProducts.forEach((item) => {
       const name = (item.product.name || "").toUpperCase();
       const weight = formatWeightDisplay(item.netWeight);
       const price = Math.round(
-        calculatePriceByWeight(
-          item.netWeight,
-          item.product.sales_rate_exc_dis_and_tax
+        Number(
+          calculatePriceByWeight(
+            item.netWeight,
+            item.product.sales_rate_exc_dis_and_tax
+          )
         )
       );
       const pkg = formatDate(item.packageDate);
       const exp = formatDate(item.expiryDate);
+      const barcodeValue = `${
+        item.product.sku || item.product.code || "PROD"
+      }-${price}`;
 
-      // Create barcode SVG for this product
-      const barcodeValue = `${item.product.sku}-${price}`;
-      const barcodeSVG = `<svg width="41mm" height="var(--bc-h)" viewBox="0 0 165 60" xmlns="http://www.w3.org/2000/svg">
-        <rect width="100%" height="100%" fill="white"/>
-        <g transform="translate(10,10)">
-          ${generateBarcodeRects(barcodeValue)}
-        </g>
-      </svg>`;
+      // Generate barcode data URL
+      const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
 
       allLabelsHTML += `
-        <div class="label" style="page-break-after: always;">
+        <div class="label">
           <div class="title">${name}</div>
-          <div class="row"><span>Net Wt: ${weight}</span><span>Price: ${price}</span></div>
-          <div class="bc">${barcodeSVG}</div>
-          <div class="dates"><span>PKG: ${pkg}</span><span>EXP: ${exp}</span></div>
+          <div class="row">
+            <span>Net Wt: ${weight}</span>
+            <span>Price: ${price}</span>
+          </div>
+          <div class="bc">
+            <img src="${barcodeDataURL}" alt="Barcode" />
+          </div>
+          <div class="dates">
+            <span>PKG: ${pkg}</span>
+            <span>EXP: ${exp}</span>
+          </div>
         </div>
       `;
     });
 
-    w.document.write(`
-  <html>
-    <head>
-      <title>Barcode Labels - Batch Print</title>
-      <style>
-        @page { size: 50mm 30mm; margin: 0; }
-        html,body{ margin:0; padding:0; overflow:hidden; }
+    printWindow.document.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Barcode Labels - Batch Print</title>
+          <style>
+            @page { 
+              size: 50mm 30mm; 
+              margin: 0;
+            }
+            
+            * { 
+              margin: 0; 
+              padding: 0; 
+              box-sizing: border-box; 
+            }
+            
+            html, body { 
+              margin: 0; 
+              padding: 0; 
+              font-family: Arial, sans-serif;
+            }
 
-        :root{
-          --fs-title: 11.5pt;
-          --fs-body:   9.5pt;
-          --fs-small:  8.0pt;
-          --bc-h:     11.0mm;
-        }
+            .label {
+              width: 50mm;
+              height: 30mm;
+              padding: 1mm 2mm;
+              display: grid;
+              grid-template-rows: auto auto 1fr auto;
+              gap: 0.5mm;
+              page-break-after: always;
+              border: 1px solid #ddd;
+              background: white;
+            }
 
-        .label{
-          width:50mm; height:30mm; box-sizing:border-box;
-          padding:0.8mm 3mm;
-          display:grid;
-          grid-template-rows: auto auto 1fr auto;
-          gap:.4mm; font-family: Arial, sans-serif;
-        }
+            .title {
+              font-size: 9pt;
+              font-weight: bold;
+              text-align: center;
+              text-transform: uppercase;
+              line-height: 1.1;
+              overflow: hidden;
+              display: -webkit-box;
+              -webkit-line-clamp: 2;
+              -webkit-box-orient: vertical;
+              max-height: 6mm;
+            }
 
-        .title{
-          font:700 var(--fs-title)/1.05 Arial; text-align:center; text-transform:uppercase;
-          display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden;
-          word-break: break-word; hyphens: auto; word-wrap: break-word;
-          max-height: 8mm;
-        }
+            .row { 
+              display: flex; 
+              justify-content: space-between; 
+              align-items: center;
+              font-size: 7pt;
+              font-weight: bold;
+              white-space: nowrap;
+            }
 
-        .row{ 
-          display:flex; justify-content:space-between; gap:1mm; white-space:nowrap;
-          font:700 var(--fs-body)/1.05 Arial;
-        }
+            .bc { 
+              display: flex; 
+              align-items: center; 
+              justify-content: center;
+              min-height: 8mm;
+            }
+            
+            .bc img { 
+              max-width: 40mm; 
+              max-height: 8mm; 
+              object-fit: contain;
+            }
 
-        .bc{ 
-          display:flex; align-items:center; justify-content:center; 
-          min-height:8mm;
-        }
-        .bc svg{ width:41mm; height:var(--bc-h); display:block; }
+            .dates {
+              display: flex; 
+              justify-content: space-between; 
+              align-items: center;
+              font-size: 6pt;
+              font-weight: bold;
+              border-top: 1px solid #000; 
+              padding-top: 0.5mm;
+              white-space: nowrap;
+            }
 
-        .dates{
-          display:flex; justify-content:space-between; gap:1mm; white-space:nowrap;
-          font:700 var(--fs-small)/1.05 Arial; border-top:.22mm solid #000; padding-top:.45mm;
-        }
-      </style>
-    </head>
-    <body>
-      ${allLabelsHTML}
+            @media print {
+              .label {
+                border: none;
+              }
+            }
+          </style>
+        </head>
+        <body>
+          ${allLabelsHTML}
+          <script>
+            // Auto print when page loads
+            window.onload = function() {
+              setTimeout(function() {
+                window.print();
+                setTimeout(function() {
+                  window.close();
+                }, 500);
+              }, 100);
+            };
+          </script>
+        </body>
+      </html>
+    `);
 
-      <script>
-        const root = document.documentElement;
-        const labels = document.querySelectorAll('.label');
-
-        function shrink(varName, step, min, unit){
-          const v = parseFloat(getComputedStyle(root).getPropertyValue(varName));
-          if (v <= min) return false;
-          root.style.setProperty(varName, (v - step) + unit);
-          return true;
-        }
-
-        function fitTitleText(label) {
-          const title = label.querySelector('.title');
-          let guard = 40;
-          
-          while (title.scrollHeight > title.clientHeight && guard-- > 0) {
-            if (!shrink('--fs-title', 0.6, 6.5, 'pt')) break;
-          }
-        }
-
-        function fitRowWidth(label, selector, varName, minPt){
-          const row = label.querySelector(selector);
-          const spans = row.querySelectorAll('span');
-          const gap = parseFloat(getComputedStyle(row).gap) || 0;
-          const rowW = () => row.getBoundingClientRect().width;
-          const sumW = () => spans[0].getBoundingClientRect().width + spans[1].getBoundingClientRect().width + gap;
-          let guard = 30;
-          while (sumW() > rowW() && guard-- > 0){
-            if (!shrink(varName, 0.5, minPt, 'pt')) break;
-          }
-        }
-
-        function fitHeight(label){
-          let guard = 40;
-          
-          while (label.scrollHeight > label.clientHeight && guard-- > 0){
-            if (shrink('--fs-title', 0.5, 6.0, 'pt')) continue;
-            if (shrink('--bc-h',     0.4, 7.0, 'mm')) continue;
-            if (shrink('--fs-body',  0.4, 7.0, 'pt')) continue;
-            if (shrink('--fs-small', 0.3, 6.0, 'pt')) continue;
-            break;
-          }
-        }
-
-        // Process each label
-        labels.forEach(label => {
-          fitTitleText(label);
-          fitRowWidth(label, '.row', '--fs-body', 7.0);
-          fitRowWidth(label, '.dates', '--fs-small', 6.0);
-          fitHeight(label);
-        });
-
-        window.print(); 
-        setTimeout(()=>window.close(), 200);
-      </script>
-    </body>
-  </html>`);
-    w.document.close();
-  };
-
-  // Simple barcode rect generator (placeholder - you'd want to use a proper barcode library)
-  const generateBarcodeRects = (value: string) => {
-    // This is a simplified barcode generator
-    // In a real implementation, you'd use proper Code128 encoding
-    let rects = "";
-    for (let i = 0; i < value.length * 6; i++) {
-      const x = i * 2;
-      const width = (i % 3 === 0) ? 3 : 1;
-      rects += `<rect x="${x}" y="0" width="${width}" height="40" fill="black"/>`;
-    }
-    return rects;
+    printWindow.document.close();
   };
 
   const formatDate = (date: Date | undefined) => {
@@ -491,13 +589,14 @@ export default function BarcodeGenerator() {
     });
   };
 
-  const isFormValid = selectedProducts.length > 0 && 
-    selectedProducts.every(item => 
-      item.netWeight.trim() && item.packageDate && item.expiryDate
+  const isFormValid =
+    selectedProducts.length > 0 &&
+    selectedProducts.every(
+      (item) => item.netWeight.trim() && item.packageDate && item.expiryDate
     );
 
   if (productsLoading && products.length === 0) {
-    return <PageLoader message="Barcode Generator..." />;
+    return <PageLoader message="Loading Barcode Generator..." />;
   }
 
   return (
@@ -512,8 +611,114 @@ export default function BarcodeGenerator() {
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Search */}
+            {/* Printer Selection */}
             <div className="space-y-2">
+              <Label className="flex items-center gap-2">
+                <Printer className="h-4 w-4" />
+                Select Printer
+              </Label>
+              <div className="flex gap-2">
+                <Select
+                  onValueChange={setSelectedPrinter}
+                  value={selectedPrinter}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue
+                      placeholder={
+                        loadingPrinters
+                          ? "Loading..."
+                          : printers.length === 0
+                          ? "No printers found"
+                          : "Choose a printer"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {printers.map((printer) => (
+                      <SelectItem key={printer.name} value={printer.name}>
+                        <div className="flex flex-col">
+                          <span className="font-medium">{printer.name}</span>
+                          <span className="text-xs text-gray-500">
+                            Status: {printer.status}{" "}
+                            {printer.isDefault ? "(Default)" : ""}
+                          </span>
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={loadPrinters}
+                  variant="outline"
+                  size="sm"
+                  disabled={loadingPrinters}
+                >
+                  {loadingPrinters ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                </Button>
+              </div>
+              {printers.length === 0 && !loadingPrinters && (
+                <p className="text-sm text-gray-500">
+                  No printers detected. Labels will print using browser default.
+                </p>
+              )}
+            </div>
+
+            {/* Print Settings */}
+            <div className="space-y-2 border-t pt-4">
+              <Label>Print Settings</Label>
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label htmlFor="copies" className="text-xs">
+                    Copies
+                  </Label>
+                  <Input
+                    id="copies"
+                    type="number"
+                    min="1"
+                    max="10"
+                    value={printSettings.copies}
+                    onChange={(e) =>
+                      setPrintSettings((prev) => ({
+                        ...prev,
+                        copies: parseInt(e.target.value) || 1,
+                      }))
+                    }
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="paper-size" className="text-xs">
+                    Paper Size
+                  </Label>
+                  <Select
+                    value={printSettings.paperSize}
+                    onValueChange={(value) =>
+                      setPrintSettings((prev) => ({
+                        ...prev,
+                        paperSize: value,
+                      }))
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {paperSizes.map((size) => (
+                        <SelectItem key={size.value} value={size.value}>
+                          {size.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            </div>
+
+            {/* Search */}
+            <div className="space-y-2 border-t pt-4">
               <Label htmlFor="search">Search Products</Label>
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -546,7 +751,8 @@ export default function BarcodeGenerator() {
                         <div className="flex flex-col">
                           <span className="font-medium">{product.name}</span>
                           <span className="text-xs text-gray-500">
-                            SKU: {product.sku} | Rs {product.sales_rate_exc_dis_and_tax}
+                            SKU: {product.sku} | Rs{" "}
+                            {product.sales_rate_exc_dis_and_tax}
                           </span>
                         </div>
                       </SelectItem>
@@ -561,23 +767,31 @@ export default function BarcodeGenerator() {
 
             {/* Global Dates */}
             <div className="space-y-2 border-t pt-4">
-              <Label>Global Dates (Apply to All)</Label>
+              <Label>Global Expiry (Apply to All)</Label>
               <div className="grid grid-cols-1 gap-2">
-                <DatePicker
-                  date={globalPackageDate}
-                  onDateChange={setGlobalPackageDate}
-                  placeholder="Global package date"
-                />
-                <DatePicker
-                  date={globalExpiryDate}
-                  onDateChange={setGlobalExpiryDate}
-                  placeholder="Global expiry date"
-                />
+                <Select
+                  onValueChange={setGlobalExpiryDuration}
+                  value={globalExpiryDuration}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Choose global expiry" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {expiryOptions.map((opt) => (
+                      <SelectItem key={opt.value} value={opt.value}>
+                        {opt.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
                 <Button
                   onClick={applyGlobalDates}
                   variant="outline"
                   size="sm"
-                  disabled={!globalPackageDate || !globalExpiryDate || selectedProducts.length === 0}
+                  disabled={
+                    !globalExpiryDuration || selectedProducts.length === 0
+                  }
                 >
                   Apply to All Products
                 </Button>
@@ -585,7 +799,7 @@ export default function BarcodeGenerator() {
             </div>
 
             {/* Action Buttons */}
-            <div className="space-y-2">
+            <div className="space-y-2 border-t pt-4">
               <Button
                 onClick={handlePrintAll}
                 className="w-full"
@@ -593,6 +807,7 @@ export default function BarcodeGenerator() {
               >
                 <Printer className="h-4 w-4 mr-2" />
                 Print All Barcodes ({selectedProducts.length})
+                {selectedPrinter && ` - ${selectedPrinter}`}
               </Button>
               <Button
                 onClick={clearAll}
@@ -622,11 +837,16 @@ export default function BarcodeGenerator() {
             ) : (
               <div className="space-y-4 max-h-96 overflow-y-auto">
                 {selectedProducts.map((item) => (
-                  <div key={item.id} className="border rounded-lg p-4 space-y-4">
+                  <div
+                    key={item.id}
+                    className="border rounded-lg p-4 space-y-4"
+                  >
                     <div className="flex justify-between items-start">
                       <div>
                         <h3 className="font-medium">{item.product.name}</h3>
-                        <p className="text-sm text-gray-600">SKU: {item.product.sku}</p>
+                        <p className="text-sm text-gray-600">
+                          SKU: {item.product.sku}
+                        </p>
                         <p className="text-sm text-gray-600">
                           Price: Rs {item.product.sales_rate_exc_dis_and_tax}
                         </p>
@@ -642,48 +862,93 @@ export default function BarcodeGenerator() {
 
                     <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
                       <div>
-                        <Label htmlFor={`weight-${item.id}`}>Net Weight *</Label>
+                        <Label htmlFor={`weight-${item.id}`}>
+                          Net Weight *
+                        </Label>
                         <Input
                           id={`weight-${item.id}`}
                           value={item.netWeight}
-                          onChange={(e) => updateProductData(item.id, 'netWeight', e.target.value)}
+                          onChange={(e) =>
+                            updateProductData(
+                              item.id,
+                              "netWeight",
+                              e.target.value
+                            )
+                          }
                           placeholder="e.g., 500g, 1kg"
                         />
                       </div>
                       <div>
-                        <Label>Package Date *</Label>
-                        <DatePicker
-                          date={item.packageDate}
-                          onDateChange={(date) => updateProductData(item.id, 'packageDate', date)}
-                          placeholder="Package date"
+                        <Label>Package Date</Label>
+                        <Input
+                          value={formatDate(item.packageDate)}
+                          readOnly
+                          className="bg-gray-100"
                         />
                       </div>
                       <div>
-                        <Label>Expiry Date *</Label>
-                        <DatePicker
-                          date={item.expiryDate}
-                          onDateChange={(date) => updateProductData(item.id, 'expiryDate', date)}
-                          placeholder="Expiry date"
-                        />
+                        <Label>Expiry Duration *</Label>
+                        <Select
+                          onValueChange={(value) =>
+                            updateProductData(item.id, "expiryDuration", value)
+                          }
+                          value={item.expiryDuration}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Set expiry" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {expiryOptions.map((opt) => (
+                              <SelectItem key={opt.value} value={opt.value}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     </div>
 
-                    {/* Individual Preview */}
-                    <div className="bg-gray-50 p-2 rounded">
-                      <div className="text-xs text-center space-y-1">
-                        <div className="font-bold">{item.product.name.toUpperCase()}</div>
-                        <div>Net Wt: {formatWeightDisplay(item.netWeight)} | Price: Rs {Math.round(calculatePriceByWeight(item.netWeight, item.product.sales_rate_exc_dis_and_tax))}</div>
-                        <div className="flex justify-center">
-                          <Barcode
-                            value={`${item.product.sku}-${Math.round(calculatePriceByWeight(item.netWeight, item.product.sales_rate_exc_dis_and_tax))}`}
-                            format="CODE128"
-                            displayValue={false}
-                            width={1}
-                            height={30}
-                            margin={0}
+                    {/* Individual Preview with Proper Barcode */}
+                    <div className="bg-gray-50 p-3 rounded border">
+                      <div className="text-center space-y-2">
+                        <div className="font-bold text-sm">
+                          {item.product.name.toUpperCase()}
+                        </div>
+                        <div className="flex justify-between text-xs">
+                          <span>
+                            Net Wt: {formatWeightDisplay(item.netWeight)}
+                          </span>
+                          <span>
+                            Price: Rs{" "}
+                            {Math.round(
+                              Number(
+                                calculatePriceByWeight(
+                                  item.netWeight,
+                                  item.product.sales_rate_exc_dis_and_tax
+                                )
+                              )
+                            )}
+                          </span>
+                        </div>
+                        <div className="flex justify-center bg-white p-2 rounded">
+                          <img
+                            src={generateBarcodeDataURL(
+                              `${
+                                item.product.sku || item.product.code || "PROD"
+                              }-${Math.round(
+                                Number(
+                                  calculatePriceByWeight(
+                                    item.netWeight,
+                                    item.product.sales_rate_exc_dis_and_tax
+                                  )
+                                )
+                              )}`
+                            )}
+                            alt="Barcode Preview"
+                            className="max-w-full h-10 object-contain"
                           />
                         </div>
-                        <div className="flex justify-between border-t pt-1">
+                        <div className="flex justify-between text-xs border-t pt-2">
                           <span>PKG: {formatDate(item.packageDate)}</span>
                           <span>EXP: {formatDate(item.expiryDate)}</span>
                         </div>

@@ -77,7 +77,7 @@ interface StoreState {
   lastCustomersFetch: number | null
   
   // Actions
-  fetchProducts: (force?: boolean) => Promise<void>
+  fetchProducts: (force?: boolean, search?: string) => Promise<void>
   fetchCategories: (force?: boolean) => Promise<void>
   fetchCustomers: (force?: boolean) => Promise<void>
   clearStore: () => void
@@ -101,17 +101,20 @@ export const useStore = create<StoreState>()(
       lastCustomersFetch: null,
 
       // Fetch products with caching
-      fetchProducts: async (force = false) => {
+      fetchProducts: async (force = false, search?: string) => {
         const state = get()
         const now = Date.now()
         
-        // Check if we have cached data and it's still valid
-        if (!force && 
-            state.products.length > 0 && 
-            state.lastProductsFetch && 
-            (now - state.lastProductsFetch) < CACHE_DURATION) {
-          console.log('Using cached products data')
-          return
+        // If searching, bypass cache
+        if (!search) {
+          // Check if we have cached data and it's still valid
+          if (!force && 
+              state.products.length > 0 && 
+              state.lastProductsFetch && 
+              (now - state.lastProductsFetch) < CACHE_DURATION) {
+            console.log('Using cached products data')
+            return
+          }
         }
 
         set({ productsLoading: true })
@@ -132,9 +135,10 @@ export const useStore = create<StoreState>()(
 
           const res = await apiClient.get("/products", {
             params: {
-              limit: 1000,
+              limit: search ? 1000 : 100,  // Get all products when searching, otherwise limit to 100
               page: 1,
-              branch_id: branchId
+              branch_id: branchId,
+              search: search || undefined
             }
           })
           

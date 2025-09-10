@@ -3,7 +3,6 @@ import { useToast } from '@/hooks/use-toast'
 
 export function usePosData() {
   const store = useStore()
-  console.log("🚀 ~ usePosData ~ store:", store.products)
   const { toast } = useToast()
 
   const refreshAllData = async () => {
@@ -42,7 +41,7 @@ export function usePosData() {
     
     // Actions
     refreshAllData,
-    fetchProducts: store.fetchProducts,
+    fetchProducts: (force?: boolean, search?: string) => store.fetchProducts(force, search),
     fetchCategories: store.fetchCategories,
     fetchCustomers: store.fetchCustomers,
     clearStore: store.clearStore,
