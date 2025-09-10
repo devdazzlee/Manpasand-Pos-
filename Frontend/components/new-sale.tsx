@@ -94,7 +94,7 @@ export function NewSale() {
 
       try {
         await Promise.all([
-          fetchProducts(), // Initial fetch with limit 100
+          fetchProducts(),
           fetchCategories(),
           fetchCustomers(),
           getBranchName(),
@@ -291,10 +291,16 @@ export function NewSale() {
   };
 
   const holdCurrentSale = () => {
-    if (cart.length === 0) return;
+    if (cart.length === 0) {
+      toast({
+        variant: "destructive",
+        title: "Cannot Hold Empty Cart",
+        description: "Add some items to the cart first",
+      });
+      return;
+    }
     setHoldSales([...holdSales, [...cart]]);
     setCart([]);
-    setHoldSaleDialogOpen(false);
     toast({
       title: "Sale Held",
       description: `Sale #${holdSales.length + 1} has been held`,
@@ -308,12 +314,12 @@ export function NewSale() {
       );
       if (!shouldReplace) return;
     }
-    setCart(holdSales[index]);
+    const heldSale = holdSales[index];
+    setCart(heldSale);
     setHoldSales(holdSales.filter((_, i) => i !== index));
-    setHoldSaleDialogOpen(false);
     toast({
       title: "Sale Retrieved",
-      description: "Held sale has been restored",
+      description: `Held sale #${index + 1} has been restored`,
     });
   };
 
@@ -1039,25 +1045,31 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 <RefreshCw className="h-4 w-4" />
               </LoadingButton>
               {cart.length > 0 && (
-                <>
-                  <Button variant="outline" onClick={clearCart}>
-                    Clear Cart
-                  </Button>
-                  <Button
-                    variant="outline"
-                    onClick={() => setHoldSaleDialogOpen(true)}
-                  >
-                    Hold Sale
-                  </Button>
-                </>
+                <Button variant="outline" onClick={holdCurrentSale}>
+                  Hold Sale
+                </Button>
               )}
               {holdSales.length > 0 && (
-                <Button
-                  variant="outline"
-                  onClick={() => setHoldSaleDialogOpen(true)}
-                >
-                  View Held ({holdSales.length})
-                </Button>
+                <div className="flex items-center">
+                  <Badge 
+                    variant="secondary" 
+                    className="mr-2 bg-blue-100 text-blue-800"
+                  >
+                    {holdSales.length} held
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      // Scroll the held sales list into view
+                      const element = document.getElementById('held-sales-list');
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth' });
+                      }
+                    }}
+                  >
+                    View Held Sales
+                  </Button>
+                </div>
               )}
             </div>
           </div>
@@ -1233,37 +1245,53 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
             </select>
           </div>
 
-          {/* Hold Sales Controls */}
-          {cart.length > 0 && (
-            <div className="mt-4 flex gap-2">
-              <Button variant="outline" onClick={clearCart} className="flex-1">
-                Clear Cart
-              </Button>
-              <Button variant="outline" onClick={holdCurrentSale} className="flex-1">
-                Hold Sale
-              </Button>
-            </div>
-          )}
-          
-          {holdSales.length > 0 && (
-            <div className="mt-2 space-y-2">
-              <p className="text-sm font-medium">Held Sales ({holdSales.length})</p>
-              <div className="max-h-32 overflow-y-auto space-y-1">
-                {holdSales.map((sale, index) => (
-                  <Button
-                    key={index}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => retrieveHoldSale(index)}
-                    className="w-full justify-between text-sm py-1 h-auto"
-                  >
-                    <span>Sale #{index + 1}</span>
-                    <span>{sale.length} items</span>
+          {/* Cart and Hold Sales Controls */}
+          <div className="mt-4 space-y-4">
+            {/* Cart Controls */}
+            <div className="flex gap-2">
+              {cart.length > 0 && (
+                <>
+                  <Button variant="outline" onClick={clearCart} className="flex-1">
+                    Clear Cart
                   </Button>
-                ))}
-              </div>
+                  <Button variant="default" onClick={holdCurrentSale} className="flex-1">
+                    Hold Sale
+                  </Button>
+                </>
+              )}
             </div>
-          )}
+            
+            {/* Held Sales List */}
+            {holdSales.length > 0 && (
+              <div id="held-sales-list" className="space-y-2 border-t pt-4">
+                <div className="flex items-center justify-between">
+                  <h3 className="font-medium">Held Sales</h3>
+                  <Badge variant="secondary">{holdSales.length}</Badge>
+                </div>
+                <div className="max-h-40 overflow-y-auto space-y-2">
+                  {holdSales.map((sale, index) => {
+                    const saleTotal = sale.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                    return (
+                      <Button
+                        key={index}
+                        variant="outline"
+                        onClick={() => retrieveHoldSale(index)}
+                        className="w-full justify-between py-2 h-auto"
+                      >
+                        <div className="flex flex-col items-start">
+                          <span className="font-medium">Sale #{index + 1}</span>
+                          <span className="text-xs text-gray-500">{sale.length} items</span>
+                        </div>
+                        <div className="text-right">
+                          <span className="font-medium">Rs {saleTotal.toFixed(2)}</span>
+                        </div>
+                      </Button>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto p-4">
