@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { DashboardHome } from "@/components/dashboard-home";
-import { NewSale } from "@/components/new-sale";
+
 import { Customers } from "@/components/customers";
 import { Reports } from "@/components/reports";
 import { Settings } from "@/components/settings";
@@ -41,6 +41,8 @@ import Sizes from "./sizes";
 import { Salaries } from "./Salaries";
 import { Designation } from "./Designation";
 import BarcodeGenerater from "./barcode-generater";
+import { NewSale } from "./new-sale";
+
 
 interface DashboardProps {
   onLogout: () => void;

@@ -1,18 +1,12 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useLoading } from "@/hooks/use-loading";
 import { useToast } from "@/hooks/use-toast";
@@ -33,8 +27,10 @@ interface CartItem {
   id: string;
   name: string;
   price: number;
+  originalPrice: number;
   quantity: number;
   category: string;
+  discount: number;
 }
 
 interface Product {
@@ -51,11 +47,17 @@ interface Product {
   maximum_stock?: number;
 }
 
+
 export function NewSale() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
+  const [holdSaleDialogOpen, setHoldSaleDialogOpen] = useState(false);
+  const [holdSales, setHoldSales] = useState<CartItem[][]>([]);
+  const [globalDiscount, setGlobalDiscount] = useState(0);
+  const [globalDiscountType, setGlobalDiscountType] = useState<'percentage' | 'amount'>('percentage');
+  const searchInputRef = useRef<HTMLInputElement>(null);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(
     null
   );
@@ -64,10 +66,7 @@ export function NewSale() {
   const [scanLoading, setScanLoading] = useState(false);
   const { toast } = useToast();
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
-  const [quickAddDialogOpen, setQuickAddDialogOpen] = useState(false);
-  const [selectedProduct, setSelectedProduct] = useState<Product | null>(null);
-  const [quickAddQuantity, setQuickAddQuantity] = useState("1");
-  const [quickAddTotalPrice, setQuickAddTotalPrice] = useState("");
+
   const [branchName, setBranchName] = useState({
     name: "",
     address: "",
@@ -86,16 +85,16 @@ export function NewSale() {
     fetchCategories,
     fetchCustomers,
   } = usePosData();
-  // Fetch initial data
+  // Fetch initial data and focus search input
   useEffect(() => {
     let mounted = true;
-    
+
     const fetchData = async () => {
       if (!mounted) return;
-      
+
       try {
         await Promise.all([
-          fetchProducts(),  // Initial fetch with limit 100
+          fetchProducts(), // Initial fetch with limit 100
           fetchCategories(),
           fetchCustomers(),
           getBranchName(),
@@ -110,9 +109,14 @@ export function NewSale() {
         }
       }
     };
-    
+
     fetchData();
-    
+
+    // Focus the search input
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+
     // Cleanup function to prevent memory leaks and state updates after unmount
     return () => {
       mounted = false;
@@ -127,12 +131,12 @@ export function NewSale() {
       fetchProducts(true);
       return;
     }
-    
+
     if (searchTerm.length < 2) return; // Don't search with less than 2 characters
 
     const handleSearch = async () => {
       try {
-        await fetchProducts(true, searchTerm);  // Force refresh with search term
+        await fetchProducts(true, searchTerm); // Force refresh with search term
       } catch (error) {
         toast({
           variant: "destructive",
@@ -142,13 +146,15 @@ export function NewSale() {
       }
     };
 
-    const debounceTimer = setTimeout(handleSearch, 300);  // Debounce search
+    const debounceTimer = setTimeout(handleSearch, 300); // Debounce search
     return () => clearTimeout(debounceTimer);
   }, [searchTerm]); // Remove fetchProducts and toast from dependencies
 
   const filteredProducts = products.filter((product) => {
     // Only filter by category since search is now handled by the API
-    return selectedCategory === "all" || product.categoryId === selectedCategory;
+    return (
+      selectedCategory === "all" || product.categoryId === selectedCategory
+    );
   });
 
   const addToCart = async (product: Product, quantity: number = 1) => {
@@ -186,8 +192,10 @@ export function NewSale() {
           id: product.id,
           name: product.name,
           price: product.price,
+          originalPrice: product.price,
           quantity: quantity,
           category: product.category,
+          discount: 0,
         },
       ]);
     }
@@ -252,6 +260,63 @@ export function NewSale() {
     );
   };
 
+  const updateItemPrice = (id: string, newPrice: number) => {
+    if (newPrice < 0) return;
+    setCart(
+      cart.map((item) => {
+        if (item.id === id) {
+          return { ...item, price: Number(newPrice) };
+        }
+        return item;
+      })
+    );
+  };
+
+  const updateItemDiscount = (id: string, discountPercentage: number) => {
+    if (discountPercentage < 0 || discountPercentage > 100) return;
+    setCart(
+      cart.map((item) => {
+        if (item.id === id) {
+          const discountAmount =
+            (item.originalPrice * discountPercentage) / 100;
+          return {
+            ...item,
+            discount: discountPercentage,
+            price: item.originalPrice - discountAmount,
+          };
+        }
+        return item;
+      })
+    );
+  };
+
+  const holdCurrentSale = () => {
+    if (cart.length === 0) return;
+    setHoldSales([...holdSales, [...cart]]);
+    setCart([]);
+    setHoldSaleDialogOpen(false);
+    toast({
+      title: "Sale Held",
+      description: `Sale #${holdSales.length + 1} has been held`,
+    });
+  };
+
+  const retrieveHoldSale = (index: number) => {
+    if (cart.length > 0) {
+      const shouldReplace = window.confirm(
+        "Current cart will be replaced. Continue?"
+      );
+      if (!shouldReplace) return;
+    }
+    setCart(holdSales[index]);
+    setHoldSales(holdSales.filter((_, i) => i !== index));
+    setHoldSaleDialogOpen(false);
+    toast({
+      title: "Sale Retrieved",
+      description: "Held sale has been restored",
+    });
+  };
+
   const getBranchName = async () => {
     try {
       const branchId = localStorage.getItem("branch");
@@ -295,7 +360,12 @@ export function NewSale() {
     (sum, item) => sum + item.price * item.quantity,
     0
   );
-  const total = subtotal;
+
+  const discountAmount = globalDiscountType === 'percentage' 
+    ? (subtotal * globalDiscount) / 100 
+    : globalDiscount;
+  
+  const total = Math.max(0, subtotal - discountAmount);
 
   const generateTransactionId = () => {
     return `TXN${Date.now().toString().slice(-6)}`;
@@ -933,28 +1003,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
   };
 
   const handleProductClick = (product: Product) => {
-    setSelectedProduct(product);
-    setQuickAddQuantity("1");
-    setQuickAddDialogOpen(true);
-  };
-
-  const handleQuickAdd = async () => {
-    if (!selectedProduct) return;
-    const quantity = parseFloat(quickAddQuantity);
-    if (isNaN(quantity) || quantity <= 0) {
-      toast({
-        variant: "destructive",
-        title: "Invalid Quantity",
-        description: "Please enter a valid quantity greater than 0",
-      });
-      return;
-    }
-
-    await addToCart(selectedProduct, quantity);
-    setQuickAddDialogOpen(false);
-    setSelectedProduct(null);
-    setQuickAddQuantity("1");
-    setQuickAddTotalPrice("");
+    addToCart(product, 1);
   };
 
   const handleCategoryChange = async (categoryId: string) => {
@@ -990,8 +1039,24 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 <RefreshCw className="h-4 w-4" />
               </LoadingButton>
               {cart.length > 0 && (
-                <Button variant="outline" onClick={clearCart}>
-                  Clear Cart
+                <>
+                  <Button variant="outline" onClick={clearCart}>
+                    Clear Cart
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => setHoldSaleDialogOpen(true)}
+                  >
+                    Hold Sale
+                  </Button>
+                </>
+              )}
+              {holdSales.length > 0 && (
+                <Button
+                  variant="outline"
+                  onClick={() => setHoldSaleDialogOpen(true)}
+                >
+                  View Held ({holdSales.length})
                 </Button>
               )}
             </div>
@@ -1000,10 +1065,12 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
               <Input
-                placeholder="Search products..."
+                ref={searchInputRef}
+                placeholder="Scan barcode or search products..."
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 className="pl-10"
+                autoFocus
               />
             </div>
             <LoadingButton
@@ -1139,81 +1206,144 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
       </div>
 
       {/* Cart Section */}
-      <div className="w-96 bg-white border-l border-gray-200 flex flex-col">
-        <div className="p-6 border-b border-gray-200">
+      <div className="w-[400px] bg-white border-l border-gray-200 flex flex-col">
+        <div className="p-4 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">
             Cart ({cart.length} items •{" "}
             {cart.reduce((sum, item) => sum + item.quantity, 0).toFixed(2)}{" "}
             total qty)
           </h2>
+
+          {/* Customer Selection */}
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Customer
+            </label>
+            <select
+              className="w-full border rounded px-3 py-2 bg-white text-gray-900"
+              value={selectedCustomer ?? ""}
+              onChange={(e) => setSelectedCustomer(e.target.value || null)}
+            >
+              <option value="">Walk-in Customer</option>
+              {customers.map((customer: any) => (
+                <option key={customer.id} value={customer.id}>
+                  {customer.email}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          {/* Hold Sales Controls */}
+          {cart.length > 0 && (
+            <div className="mt-4 flex gap-2">
+              <Button variant="outline" onClick={clearCart} className="flex-1">
+                Clear Cart
+              </Button>
+              <Button variant="outline" onClick={holdCurrentSale} className="flex-1">
+                Hold Sale
+              </Button>
+            </div>
+          )}
+          
+          {holdSales.length > 0 && (
+            <div className="mt-2 space-y-2">
+              <p className="text-sm font-medium">Held Sales ({holdSales.length})</p>
+              <div className="max-h-32 overflow-y-auto space-y-1">
+                {holdSales.map((sale, index) => (
+                  <Button
+                    key={index}
+                    variant="outline"
+                    size="sm"
+                    onClick={() => retrieveHoldSale(index)}
+                    className="w-full justify-between text-sm py-1 h-auto"
+                  >
+                    <span>Sale #{index + 1}</span>
+                    <span>{sale.length} items</span>
+                  </Button>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
 
-        <div className="flex-1 overflow-auto p-6">
+        <div className="flex-1 overflow-auto p-4">
           {cart.length === 0 ? (
             <div className="text-center text-gray-500 mt-8">
               <p>Your cart is empty</p>
               <p className="text-sm">Add products to get started</p>
             </div>
           ) : (
-            <div className="space-y-4">
+            <div className="space-y-3">
               {cart.map((item) => (
                 <div
                   key={item.id}
-                  className="flex items-center justify-between p-3 border rounded-lg"
+                  className="p-3 border rounded-lg space-y-2"
                 >
-                  <div className="flex-1">
+                  <div className="flex justify-between items-start">
                     <h4 className="font-medium text-gray-900">{item.name}</h4>
-                    <p className="text-sm text-gray-500">
-                      Rs {item.price.toFixed(2)} each
-                    </p>
-                    <p className="text-sm font-medium">
-                      Rs {(item.price * item.quantity).toFixed(2)}
-                    </p>
-                  </div>
-                  <div className="flex items-center space-x-2">
                     <Button
                       size="sm"
-                      variant="outline"
-                      onClick={() => updateQuantity(item.id, -1)}
-                      className="h-8 w-8 p-0"
+                      variant="ghost"
+                      onClick={() => removeFromCart(item.id)}
+                      className="text-red-600 hover:text-red-700 h-6 w-6 p-0 -mt-1 -mr-1"
                     >
-                      <Minus className="h-3 w-3" />
+                      <Trash2 className="h-4 w-4" />
                     </Button>
+                  </div>
 
-                    <div className="flex flex-col items-center">
+                  {/* Price Control */}
+                  <div className="grid grid-cols-2 gap-2">
+                    <div>
+                      <label className="text-xs text-gray-600">Price (Rs)</label>
                       <Input
                         type="number"
-                        value={item.quantity}
-                        onChange={(e) => {
-                          const value = parseFloat(e.target.value);
-                          if (!isNaN(value)) {
-                            updateQuantityManual(item.id, value);
-                          }
-                        }}
-                        className="w-16 h-8 text-center text-sm"
+                        value={item.price}
+                        onChange={(e) => updateItemPrice(item.id, parseFloat(e.target.value))}
+                        className="h-7 text-sm"
                         min="0"
                         step="0.01"
-                        placeholder="0"
                       />
                     </div>
+                    <div>
+                      <label className="text-xs text-gray-600">Quantity</label>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => updateQuantity(item.id, -1)}
+                          className="h-7 px-2"
+                        >
+                          <Minus className="h-3 w-3" />
+                        </Button>
 
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => updateQuantity(item.id, 1)}
-                      className="h-8 w-8 p-0"
-                    >
-                      <Plus className="h-3 w-3" />
-                    </Button>
+                        <Input
+                          type="number"
+                          value={item.quantity}
+                          onChange={(e) => {
+                            const value = parseFloat(e.target.value);
+                            if (!isNaN(value)) {
+                              updateQuantityManual(item.id, value);
+                            }
+                          }}
+                          className="h-7 text-center text-sm"
+                          min="0"
+                          step="0.01"
+                        />
 
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={() => removeFromCart(item.id)}
-                      className="text-red-600 hover:text-red-700 h-8 w-8 p-0"
-                    >
-                      <Trash2 className="h-3 w-3" />
-                    </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => updateQuantity(item.id, 1)}
+                          className="h-7 px-2"
+                        >
+                          <Plus className="h-3 w-3" />
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="text-sm text-gray-500">
+                    Total: Rs {(item.price * item.quantity).toFixed(2)}
                   </div>
                 </div>
               ))}
@@ -1222,12 +1352,43 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
         </div>
 
         {cart.length > 0 && (
-          <div className="p-6 border-t border-gray-200">
-            <div className="space-y-2 mb-4">
-              <div className="flex justify-between">
+          <div className="p-4 border-t border-gray-200 space-y-4">
+            {/* Discount Controls */}
+            <div className="space-y-2">
+              <label className="text-sm font-medium">Discount</label>
+              <div className="flex items-center gap-2">
+                <select
+                  className="border rounded h-9 px-2"
+                  value={globalDiscountType}
+                  onChange={(e) => setGlobalDiscountType(e.target.value as 'percentage' | 'amount')}
+                >
+                  <option value="percentage">%</option>
+                  <option value="amount">Rs</option>
+                </select>
+                <Input
+                  type="number"
+                  value={globalDiscount}
+                  onChange={(e) => setGlobalDiscount(parseFloat(e.target.value) || 0)}
+                  className="flex-1"
+                  min="0"
+                  step={globalDiscountType === 'percentage' ? '1' : '0.01'}
+                  max={globalDiscountType === 'percentage' ? '100' : undefined}
+                />
+              </div>
+            </div>
+
+            {/* Totals */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
                 <span>Subtotal:</span>
                 <span>Rs {subtotal.toFixed(2)}</span>
               </div>
+              {discountAmount > 0 && (
+                <div className="flex justify-between text-sm text-green-600">
+                  <span>Discount:</span>
+                  <span>- Rs {discountAmount.toFixed(2)}</span>
+                </div>
+              )}
               <Separator />
               <div className="flex justify-between font-bold text-lg">
                 <span>Total:</span>
@@ -1235,207 +1396,30 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
               </div>
             </div>
 
-            <div className="space-y-2">
-              <LoadingButton
-                className="w-full"
-                onClick={() => setPaymentDialogOpen(true)}
-                loading={paymentLoading}
-                disabled={cart.length === 0}
+            {/* Payment Buttons */}
+            <div className="grid grid-cols-2 gap-2">
+              <Button
+                size="lg"
+                onClick={() => handlePayment("Cash")}
+                disabled={paymentLoading}
+              >
+                <DollarSign className="h-4 w-4 mr-2" />
+                Cash
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => handlePayment("Card")}
+                disabled={paymentLoading}
               >
                 <CreditCard className="h-4 w-4 mr-2" />
-                Process Payment
-              </LoadingButton>
+                Card
+              </Button>
             </div>
           </div>
         )}
       </div>
 
-      {/* Payment Dialog */}
-      <Dialog open={paymentDialogOpen} onOpenChange={setPaymentDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Process Payment</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <div className="flex justify-between mb-2">
-                <span>Total Amount:</span>
-                <span className="font-bold text-xl">Rs {total.toFixed(2)}</span>
-              </div>
-              <div className="text-sm text-gray-600">{cart.length} item(s)</div>
-            </div>
-            <div className="grid grid-cols-2 gap-4">
-              <LoadingButton
-                onClick={() => handlePayment("Cash")}
-                className="h-16"
-                loading={paymentLoading}
-                loadingText="Processing..."
-              >
-                <DollarSign className="h-6 w-6 mr-2" />
-                Cash
-              </LoadingButton>
-              <LoadingButton
-                onClick={() => handlePayment("Card")}
-                variant="outline"
-                className="h-16"
-                loading={paymentLoading}
-                loadingText="Processing..."
-              >
-                <CreditCard className="h-6 w-6 mr-2" />
-                Card
-              </LoadingButton>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      {/* Quick Add Dialog */}
-      <Dialog open={quickAddDialogOpen} onOpenChange={setQuickAddDialogOpen}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Add Quantity</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="bg-gray-50 p-4 rounded-lg">
-              <div className="flex justify-between mb-2">
-                <span>Product:</span>
-                <span className="font-medium">{selectedProduct?.name}</span>
-              </div>
-              <div className="flex justify-between mb-2">
-                <span>Price:</span>
-                <span className="font-medium">
-                  Rs {selectedProduct?.price.toFixed(2)}
-                </span>
-              </div>
-              <div className="flex justify-between mb-2">
-                <span>Current Stock:</span>
-                <span className="font-medium">
-                  {selectedProduct?.available_stock ?? selectedProduct?.stock}
-                </span>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Quantity</label>
-              <div className="flex items-center space-x-2">
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const currentQty = parseFloat(quickAddQuantity) || 0;
-                    setQuickAddQuantity(
-                      currentQty - 1 > 0 ? (currentQty - 1).toFixed(2) : ""
-                    );
-                    setQuickAddTotalPrice(""); // Clear total price if manually changing quantity
-                  }}
-                  className="h-10 w-10 p-0"
-                >
-                  <Minus className="h-4 w-4" />
-                </Button>
-
-                <Input
-                  type="number"
-                  value={quickAddQuantity}
-                  onChange={(e) => {
-                    const value = parseFloat(e.target.value);
-                    if (!isNaN(value)) {
-                      setQuickAddQuantity(value.toString());
-                      setQuickAddTotalPrice(""); // Clear total price if manually changing quantity
-                    } else {
-                      setQuickAddQuantity("");
-                    }
-                  }}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") {
-                      handleQuickAdd();
-                    }
-                  }}
-                  className="flex-1 text-center"
-                  min="0"
-                  step="0.01"
-                  placeholder="Enter quantity"
-                />
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    const currentQty = parseFloat(quickAddQuantity) || 0;
-                    setQuickAddQuantity((currentQty + 1).toFixed(2));
-                    setQuickAddTotalPrice(""); // Clear total price if manually changing quantity
-                  }}
-                  className="h-10 w-10 p-0"
-                >
-                  <Plus className="h-4 w-4" />
-                </Button>
-              </div>
-              <p className="text-xs text-gray-500">
-                You can enter decimal values like 0.5, 0.25, etc.
-              </p>
-
-              {/* Quick Preset Buttons */}
-              <div className="flex flex-wrap gap-1 mt-2">
-                {[0.25, 0.5, 0.75, 1, 2, 5].map((preset) => (
-                  <Button
-                    key={preset}
-                    variant="outline"
-                    size="sm"
-                    onClick={() => {
-                      setQuickAddQuantity(preset.toString());
-                      setQuickAddTotalPrice("");
-                    }}
-                    className="text-xs px-2 py-1 h-6"
-                  >
-                    {preset}
-                  </Button>
-                ))}
-              </div>
-            </div>
-            {/* Total Price Input */}
-            <div className="space-y-2 mt-2">
-              <label className="text-sm font-medium">Total Price</label>
-              <Input
-                type="number"
-                value={quickAddTotalPrice}
-                onChange={(e) => {
-                  setQuickAddTotalPrice(e.target.value);
-                  const price = parseFloat(e.target.value);
-                  if (
-                    !isNaN(price) &&
-                    selectedProduct &&
-                    selectedProduct.price > 0
-                  ) {
-                    const qty = price / selectedProduct.price;
-                    setQuickAddQuantity(qty > 0 ? qty.toFixed(2) : "");
-                  }
-                }}
-                className="flex-1 text-center"
-                min="0"
-                step="0.01"
-                placeholder="Enter total price"
-              />
-              <p className="text-xs text-gray-500">
-                Enter the total price you want to spend. Quantity will be
-                calculated automatically.
-              </p>
-            </div>
-
-            <div className="flex space-x-2">
-              <Button onClick={handleQuickAdd} className="flex-1">
-                <Plus className="h-4 w-4 mr-2" />
-                Add to Cart
-              </Button>
-              <Button
-                onClick={() => setQuickAddDialogOpen(false)}
-                variant="outline"
-                className="flex-1"
-              >
-                Cancel
-              </Button>
-            </div>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
