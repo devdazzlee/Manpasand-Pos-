@@ -33,6 +33,7 @@ import employeeRoutes  from './routes/employee.route';
 import salaryRoutes  from './routes/salary.route';
 import shiftRoutes  from './routes/shift.route';
 import shiftAssignmentRoutes  from './routes/shiftAssignment.routes';
+import barcodeRoutes from './routes/barcode.routes';
 import cron from 'node-cron';
 
 const vAPI = process.env.vAPI || '/api/v1';
@@ -70,6 +71,7 @@ app.use(`${vAPI}/employee`, employeeRoutes);
 app.use(`${vAPI}/salaries`, salaryRoutes);
 app.use(`${vAPI}/shifts`, shiftRoutes);
 app.use(`${vAPI}/shift-assignment`, shiftAssignmentRoutes);
+app.use(`${vAPI}/barcode-generator`, barcodeRoutes);
 
 // App Routes
 app.use(`${vAPI}/customer/app`, appRoutes);

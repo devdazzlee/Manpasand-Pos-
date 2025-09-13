@@ -9,6 +9,7 @@ interface Product {
   category: string
   stock: number
   categoryId: string
+  barcode?: string //TODO
   current_stock?: number
   available_stock?: number
   reserved_stock?: number
@@ -148,6 +149,7 @@ export const useStore = create<StoreState>()(
             price: Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? item.purchase_rate ?? 0),
             category: item.category?.name,
             categoryId: item.category?.id,
+            barcode: item.barcode || item.sku, // Use barcode field or fallback to SKU
             stock: item.available_stock ?? item.current_stock ?? 0, // Use actual stock instead of max_qty
             current_stock: item.current_stock ?? 0,
             available_stock: item.available_stock ?? 0,

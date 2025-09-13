@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo } from "react";
+import { useState, useEffect, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { Input } from "@/components/ui/input";
@@ -40,6 +40,7 @@ interface Product {
   category: string;
   stock: number;
   categoryId: string;
+  barcode?: string;
   available_stock?: number;
   current_stock?: number;
   reserved_stock?: number;
@@ -64,6 +65,7 @@ export function NewSale() {
   const { loading: paymentLoading, withLoading: withPaymentLoading } =
     useLoading();
   const [scanLoading, setScanLoading] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const { toast } = useToast();
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
 
@@ -85,7 +87,7 @@ export function NewSale() {
     fetchCategories,
     fetchCustomers,
   } = usePosData();
-  // Fetch initial data and maintain search input focus
+  // Fetch initial data and focus search input
   useEffect(() => {
     let mounted = true;
 
@@ -112,43 +114,14 @@ export function NewSale() {
 
     fetchData();
 
-    // Focus the search input initially without scrolling
+    // Focus the search input
     if (searchInputRef.current) {
-      searchInputRef.current.focus({ preventScroll: true });
+      searchInputRef.current.focus();
     }
 
-    // Add event listener for keydown events (for barcode scanner)
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const target = e.target as HTMLElement;
-      // Only refocus if we're not in any form control
-      if (!['INPUT', 'TEXTAREA', 'SELECT'].includes(target.tagName) && 
-          !target.closest('.discount-controls') && // Don't refocus if clicking in discount area
-          !target.closest('.cart-item-controls')) { // Don't refocus if clicking in cart items
-        searchInputRef.current?.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-
-    // Handle clicks on empty areas to refocus search
-    const handleClick = (e: MouseEvent) => {
-      const target = e.target as HTMLElement;
-      // Only refocus if clicking on the main background
-      if (target.classList.contains('h-screen') || 
-          (target === document.body && 
-           !target.closest('.discount-controls') && // Don't refocus if clicking in discount area
-           !target.closest('.cart-item-controls'))) { // Don't refocus if clicking in cart items
-        searchInputRef.current?.focus({ preventScroll: true });
-      }
-    };
-
-    document.addEventListener('click', handleClick);
-
-    // Cleanup function
+    // Cleanup function to prevent memory leaks and state updates after unmount
     return () => {
       mounted = false;
-      document.removeEventListener('keydown', handleKeyDown);
-      document.removeEventListener('click', handleClick);
     };
   }, []); // Empty dependency array since we only want to fetch once on mount
 
@@ -259,26 +232,17 @@ export function NewSale() {
     */
 
     setCart(
-      cart
-        .map((item) => {
-          if (item.id === id) {
-            const newQuantity = Number(item.quantity) + Number(change);
-            return newQuantity > 0 ? { ...item, quantity: newQuantity } : item;
-          }
-          return item;
-        })
-        .filter((item) => item.quantity > 0)
+      cart.map((item) => {
+        if (item.id === id) {
+          const newQuantity = Number(item.quantity) + Number(change);
+          return { ...item, quantity: Math.max(0.01, newQuantity) };
+        }
+        return item;
+      })
     );
   };
 
   const updateQuantityManual = (id: string, newQuantity: number) => {
-    // Validate quantity is positive
-    if (newQuantity <= 0) {
-      // Remove item if quantity is 0 or negative
-      setCart(cart.filter((item) => item.id !== id));
-      return;
-    }
-
     setCart(
       cart.map((item) => {
         if (item.id === id) {
@@ -396,13 +360,9 @@ export function NewSale() {
     0
   );
 
-  const discountAmount = useMemo(() => {
-    if (!globalDiscount) return 0;
-    
-    return globalDiscountType === 'percentage'
-      ? (subtotal * globalDiscount) / 100
-      : Math.min(globalDiscount, subtotal); // Ensure amount discount doesn't exceed subtotal
-  }, [globalDiscount, globalDiscountType, subtotal]);
+  const discountAmount = globalDiscountType === 'percentage' 
+    ? (subtotal * globalDiscount) / 100 
+    : globalDiscount;
   
   const total = Math.max(0, subtotal - discountAmount);
 
@@ -850,7 +810,8 @@ export function NewSale() {
 
 ${receiptData.items
   .map((item: any) => {
-    const itemName = item.name 
+    const itemName =
+      item.name.length > 20 ? item.name.substring(0, 17) + "..." : item.name;
     const qty = `${item.quantity} pc`;
     const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
 
@@ -859,7 +820,11 @@ ${receiptData.items
             <div class="item-qty">${qty}</div>
             <div class="item-rate">${rate}</div>
           </div>
-          `;
+          ${
+            item.name.length > 20
+              ? `<div class="item-sub-row"><div class="item-sub-name">${item.name}</div><div class="item-sub-qty"></div><div class="item-sub-rate"></div></div>`
+              : ""
+          }`;
   })
   .join("")}
 </div>
@@ -1010,6 +975,10 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
     });
   };
 
+  const findProductByBarcode = (barcode: string): Product | null => {
+    return products.find(product => product.barcode === barcode) || null;
+  };
+
   const handleBarcodeScan = async () => {
     setScanLoading(true);
     try {
@@ -1036,20 +1005,38 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
     }
   };
 
-  const handleProductClick = (product: Product) => {
-    // Store current scroll position
-    const scrollPosition = window.scrollY;
+  const handleScannerInput = async (scannedValue: string) => {
+    setIsScanning(true);
     
-    addToCart(product, 1);
-    
-    // Refocus the search input after adding to cart without scrolling
-    if (searchInputRef.current) {
-      setTimeout(() => {
-        searchInputRef.current?.focus({ preventScroll: true });
-        // Restore scroll position
-        window.scrollTo(0, scrollPosition);
-      }, 100);
+    try {
+      // Clear the search term first
+      setSearchTerm("");
+      
+      // Find product by barcode
+      const product = findProductByBarcode(scannedValue);
+      
+      if (product) {
+        // Add product to cart
+        await addToCart(product, 1);
+        
+        toast({
+          title: "Product Added",
+          description: `${product.name} added to cart via barcode scan`,
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Product Not Found",
+          description: `No product found with barcode: ${scannedValue}`,
+        });
+      }
+    } finally {
+      setIsScanning(false);
     }
+  };
+
+  const handleProductClick = (product: Product) => {
+    addToCart(product, 1);
   };
 
   const handleCategoryChange = async (categoryId: string) => {
@@ -1084,27 +1071,59 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
               >
                 <RefreshCw className="h-4 w-4" />
               </LoadingButton>
+              {cart.length > 0 && (
+                <Button variant="outline" onClick={holdCurrentSale}>
+                  Hold Sale
+                </Button>
+              )}
               {holdSales.length > 0 && (
-                <Badge 
-                  variant="secondary" 
-                  className="bg-blue-100 text-blue-800"
-                >
-                  {holdSales.length} sale{holdSales.length > 1 ? 's' : ''} on hold
-                </Badge>
+                <div className="flex items-center">
+                  <Badge 
+                    variant="secondary" 
+                    className="mr-2 bg-blue-100 text-blue-800"
+                  >
+                    {holdSales.length} held
+                  </Badge>
+                  <Button
+                    variant="outline"
+                    onClick={() => {
+                      // Scroll the held sales list into view
+                      const element = document.getElementById('held-sales-list');
+                      if (element) {
+                        element.scrollIntoView({ behavior: 'smooth' });
+                      }
+                    }}
+                  >
+                    View Held Sales
+                  </Button>
+                </div>
               )}
             </div>
           </div>
           <div className="flex items-center space-x-4">
             <div className="relative flex-1 max-w-md">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500' : 'text-gray-400'}`} />
               <Input
                 ref={searchInputRef}
-                placeholder="Scan barcode or search products..."
+                placeholder={isScanning ? "Scanning..." : "Scan barcode or search products..."}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
-                className="pl-10"
+                onKeyDown={(e) => {
+                  // Detect Enter key (barcode scanner typically sends Enter after data)
+                  if (e.key === 'Enter' && searchTerm.trim()) {
+                    e.preventDefault();
+                    // Check if it looks like a barcode (numeric, 8+ digits or common barcode formats)
+                    const isBarcode = /^\d{8,}$/.test(searchTerm.trim()) || 
+                                    /^\d{12,13}$/.test(searchTerm.trim()) || // EAN-13, UPC-A
+                                    /^\d{8}$/.test(searchTerm.trim()); // EAN-8
+                    if (isBarcode) {
+                      handleScannerInput(searchTerm.trim());
+                    }
+                  }
+                }}
+                className={`pl-10 ${isScanning ? 'border-blue-500 bg-blue-50' : ''}`}
                 autoFocus
-                autoComplete="off"
+                disabled={isScanning}
               />
             </div>
             <LoadingButton
@@ -1327,7 +1346,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
               {cart.map((item) => (
                 <div
                   key={item.id}
-                  className="p-3 border rounded-lg space-y-2 cart-item-controls"
+                  className="p-3 border rounded-lg space-y-2"
                 >
                   <div className="flex justify-between items-start">
                     <h4 className="font-medium text-gray-900">{item.name}</h4>
@@ -1360,8 +1379,14 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() => updateQuantity(item.id, -1)}
+                          onClick={() => {
+                            const currentItem = cart.find(cartItem => cartItem.id === item.id);
+                            if (currentItem && currentItem.quantity > 0.01) {
+                              updateQuantity(item.id, -1);
+                            }
+                          }}
                           className="h-7 px-2"
+                          disabled={item.quantity <= 0.01}
                         >
                           <Minus className="h-3 w-3" />
                         </Button>
@@ -1370,12 +1395,40 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                           type="number"
                           value={item.quantity}
                           onChange={(e) => {
-                            const value = parseFloat(e.target.value);
-                            if (!isNaN(value)) {
-                              updateQuantityManual(item.id, value);
+                            const value = e.target.value;
+                            // Allow empty string for clearing
+                            if (value === '') {
+                              setCart(
+                                cart.map((cartItem) => {
+                                  if (cartItem.id === item.id) {
+                                    return { ...cartItem, quantity: 0 };
+                                  }
+                                  return cartItem;
+                                })
+                              );
+                              return;
+                            }
+                            
+                            const numValue = parseFloat(value);
+                            if (!isNaN(numValue)) {
+                              updateQuantityManual(item.id, numValue);
                             }
                           }}
-                          className="h-7 text-center text-sm"
+                          onBlur={(e) => {
+                            const value = parseFloat(e.target.value);
+                            if (isNaN(value) || value <= 0) {
+                              // Set to minimum if invalid or empty
+                              setCart(
+                                cart.map((cartItem) => {
+                                  if (cartItem.id === item.id) {
+                                    return { ...cartItem, quantity: 0.01 };
+                                  }
+                                  return cartItem;
+                                })
+                              );
+                            }
+                          }}
+                          className="h-7 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           min="0"
                           step="0.01"
                         />
@@ -1387,6 +1440,24 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                           className="h-7 px-2"
                         >
                           <Plus className="h-3 w-3" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => {
+                            setCart(
+                              cart.map((cartItem) => {
+                                if (cartItem.id === item.id) {
+                                  return { ...cartItem, quantity: 0 };
+                                }
+                                return cartItem;
+                              })
+                            );
+                          }}
+                          className="h-7 px-2 text-red-600 hover:text-red-700"
+                          title="Clear quantity"
+                        >
+                          ×
                         </Button>
                       </div>
                     </div>
@@ -1404,67 +1475,27 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
         {cart.length > 0 && (
           <div className="p-4 border-t border-gray-200 space-y-4">
             {/* Discount Controls */}
-            <div className="space-y-2 discount-controls">
+            <div className="space-y-2">
               <label className="text-sm font-medium">Discount</label>
               <div className="flex items-center gap-2">
                 <select
                   className="border rounded h-9 px-2"
                   value={globalDiscountType}
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => {
-                    setGlobalDiscountType(e.target.value as 'percentage' | 'amount');
-                    // Reset discount value when changing type to prevent invalid values
-                    setGlobalDiscount(0);
-                  }}
+                  onChange={(e) => setGlobalDiscountType(e.target.value as 'percentage' | 'amount')}
                 >
                   <option value="percentage">%</option>
                   <option value="amount">Rs</option>
                 </select>
                 <Input
                   type="number"
-                  value={globalDiscount || ''}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (value === '') {
-                      setGlobalDiscount(0);
-                      return;
-                    }
-                    
-                    const numValue = parseFloat(value);
-                    if (isNaN(numValue)) return;
-                    
-                    if (globalDiscountType === 'percentage') {
-                      // For percentage, limit between 0 and 100
-                      if (numValue >= 0 && numValue <= 100) {
-                        setGlobalDiscount(numValue);
-                      }
-                    } else {
-                      // For amount, limit to non-negative and not exceeding subtotal
-                      if (numValue >= 0 && numValue <= subtotal) {
-                        setGlobalDiscount(numValue);
-                      }
-                    }
-                  }}
-                  onBlur={() => {
-                    // Format the number on blur
-                    if (globalDiscount) {
-                      setGlobalDiscount(Number(globalDiscount.toFixed(2)));
-                    }
-                  }}
+                  value={globalDiscount}
+                  onChange={(e) => setGlobalDiscount(parseFloat(e.target.value) || 0)}
                   className="flex-1"
                   min="0"
                   step={globalDiscountType === 'percentage' ? '1' : '0.01'}
-                  max={globalDiscountType === 'percentage' ? '100' : subtotal}
-                  placeholder={globalDiscountType === 'percentage' ? '0%' : '0.00'}
+                  max={globalDiscountType === 'percentage' ? '100' : undefined}
                 />
               </div>
-              {globalDiscount > 0 && (
-                <p className="text-sm text-green-600">
-                  Discount: {globalDiscountType === 'percentage' 
-                    ? `${globalDiscount}% (Rs ${discountAmount.toFixed(2)})` 
-                    : `Rs ${globalDiscount.toFixed(2)}`}
-                </p>
-              )}
             </div>
 
             {/* Totals */}

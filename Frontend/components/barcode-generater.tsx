@@ -1,11 +1,11 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
+import { CancelTokenSource } from "axios";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import ZebraBrowserPrintWrapper from "zebra-browser-print-wrapper";
 import {
   Select,
   SelectContent,
@@ -28,6 +28,8 @@ import JsBarcode from "jsbarcode";
 import { PageLoader } from "./ui/page-loader";
 import { usePosData } from "@/hooks/use-pos-data";
 import { useToast } from "@/hooks/use-toast";
+import apiClient from "@/lib/apiClient";
+import axios from "axios";
 
 interface Product {
   id: string;
@@ -60,7 +62,12 @@ export default function BarcodeGenerator() {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentProductId, setCurrentProductId] = useState("");
   const [globalExpiryDuration, setGlobalExpiryDuration] = useState("");
+  const [availablePrinters, setAvailablePrinters] = useState<any[]>([]);
+  const [selectedPrinter, setSelectedPrinter] = useState("");
+  const [isLoadingPrinters, setIsLoadingPrinters] = useState(false);
+  const [isPrinting, setIsPrinting] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
+  const printerRequestRef = useRef<CancelTokenSource | null>(null);
   const { toast } = useToast();
 
   const expiryOptions = [
@@ -150,6 +157,24 @@ export default function BarcodeGenerator() {
     const debounceTimer = setTimeout(fetchData, 300);
     return () => clearTimeout(debounceTimer);
   }, [searchTerm]);
+
+  // Fetch printers on component mount with delay to avoid conflicts
+  useEffect(() => {
+    console.log('🖨️ useEffect for printers triggered');
+    const timer = setTimeout(() => {
+      console.log('🖨️ Timer fired, calling fetchPrinters');
+      fetchPrinters();
+    }, 2000); // 2 second delay to avoid conflicts with products API
+    
+    return () => {
+      console.log('🖨️ useEffect cleanup');
+      clearTimeout(timer);
+      // Cancel any pending printer request on unmount
+      if (printerRequestRef.current) {
+        printerRequestRef.current.cancel('Component unmounted');
+      }
+    };
+  }, []);
 
   const parseWeightToGrams = (weightInput: any) => {
     if (!weightInput || weightInput.trim() === "") return 0;
@@ -357,30 +382,109 @@ export default function BarcodeGenerator() {
     });
   };
 
-  const checkPrinterConnection = async () => {
+  // Fetch available printers from API
+  const fetchPrinters = async () => {
+    console.log('🖨️ fetchPrinters called');
+    
+    // Cancel any existing printer request
+    if (printerRequestRef.current) {
+      printerRequestRef.current.cancel('New printer request started');
+    }
+    
+    setIsLoadingPrinters(true);
     try {
-      const browserPrint = new ZebraBrowserPrintWrapper();
-      console.log("🚀 ~ checkPrinterConnection ~ browserPrint:", browserPrint)
-      const isConnected = await browserPrint.getDefaultPrinter();
-      console.log("🚀 ~ checkPrinterConnection ~ isConnected:", isConnected)
-      if (isConnected) {
-        console.log("Printer connected successfully");
-        return browserPrint;
+      // Create new cancel token
+      const cancelToken = axios.CancelToken.source();
+      printerRequestRef.current = cancelToken;
+      
+      console.log('🖨️ Making API call to /barcode-generator/printers');
+      const response = await apiClient.get('/barcode-generator/printers', {
+        cancelToken: cancelToken.token,
+        timeout: 10000 // 10 second timeout
+      });
+      
+      console.log('🖨️ API response:', response.data);
+      setAvailablePrinters(response.data.data || []);
+      
+      // Auto-select default printer if available
+      const defaultPrinter = response.data.data?.find((p: any) => p.isDefault);
+      if (defaultPrinter) {
+        setSelectedPrinter(defaultPrinter.name);
       }
-      return null;
-    } catch (error) {
-      console.error("Printer connection failed:", error);
+    } catch (error: any) {
+      if (error.name === 'CanceledError' || error.code === 'ERR_CANCELED') {
+        console.log('Printer request was cancelled');
+        return;
+      }
+      
+      console.error("Failed to fetch printers:", error);
       toast({
         variant: "destructive",
-        title: "Printer Connection Error",
-        description: "Please ensure:\n1. Zebra Browser Print is installed\n2. The service is running\n3. Your printer is connected and powered on",
+        title: "Failed to load printers",
+        description: "Could not fetch printer list from server",
       });
-      return null;
+    } finally {
+      setIsLoadingPrinters(false);
+      printerRequestRef.current = null;
+    }
+  };
+
+  // Test printer connection
+  const testPrinterConnection = async (printerName: string) => {
+    try {
+      const requestData = { printerName };
+      console.log('Sending test printer request:', JSON.stringify(requestData, null, 2));
+      
+      const response = await apiClient.post('/barcode-generator/test-printer', requestData);
+      
+      if (response.data.success) {
+        toast({
+          title: "Printer Test Successful",
+          description: `Printer "${printerName}" is ready`,
+        });
+        return true;
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Printer Test Failed",
+          description: response.data.message,
+        });
+        return false;
+      }
+    } catch (error: any) {
+      console.error("Printer test failed:", error);
+      console.error("Error response:", error.response?.data);
+      
+      let errorMessage = "Failed to test printer connection";
+      
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response?.data?.errors) {
+        errorMessage = error.response.data.errors.map((err: any) => err.message).join(', ');
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
+      toast({
+        variant: "destructive",
+        title: "Printer Test Error",
+        description: errorMessage,
+      });
+      return false;
     }
   };
 
   const handlePrintAll = async () => {
     if (selectedProducts.length === 0) return;
+
+    if (!selectedPrinter) {
+      toast({
+        variant: "destructive",
+        title: "No Printer Selected",
+        description: "Please select a printer before printing.",
+      });
+      return;
+    }
 
     const invalidProducts = selectedProducts.filter(
       (item) => !item.netWeight.trim() || !item.packageDate || !item.expiryDate
@@ -395,81 +499,67 @@ export default function BarcodeGenerator() {
       return;
     }
 
+    setIsPrinting(true);
     try {
-      // Check printer connection first
-      const browserPrint = await checkPrinterConnection();
-      if (!browserPrint) {
-        return;
-      }
+      // Prepare products data for API
+      const productsData = selectedProducts.map((item) => ({
+        id: item.product.id,
+        name: item.product.name,
+        sku: item.product.sku,
+        code: item.product.code,
+        sales_rate_exc_dis_and_tax: item.product.sales_rate_exc_dis_and_tax,
+        netWeight: item.netWeight,
+        packageDate: item.packageDate.toISOString(),
+        expiryDate: item.expiryDate?.toISOString(),
+      }));
 
-      // Select default printer
-      const defaultPrinter = await browserPrint.getDefaultPrinter();
+      // Send print request to API
+      const requestData = {
+        products: productsData,
+        printerName: selectedPrinter,
+        settings: {
+          copies: 1,
+          paperSize: "50x30mm"
+        }
+      };
       
-      // Set the printer
-      browserPrint.setPrinter(defaultPrinter);
+      console.log('Sending print request:', JSON.stringify(requestData, null, 2));
+      
+      const response = await apiClient.post('/barcode-generator/print', requestData);
 
-      // Check printer status
-      const printerStatus = await browserPrint.checkPrinterStatus();
-
-      if (!printerStatus.isReadyToPrint) {
-        toast({
-          variant: "destructive",
-          title: "Printer Error",
-          description: `Printer is not ready: ${Array.isArray(printerStatus.errors) ? printerStatus.errors.join(", ") : printerStatus.errors}`,
-        });
-        return;
-      }
-
-    // Prepare ZPL commands for all labels
-    let allZplCommands = "";
-
-    selectedProducts.forEach((item) => {
-      const name = (item.product.name || "").toUpperCase();
-      const weight = formatWeightDisplay(item.netWeight);
-      const price = Math.round(
-        Number(
-          calculatePriceByWeight(
-            item.netWeight,
-            item.product.sales_rate_exc_dis_and_tax
-          )
-        )
-      );
-      const pkg = formatDate(item.packageDate);
-      const exp = formatDate(item.expiryDate);
-      const barcodeValue = `${
-        item.product.sku || item.product.code || "PROD"
-      }-${price}`;
-
-      // Generate ZPL commands for this label
-      const zpl = `^XA
-^CF0,30
-^FO50,50^FB400,2,0,C^FD${name}^FS
-^FO50,120^FD${weight}^FS
-^FO250,120^FDRs ${price}^FS
-^BY3,2,100
-^FO50,150^BC^FD${barcodeValue}^FS
-^FO50,280^FDPkg: ${pkg}^FS
-^FO250,280^FDExp: ${exp}^FS
-^XZ`;
-
-      allZplCommands += zpl;
-    });
-
-      // Print all labels using Zebra printer
-      await browserPrint.print(allZplCommands);
-
+      if (response.data.success) {
       toast({
         title: "Print Success",
-        description: `Successfully sent ${selectedProducts.length} labels to printer.`,
-      });
-    } catch (error) {
+          description: response.data.message,
+        });
+      } else {
+        toast({
+          variant: "destructive",
+          title: "Print Failed",
+          description: response.data.message,
+        });
+      }
+    } catch (error: any) {
       console.error('Printing error:', error);
-      const errorMessage = error instanceof Error ? error.message : "Failed to print labels. Please check printer connection.";
+      console.error('Error response:', error.response?.data);
+      
+      let errorMessage = "Failed to print labels. Please check printer connection.";
+      
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message;
+      } else if (error.response?.data?.errors) {
+        errorMessage = error.response.data.errors.map((err: any) => err.message).join(', ');
+      } else if (error.message) {
+        errorMessage = error.message;
+      }
+      
       toast({
         variant: "destructive",
         title: "Print Error",
         description: errorMessage,
       });
+    } finally {
+      setIsPrinting(false);
     }
   };
 
@@ -554,6 +644,82 @@ export default function BarcodeGenerator() {
               </div>
             </div>
 
+            {/* Printer Selection */}
+            <div className="space-y-2 border-t pt-4">
+              <Label>Select Printer</Label>
+              <div className="flex gap-2">
+                <Select
+                  onValueChange={setSelectedPrinter}
+                  value={selectedPrinter}
+                  disabled={isLoadingPrinters}
+                >
+                  <SelectTrigger className="flex-1">
+                    <SelectValue placeholder={isLoadingPrinters ? "Loading printers..." : "Choose a printer"} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {availablePrinters.map((printer) => (
+                      <SelectItem key={printer.name} value={printer.name}>
+                        <div className="flex items-center gap-2">
+                          <span>{printer.name}</span>
+                          {printer.isDefault && (
+                            <span className="text-xs bg-blue-100 text-blue-800 px-1 rounded">
+                              Default
+                            </span>
+                          )}
+                        </div>
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button
+                  onClick={() => fetchPrinters()}
+                  variant="outline"
+                  size="sm"
+                  disabled={isLoadingPrinters}
+                >
+                  {isLoadingPrinters ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RefreshCw className="h-4 w-4" />
+                  )}
+                </Button>
+                {selectedPrinter && (
+                  <Button
+                    onClick={() => testPrinterConnection(selectedPrinter)}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <Settings className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+              {isLoadingPrinters && (
+                <div className="text-xs text-gray-500 flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Loading printers...
+                </div>
+              )}
+              {availablePrinters.length === 0 && !isLoadingPrinters && (
+                <div className="text-xs text-gray-500 space-y-2">
+                  <div>No printers found. Click refresh to try again.</div>
+                  <Button
+                    onClick={() => {
+                      console.log('🧪 Testing API endpoint');
+                      fetch('http://localhost:7000/api/v1/barcode-generator/health')
+                        .then(res => res.json())
+                        .then(data => console.log('🧪 Health check:', data))
+                        .catch(err => console.error('🧪 Health check failed:', err));
+                    }}
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                  >
+                    Test API Connection
+                  </Button>
+                </div>
+              )}
+            </div>
+
             {/* Global Dates */}
             <div className="space-y-2 border-t pt-4">
               <Label>Global Expiry (Apply to All)</Label>
@@ -592,10 +758,14 @@ export default function BarcodeGenerator() {
               <Button
                 onClick={handlePrintAll}
                 className="w-full"
-                disabled={!isFormValid}
+                disabled={!isFormValid || isPrinting || !selectedPrinter}
               >
+                {isPrinting ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
                 <Printer className="h-4 w-4 mr-2" />
-                Print All Barcodes ({selectedProducts.length})
+                )}
+                {isPrinting ? "Printing..." : `Print All Barcodes (${selectedProducts.length})`}
               </Button>
               <Button
                 onClick={clearAll}
