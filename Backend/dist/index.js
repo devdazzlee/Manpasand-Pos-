@@ -38,13 +38,36 @@ const employee_route_1 = __importDefault(require("./routes/employee.route"));
 const salary_route_1 = __importDefault(require("./routes/salary.route"));
 const shift_route_1 = __importDefault(require("./routes/shift.route"));
 const shiftAssignment_routes_1 = __importDefault(require("./routes/shiftAssignment.routes"));
+const barcode_routes_1 = __importDefault(require("./routes/barcode.routes"));
 const node_cron_1 = __importDefault(require("node-cron"));
 const vAPI = process.env.vAPI || '/api/v1';
 const app = (0, express_1.default)();
 (0, db_1.connectDB)();
 (0, redis_1.connectRedis)();
 // Middleware
-app.use((0, cors_1.default)());
+// CORS configuration
+const allowedOrigins = [
+    'http://localhost:3000',
+    'http://localhost:3001',
+    'https://pos.radiantcortex.com',
+    process.env.FRONTEND_URL
+].filter(Boolean); // Remove undefined values
+app.use((0, cors_1.default)({
+    origin: (origin, callback) => {
+        // Allow requests with no origin (like mobile apps or curl requests)
+        if (!origin)
+            return callback(null, true);
+        if (allowedOrigins.includes(origin)) {
+            callback(null, true);
+        }
+        else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization']
+}));
 app.use((0, helmet_1.default)());
 app.use((0, morgan_1.default)('dev'));
 app.use(express_1.default.json());
@@ -71,6 +94,7 @@ app.use(`${vAPI}/employee`, employee_route_1.default);
 app.use(`${vAPI}/salaries`, salary_route_1.default);
 app.use(`${vAPI}/shifts`, shift_route_1.default);
 app.use(`${vAPI}/shift-assignment`, shiftAssignment_routes_1.default);
+app.use(`${vAPI}/barcode-generator`, barcode_routes_1.default);
 // App Routes
 app.use(`${vAPI}/customer/app`, app_routes_1.default);
 app.use(`${vAPI}/customer`, customer_routes_1.default);

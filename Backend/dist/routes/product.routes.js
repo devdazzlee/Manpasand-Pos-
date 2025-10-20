@@ -14,8 +14,7 @@ const uploadBulk_1 = __importDefault(require("../utils/uploadBulk"));
 const router = express_1.default.Router();
 router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
 router.post('/', multer_1.default.array('images', 10), parse_formdata_middleware_1.parseFormData, (0, validation_middleware_1.validate)(product_validation_1.createProductSchema), product_controller_1.createProduct);
-router.post('/bulk-upload', uploadBulk_1.default.single('file'), // Accept a single file with field name 'file'
-product_controller_1.bulkUploadProducts);
+router.post('/bulk-upload', uploadBulk_1.default.single('file'), product_controller_1.bulkUploadProducts);
 router.get('/', (0, validation_middleware_1.validate)(product_validation_1.listProductsSchema), product_controller_1.listProducts);
 router.get('/featured', product_controller_1.getFeaturedProducts);
 router.get('/best-selling', product_controller_1.getBestSellingProducts);
