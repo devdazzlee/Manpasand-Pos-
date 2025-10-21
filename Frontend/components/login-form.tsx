@@ -26,7 +26,7 @@ interface LoginResponse {
 }
 
 interface LoginFormProps {
-  onLogin: (token: string, branch: string, user: { email: string; role: string }) => void
+  onLogin: (token: string, branch: string, user: { email: string; role: string; branch_id: string | null }) => void
 }
 
 export function LoginForm({ onLogin }: LoginFormProps) {
@@ -39,16 +39,20 @@ export function LoginForm({ onLogin }: LoginFormProps) {
 
     const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
+    e.stopPropagation()
+    
     setError("")
     setIsLoading(true)
+    
     try {
       const response = await loginRequest(username, password) as LoginResponse
       const { token, branch, user } = response.data
       toast({ variant: "success", title: "Login successful" })
       onLogin(token, branch, user)
     } catch (err: any) {
-      setError(err.message)
-      toast({ variant: "destructive", title: "Login failed", description: err.message })
+      const errorMessage = err?.message || "Login failed. Please try again."
+      setError(errorMessage)
+      toast({ variant: "destructive", title: "Login failed", description: errorMessage })
     } finally {
       setIsLoading(false)
     }

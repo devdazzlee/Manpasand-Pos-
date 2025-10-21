@@ -60,10 +60,10 @@ export function Audit() {
   }
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold">Audit Trail</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Audit Trail</h1>
           <p className="text-gray-600">System activity logs and security monitoring</p>
         </div>
         <Button>

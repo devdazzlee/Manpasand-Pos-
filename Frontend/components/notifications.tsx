@@ -236,18 +236,20 @@ export function Notifications() {
   };
 
   const renderNotificationsTable = (filteredNotifications: Notification[]) => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Type</TableHead>
-          <TableHead>Title</TableHead>
-          <TableHead>Message</TableHead>
-          <TableHead>Priority</TableHead>
-          <TableHead>Time</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Actions</TableHead>
-        </TableRow>
-      </TableHeader>
+    <div className="overflow-x-auto -mx-4 md:mx-0">
+      <div className="inline-block min-w-full align-middle">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="min-w-[80px]">Type</TableHead>
+              <TableHead className="min-w-[150px]">Title</TableHead>
+              <TableHead className="min-w-[250px]">Message</TableHead>
+              <TableHead className="min-w-[100px]">Priority</TableHead>
+              <TableHead className="min-w-[150px]">Time</TableHead>
+              <TableHead className="min-w-[100px]">Status</TableHead>
+              <TableHead className="min-w-[150px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
       <TableBody>
         {filteredNotifications.length === 0 ? (
           <TableRow>
@@ -287,14 +289,16 @@ export function Notifications() {
         )}
       </TableBody>
     </Table>
+      </div>
+    </div>
   )
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Notifications</h1>
-          <p className="text-gray-600">System notifications and alerts management</p>
+          <h1 className="text-2xl md:text-3xl font-bold">Notifications</h1>
+          <p className="text-sm md:text-base text-gray-600">System notifications and alerts management</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={markAllAsRead} disabled={unreadCount === 0}>

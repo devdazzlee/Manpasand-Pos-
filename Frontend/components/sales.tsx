@@ -227,7 +227,7 @@
 
     if (isInitialLoading) {
       return (
-        <div className="p-6 space-y-6">
+        <div className="p-4 md:p-6 space-y-4 md:space-y-6">
           <div className="flex items-center justify-center py-20">
             <div className="text-center">
               <Loader2 className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" />
@@ -239,11 +239,11 @@
     }
 
     return (
-      <div className="p-6 space-y-6">
+      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
         {/* Header + Add Sale */}
         <div className="flex items-center justify-between">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Sales</h1>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Sales</h1>
             <p className="text-gray-600">Create & view sales</p>
           </div>
           <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>

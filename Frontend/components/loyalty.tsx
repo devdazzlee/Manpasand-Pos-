@@ -288,10 +288,10 @@ export function Loyalty() {
   )
 
   return (
-    <div className="p-6 space-y-6">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       <div className="flex justify-between items-center">
         <div>
-          <h1 className="text-3xl font-bold">Loyalty Program</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Loyalty Program</h1>
           <p className="text-gray-600">Manage customer loyalty and rewards</p>
         </div>
         <Dialog open={isAddMemberOpen} onOpenChange={setIsAddMemberOpen}>

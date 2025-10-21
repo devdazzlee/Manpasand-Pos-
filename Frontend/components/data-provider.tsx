@@ -37,7 +37,8 @@ export function DataProvider({ children }: DataProviderProps) {
     }
 
     initializeData()
-  }, [fetchProducts, fetchCategories, fetchCustomers, toast])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   return <>{children}</>
 } 

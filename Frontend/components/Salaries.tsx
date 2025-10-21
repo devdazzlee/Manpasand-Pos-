@@ -174,12 +174,12 @@ export function Salaries() {
         .reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
 
     return (
-        <div className="p-6 space-y-6">
+        <div className="p-4 md:p-6 space-y-4 md:space-y-6">
             {/* Header & Add Dialog */}
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-bold text-gray-900">Salary Management</h1>
-                    <p className="text-gray-600">Manage employee salary records</p>
+                    <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Salary Management</h1>
+                    <p className="text-sm md:text-base text-gray-600">Manage employee salary records</p>
                 </div>
                 <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
                     <DialogTrigger asChild>
@@ -298,7 +298,7 @@ export function Salaries() {
             </div>
 
             {/* Stats Cards */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
                 <Card>
                     <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                         <CardTitle className="text-sm font-medium">Total Salaries</CardTitle>
@@ -347,19 +347,21 @@ export function Salaries() {
                             <p className="text-gray-600">No salaries found</p>
                         </div>
                     ) : (
-                        <Table>
-                            <TableHeader>
-                                <TableRow>
-                                    <TableHead>Employee</TableHead>
-                                    <TableHead>Month</TableHead>
-                                    <TableHead>Year</TableHead>
-                                    <TableHead>Amount</TableHead>
-                                    <TableHead>Status</TableHead>
-                                    <TableHead>Paid Date</TableHead>
-                                    <TableHead>Notes</TableHead>
-                                    <TableHead>Actions</TableHead>
-                                </TableRow>
-                            </TableHeader>
+                        <div className="overflow-x-auto -mx-4 md:mx-0">
+                            <div className="inline-block min-w-full align-middle">
+                                <Table>
+                                    <TableHeader>
+                                        <TableRow>
+                                            <TableHead className="min-w-[150px]">Employee</TableHead>
+                                            <TableHead className="min-w-[100px]">Month</TableHead>
+                                            <TableHead className="min-w-[80px]">Year</TableHead>
+                                            <TableHead className="min-w-[100px]">Amount</TableHead>
+                                            <TableHead className="min-w-[100px]">Status</TableHead>
+                                            <TableHead className="min-w-[120px]">Paid Date</TableHead>
+                                            <TableHead className="min-w-[150px]">Notes</TableHead>
+                                            <TableHead className="min-w-[120px]">Actions</TableHead>
+                                        </TableRow>
+                                    </TableHeader>
                             <TableBody>
                                 {salaries.map(sal => (
                                     <TableRow key={sal.id}>
@@ -404,6 +406,8 @@ export function Salaries() {
                                 ))}
                             </TableBody>
                         </Table>
+                            </div>
+                        </div>
                     )}
                 </CardContent>
             </Card>

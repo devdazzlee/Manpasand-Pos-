@@ -1087,13 +1087,13 @@ export default function Inventory() {
 
   return (
     <div className="min-h-screen bg-gray-50">
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-between">
+      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
           <div>
-            <h1 className="text-3xl font-bold text-gray-900">Product Management</h1>
-            <p className="text-gray-600">Manage your products and inventory</p>
+            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Product Management</h1>
+            <p className="text-sm md:text-base text-gray-600">Manage your products and inventory</p>
             {globalLoading && (
-              <p className="text-sm text-blue-600 mt-1">Loading data from cache...</p>
+              <p className="text-xs md:text-sm text-blue-600 mt-1">Loading data from cache...</p>
             )}
           </div>
           <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
@@ -1132,7 +1132,7 @@ export default function Inventory() {
         </div>
 
         {/* Stats Cards */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
           <Card>
             <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
               <CardTitle className="text-sm font-medium">Total Products</CardTitle>
@@ -1163,8 +1163,8 @@ export default function Inventory() {
         </div>
 
         {/* Filters */}
-        <div className="flex items-center space-x-4">
-          <div className="relative flex-1 max-w-md">
+        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
+          <div className="relative flex-1 sm:max-w-md">
             <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
             <Input
               placeholder="Search products..."
@@ -1174,7 +1174,7 @@ export default function Inventory() {
             />
           </div>
           <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="All Categories" />
             </SelectTrigger>
             <SelectContent>
@@ -1187,7 +1187,7 @@ export default function Inventory() {
             </SelectContent>
           </Select>
           <Select value={selectedSubcategory} onValueChange={setSelectedSubcategory}>
-            <SelectTrigger className="w-48">
+            <SelectTrigger className="w-full sm:w-48">
               <SelectValue placeholder="All Subcategories" />
             </SelectTrigger>
             <SelectContent>
@@ -1225,20 +1225,22 @@ export default function Inventory() {
               </div>
             ) : (
               <>
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Name</TableHead>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Unit</TableHead>
-                      <TableHead>Stock</TableHead>
-                      <TableHead>Purchase Rate</TableHead>
-                      <TableHead>Sales Rate</TableHead>
-                      <TableHead>Status</TableHead>
-                      <TableHead>Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
+                <div className="overflow-x-auto -mx-4 md:mx-0">
+                  <div className="inline-block min-w-full align-middle">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="min-w-[150px]">Name</TableHead>
+                          <TableHead className="min-w-[120px]">SKU</TableHead>
+                          <TableHead className="min-w-[120px]">Category</TableHead>
+                          <TableHead className="min-w-[100px]">Unit</TableHead>
+                          <TableHead className="min-w-[100px]">Stock</TableHead>
+                          <TableHead className="min-w-[120px]">Purchase Rate</TableHead>
+                          <TableHead className="min-w-[120px]">Sales Rate</TableHead>
+                          <TableHead className="min-w-[100px]">Status</TableHead>
+                          <TableHead className="min-w-[150px]">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
                   <TableBody>
                     {products.map((product) => (
                       <TableRow key={product.id}>
@@ -1299,6 +1301,8 @@ export default function Inventory() {
                     ))}
                   </TableBody>
                 </Table>
+                  </div>
+                </div>
                 {/* Pagination */}
                 {(totalPages > 1 || pageSize === 0) && (
                   <div className="flex flex-col md:flex-row md:items-center md:justify-between mt-4 space-y-2 md:space-y-0">

@@ -13,6 +13,13 @@ export async function initializeOfflineMode() {
   try {
     console.log('🔄 Initializing offline mode...');
 
+    // Only initialize if user is logged in
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (!token) {
+      console.log('⏭️ Skipping offline mode initialization (not logged in)');
+      return true;
+    }
+
     // Check if we have data in offline storage
     const stats = await offlineDB.getStats();
     console.log('📊 Offline storage stats:', stats);
@@ -42,11 +49,15 @@ export async function initializeOfflineMode() {
 
 async function fetchInitialData() {
   try {
-    const API_BASE = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:5000/api/v1';
+    // Import API_BASE from constants instead of using env variable
+    const API_BASE = 'https://manpasand-pos-beta.vercel.app/api/v1';
+    const token = localStorage.getItem('token');
 
     // Fetch products
     try {
-      const productsRes = await fetch(`${API_BASE}/products`);
+      const productsRes = await fetch(`${API_BASE}/products`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
       if (productsRes.ok) {
         const productsData = await productsRes.json();
         if (productsData.data) {
@@ -60,7 +71,9 @@ async function fetchInitialData() {
 
     // Fetch customers
     try {
-      const customersRes = await fetch(`${API_BASE}/customers`);
+      const customersRes = await fetch(`${API_BASE}/customer`, {
+        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
+      });
       if (customersRes.ok) {
         const customersData = await customersRes.json();
         if (customersData.data) {

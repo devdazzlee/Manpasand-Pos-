@@ -121,11 +121,11 @@ const Sizes: React.FC = () => {
   );
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Sizes</h1>
-          <p className="text-gray-600">Create & manage sizes</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Sizes</h1>
+          <p className="text-sm md:text-base text-gray-600">Create & manage sizes</p>
         </div>
         <Button onClick={openAdd}>
           <Plus className="h-4 w-4 mr-2" />
@@ -160,16 +160,18 @@ const Sizes: React.FC = () => {
               <p className="text-gray-600">No sizes found</p>
             </div>
           ) : (
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Code</TableHead>
-                  <TableHead>Name</TableHead>
-                  <TableHead>Products</TableHead>
-                  <TableHead>Created</TableHead>
-                  <TableHead>Actions</TableHead>
-                </TableRow>
-              </TableHeader>
+            <div className="overflow-x-auto -mx-4 md:mx-0">
+              <div className="inline-block min-w-full align-middle">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[100px]">Code</TableHead>
+                      <TableHead className="min-w-[150px]">Name</TableHead>
+                      <TableHead className="min-w-[100px]">Products</TableHead>
+                      <TableHead className="min-w-[120px]">Created</TableHead>
+                      <TableHead className="min-w-[120px]">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
               <TableBody>
                 {filtered.map(s => (
                   <TableRow key={s.id} className="hover:bg-gray-50">
@@ -185,6 +187,8 @@ const Sizes: React.FC = () => {
                 ))}
               </TableBody>
             </Table>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>

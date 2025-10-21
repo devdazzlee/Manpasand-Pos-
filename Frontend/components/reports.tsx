@@ -39,13 +39,13 @@ export function Reports() {
   ]
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold text-gray-900">Reports & Analytics</h1>
-          <p className="text-gray-600">Comprehensive business insights and performance metrics</p>
+          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Reports & Analytics</h1>
+          <p className="text-sm md:text-base text-gray-600">Comprehensive business insights and performance metrics</p>
         </div>
-        <div className="flex space-x-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <Button variant="outline">
             <Calendar className="h-4 w-4 mr-2" />
             Date Range
@@ -58,7 +58,7 @@ export function Reports() {
       </div>
 
       {/* Key Metrics */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
@@ -117,22 +117,24 @@ export function Reports() {
         </Card>
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* Daily Sales Report */}
         <Card>
           <CardHeader>
             <CardTitle>Daily Sales Report</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Sales</TableHead>
-                  <TableHead>Orders</TableHead>
-                  <TableHead>Customers</TableHead>
-                </TableRow>
-              </TableHeader>
+            <div className="overflow-x-auto -mx-4 md:mx-0">
+              <div className="inline-block min-w-full align-middle">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[120px]">Date</TableHead>
+                      <TableHead className="min-w-[100px]">Sales</TableHead>
+                      <TableHead className="min-w-[100px]">Orders</TableHead>
+                      <TableHead className="min-w-[120px]">Customers</TableHead>
+                    </TableRow>
+                  </TableHeader>
               <TableBody>
                 {dailySales.map((day) => (
                   <TableRow key={day.date}>
@@ -144,6 +146,8 @@ export function Reports() {
                 ))}
               </TableBody>
             </Table>
+              </div>
+            </div>
           </CardContent>
         </Card>
 
@@ -216,15 +220,17 @@ export function Reports() {
             <CardTitle>Employee Performance</CardTitle>
           </CardHeader>
           <CardContent>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Sales</TableHead>
-                  <TableHead>Orders</TableHead>
-                  <TableHead>Avg Order</TableHead>
-                </TableRow>
-              </TableHeader>
+            <div className="overflow-x-auto -mx-4 md:mx-0">
+              <div className="inline-block min-w-full align-middle">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="min-w-[150px]">Employee</TableHead>
+                      <TableHead className="min-w-[100px]">Sales</TableHead>
+                      <TableHead className="min-w-[100px]">Orders</TableHead>
+                      <TableHead className="min-w-[100px]">Avg Order</TableHead>
+                    </TableRow>
+                  </TableHeader>
               <TableBody>
                 {employeePerformance.map((employee, index) => (
                   <TableRow key={index}>
@@ -236,6 +242,8 @@ export function Reports() {
                 ))}
               </TableBody>
             </Table>
+              </div>
+            </div>
           </CardContent>
         </Card>
       </div>

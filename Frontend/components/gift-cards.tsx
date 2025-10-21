@@ -601,20 +601,22 @@ export function GiftCards() {
   }
 
   const renderCardsTable = (cardsData: GiftCard[]) => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Card ID</TableHead>
-          <TableHead>Code</TableHead>
-          <TableHead>Customer</TableHead>
-          <TableHead>Original Value</TableHead>
-          <TableHead>Current Balance</TableHead>
-          <TableHead>Issue Date</TableHead>
-          <TableHead>Expiry Date</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Actions</TableHead>
-        </TableRow>
-      </TableHeader>
+    <div className="overflow-x-auto -mx-4 md:mx-0">
+      <div className="inline-block min-w-full align-middle">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="min-w-[100px]">Card ID</TableHead>
+              <TableHead className="min-w-[130px]">Code</TableHead>
+              <TableHead className="min-w-[150px]">Customer</TableHead>
+              <TableHead className="min-w-[120px]">Original Value</TableHead>
+              <TableHead className="min-w-[130px]">Current Balance</TableHead>
+              <TableHead className="min-w-[120px]">Issue Date</TableHead>
+              <TableHead className="min-w-[120px]">Expiry Date</TableHead>
+              <TableHead className="min-w-[100px]">Status</TableHead>
+              <TableHead className="min-w-[150px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
       <TableBody>
         {cardsData.length === 0 ? (
           <TableRow>
@@ -662,16 +664,18 @@ export function GiftCards() {
         )}
       </TableBody>
     </Table>
+      </div>
+    </div>
   )
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Gift Cards</h1>
-          <p className="text-gray-600">Manage gift card issuance and transactions</p>
+          <h1 className="text-2xl md:text-3xl font-bold">Gift Cards</h1>
+          <p className="text-sm md:text-base text-gray-600">Manage gift card issuance and transactions</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-col sm:flex-row gap-2">
           <Dialog open={isReloadOpen} onOpenChange={setIsReloadOpen}>
             <DialogTrigger asChild>
               <Button variant="outline">

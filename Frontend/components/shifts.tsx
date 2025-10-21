@@ -341,18 +341,20 @@ export function Shifts() {
   const todayLaborCost = todayShifts.reduce((sum, shift) => sum + shift.totalHours * shift.hourlyRate, 0)
 
   const ShiftTable = ({ shiftData }: { shiftData: Shift[] }) => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Shift ID</TableHead>
-          <TableHead>Employee</TableHead>
-          <TableHead>Date</TableHead>
-          <TableHead>Start Time</TableHead>
-          <TableHead>End Time</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Actions</TableHead>
-        </TableRow>
-      </TableHeader>
+    <div className="overflow-x-auto -mx-4 md:mx-0">
+      <div className="inline-block min-w-full align-middle">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="min-w-[120px]">Shift ID</TableHead>
+              <TableHead className="min-w-[150px]">Employee</TableHead>
+              <TableHead className="min-w-[120px]">Date</TableHead>
+              <TableHead className="min-w-[100px]">Start Time</TableHead>
+              <TableHead className="min-w-[100px]">End Time</TableHead>
+              <TableHead className="min-w-[120px]">Status</TableHead>
+              <TableHead className="min-w-[150px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
       <TableBody>
         {shiftData.map((shift) => (
           <TableRow key={shift.id}>
@@ -393,14 +395,16 @@ export function Shifts() {
         ))}
       </TableBody>
     </Table>
+      </div>
+    </div>
   )
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Shift Management</h1>
-          <p className="text-gray-600">Manage employee shifts and time tracking</p>
+          <h1 className="text-2xl md:text-3xl font-bold">Shift Management</h1>
+          <p className="text-sm md:text-base text-gray-600">Manage employee shifts and time tracking</p>
         </div>
 
         {/* Create Shift Dialog */}

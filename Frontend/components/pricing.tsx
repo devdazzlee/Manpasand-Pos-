@@ -149,11 +149,11 @@ export function Pricing() {
   )
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Pricing & Margins</h1>
-          <p className="text-gray-600">Manage pricing strategies and profit margins</p>
+          <h1 className="text-2xl md:text-3xl font-bold">Pricing & Margins</h1>
+          <p className="text-sm md:text-base text-gray-600">Manage pricing strategies and profit margins</p>
         </div>
         <Dialog open={isCreateRuleOpen} onOpenChange={setIsCreateRuleOpen}>
           <DialogTrigger asChild>
@@ -297,7 +297,7 @@ export function Pricing() {
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Average Margin</CardTitle>
@@ -366,19 +366,21 @@ export function Pricing() {
                   />
                 </div>
               </div>
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead>Rule ID</TableHead>
-                    <TableHead>Name</TableHead>
-                    <TableHead>Category</TableHead>
-                    <TableHead>Type</TableHead>
-                    <TableHead>Value</TableHead>
-                    <TableHead>Products</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
+              <div className="overflow-x-auto -mx-4 md:mx-0">
+                <div className="inline-block min-w-full align-middle">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[100px]">Rule ID</TableHead>
+                        <TableHead className="min-w-[180px]">Name</TableHead>
+                        <TableHead className="min-w-[120px]">Category</TableHead>
+                        <TableHead className="min-w-[150px]">Type</TableHead>
+                        <TableHead className="min-w-[80px]">Value</TableHead>
+                        <TableHead className="min-w-[100px]">Products</TableHead>
+                        <TableHead className="min-w-[100px]">Status</TableHead>
+                        <TableHead className="min-w-[150px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
                 <TableBody>
                   {filteredRules.map((rule) => (
                     <TableRow key={rule.id}>
@@ -414,7 +416,9 @@ export function Pricing() {
                     </TableRow>
                   ))}
                 </TableBody>
-              </Table>
+                  </Table>
+                </div>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
@@ -478,17 +482,19 @@ export function Pricing() {
             </CardHeader>
             <CardContent>
               <div className="space-y-4">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead>Date</TableHead>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Old Price</TableHead>
-                      <TableHead>New Price</TableHead>
-                      <TableHead>Change</TableHead>
-                      <TableHead>Reason</TableHead>
-                    </TableRow>
-                  </TableHeader>
+                <div className="overflow-x-auto -mx-4 md:mx-0">
+                  <div className="inline-block min-w-full align-middle">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="min-w-[120px]">Date</TableHead>
+                          <TableHead className="min-w-[180px]">Product</TableHead>
+                          <TableHead className="min-w-[100px]">Old Price</TableHead>
+                          <TableHead className="min-w-[100px]">New Price</TableHead>
+                          <TableHead className="min-w-[100px]">Change</TableHead>
+                          <TableHead className="min-w-[200px]">Reason</TableHead>
+                        </TableRow>
+                      </TableHeader>
                   <TableBody>
                     <TableRow>
                       <TableCell>2024-01-15</TableCell>
@@ -507,7 +513,9 @@ export function Pricing() {
                       <TableCell>Markup rule applied</TableCell>
                     </TableRow>
                   </TableBody>
-                </Table>
+                    </Table>
+                  </div>
+                </div>
               </div>
             </CardContent>
           </Card>

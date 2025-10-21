@@ -319,18 +319,20 @@ export function Returns() {
   }
 
   const renderReturnsTable = (returnsData: ReturnItem[]) => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Sale ID</TableHead>
-          <TableHead>Customer</TableHead>
-          <TableHead>Date</TableHead>
-          <TableHead>Amount</TableHead>
-          <TableHead>Payment Method</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Actions</TableHead>
-        </TableRow>
-      </TableHeader>
+    <div className="overflow-x-auto -mx-4 md:mx-0">
+      <div className="inline-block min-w-full align-middle">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="min-w-[120px]">Sale ID</TableHead>
+              <TableHead className="min-w-[150px]">Customer</TableHead>
+              <TableHead className="min-w-[120px]">Date</TableHead>
+              <TableHead className="min-w-[100px]">Amount</TableHead>
+              <TableHead className="min-w-[130px]">Payment Method</TableHead>
+              <TableHead className="min-w-[100px]">Status</TableHead>
+              <TableHead className="min-w-[100px]">Actions</TableHead>
+            </TableRow>
+          </TableHeader>
       <TableBody>
         {returnsData.length === 0 ? (
           <TableRow>
@@ -361,14 +363,16 @@ export function Returns() {
         )}
       </TableBody>
     </Table>
+      </div>
+    </div>
   )
 
   return (
-    <div className="p-6 space-y-6">
-      <div className="flex justify-between items-center">
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-3xl font-bold">Returns & Refunds</h1>
-          <p className="text-gray-600">Process customer returns and refunds</p>
+          <h1 className="text-2xl md:text-3xl font-bold">Returns & Refunds</h1>
+          <p className="text-sm md:text-base text-gray-600">Process customer returns and refunds</p>
         </div>
         <Dialog open={isProcessOpen} onOpenChange={setIsProcessOpen}>
           <DialogTrigger asChild>
@@ -503,7 +507,7 @@ export function Returns() {
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
             <CardTitle className="text-sm font-medium">Today's Returns</CardTitle>

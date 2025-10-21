@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { DashboardHome } from "@/components/dashboard-home";
+import { Button } from "@/components/ui/button";
+import { Menu } from "lucide-react";
 
 import { Customers } from "@/components/customers";
 import { Reports } from "@/components/reports";
@@ -50,6 +52,7 @@ interface DashboardProps {
 
 export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("dashboard");
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -136,8 +139,23 @@ export function Dashboard({ onLogout }: DashboardProps) {
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onLogout={onLogout}
+        isOpen={sidebarOpen}
+        onClose={() => setSidebarOpen(false)}
       />
-      <main className="flex-1 overflow-auto">{renderContent()}</main>
+      
+      {/* Mobile Menu Button */}
+      <div className="lg:hidden fixed top-4 left-4 z-30">
+        <Button
+          variant="default"
+          size="sm"
+          onClick={() => setSidebarOpen(true)}
+          className="bg-blue-600 hover:bg-blue-700 shadow-lg"
+        >
+          <Menu className="h-5 w-5" />
+        </Button>
+      </div>
+
+      <main className="flex-1 overflow-auto w-full pt-16 lg:pt-0">{renderContent()}</main>
     </div>
   );
 }

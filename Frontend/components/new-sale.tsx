@@ -1045,13 +1045,13 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
   };
 
   return (
-    <div className="flex h-screen">
+    <div className="flex flex-col lg:flex-row h-screen">
       {/* Products Section */}
-      <div className="flex-1 p-6 overflow-auto">
-        <div className="mb-6">
-          <div className="flex items-center justify-between mb-4">
+      <div className="flex-1 p-4 md:p-6 overflow-auto">
+        <div className="mb-4 md:mb-6">
+          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
             <div>
-              <h1 className="text-3xl font-bold text-gray-900">New Sales</h1>
+              <h1 className="text-2xl md:text-3xl font-bold text-gray-900">New Sales</h1>
               <p className="text-sm text-orange-600 font-medium">
                 ⚠️ TESTING MODE: Negative sales allowed
               </p>
@@ -1061,7 +1061,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 </p>
               )}
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="flex flex-wrap items-center gap-2">
               <LoadingButton
                 variant="outline"
                 size="icon"
@@ -1259,7 +1259,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
       </div>
 
       {/* Cart Section */}
-      <div className="w-[400px] bg-white border-l border-gray-200 flex flex-col">
+      <div className="w-full lg:w-[400px] bg-white lg:border-l border-gray-200 flex flex-col">
         <div className="p-4 border-b border-gray-200">
           <h2 className="text-xl font-bold text-gray-900">
             Cart ({cart.length} items •{" "}

@@ -28,6 +28,7 @@ import {
   ListOrdered,
   StoreIcon,
   Barcode,
+  X,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -49,6 +50,8 @@ interface SidebarProps {
   activeTab: string;
   setActiveTab: (tab: string) => void;
   onLogout: () => void;
+  isOpen?: boolean;
+  onClose?: () => void;
 }
 
 const menuSections: SidebarMenuSection[] = [
@@ -137,7 +140,7 @@ const menuSections: SidebarMenuSection[] = [
   },
 ];
 
-export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
+export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onClose }: SidebarProps) {
   const [expandedSections, setExpandedSections] = useState<string[]>([
     "sales",
     "barcode-generater",
@@ -189,9 +192,44 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
     );
   };
 
+  const handleMenuClick = (itemId: string) => {
+    setActiveTab(itemId);
+    // Close sidebar on mobile when item is clicked
+    if (onClose) {
+      onClose();
+    }
+  };
+
   return (
-    <div className="w-72 bg-white border-r border-gray-200 flex flex-col shadow-sm">
-      <div className="p-6 border-b border-gray-200">
+    <>
+      {/* Mobile Overlay */}
+      {isOpen && (
+        <div 
+          className="fixed inset-0 bg-black/50 z-40 lg:hidden"
+          onClick={onClose}
+        />
+      )}
+      
+      {/* Sidebar */}
+      <div className={`
+        fixed lg:static inset-y-0 left-0 z-50
+        w-72 bg-white border-r border-gray-200 flex flex-col shadow-sm
+        transform transition-transform duration-300 ease-in-out
+        ${isOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+      `}>
+        {/* Close button for mobile */}
+        <div className="lg:hidden absolute top-4 right-4 z-10">
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={onClose}
+            className="h-8 w-8 p-0"
+          >
+            <X className="h-5 w-5" />
+          </Button>
+        </div>
+
+        <div className="p-6 border-b border-gray-200">
         <div className="flex items-center space-x-3">
           <div className="bg-gradient-to-br from-blue-600 to-blue-700 p-2.5 rounded-xl shadow-lg">
             <Store className="h-6 w-6 text-white" />
@@ -236,7 +274,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
                                 ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
                                 : "text-gray-700 hover:bg-gray-100"
                             }`}
-                            onClick={() => setActiveTab(item.id)}
+                            onClick={() => handleMenuClick(item.id)}
                           >
                             <Icon className="h-4 w-4 mr-3" />
                             {item.label}
@@ -275,7 +313,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
                               ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
                               : "text-gray-700 hover:bg-gray-100"
                           }`}
-                          onClick={() => setActiveTab(item.id)}
+                          onClick={() => handleMenuClick(item.id)}
                         >
                           <Icon className="h-4 w-4 mr-3" />
                           {item.label}
@@ -314,5 +352,6 @@ export function Sidebar({ activeTab, setActiveTab, onLogout }: SidebarProps) {
         </Button>
       </div>
     </div>
+    </>
   );
 }
