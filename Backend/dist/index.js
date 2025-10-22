@@ -45,30 +45,20 @@ const app = (0, express_1.default)();
 (0, db_1.connectDB)();
 (0, redis_1.connectRedis)();
 // Middleware
-// CORS configuration
-const allowedOrigins = [
-    'http://localhost:3000',
-    'http://localhost:3001',
-    'https://pos.radiantcortex.com',
-    process.env.FRONTEND_URL
-].filter(Boolean); // Remove undefined values
 app.use((0, cors_1.default)({
-    origin: (origin, callback) => {
-        // Allow requests with no origin (like mobile apps or curl requests)
-        if (!origin)
-            return callback(null, true);
-        if (allowedOrigins.includes(origin)) {
-            callback(null, true);
-        }
-        else {
-            callback(new Error('Not allowed by CORS'));
-        }
-    },
+    origin: [
+        'https://pos.manpasandstore.com',
+        'http://localhost:3000',
+        'http://localhost:5173'
+    ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization']
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    exposedHeaders: ['Content-Range', 'X-Content-Range']
 }));
-app.use((0, helmet_1.default)());
+app.use((0, helmet_1.default)({
+    crossOriginResourcePolicy: { policy: "cross-origin" }
+}));
 app.use((0, morgan_1.default)('dev'));
 app.use(express_1.default.json());
 app.use(express_1.default.urlencoded({ extended: true }));
