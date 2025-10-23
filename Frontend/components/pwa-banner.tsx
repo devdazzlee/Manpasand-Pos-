@@ -19,7 +19,8 @@ export function PWABanner({ className }: PWABannerProps) {
 
   useEffect(() => {
     // Show banner if app is installable and not already installed
-    if (isInstallable && !isInstalled) {
+    // For iOS, always show the banner since it doesn't trigger beforeinstallprompt
+    if ((isInstallable && !isInstalled) || (isIOS && !isInstalled)) {
       // Delay showing the banner
       const timer = setTimeout(() => {
         setIsVisible(true);
@@ -27,11 +28,17 @@ export function PWABanner({ className }: PWABannerProps) {
 
       return () => clearTimeout(timer);
     }
-  }, [isInstallable, isInstalled]);
+  }, [isInstallable, isInstalled, isIOS]);
 
   const handleInstall = async () => {
     setIsInstalling(true);
     try {
+      // For iOS, we can't programmatically install, so just show instructions
+      if (isIOS) {
+        setIsInstalling(false);
+        return;
+      }
+      
       const success = await installApp();
       if (success) {
         setIsVisible(false);
@@ -113,7 +120,7 @@ export function PWABanner({ className }: PWABannerProps) {
               ) : (
                 <div className="flex items-center space-x-2">
                   <Download className="w-4 h-4" />
-                  <span>Install</span>
+                  <span>{isIOS ? 'Show Instructions' : 'Install'}</span>
                 </div>
               )}
             </Button>
@@ -132,10 +139,17 @@ export function PWABanner({ className }: PWABannerProps) {
         {/* iOS Instructions */}
         {isIOS && (
           <div className="mt-3 pt-3 border-t border-slate-700/50">
-            <p className="text-xs text-slate-400 text-center">
-              <Smartphone className="w-3 h-3 inline mr-1" />
-              On iOS: Tap Share → "Add to Home Screen" to install
-            </p>
+            <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg p-3">
+              <div className="flex items-center justify-center space-x-2 mb-2">
+                <Smartphone className="w-4 h-4 text-blue-400" />
+                <span className="text-sm font-semibold text-blue-300">iOS Installation</span>
+              </div>
+              <div className="text-xs text-blue-200 text-center space-y-1">
+                <p>1. Tap the <strong>Share</strong> button (□↑) at the bottom</p>
+                <p>2. Scroll down and tap <strong>"Add to Home Screen"</strong></p>
+                <p>3. Tap <strong>"Add"</strong> to install</p>
+              </div>
+            </div>
           </div>
         )}
       </div>

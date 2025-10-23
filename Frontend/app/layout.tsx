@@ -22,6 +22,11 @@ export const metadata: Metadata = {
     icon: '/icons/icon-192x192.png',
     apple: '/icons/icon-192x192.png',
   },
+  other: {
+    'apple-mobile-web-app-capable': 'yes',
+    'apple-mobile-web-app-status-bar-style': 'default',
+    'apple-mobile-web-app-title': 'MANPASAND POS',
+  },
 }
 
 export const viewport: Viewport = {

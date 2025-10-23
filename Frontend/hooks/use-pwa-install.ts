@@ -31,7 +31,7 @@ export function usePWAInstall() {
   useEffect(() => {
     // Check if app is already installed
     const isStandalone = window.matchMedia('(display-mode: standalone)').matches;
-    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+    const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) && !window.MSStream;
     const isInstalled = isStandalone || (window.navigator as any).standalone;
 
     setState(prev => ({
@@ -41,7 +41,7 @@ export function usePWAInstall() {
       isStandalone,
     }));
 
-    // Listen for the beforeinstallprompt event
+    // Listen for the beforeinstallprompt event (Android/Desktop only)
     const handleBeforeInstallPrompt = (e: Event) => {
       e.preventDefault();
       const deferredPrompt = e as BeforeInstallPromptEvent;
@@ -63,11 +63,16 @@ export function usePWAInstall() {
       }));
     };
 
-    window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    // Only add beforeinstallprompt listener for non-iOS devices
+    if (!isIOS) {
+      window.addEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+    }
     window.addEventListener('appinstalled', handleAppInstalled);
 
     return () => {
-      window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      if (!isIOS) {
+        window.removeEventListener('beforeinstallprompt', handleBeforeInstallPrompt);
+      }
       window.removeEventListener('appinstalled', handleAppInstalled);
     };
   }, []);

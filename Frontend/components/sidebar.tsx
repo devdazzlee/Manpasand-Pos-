@@ -3,7 +3,6 @@
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
-import { OfflineStatus } from "@/components/offline-status";
 import {
   Store,
   LayoutDashboard,
@@ -342,10 +341,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
         </div>
       </nav>
 
-      <div className="p-4 border-t border-gray-200 bg-gray-50 space-y-3">
-        {/* Offline Status Indicator */}
-        <OfflineStatus />
-        
+      <div className="p-4 border-t border-gray-200 bg-gray-50">
         <Button
           variant="ghost"
           className="w-full justify-start text-red-600 hover:bg-red-50 hover:text-red-700"
