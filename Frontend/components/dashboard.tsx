@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { DashboardHome } from "@/components/dashboard-home";
+import { OfflineProvider } from "@/components/offline-provider";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 
@@ -134,28 +135,30 @@ export function Dashboard({ onLogout }: DashboardProps) {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      <Sidebar
-        activeTab={activeTab}
-        setActiveTab={setActiveTab}
-        onLogout={onLogout}
-        isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-      />
-      
-      {/* Mobile Menu Button */}
-      <div className="lg:hidden fixed top-4 left-4 z-30">
-        <Button
-          variant="default"
-          size="sm"
-          onClick={() => setSidebarOpen(true)}
-          className="bg-blue-600 hover:bg-blue-700 shadow-lg"
-        >
-          <Menu className="h-5 w-5" />
-        </Button>
-      </div>
+    <OfflineProvider>
+      <div className="flex h-screen bg-gray-50">
+        <Sidebar
+          activeTab={activeTab}
+          setActiveTab={setActiveTab}
+          onLogout={onLogout}
+          isOpen={sidebarOpen}
+          onClose={() => setSidebarOpen(false)}
+        />
+        
+        {/* Mobile Menu Button */}
+        <div className="lg:hidden fixed top-4 left-4 z-30">
+          <Button
+            variant="default"
+            size="sm"
+            onClick={() => setSidebarOpen(true)}
+            className="bg-blue-600 hover:bg-blue-700 shadow-lg"
+          >
+            <Menu className="h-5 w-5" />
+          </Button>
+        </div>
 
-      <main className="flex-1 overflow-auto w-full pt-16 lg:pt-0">{renderContent()}</main>
-    </div>
+        <main className="flex-1 overflow-auto w-full pt-16 lg:pt-0">{renderContent()}</main>
+      </div>
+    </OfflineProvider>
   );
 }

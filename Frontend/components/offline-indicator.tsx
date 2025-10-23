@@ -6,6 +6,7 @@
 'use client';
 
 import { useOnlineStatus, useSync, useOfflineStats } from '@/hooks/use-offline';
+import { useIsMobile } from '@/hooks/use-mobile';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -25,6 +26,7 @@ export function OfflineIndicator() {
   const { sync, isSyncing } = useSync();
   const { stats, refresh } = useOfflineStats();
   const [showDetails, setShowDetails] = useState(false);
+  const isMobile = useIsMobile();
 
   const formatTime = (timestamp: number) => {
     if (!timestamp) return 'Never';
@@ -38,12 +40,12 @@ export function OfflineIndicator() {
   };
 
   return (
-    <div className="fixed bottom-4 right-4 z-50">
+    <div className={`fixed ${isMobile ? 'bottom-20 left-4' : 'bottom-6 left-4'} z-40`}>
       {/* Main Status Badge */}
       <Button
         variant={status.isOnline ? 'default' : 'destructive'}
         size="sm"
-        className="mb-2 shadow-lg"
+        className={`${isMobile ? 'mb-1' : 'mb-2'} shadow-lg`}
         onClick={() => setShowDetails(!showDetails)}
       >
         {status.isOnline ? (
@@ -71,7 +73,7 @@ export function OfflineIndicator() {
 
       {/* Detailed Status Card */}
       {showDetails && (
-        <Card className="w-80 shadow-2xl">
+        <Card className={`${isMobile ? 'w-72 mb-2' : 'w-80 mb-2'} shadow-2xl`}>
           <CardContent className="p-4 space-y-4">
             {/* Connection Status */}
             <div className="flex items-center justify-between">

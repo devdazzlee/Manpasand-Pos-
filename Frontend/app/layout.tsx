@@ -4,7 +4,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { Toaster } from "@/components/ui/toaster"
 import { DataProvider } from "@/components/data-provider"
-import { OfflineProvider } from "@/components/offline-provider"
+import { PWABanner } from "@/components/pwa-banner"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -29,7 +29,7 @@ export const viewport: Viewport = {
   initialScale: 1,
   maximumScale: 5,
   userScalable: true,
-  themeColor: '#ffffff',
+  themeColor: '#3b82f6',
 }
 
 export default function RootLayout({
@@ -41,10 +41,9 @@ export default function RootLayout({
     <html lang="en">
       <body className={inter.className}>
         <DataProvider>
-          <OfflineProvider>
-            {children}
-          </OfflineProvider>
+          {children}
         </DataProvider>
+        <PWABanner />
         <Toaster />
       </body>
     </html>
