@@ -1,8 +1,10 @@
-import { exec } from 'child_process';
+import { exec, execFile } from 'child_process';
 import { promisify } from 'util';
 import { logger } from '../utils/logger';
-import * as fs from 'fs';
-import * as path from 'path';
+import util from 'util';
+const execFileAsync = util.promisify(execFile);
+import { ThermalPrinter, PrinterTypes } from 'node-thermal-printer';
+const PrinterDriver = require('node-printer');
 
 const execAsync = promisify(exec);
 
@@ -17,407 +19,262 @@ interface Product {
   expiryDate: string;
 }
 
-interface PrintSettings {
-  paperSize?: string;
-  copies?: number;
+type PrintJobInput = {
+  printer: {
+    name: string;
+    languageHint?: 'escpos' | 'zpl' | 'generic';
+    columns?: { fontA: number; fontB: number };
+  };
+  job?: { copies?: number; cut?: boolean; openDrawer?: boolean };
+  receiptData: any;
+};
+
+interface PrinterInfo {
+  name: string;
+  id: string;
+  isDefault: boolean;
+  status: 'available' | 'offline' | 'unknown';
+  workOffline?: boolean;
+  printerStatus?: number;
+  serverName?: string | null;
+  shareName?: string | null;
+  port?: { name?: string | null; host?: string | null } | null;
+  driver?: { name?: string | null; version?: string | null; manufacturer?: string | null } | null;
+  defaults?: {
+    paperSize?: string | null;
+    pageWidthMM?: number | null;
+    pageHeightMM?: number | null;
+    orientation?: string | null;
+    dpi?: { x?: number | null; y?: number | null } | null;
+  } | null;
+  languageHint?: 'escpos' | 'zpl' | 'generic';
+  receiptProfile?: {
+    roll: '80mm' | '58mm';
+    printableWidthMM: number;
+    columns: { fontA: number; fontB: number };
+  };
 }
+
+function safeParseJson<T = any>(text: string): T | null {
+  try { return JSON.parse(text); } catch { return null; }
+}
+
+async function getPrintersViaCIM(): Promise<PrinterInfo[]> {
+  const ps = [
+    '-NoProfile',
+    '-Command',
+    `$p = Get-CimInstance Win32_Printer | Select-Object Name,Default,WorkOffline,PrinterStatus,DriverName,PortName,ServerName,ShareName;
+     $p | ConvertTo-Json -Compress -Depth 3`
+  ];
+  const { stdout } = await execFileAsync('powershell', ps, { timeout: 5000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+  const data = safeParseJson(stdout);
+  if (!data) return [];
+
+  const items = Array.isArray(data) ? data : [data];
+  return items.map((p: any) => ({
+    name: p.Name,
+    id: `${String(p.Name).toLowerCase().replace(/\s+/g, '-')}@${process.env.COMPUTERNAME || 'local'}`,
+    isDefault: !!p.Default,
+    status: p.WorkOffline ? 'offline' : ((p.PrinterStatus === 3 || p.PrinterStatus === 0 || p.PrinterStatus == null) ? 'available' : 'unknown'),
+    workOffline: !!p.WorkOffline,
+    printerStatus: p.PrinterStatus ?? null,
+    serverName: p.ServerName ?? null,
+    shareName: p.ShareName ?? null,
+    // fill driver/port shallowly; we’ll enrich soon
+    driver: { name: p.DriverName ?? null, version: null, manufacturer: null },
+    port: { name: p.PortName ?? null, host: null },
+    defaults: null
+  } as PrinterInfo));
+}
+async function enrichPrinterInfo(printerName: string): Promise<Partial<PrinterInfo>> {
+  const ps = `
+$pn = '${printerName.replace(/'/g, "''")}';
+$pr = Get-CimInstance Win32_Printer -Filter "Name='$pn'";
+$cfg = Get-PrintConfiguration -PrinterName $pn -ErrorAction SilentlyContinue;
+$drv = if ($pr -and $pr.DriverName) { Get-PrinterDriver -Name $pr.DriverName -ErrorAction SilentlyContinue } else { $null };
+$port = if ($pr -and $pr.PortName) { Get-PrinterPort -Name $pr.PortName -ErrorAction SilentlyContinue } else { $null };
+$ip = $null; if ($port -and $port.PrinterHostAddress) { $ip = $port.PrinterHostAddress; }
+
+[pscustomobject]@{
+  Driver = if ($drv) { [pscustomobject]@{ Name=$drv.Name; Version=$drv.DriverVersion; Manufacturer=$drv.Manufacturer } } else { $null }
+  Port = if ($pr) { [pscustomobject]@{ Name=$pr.PortName; Host=$ip } } else { $null }
+  Defaults = if ($cfg) {
+    [pscustomobject]@{
+      PaperSize = $cfg.PaperSize
+      PageWidthMM = if ($cfg.PageSize.Width) { [math]::Round($cfg.PageSize.Width/1000,0) } else { $null }
+      PageHeightMM = if ($cfg.PageSize.Height){ [math]::Round($cfg.PageSize.Height/1000,0)} else { $null }
+      Orientation = $cfg.PageOrientation
+      Dpi = [pscustomobject]@{ x = $cfg.ResolutionX; y = $cfg.ResolutionY }
+    }
+  } else { $null }
+} | ConvertTo-Json -Depth 5 -Compress
+`;
+  const { stdout } = await execFileAsync('powershell', ['-NoProfile', '-Command', ps], { timeout: 6000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+  const data = safeParseJson(stdout) || {};
+  return {
+    driver: data.Driver ?? null,
+    port: data.Port ?? null,
+    defaults: data.Defaults ?? null,
+  };
+}
+async function getPrintersViaGetPrinter() {
+  const ps = [
+    '-NoProfile',
+    '-Command',
+    `$p = Get-Printer | Select-Object Name, PrinterStatus, WorkOffline;
+     $p | ConvertTo-Json -Compress -Depth 3`
+  ];
+  const { stdout } = await execFileAsync('powershell', ps, { timeout: 5000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
+  const data = safeParseJson(stdout);
+  if (!data) return [];
+  const items = Array.isArray(data) ? data : [data];
+  // No default info here — we’ll compute default separately if needed.
+  return items.map((p: any) => ({
+    name: p.Name,
+    isDefault: false,
+    status:
+      p.WorkOffline ? 'offline'
+        : (p.PrinterStatus === 3 || p.PrinterStatus === 0 || p.PrinterStatus == null) ? 'available'
+          : 'unknown'
+  }));
+}
+
+async function getDefaultPrinterFromRegistryHKCU() {
+  // HKCU default printer: "Device" value like: "Printer Name,winspool,NeXX:"
+  const cmd = [
+    'reg',
+    'query',
+    'HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows',
+    '/v',
+    'Device'
+  ];
+  const { stdout } = await execFileAsync(cmd[0], cmd.slice(1), { timeout: 4000, windowsHide: true });
+  // Parse the line that contains "Device    REG_SZ    <value>"
+  const line = stdout.split(/\r?\n/).find(l => l.includes('REG_SZ'));
+  if (!line) return null;
+  const val = line.split('REG_SZ').pop()?.trim() || '';
+  // Extract printer name before first comma
+  const name = val.split(',')[0]?.trim() || null;
+  return name || null;
+}
+
+function normalizeAndSort(
+  printers: Array<PrinterInfo>,
+  defaultName?: string | null
+) {
+  const map = new Map<string, PrinterInfo>();
+  for (const p of printers) {
+    const key = p.name.trim();
+    const prev = map.get(key);
+    map.set(key, {
+      ...prev,
+      ...p,
+      isDefault: p.isDefault || prev?.isDefault || (defaultName ? key === defaultName : false),
+    });
+  }
+  const list = Array.from(map.values());
+  list.sort((a, b) => (Number(b.isDefault) - Number(a.isDefault)) || a.name.localeCompare(b.name));
+  return list;
+}
+
+
+function deriveLanguageHint(p: Partial<PrinterInfo>) {
+  const s = `${p.driver?.name || ''} ${p.name || ''}`.toLowerCase();
+  if (s.includes('zebra') || s.includes('zdesigner')) return 'zpl';
+  if (s.includes('generic') || s.includes('escpos') || s.includes('blackcopper') || s.includes('80mm') || s.includes('58mm')) return 'escpos';
+  return 'generic';
+}
+
+function deriveReceiptProfile(p: Partial<PrinterInfo>) {
+  const w = p.defaults?.pageWidthMM ?? null;
+  const name = (p.name || '').toLowerCase();
+  const roll: '80mm' | '58mm' =
+    name.includes('80') || (w !== null && w >= 70) ? '80mm' : '58mm';
+  const printableWidthMM = roll === '80mm' ? 72 : 48; // conservative safe area
+  const columns = roll === '80mm' ? { fontA: 48, fontB: 64 } : { fontA: 32, fontB: 42 };
+  return { roll, printableWidthMM, columns };
+}
+
 
 export class BarcodeService {
   // Get available printers using Windows command
-  async getAvailablePrinters(): Promise<any[]> {
+  async getAvailablePrinters(): Promise<PrinterInfo[]> {
     try {
-      // Try multiple methods to get printer list
-      let printers: any[] = [];
-      
-      // Method 1: Try PowerShell Get-Printer command
-      try {
-        const { stdout } = await execAsync('powershell "Get-Printer | Select-Object Name, Default | ConvertTo-Json"');
-        const printerData = JSON.parse(stdout);
-        
-        if (Array.isArray(printerData)) {
-          printers = printerData.map((printer: any) => ({
-            name: printer.Name,
-            isDefault: printer.Default || false,
-            status: 'available'
-          }));
-        }
-      } catch (psError) {
-        logger.warn('PowerShell method failed, trying alternative:', psError);
-        
-        // Method 2: Try WMIC with different syntax
-        try {
-          const { stdout } = await execAsync('wmic printer list brief /format:csv');
-          const lines = stdout.split('\n').filter(line => line.trim() && !line.includes('Node'));
-          
-          printers = lines.map(line => {
-            const parts = line.split(',');
-            if (parts.length >= 2) {
-              const name = parts[1]?.trim();
-              return {
-                name,
-                isDefault: false, // WMIC doesn't easily show default status
-                status: 'available'
-              };
-            }
-            return null;
-          }).filter(Boolean);
-        } catch (wmicError) {
-          logger.warn('WMIC method failed, trying registry method:', wmicError);
-          
-          // Method 3: Try registry query
-          try {
-            const { stdout } = await execAsync('reg query "HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers" /s /f "Printer"');
-            const lines = stdout.split('\n');
-            const printerNames = new Set<string>();
-            
-            lines.forEach(line => {
-              const match = line.match(/HKEY_LOCAL_MACHINE\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers\\([^\\]+)/);
-              if (match) {
-                printerNames.add(match[1]);
-              }
-            });
-            
-            printers = Array.from(printerNames).map(name => ({
-              name,
-              isDefault: false,
-              status: 'available'
-            }));
-          } catch (regError) {
-            logger.error('All printer detection methods failed:', regError);
-            throw new Error('Unable to detect printers using any method');
-          }
-        }
-      }
-      
-      // If no printers found, return a default printer option
-      if (printers.length === 0) {
-        printers = [
-          {
-            name: 'Default Printer',
-            isDefault: true,
-            status: 'available'
-          }
-        ];
-      }
-      
-      logger.info(`Found ${printers.length} printers`);
-      return printers;
-    } catch (error) {
-      logger.error('Error getting printers:', error);
-      // Return a fallback printer instead of throwing error
-      return [
-        {
-          name: 'Default Printer',
-          isDefault: true,
-          status: 'available'
-        }
-      ];
-    }
-  }
-
-  // Test printer connection
-  async testPrinterConnection(printerName: string): Promise<any> {
-    try {
-      // Try PowerShell first
-      try {
-        const { stdout } = await execAsync(`powershell "Get-Printer -Name '${printerName}' | Select-Object Name"`);
-        if (stdout.includes(printerName)) {
-          return {
-            success: true,
-            message: 'Printer connection successful',
-            printerName
-          };
-        }
-      } catch (psError) {
-        logger.warn('PowerShell printer test failed, trying alternative:', psError);
-        
-        // Try WMIC alternative
-        try {
-          const { stdout } = await execAsync(`wmic printer where name="${printerName}" get name /format:csv`);
-          if (stdout.includes(printerName)) {
-            return {
-              success: true,
-              message: 'Printer connection successful',
-              printerName
-            };
-          }
-        } catch (wmicError) {
-          logger.warn('WMIC printer test failed:', wmicError);
-        }
-      }
-      
-      // If we get here, printer not found
-      return {
-        success: false,
-        message: 'Printer not found or not accessible',
-        printerName
-      };
-    } catch (error) {
-      logger.error('Error testing printer:', error);
-      return {
-        success: false,
-        message: 'Failed to test printer connection',
-        error: error instanceof Error ? error.message : 'Unknown error'
-      };
-    }
-  }
-
-  // Generate EPL commands for barcode labels (GC420t EPL mode)
-  private generateEPL(product: Product, settings: PrintSettings = {}): string {
-    const name = (product.name || "").toUpperCase();
-    const weight = this.formatWeightDisplay(product.netWeight);
-    const price = Math.round(
-      Number(this.calculatePriceByWeight(product.netWeight, product.sales_rate_exc_dis_and_tax))
-    );
-    const pkg = this.formatDate(new Date(product.packageDate));
-    const exp = this.formatDate(new Date(product.expiryDate));
-    const barcodeValue = `${product.sku || product.code || "PROD"}-${price}`;
-
-    // Generate EPL commands for the label - GC420t EPL format
-    const epl = `N
-A50,50,0,2,1,1,N,"${name}"
-A50,120,0,2,1,1,N,"${weight}"
-A250,120,0,2,1,1,N,"Rs ${price}"
-B50,150,0,1,2,2,50,N,"${barcodeValue}"
-A50,220,0,2,1,1,N,"Pkg: ${pkg}"
-A250,220,0,2,1,1,N,"Exp: ${exp}"
-P1`;
-
-    return epl;
-  }
-
-  // Print barcodes to specified printer
-  async printBarcodes(products: Product[], printerName: string, settings: PrintSettings = {}): Promise<any> {
-    try {
-      // Validate printer exists
-      const printerTest = await this.testPrinterConnection(printerName);
-      if (!printerTest.success) {
-        throw new Error(`Printer "${printerName}" not found or not accessible`);
-      }
-
-      // Stop any existing print jobs to prevent continuous printing
-      try {
-        await execAsync(`powershell "Get-Printer -Name '${printerName}' | Get-PrintJob | Remove-PrintJob"`);
-        logger.info('Cleared existing print jobs');
-      } catch (clearError) {
-        logger.warn('Could not clear print jobs:', clearError);
-      }
-
-      // Get the actual printer name and port info
-      try {
-        const { stdout } = await execAsync(`powershell "Get-Printer -Name '${printerName}' | Select-Object Name, PortName, DriverName | ConvertTo-Json"`);
-        const printerInfo = JSON.parse(stdout);
-        logger.info('Printer info:', printerInfo);
-      } catch (infoError) {
-        logger.warn('Could not get printer info:', infoError);
-      }
-
-      // Generate EPL commands for all products
-      let allEplCommands = "";
-      const copies = Math.min(settings.copies || 1, 5); // Limit to max 5 copies to prevent issues
-
-      for (let copy = 0; copy < copies; copy++) {
-        products.forEach((product) => {
-          allEplCommands += this.generateEPL(product, settings);
-        });
-      }
-
-      // Save EPL to temporary file
-      const tempDir = path.join(process.cwd(), 'temp');
-      
-      // Create temp directory if it doesn't exist
-      if (!fs.existsSync(tempDir)) {
-        fs.mkdirSync(tempDir, { recursive: true });
-      }
-
-      const tempFile = path.join(tempDir, `barcode_${Date.now()}.epl`);
-      fs.writeFileSync(tempFile, allEplCommands);
-      
-      // Also create a .prn file (Windows raw printer file)
-      const prnFile = path.join(tempDir, `barcode_${Date.now()}.prn`);
-      fs.writeFileSync(prnFile, allEplCommands);
-      
-      // Also save to desktop for easy testing
-      const desktopPath = path.join(process.env.USERPROFILE || '', 'Desktop', `barcode_${Date.now()}.epl`);
-      try {
-        fs.writeFileSync(desktopPath, allEplCommands);
-        logger.info('EPL file also saved to desktop:', desktopPath);
-      } catch (desktopError) {
-        logger.warn('Could not save to desktop:', desktopError);
-      }
-      
-      // No need for test ZPL - go directly to printing
-      
-      // Create a batch file for printing (more reliable)
-      const batchFile = path.join(tempDir, `print_${Date.now()}.bat`);
-      const batchContent = `@echo off
-echo Printing to ${printerName}
-print /d:"${printerName}" "${tempFile}"
-if %errorlevel% neq 0 (
-    echo Print command failed, trying direct port
-    type "${tempFile}" > "USB001"
-)
-echo Print job completed`;
-      fs.writeFileSync(batchFile, batchContent);
-      logger.info('Batch file created:', batchFile);
-      
-      // Log the EPL content for debugging
-      logger.info('EPL Content:', allEplCommands);
-      logger.info('Temp file created:', tempFile);
-
-      try {
-        // Try multiple printing methods
-        let printSuccess = false;
-        let printError: any = null;
-        
-        // Method 1: Try multiple different approaches
-        try {
-          logger.info(`Attempting multiple printing methods to: ${printerName}`);
-          
-          // Try different methods in sequence
-          const methods = [
-            `print /d:"${printerName}" "${tempFile}"`,
-            `copy "${tempFile}" USB001`,
-            `type "${tempFile}" > USB001`,
-            `copy "${tempFile}" "\\\\localhost\\${printerName}"`,
-            `copy "${tempFile}" "\\\\127.0.0.1\\${printerName}"`
-          ];
-          
-          for (const method of methods) {
-            try {
-              logger.info(`Trying method: ${method}`);
-              await execAsync(method);
-              printSuccess = true;
-              logger.info(`Method successful: ${method}`);
-              break;
-            } catch (methodError) {
-              logger.warn(`Method failed: ${method}`, methodError);
-            }
-          }
-          
-          if (printSuccess) {
-            logger.info('One of the printing methods was successful');
-          } else {
-            throw new Error('All printing methods failed');
-          }
-        } catch (printError) {
-          logger.warn('Windows print command failed, trying alternative approach:', printError);
-          printError = printError;
-          
-          // Method 2: Try PowerShell with binary data
-          try {
-            logger.info(`Attempting PowerShell binary printing`);
-            const escapedPrinterName = printerName.replace(/'/g, "''");
-            await execAsync(`powershell "[System.IO.File]::WriteAllBytes('${tempFile}', [System.IO.File]::ReadAllBytes('${tempFile}')); Get-Content '${tempFile}' -Raw | Out-Printer -Name '${escapedPrinterName}'"`);
-            printSuccess = true;
-            logger.info('PowerShell binary printing successful');
-          } catch (psError) {
-            logger.warn('PowerShell binary printing failed, trying .prn file method:', psError);
-            printError = psError;
-            
-            // Method 3: Try direct port using printer's actual port
-            try {
-              logger.info(`Attempting direct port printing using printer port`);
-              
-              // Get the actual printer port from Windows
-              const { stdout: portInfo } = await execAsync(`powershell "Get-Printer -Name '${printerName}' | Select-Object -ExpandProperty PortName"`);
-              const printerPort = portInfo.trim();
-              logger.info(`Printer port: ${printerPort}`);
-              
-              // Send ZPL directly to the printer's port
-              await execAsync(`type "${tempFile}" > "${printerPort}"`);
-              printSuccess = true;
-              logger.info('Direct port printing successful');
-            } catch (portError) {
-              logger.warn('Direct port failed, trying batch file:', portError);
-              printError = portError;
-              
-              // Method 4: Try batch file approach
-              try {
-                await execAsync(`"${batchFile}"`);
-                printSuccess = true;
-                logger.info('Batch file printing successful');
-              } catch (batchError) {
-                logger.error('All printing methods failed:', batchError);
-                printError = batchError;
-              }
-            }
-          }
-        }
-        
-        // Clean up temp files
-        if (fs.existsSync(tempFile)) {
-          fs.unlinkSync(tempFile);
-        }
-        if (fs.existsSync(prnFile)) {
-          fs.unlinkSync(prnFile);
-        }
-        if (fs.existsSync(batchFile)) {
-          fs.unlinkSync(batchFile);
-        }
-        
-        if (printSuccess) {
-          logger.info(`Successfully printed ${products.length} barcodes to ${printerName}`);
-          
-          // Add a small delay to prevent rapid-fire printing
-          await new Promise(resolve => setTimeout(resolve, 1000));
-          
-          return {
-            success: true,
-            message: `Successfully sent ${products.length} labels to printer`,
-            printedCount: products.length,
-            printerName
-          };
+      // 1) Primary: CIM
+      const cimPrinters = await getPrintersViaCIM().catch(() => []);
+      let printers: PrinterInfo[] = [];
+      if (cimPrinters.length) {
+        printers = normalizeAndSort(cimPrinters);
+      } else {
+        // 2) Fallback: Get-Printer + default from HKCU
+        const [gpPrintersRaw, defName] = await Promise.all([
+          getPrintersViaGetPrinter().catch(() => []),
+          getDefaultPrinterFromRegistryHKCU().catch(() => null),
+        ]);
+        // ensure id field
+        const gpPrinters = gpPrintersRaw.map((p: any) => ({
+          ...p,
+          id: `${String(p.name).toLowerCase().replace(/\s+/g, '-')}@${process.env.COMPUTERNAME || 'local'}`
+        })) as PrinterInfo[];
+        if (gpPrinters.length) {
+          printers = normalizeAndSort(gpPrinters, defName);
         } else {
-          throw printError || new Error('All printing methods failed');
+          // 3) Registry enumerate names
+          const { stdout } = await execFileAsync('reg', ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers'], { timeout: 5000, windowsHide: true });
+          const names = new Set<string>();
+          stdout.split(/\r?\n/).forEach(line => {
+            const m = line.match(/Printers\\([^\\\r\n]+)/);
+            if (m?.[1]) names.add(m[1]);
+          });
+          const def = await getDefaultPrinterFromRegistryHKCU().catch(() => null);
+          const regPrinters: PrinterInfo[] = Array.from(names).map(name => ({
+            name,
+            id: `${name.toLowerCase().replace(/\s+/g, '-')}@${process.env.COMPUTERNAME || 'local'}`,
+            isDefault: false,
+            status: 'available',
+          })) as PrinterInfo[];
+          printers = normalizeAndSort(regPrinters, def);
         }
-      } catch (printError) {
-        // Clean up temp files on error
-        if (fs.existsSync(tempFile)) {
-          fs.unlinkSync(tempFile);
-        }
-        if (fs.existsSync(prnFile)) {
-          fs.unlinkSync(prnFile);
-        }
-        if (fs.existsSync(batchFile)) {
-          fs.unlinkSync(batchFile);
-        }
-        throw printError;
       }
 
-    } catch (error) {
-      logger.error('Error printing barcodes:', error);
-      throw new Error(`Failed to print barcodes: ${error instanceof Error ? error.message : 'Unknown error'}`);
-    }
-  }
-
-  // Helper methods (copied from frontend logic)
-  private parseWeightToGrams(weightInput: any): number {
-    if (!weightInput || weightInput.trim() === "") return 0;
-
-    const input = weightInput.toLowerCase().trim();
-    let weight = 0;
-
-    const numberMatch = input.match(/(\d+\.?\d*)/);
-    if (!numberMatch) return 0;
-
-    const number = Number.parseFloat(numberMatch[1]);
-
-    if (input.includes("kg")) {
-      weight = number * 1000;
-    } else if (input.includes("g") && !input.includes("kg")) {
-      weight = number;
-    } else if (input.includes("ml") || input.includes("l")) {
-      if (input.includes("ml")) {
-        weight = number;
-      } else if (input.includes("l")) {
-        weight = number * 1000;
+      if (!printers.length) {
+        return [{ name: 'Default Printer', id: 'default@local', isDefault: true, status: 'available' }];
       }
-    } else {
-      weight = number;
-    }
 
-    return weight;
+      // 6.a) Enrich in parallel (limit concurrency to avoid PS storms)
+      const limit = 3;
+      const out: PrinterInfo[] = [];
+      for (let i = 0; i < printers.length; i += limit) {
+        const chunk = printers.slice(i, i + limit);
+        const enriched = await Promise.all(chunk.map(async p => {
+          try {
+            const extra = await enrichPrinterInfo(p.name);
+            const merged: PrinterInfo = {
+              ...p,
+              driver: extra.driver ?? p.driver ?? null,
+              port: extra.port ?? p.port ?? null,
+              defaults: extra.defaults ?? p.defaults ?? null,
+            };
+            merged.languageHint = deriveLanguageHint(merged);
+            merged.receiptProfile = deriveReceiptProfile(merged);
+            return merged;
+          } catch {
+            const merged: PrinterInfo = {
+              ...p,
+              languageHint: deriveLanguageHint(p),
+              receiptProfile: deriveReceiptProfile(p),
+            };
+            return merged;
+          }
+        }));
+        out.push(...enriched);
+      }
+
+      return out;
+    } catch (e) {
+      logger.error('Error getting printers (enriched):', e);
+      return [{ name: 'Default Printer', id: 'default@local', isDefault: true, status: 'available' }];
+    }
   }
 
   private calculatePriceByWeight(netWeightInput: any, basePrice: any): number {
@@ -507,4 +364,110 @@ echo Print job completed`;
       year: "numeric",
     });
   }
+
+  async printReceipt(input: PrintJobInput) {
+    const { printer, job, receiptData } = input;
+    const columns = printer.columns ?? { fontA: 48, fontB: 64 }; // safe default for 80mm
+    const copies = job?.copies ?? 1;
+    const cut = job?.cut ?? true;
+    const openDrawer = job?.openDrawer ?? false;
+
+    // USB queue on Windows
+    const tp = new ThermalPrinter({
+      type: PrinterTypes.EPSON,                       // ESC/POS
+      interface: `printer:${printer.name}`,           // ← local Windows queue
+      driver: PrinterDriver,                          // ← REQUIRED for printer: scheme
+      options: { timeout: 6000 },
+      removeSpecialCharacters: false,
+      lineCharacter: '='
+    });
+
+
+    const twoCol = (left: string, right: string) => {
+      const width = columns.fontA;
+      // Trim to max and keep at least one space
+      left = (left ?? '').toString();
+      right = (right ?? '').toString();
+      const pad = Math.max(1, width - left.length - right.length);
+      return left + ' '.repeat(pad) + right;
+    };
+
+    // ====== Layout ======
+    await tp.alignCenter();
+    await tp.setTextDoubleHeight(); await tp.setTextDoubleWidth();
+    await tp.println((receiptData.storeName || 'MANPASAND GENERAL STORE').toUpperCase());
+    await tp.setTextNormal();
+    await tp.println(receiptData.tagline || 'Quality • Service • Value');
+    await tp.println(receiptData.address || 'Karachi, Pakistan');
+    await tp.drawLine();
+
+    const ts = new Date(receiptData.timestamp || Date.now());
+    await tp.alignLeft();
+    await tp.println(`Receipt: ${receiptData.transactionId}`);
+    await tp.println(`Date: ${ts.toLocaleDateString()} ${ts.toLocaleTimeString()}`);
+    await tp.println(`Cashier: ${receiptData.cashier || 'Walk-in'}   Customer: ${receiptData.customerType || 'Walk-in'}`);
+    await tp.drawLine();
+
+    // Items
+    await tp.println(twoCol('ITEM                 QTY', 'AMOUNT'));
+    await tp.drawLine();
+    for (const it of receiptData.items || []) {
+      const name = String(it.name ?? '').slice(0, columns.fontA); // clip
+      const qty = (it.quantity ?? 0).toString();
+      const amt = `PKR ${(Number(it.price ?? 0) * Number(it.quantity ?? 0)).toFixed(2)}`;
+      await tp.println(twoCol(`${name} ${qty}x`, amt));
+      // Long name on next line if clipped:
+      if (it.name && it.name.length > name.length) {
+        await tp.println(it.name);
+      }
+    }
+    await tp.drawLine();
+
+    const subtotal = Number(receiptData.subtotal ?? 0);
+    const discount = Number(receiptData.discount ?? 0);
+    const total = Number(receiptData.total ?? Math.max(0, subtotal - discount));
+
+    await tp.println(twoCol('Subtotal', `PKR ${subtotal.toFixed(2)}`));
+    if (discount > 0) await tp.println(twoCol('Discount', `PKR ${discount.toFixed(2)}`));
+    await tp.setTextDoubleWidth();
+    await tp.println(twoCol('TOTAL', `PKR ${total.toFixed(2)}`));
+    await tp.setTextNormal();
+    await tp.drawLine();
+
+    await tp.println(twoCol('Payment', (receiptData.paymentMethod || 'CASH').toUpperCase()));
+    if (receiptData.amountPaid != null) await tp.println(twoCol('Paid', `PKR ${Number(receiptData.amountPaid).toFixed(2)}`));
+    if (receiptData.changeAmount > 0) await tp.println(twoCol('Change', `PKR ${Number(receiptData.changeAmount).toFixed(2)}`));
+
+    await tp.newLine();
+    await tp.alignCenter();
+    await tp.println(receiptData.thankYouMessage || 'Thank you for shopping with us!');
+    if (receiptData.footerMessage) await tp.println(receiptData.footerMessage);
+
+    // Optional barcode (ESC/POS Code128)
+    if (receiptData.transactionId) {
+      await tp.newLine();
+      await tp.printBarcode(String(receiptData.transactionId), 73, { width: 2, height: 80, hriPos: 2 });
+    }
+
+    if (openDrawer) {
+      // ESC/POS kick cash drawer (might vary per printer)
+      await tp.openCashDrawer();
+    }
+    if (cut) await tp.cut();
+
+    // Copies
+    let ok = true;
+    for (let i = 0; i < copies; i++) {
+      const res = await tp.execute();
+      ok = ok && !!res;
+    }
+
+    return {
+      success: ok,
+      printer: printer.name,
+      copies,
+      columns
+    };
+  }
+
 }

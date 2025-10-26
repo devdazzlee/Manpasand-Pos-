@@ -1,45 +1,25 @@
 import express from 'express';
 import {
   getPrinters,
-  printBarcodes,
-  testPrinter,
+  printReceipt,
 } from '../controllers/barcode.controller';
-import { validate } from '../middleware/validation.middleware';
-import { authenticate, authorize } from '../middleware/auth.middleware';
-import { printBarcodesSchema, testPrinterSchema } from '../validations/barcode.validation';
+import asyncHandler from '../middleware/asyncHandler';
+import { ApiResponse } from '../utils/apiResponse';
+import { printReceiptPDF } from '../services/print-receipt-pdf.service';
 
 const router = express.Router();
-
-// Health check for barcode service (no auth required)
-router.get('/health', (req, res) => {
-  res.json({ 
-    success: true, 
-    message: 'Barcode service is running',
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Test endpoint for debugging (no auth required)
-router.post('/test-debug', (req, res) => {
-  console.log('Test debug request body:', JSON.stringify(req.body, null, 2));
-  res.json({ 
-    success: true, 
-    message: 'Debug endpoint working',
-    receivedData: req.body,
-    timestamp: new Date().toISOString()
-  });
-});
-
-// Apply authentication to all other routes
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
-
 // Get available printers
 router.get('/printers', getPrinters);
 
-// Test printer connection
-router.post('/test-printer', validate(testPrinterSchema), testPrinter);
+// Print receipt
+router.post('/print-receipt', asyncHandler(async (req, res) => {
+  const { printer, job, receiptData } = req.body || {};
+  if (!printer?.name || !receiptData) {
+    return res.status(400).json({ success: false, message: 'Missing printer.name or receiptData' });
+  }
+  const result = await printReceiptPDF({ printer, job, receiptData });
+  new ApiResponse(result, 'Receipt sent to printer successfully').send(res);
+}));
 
-// Print barcodes
-router.post('/print', validate(printBarcodesSchema), printBarcodes);
 
 export default router;

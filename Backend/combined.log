@@ -827,3 +827,290 @@
 {"level":"info","message":"Attempting Windows print command to: ZDesigner GC420t (EPL)","timestamp":"2025-09-12T22:44:36.654Z"}
 {"level":"info","message":"Windows print command successful","timestamp":"2025-09-12T22:44:36.710Z"}
 {"level":"info","message":"Successfully printed 1 barcodes to ZDesigner GC420t (EPL)","timestamp":"2025-09-12T22:44:36.712Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:09:54.669Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:09:59.263Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:34:20.915Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:34:23.383Z"}
+{"level":"error","message":"Error printing receipt: No driver set!","stack":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:130:23)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:34:18","timestamp":"2025-10-26T14:34:30.757Z"}
+{"level":"info","message":"Falling back to Windows print command","timestamp":"2025-10-26T14:34:30.758Z"}
+{"level":"error","message":"Error printing receipt: No driver set!","stack":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:130:23)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:34:18","timestamp":"2025-10-26T14:34:54.754Z"}
+{"level":"info","message":"Falling back to Windows print command","timestamp":"2025-10-26T14:34:54.755Z"}
+{"level":"error","message":"Error printing receipt: No driver set!","stack":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:130:23)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:34:18","timestamp":"2025-10-26T14:35:05.558Z"}
+{"level":"info","message":"Falling back to Windows print command","timestamp":"2025-10-26T14:35:05.559Z"}
+{"level":"error","message":"Error printing receipt: No driver set!","stack":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:130:23)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:34:18","timestamp":"2025-10-26T14:35:32.090Z"}
+{"level":"info","message":"Falling back to Windows print command","timestamp":"2025-10-26T14:35:32.091Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:39:22.865Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:39:27.715Z"}
+{"level":"error","message":"Error: Invalid or expired session\n    at authenticate (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\auth.middleware.ts:32:13)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-10-26T14:39:31.322Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:39:56.594Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:40:01.208Z"}
+{"level":"error","message":"Error printing receipt: No driver set!","stack":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:130:23)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:34:18","timestamp":"2025-10-26T14:40:04.781Z"}
+{"level":"info","message":"Falling back to Windows print command","timestamp":"2025-10-26T14:40:04.783Z"}
+{"level":"error","message":"Error printing receipt: No driver set!","stack":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:130:23)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:34:18","timestamp":"2025-10-26T14:40:27.789Z"}
+{"level":"info","message":"Falling back to Windows print command","timestamp":"2025-10-26T14:40:27.790Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:45:49.943Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:45:55.020Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:46:39.281Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:46:43.155Z"}
+{"level":"info","message":"Using Windows print command with ESC/POS formatting","timestamp":"2025-10-26T14:47:11.674Z"}
+{"level":"info","message":"Using Windows print command with ESC/POS formatting","timestamp":"2025-10-26T14:47:31.432Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:54:10.769Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T14:54:15.101Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T14:54:20.461Z"}
+{"level":"info","message":"Temp file created: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761490460463.txt","timestamp":"2025-10-26T14:54:20.463Z"}
+{"level":"info","message":"Receipt sent to printer \"BlackCopper 80mm Series(2)\" successfully","timestamp":"2025-10-26T14:54:20.491Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761490460463.txt","timestamp":"2025-10-26T14:54:25.506Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T14:59:50.034Z"}
+{"level":"info","message":"Temp file created: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761490790037.prn","timestamp":"2025-10-26T14:59:50.037Z"}
+{"level":"info","message":"Attempting to send file to USB002","timestamp":"2025-10-26T14:59:50.038Z"}
+{"level":"info","message":"Receipt sent successfully via USB002","timestamp":"2025-10-26T14:59:50.080Z"}
+{"level":"info","message":"Receipt sent to printer \"BlackCopper 80mm Series(1)\" successfully","timestamp":"2025-10-26T14:59:50.081Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761490790037.prn","timestamp":"2025-10-26T14:59:55.094Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series","timestamp":"2025-10-26T15:00:14.111Z"}
+{"level":"info","message":"Temp file created: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761490814112.prn","timestamp":"2025-10-26T15:00:14.113Z"}
+{"level":"info","message":"Attempting to send file to USB002","timestamp":"2025-10-26T15:00:14.114Z"}
+{"level":"info","message":"Receipt sent successfully via USB002","timestamp":"2025-10-26T15:00:14.150Z"}
+{"level":"info","message":"Receipt sent to printer \"BlackCopper 80mm Series\" successfully","timestamp":"2025-10-26T15:00:14.150Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761490814112.prn","timestamp":"2025-10-26T15:00:19.166Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T15:05:51.299Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T15:05:53.958Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series","timestamp":"2025-10-26T15:06:03.913Z"}
+{"level":"info","message":"Temp file created with ESC/POS commands: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491163914.prn","timestamp":"2025-10-26T15:06:03.947Z"}
+{"level":"info","message":"Receipt sent to printer \"BlackCopper 80mm Series\" successfully","timestamp":"2025-10-26T15:06:03.993Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491163914.prn","timestamp":"2025-10-26T15:06:08.994Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series","timestamp":"2025-10-26T15:07:34.287Z"}
+{"level":"info","message":"Temp file created with ESC/POS commands: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491254289.prn","timestamp":"2025-10-26T15:07:34.327Z"}
+{"level":"info","message":"File size: 775 bytes","timestamp":"2025-10-26T15:07:34.328Z"}
+{"level":"info","message":"Attempting to send via type command to USB002","timestamp":"2025-10-26T15:07:34.329Z"}
+{"level":"info","message":"Successfully sent via type command","timestamp":"2025-10-26T15:07:34.387Z"}
+{"level":"info","message":"Receipt sent to printer \"BlackCopper 80mm Series\" successfully","timestamp":"2025-10-26T15:07:34.388Z"}
+{"level":"info","message":"Temp file saved at: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491254289.prn (will be kept for 30 seconds)","timestamp":"2025-10-26T15:07:34.389Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:07:54.525Z"}
+{"level":"info","message":"Temp file created with ESC/POS commands: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491274526.prn","timestamp":"2025-10-26T15:07:54.537Z"}
+{"level":"info","message":"File size: 779 bytes","timestamp":"2025-10-26T15:07:54.539Z"}
+{"level":"info","message":"Attempting to send via type command to USB002","timestamp":"2025-10-26T15:07:54.539Z"}
+{"level":"info","message":"Successfully sent via type command","timestamp":"2025-10-26T15:07:54.601Z"}
+{"level":"info","message":"Receipt sent to printer \"BlackCopper 80mm Series(1)\" successfully","timestamp":"2025-10-26T15:07:54.601Z"}
+{"level":"info","message":"Temp file saved at: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491274526.prn (will be kept for 30 seconds)","timestamp":"2025-10-26T15:07:54.602Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491254289.prn","timestamp":"2025-10-26T15:08:04.404Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491274526.prn","timestamp":"2025-10-26T15:08:24.618Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:10:37.633Z"}
+{"level":"info","message":"Temp file created with ESC/POS commands: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491437637.prn","timestamp":"2025-10-26T15:10:37.660Z"}
+{"level":"info","message":"File size: 779 bytes","timestamp":"2025-10-26T15:10:37.661Z"}
+{"level":"info","message":"First 100 bytes (hex): 1b74001b61011b21101b21204448410a1b21005175616c697479201b741095205365727669636520952056616c75650a4448412c204b6172616368690a2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d","timestamp":"2025-10-26T15:10:37.662Z"}
+{"level":"info","message":"Sending via Windows print command to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:10:37.662Z"}
+{"level":"info","message":"Receipt sent to printer \"BlackCopper 80mm Series(1)\" successfully","timestamp":"2025-10-26T15:10:37.699Z"}
+{"level":"info","message":"Temp file saved at: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491437637.prn (will be kept for 30 seconds)","timestamp":"2025-10-26T15:10:37.700Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491437637.prn","timestamp":"2025-10-26T15:11:07.700Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:15:43.488Z"}
+{"level":"info","message":"Temp file created with ESC/POS commands: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491743490.prn","timestamp":"2025-10-26T15:15:43.509Z"}
+{"level":"info","message":"File size: 820 bytes","timestamp":"2025-10-26T15:15:43.510Z"}
+{"level":"info","message":"First 100 bytes (hex): 1b74001b61011b21101b21204448410a1b21005175616c697479201b741095205365727669636520952056616c75650a4448412c204b6172616368690a2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d","timestamp":"2025-10-26T15:15:43.511Z"}
+{"level":"info","message":"Sending via Windows print command to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:15:43.511Z"}
+{"level":"info","message":"Receipt sent to printer \"BlackCopper 80mm Series(1)\" successfully","timestamp":"2025-10-26T15:15:43.545Z"}
+{"level":"info","message":"Temp file saved at: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491743490.prn (will be kept for 30 seconds)","timestamp":"2025-10-26T15:15:43.546Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491743490.prn","timestamp":"2025-10-26T15:16:13.554Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:19:59.751Z"}
+{"level":"info","message":"Temp file created with ESC/POS commands: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491999753.prn","timestamp":"2025-10-26T15:19:59.768Z"}
+{"level":"info","message":"File size: 779 bytes","timestamp":"2025-10-26T15:19:59.769Z"}
+{"level":"info","message":"First 100 bytes (hex): 1b74001b61011b21101b21204448410a1b21005175616c697479201b741095205365727669636520952056616c75650a4448412c204b6172616368690a2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d2d","timestamp":"2025-10-26T15:19:59.769Z"}
+{"level":"info","message":"Found actual printer port: USB002","timestamp":"2025-10-26T15:20:01.730Z"}
+{"level":"info","message":"Attempting to send to port: USB002","timestamp":"2025-10-26T15:20:01.731Z"}
+{"level":"info","message":"Trying copy /B command to USB002","timestamp":"2025-10-26T15:20:01.732Z"}
+{"level":"info","message":"Successfully sent via copy /B to USB002","timestamp":"2025-10-26T15:20:01.778Z"}
+{"level":"info","message":"Receipt processing completed. File: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491999753.prn","timestamp":"2025-10-26T15:20:01.779Z"}
+{"level":"warn","message":"No print job found in queue for BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:20:03.851Z"}
+{"level":"info","message":"Temp file saved at: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761491999753.prn","timestamp":"2025-10-26T15:20:03.852Z"}
+{"level":"info","message":"You can manually test this file by: Right-click > Print with BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:20:03.853Z"}
+{"level":"info","message":"Or open in Notepad to verify ESC/POS commands are correct","timestamp":"2025-10-26T15:20:03.854Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:22:22.832Z"}
+{"level":"info","message":"Temp file created with ESC/POS commands: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761492142834.prn","timestamp":"2025-10-26T15:22:22.854Z"}
+{"level":"info","message":"File size: 775 bytes","timestamp":"2025-10-26T15:22:22.855Z"}
+{"level":"info","message":"Sending via Windows print command with RAW data type","timestamp":"2025-10-26T15:22:22.856Z"}
+{"level":"info","message":"Print command executed successfully","timestamp":"2025-10-26T15:22:22.890Z"}
+{"level":"info","message":"Temp file saved at: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761492142834.prn","timestamp":"2025-10-26T15:22:22.891Z"}
+{"level":"info","message":"You can manually test this file by: Right-click > Print with BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:22:22.895Z"}
+{"level":"info","message":"Or open in Notepad to verify ESC/POS commands are correct","timestamp":"2025-10-26T15:22:22.896Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T15:27:08.150Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T15:27:11.298Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T15:27:17.351Z"}
+{"level":"info","message":"Temp file created with ESC/POS commands: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761492437352.prn","timestamp":"2025-10-26T15:27:17.372Z"}
+{"level":"info","message":"File size: 775 bytes","timestamp":"2025-10-26T15:27:17.373Z"}
+{"level":"info","message":"Print result: WARNING: Printer status: \r\n","timestamp":"2025-10-26T15:27:19.485Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T15:27:35.920Z"}
+{"level":"info","message":"Temp file created with ESC/POS commands: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761492455921.prn","timestamp":"2025-10-26T15:27:35.923Z"}
+{"level":"info","message":"File size: 824 bytes","timestamp":"2025-10-26T15:27:35.924Z"}
+{"level":"info","message":"Print result: WARNING: Printer status: \r\n","timestamp":"2025-10-26T15:27:37.995Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761492437352.prn","timestamp":"2025-10-26T15:32:19.503Z"}
+{"level":"info","message":"Temp file deleted: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761492455921.prn","timestamp":"2025-10-26T15:32:37.999Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T15:41:52.726Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T15:41:56.401Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T15:42:04.552Z"}
+{"level":"info","message":"Printer port: USB002","timestamp":"2025-10-26T15:42:06.290Z"}
+{"level":"info","message":"Using interface: \\\\.\\USB002","timestamp":"2025-10-26T15:42:06.291Z"}
+{"level":"info","message":"Attempting to print to USB002...","timestamp":"2025-10-26T15:42:06.323Z"}
+{"level":"error","message":"Print failed: Printer Error","timestamp":"2025-10-26T15:42:11.328Z"}
+{"level":"info","message":"Saved to: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761493324553.prn","timestamp":"2025-10-26T15:42:11.329Z"}
+{"level":"info","message":"You can manually test by: Right-click > Print with BlackCopper 80mm Series(2)","timestamp":"2025-10-26T15:42:11.330Z"}
+{"level":"error","message":"Error printing receipt:","timestamp":"2025-10-26T15:42:11.331Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T15:44:27.718Z"}
+{"level":"info","message":"Printer port: USB002","timestamp":"2025-10-26T15:44:29.174Z"}
+{"level":"info","message":"Generated receipt file: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761493467720.prn (779 bytes)","timestamp":"2025-10-26T15:44:29.195Z"}
+{"level":"info","message":"Attempting Windows print command...","timestamp":"2025-10-26T15:44:29.195Z"}
+{"level":"info","message":"Sent via Windows print command","timestamp":"2025-10-26T15:44:29.238Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T15:48:58.931Z"}
+{"level":"info","message":"Printer port: USB002","timestamp":"2025-10-26T15:49:00.482Z"}
+{"level":"info","message":"Generated receipt file: D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761493738933.prn (775 bytes)","timestamp":"2025-10-26T15:49:00.500Z"}
+{"level":"info","message":"Sending 775 bytes to USB002...","timestamp":"2025-10-26T15:49:00.500Z"}
+{"level":"info","message":"Data sent to USB002","timestamp":"2025-10-26T15:49:00.536Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T15:56:00.211Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T15:56:03.237Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T15:56:12.637Z"}
+{"level":"error","message":"TypeError: usb.on is not a function\n    at new USB (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\escpos-usb\\index.js:52:7)\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:130:24\n    at new Promise (<anonymous>)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:128:14)\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:34:39\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\asyncHandler.ts:6:21\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)","timestamp":"2025-10-26T15:56:12.700Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T15:58:56.085Z"}
+{"level":"info","message":"Generated 777 bytes to D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761494337915.prn","timestamp":"2025-10-26T15:58:57.916Z"}
+{"level":"info","message":"Sending to printer via Windows print command...","timestamp":"2025-10-26T15:58:57.916Z"}
+{"level":"info","message":"Print command executed","timestamp":"2025-10-26T15:58:57.947Z"}
+{"level":"warn","message":"No print job found in queue","timestamp":"2025-10-26T15:59:01.831Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:00:29.392Z"}
+{"level":"info","message":"Generated 781 bytes to D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761494431261.prn","timestamp":"2025-10-26T16:00:31.261Z"}
+{"level":"info","message":"Sending raw ESC/POS data to printer...","timestamp":"2025-10-26T16:00:31.262Z"}
+{"level":"info","message":"Print result: ","timestamp":"2025-10-26T16:00:31.990Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:01:59.319Z"}
+{"level":"info","message":"Generated 773 bytes to D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761494521302.prn","timestamp":"2025-10-26T16:02:01.303Z"}
+{"level":"info","message":"Sending raw ESC/POS data to printer...","timestamp":"2025-10-26T16:02:01.304Z"}
+{"level":"info","message":"PowerShell output: (no output)","timestamp":"2025-10-26T16:02:01.962Z"}
+{"level":"error","message":"Print failed - no success message in output","timestamp":"2025-10-26T16:02:01.962Z"}
+{"level":"error","message":"PowerShell print failed: Windows Spooler API failed to print","timestamp":"2025-10-26T16:02:01.963Z"}
+{"level":"error","message":"Full error: {}","timestamp":"2025-10-26T16:02:01.963Z"}
+{"level":"error","message":"Error printing receipt: Windows Spooler API failed to print","stack":"Error: Windows Spooler API failed to print\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:292:17)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)\n    at async D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:34:18","timestamp":"2025-10-26T16:02:01.969Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:03:15.442Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:03:18.532Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:03:33.933Z"}
+{"level":"info","message":"Generated 777 bytes to D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761494615609.prn","timestamp":"2025-10-26T16:03:35.609Z"}
+{"level":"info","message":"Sending to printer port USB002...","timestamp":"2025-10-26T16:03:35.610Z"}
+{"level":"info","message":"Command executed successfully","timestamp":"2025-10-26T16:03:35.645Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:05:08.177Z"}
+{"level":"info","message":"Generated 773 bytes to D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761494709961.prn","timestamp":"2025-10-26T16:05:09.961Z"}
+{"level":"info","message":"Writing directly to port USB002...","timestamp":"2025-10-26T16:05:09.962Z"}
+{"level":"info","message":"Result: ","timestamp":"2025-10-26T16:05:10.617Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:06:20.371Z"}
+{"level":"info","message":"Generated 773 bytes to D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761494782586.prn","timestamp":"2025-10-26T16:06:22.586Z"}
+{"level":"info","message":"Writing 773 bytes directly to USB002...","timestamp":"2025-10-26T16:06:22.587Z"}
+{"level":"error","message":"Direct write failed: Error: ENOENT: no such file or directory, open '\\\\.\\USB002'","timestamp":"2025-10-26T16:06:22.587Z"}
+{"level":"info","message":"Trying fallback copy command...","timestamp":"2025-10-26T16:06:22.588Z"}
+{"level":"info","message":"Sent via copy command","timestamp":"2025-10-26T16:06:22.623Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:12:15.360Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:12:17.487Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:12:24.957Z"}
+{"level":"info","message":"Generated 773 bytes to D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\temp\\receipt_1761495147049.prn","timestamp":"2025-10-26T16:12:27.049Z"}
+{"level":"info","message":"Sending raw bytes to printer...","timestamp":"2025-10-26T16:12:27.050Z"}
+{"level":"info","message":"Successfully sent data","timestamp":"2025-10-26T16:12:27.871Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:14:28.745Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:14:32.872Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:14:35.954Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:14:38.108Z"}
+{"level":"info","message":"Executing print to USB002...","timestamp":"2025-10-26T16:14:38.132Z"}
+{"level":"info","message":"Print executed successfully","timestamp":"2025-10-26T16:14:38.134Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:16:46.166Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:16:48.142Z"}
+{"level":"info","message":"Device path: \\\\.\\USB002","timestamp":"2025-10-26T16:16:48.143Z"}
+{"level":"info","message":"Executing print to USB002...","timestamp":"2025-10-26T16:16:48.164Z"}
+{"level":"error","message":"Error printing receipt:","timestamp":"2025-10-26T16:16:53.174Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:17:54.236Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:17:56.431Z"}
+{"level":"info","message":"Using interface: USB002","timestamp":"2025-10-26T16:17:56.432Z"}
+{"level":"info","message":"Executing print to USB002...","timestamp":"2025-10-26T16:17:56.454Z"}
+{"level":"info","message":"Print executed successfully","timestamp":"2025-10-26T16:17:56.456Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:20:03.752Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:20:09.603Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:20:12.105Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:20:14.600Z"}
+{"level":"info","message":"Using interface: COM port","timestamp":"2025-10-26T16:20:14.600Z"}
+{"level":"info","message":"Generated 861 bytes, sending to USB002...","timestamp":"2025-10-26T16:20:14.632Z"}
+{"level":"info","message":"Sent to printer successfully","timestamp":"2025-10-26T16:20:14.678Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T16:20:35.866Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:20:37.782Z"}
+{"level":"info","message":"Using interface: COM port","timestamp":"2025-10-26T16:20:37.782Z"}
+{"level":"info","message":"Generated 773 bytes, sending to USB002...","timestamp":"2025-10-26T16:20:37.786Z"}
+{"level":"info","message":"Sent to printer successfully","timestamp":"2025-10-26T16:20:37.834Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:21:52.328Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:21:54.491Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:21:55.719Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:21:58.047Z"}
+{"level":"info","message":"Using interface: COM port","timestamp":"2025-10-26T16:21:58.048Z"}
+{"level":"info","message":"Generated 818 bytes, sending to USB device...","timestamp":"2025-10-26T16:21:58.071Z"}
+{"level":"error","message":"USB direct failed: Error: LIBUSB_ERROR_NOT_SUPPORTED","timestamp":"2025-10-26T16:21:58.090Z"}
+{"level":"info","message":"Falling back to copy command...","timestamp":"2025-10-26T16:21:58.090Z"}
+{"level":"info","message":"Sent via copy command","timestamp":"2025-10-26T16:21:58.143Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:23:11.565Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:23:13.512Z"}
+{"level":"info","message":"Using interface: COM port","timestamp":"2025-10-26T16:23:13.514Z"}
+{"level":"info","message":"Generated 773 bytes, sending to USB002...","timestamp":"2025-10-26T16:23:13.545Z"}
+{"level":"info","message":"Command executed successfully","timestamp":"2025-10-26T16:23:13.595Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:29:55.785Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:29:58.821Z"}
+{"level":"info","message":"Using interface: COM port","timestamp":"2025-10-26T16:29:58.822Z"}
+{"level":"info","message":"Generated 791 bytes, sending to USB002...","timestamp":"2025-10-26T16:29:58.856Z"}
+{"level":"info","message":"Attempting direct write to \\\\.\\USB002","timestamp":"2025-10-26T16:29:58.857Z"}
+{"level":"info","message":"r+ mode failed, trying w+ mode: Error: ENOENT: no such file or directory, open '\\\\.\\USB002'","timestamp":"2025-10-26T16:29:58.857Z"}
+{"level":"warn","message":"Direct write failed: Error: ENOENT: no such file or directory, open '\\\\.\\USB002', trying copy command...","timestamp":"2025-10-26T16:29:58.858Z"}
+{"level":"info","message":"Sent via copy command","timestamp":"2025-10-26T16:29:58.922Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:33:47.405Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:33:49.347Z"}
+{"level":"info","message":"Generated 793 bytes, sending to BlackCopper 80mm Series(2)...","timestamp":"2025-10-26T16:33:49.371Z"}
+{"level":"info","message":"Trying direct copy to USB port: USB002","timestamp":"2025-10-26T16:33:49.372Z"}
+{"level":"info","message":"Successfully sent data to USB002","timestamp":"2025-10-26T16:33:49.452Z"}
+{"level":"info","message":"Cleaned up temp file","timestamp":"2025-10-26T16:33:49.453Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:34:14.057Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:34:15.961Z"}
+{"level":"info","message":"Generated 793 bytes, sending to BlackCopper 80mm Series(2)...","timestamp":"2025-10-26T16:34:15.963Z"}
+{"level":"info","message":"Trying direct copy to USB port: USB002","timestamp":"2025-10-26T16:34:15.964Z"}
+{"level":"info","message":"Successfully sent data to USB002","timestamp":"2025-10-26T16:34:16.035Z"}
+{"level":"info","message":"Cleaned up temp file","timestamp":"2025-10-26T16:34:16.036Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:40:10.181Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:40:12.151Z"}
+{"level":"info","message":"Generated 793 bytes, sending to BlackCopper 80mm Series(2)...","timestamp":"2025-10-26T16:40:12.171Z"}
+{"level":"info","message":"Trying copy to USB port: USB002","timestamp":"2025-10-26T16:40:12.172Z"}
+{"level":"info","message":"Copy command completed","timestamp":"2025-10-26T16:40:12.221Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:43:24.558Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:43:27.711Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T16:43:36.056Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:43:38.103Z"}
+{"level":"info","message":"Generated 793 bytes, sending to BlackCopper 80mm Series(1)...","timestamp":"2025-10-26T16:43:38.127Z"}
+{"level":"info","message":"Trying escpos-usb library to send raw data to printer","timestamp":"2025-10-26T16:43:38.128Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(1)","timestamp":"2025-10-26T16:46:26.262Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:46:28.318Z"}
+{"level":"info","message":"Generated 793 bytes, sending to BlackCopper 80mm Series(1)...","timestamp":"2025-10-26T16:46:28.345Z"}
+{"level":"info","message":"Using port: USB002","timestamp":"2025-10-26T16:46:28.346Z"}
+{"level":"info","message":"Writing directly to port: USB002","timestamp":"2025-10-26T16:46:28.347Z"}
+{"level":"info","message":"Successfully wrote to USB002","timestamp":"2025-10-26T16:46:28.348Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:48:13.569Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T16:48:19.309Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T16:48:21.030Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T16:48:23.260Z"}
+{"level":"info","message":"Generated 793 bytes, sending to BlackCopper 80mm Series(2)...","timestamp":"2025-10-26T16:48:23.293Z"}
+{"level":"info","message":"Sending to port: USB002","timestamp":"2025-10-26T16:48:23.294Z"}
+{"level":"info","message":"Copy command completed successfully","timestamp":"2025-10-26T16:48:23.370Z"}
+{"level":"info","message":"Receipt sent successfully. Check printer.","timestamp":"2025-10-26T16:48:24.417Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:09:22.260Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:09:25.545Z"}
+{"level":"info","message":"Printing receipt to: BlackCopper 80mm Series(2)","timestamp":"2025-10-26T21:10:51.910Z"}
+{"level":"info","message":"Using printer port: USB002","timestamp":"2025-10-26T21:10:54.104Z"}
+{"level":"info","message":"Generated 881 bytes, sending to BlackCopper 80mm Series(2)...","timestamp":"2025-10-26T21:10:54.159Z"}
+{"level":"info","message":"Sending to port: USB002","timestamp":"2025-10-26T21:10:54.161Z"}
+{"level":"info","message":"Copy command completed successfully","timestamp":"2025-10-26T21:10:54.213Z"}
+{"level":"info","message":"Receipt sent successfully. Check printer.","timestamp":"2025-10-26T21:10:55.227Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:26:19.822Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:26:22.348Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:32:38.204Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:32:41.100Z"}
+{"level":"error","message":"Error: Validation failed\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\validation.middleware.ts:20:14\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-10-26T21:40:09.761Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:43:55.990Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:43:59.135Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:48:01.139Z"}
+{"level":"info","message":"Found 7 printers","timestamp":"2025-10-26T21:48:04.795Z"}
+{"level":"error","message":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:375:16)\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:23:39\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\asyncHandler.ts:6:21\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)","timestamp":"2025-10-26T23:10:04.670Z"}
+{"level":"error","message":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:375:16)\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:23:39\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\asyncHandler.ts:6:21\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)","timestamp":"2025-10-26T23:34:30.769Z"}
+{"level":"error","message":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:376:16)\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:23:39\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\asyncHandler.ts:6:21\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)","timestamp":"2025-10-26T23:37:57.047Z"}
+{"level":"error","message":"Error: No driver set!\n    at new Printer (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\printer.js:10:13)\n    at getInterface (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\interfaces\\index.js:15:12)\n    at new ThermalPrinter (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\node-thermal-printer\\lib\\core.js:63:24)\n    at BarcodeService.printReceipt (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\services\\barcode.service.ts:376:16)\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\controllers\\barcode.controller.ts:23:39\n    at D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\asyncHandler.ts:6:21\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)\n    at next (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:149:13)\n    at Route.dispatch (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\route.js:119:3)\n    at Layer.handle [as handle_request] (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\node_modules\\express\\lib\\router\\layer.js:95:5)","timestamp":"2025-10-26T23:40:16.683Z"}

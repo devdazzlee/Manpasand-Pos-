@@ -1,0 +1,5 @@
+TEST PRINT
+This is a test from the POS system.
+If you see this, printing is working!
+
+

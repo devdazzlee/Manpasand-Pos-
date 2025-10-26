@@ -11,20 +11,23 @@ const getPrinters = asyncHandler(async (req: Request, res: Response) => {
   new ApiResponse(printers, 'Printers fetched successfully').send(res);
 });
 
-// Test printer connection
-const testPrinter = asyncHandler(async (req: Request, res: Response) => {
-  console.log('Test printer request body:', JSON.stringify(req.body, null, 2));
-  const { printerName } = req.body;
-  const result = await barcodeService.testPrinterConnection(printerName);
-  new ApiResponse(result, 'Printer test completed').send(res);
+// Print receipt
+const printReceipt = asyncHandler(async (req, res) => {
+  console.log('Print receipt request body:', JSON.stringify(req.body, null, 2));
+
+  const { printer, job, receiptData } = req.body || {};
+  if (!printer?.name || !receiptData) {
+    return res.status(400).json({ success: false, message: 'Missing printer.name or receiptData' });
+  }
+
+  const result = await barcodeService.printReceipt({
+    printer,
+    job: job ?? { copies: 1, cut: true, openDrawer: false },
+    receiptData
+  });
+
+  new ApiResponse(result, 'Receipt sent to printer successfully').send(res);
 });
 
-// Print barcodes
-const printBarcodes = asyncHandler(async (req: Request, res: Response) => {
-  console.log('Print request body:', JSON.stringify(req.body, null, 2));
-  const { products, printerName, settings } = req.body;
-  const result = await barcodeService.printBarcodes(products, printerName, settings);
-  new ApiResponse(result, 'Barcodes sent to printer successfully').send(res);
-});
 
-export { getPrinters, testPrinter, printBarcodes };
+export { getPrinters, printReceipt };

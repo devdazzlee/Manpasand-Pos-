@@ -32,21 +32,22 @@
   import { API_BASE } from "@/config/constants";
   import { useToast } from "@/hooks/use-toast";
 
-  interface Branch { id: string; name: string; }
-  interface Customer { id: string; email: string; name: string | null; }
-  interface Product { id: string; name: string; }
-  interface SaleItem { productId: string; quantity: number; price: number; }
-  interface Sale {
-    id: string;
-    sale_number: string;
-    branch_id: string;
-    customer_id: string | null;
-    total_amount: number;
-    payment_method: string;
-    status: string;
-    sale_date: string;
-    customer: Customer;
-  }
+interface Branch { id: string; name: string; }
+interface Customer { id: string; email: string; name: string | null; }
+interface Product { id: string; name: string; }
+interface SaleItem { productId: string; quantity: number; price: number; }
+interface Printer { name: string; isDefault?: boolean; }
+interface Sale {
+  id: string;
+  sale_number: string;
+  branch_id: string;
+  customer_id: string | null;
+  total_amount: number;
+  payment_method: string;
+  status: string;
+  sale_date: string;
+  customer: Customer;
+}
 
   export function Sales() {
     const { toast } = useToast();
@@ -56,6 +57,7 @@
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [sales, setSales] = useState<Sale[]>([]);
+    const [printers, setPrinters] = useState<Printer[]>([]);
 
     // UI state
     const [branchFilter, setBranchFilter] = useState<string>("");
@@ -72,11 +74,13 @@
       branchId: string;
       customerId: string;
       paymentMethod: string;
+      printerName: string;
       items: SaleItem[];
     }>({
       branchId: "",
       customerId: "",
       paymentMethod: "CASH",
+      printerName: "",
       items: [{ productId: "", quantity: 1, price: 0 }],
     });
 
@@ -140,6 +144,33 @@
         .finally(() => setIsLoading(false));
     }, [branchFilter, toast]);
 
+    // 3) Load available printers when dialog opens
+    useEffect(() => {
+      if (!isAddOpen) return;
+      
+      const loadPrinters = async () => {
+        try {
+          const response = await apiClient.get(`/barcode-generator/printers`);
+          setPrinters(response.data.data || response.data);
+          
+          // Auto-select default printer if available
+          const defaultPrinter = (response.data.data || response.data).find((p: Printer) => p.isDefault);
+          if (defaultPrinter) {
+            setSaleForm(f => ({ ...f, printerName: defaultPrinter.name }));
+          }
+        } catch (err) {
+          console.log(err);
+          toast({
+            title: "Warning",
+            description: "Failed to load available printers",
+            variant: "destructive",
+          });
+        }
+      };
+
+      loadPrinters();
+    }, [isAddOpen, toast]);
+
     // Handlers
     const handleAddSale = async () => {
       setIsSubmitting(true);
@@ -162,6 +193,7 @@
           branchId,
           customerId: "",
           paymentMethod: "CASH",
+          printerName: "",
           items: [{ productId: "", quantity: 1, price: 0 }],
         });
         // refresh
@@ -312,6 +344,26 @@
                     {["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER", "CREDIT"].map(m => (
                       <option key={m} value={m}>
                         {m.replace("_", " ")}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Printer Selection */}
+                <div>
+                  <Label htmlFor="sale-printer">Select Printer</Label>
+                  <select
+                    id="sale-printer"
+                    className="block w-full border rounded p-2"
+                    value={saleForm.printerName}
+                    onChange={e =>
+                      setSaleForm({ ...saleForm, printerName: e.target.value })
+                    }
+                  >
+                    <option value="">Select printer</option>
+                    {printers.map(p => (
+                      <option key={p.name} value={p.name}>
+                        {p.name} {p.isDefault ? "(Default)" : ""}
                       </option>
                     ))}
                   </select>

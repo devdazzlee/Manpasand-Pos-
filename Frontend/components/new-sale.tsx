@@ -48,6 +48,12 @@ interface Product {
   maximum_stock?: number;
 }
 
+interface Printer {
+  name: string;
+  isDefault?: boolean;
+  status?: string;
+}
+
 
 export function NewSale() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -68,6 +74,8 @@ export function NewSale() {
   const [isScanning, setIsScanning] = useState(false);
   const { toast } = useToast();
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
+  const [printers, setPrinters] = useState<Printer[]>([]);
+  const [selectedPrinter, setSelectedPrinter] = useState<string>("");
 
   const [branchName, setBranchName] = useState({
     name: "",
@@ -100,6 +108,7 @@ export function NewSale() {
           fetchCategories(),
           fetchCustomers(),
           getBranchName(),
+          loadPrinters(),
         ]);
       } catch (error) {
         if (mounted) {
@@ -202,11 +211,7 @@ export function NewSale() {
       ]);
     }
 
-    toast({
-      className: "absolute top-2",
-      title: "Item Added",
-      description: `${product.name} (${quantity}) added to cart`,
-    });
+    // Toast removed as per user request - no toast when selecting products
   };
 
   const updateQuantity = (id: string, change: number) => {
@@ -335,6 +340,29 @@ export function NewSale() {
     }
   };
 
+  const loadPrinters = async () => {
+    try {
+      const response = await apiClient.get(`/barcode-generator/printers`);
+      const printerList = response.data.data || response.data;
+      setPrinters(printerList);
+
+      // Auto-select default printer if available
+      const defaultPrinter = printerList.find((p: Printer) => p.isDefault);
+      if (defaultPrinter) {
+        setSelectedPrinter(defaultPrinter.name);
+      } else if (printerList.length > 0) {
+        setSelectedPrinter(printerList[0].name);
+      }
+    } catch (err) {
+      console.error("Failed to load printers:", err);
+      toast({
+        title: "Warning",
+        description: "Failed to load available printers",
+        variant: "destructive",
+      });
+    }
+  };
+
   const removeFromCart = (id: string) => {
     const item = cart.find((item) => item.id === id);
     setCart(cart.filter((item) => item.id !== id));
@@ -360,10 +388,10 @@ export function NewSale() {
     0
   );
 
-  const discountAmount = globalDiscountType === 'percentage' 
-    ? (subtotal * globalDiscount) / 100 
+  const discountAmount = globalDiscountType === 'percentage'
+    ? (subtotal * globalDiscount) / 100
     : globalDiscount;
-  
+
   const total = Math.max(0, subtotal - discountAmount);
 
   const generateTransactionId = () => {
@@ -769,31 +797,28 @@ export function NewSale() {
          -webkit-print-color-adjust: exact; 
          print-color-adjust: exact;" />
 </div>
-<div class="store-header">${
-      receiptData.storeName || "MANPASAND GENERAL STORE"
-    }</div>
+<div class="store-header">${receiptData.storeName || "MANPASAND GENERAL STORE"
+      }</div>
 <div class="tagline">${receiptData.tagline || "Quality • Service • Value"}</div>
-<div class="address">${
-      branchName.address + ", Karachi" || "Main Shahrah-e-Faisal, Karachi"
-    }</div>
+<div class="address">${branchName.address + ", Karachi" || "Main Shahrah-e-Faisal, Karachi"
+      }</div>
 
 <div class="divider">-------------------------------------</div>
 
-<div class="receipt-info">Receipt # <span class="receipt-number">${
-      receiptData.transactionId
-    }</span></div>
+<div class="receipt-info">Receipt # <span class="receipt-number">${receiptData.transactionId
+      }</span></div>
 <div class="receipt-info">${new Date(receiptData.timestamp).toLocaleDateString(
-      "en-US",
-      {
-        month: "short",
-        day: "2-digit",
-        year: "numeric",
-      }
-    )} ${new Date(receiptData.timestamp).toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    })}</div>
+        "en-US",
+        {
+          month: "short",
+          day: "2-digit",
+          year: "numeric",
+        }
+      )} ${new Date(receiptData.timestamp).toLocaleTimeString("en-US", {
+        hour: "2-digit",
+        minute: "2-digit",
+        hour12: true,
+      })}</div>
 <div class="flex-item-row-cs">
 <div class="receipt-info">Cashier: ${receiptData.cashier || "Walk-in"}</div>
 <div class="receipt-info">${receiptData.customerType || "Walk-in"}</div>  
@@ -809,24 +834,23 @@ export function NewSale() {
 </div>
 
 ${receiptData.items
-  .map((item: any) => {
-    const itemName =
-      item.name.length > 20 ? item.name.substring(0, 17) + "..." : item.name;
-    const qty = `${item.quantity} pc`;
-    const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
+        .map((item: any) => {
+          const itemName =
+            item.name.length > 20 ? item.name.substring(0, 17) + "..." : item.name;
+          const qty = `${item.quantity} pc`;
+          const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
 
-    return `<div class="item-row">
+          return `<div class="item-row">
             <div class="item-name">${itemName}</div>
             <div class="item-qty">${qty}</div>
             <div class="item-rate">${rate}</div>
           </div>
-          ${
-            item.name.length > 20
+          ${item.name.length > 20
               ? `<div class="item-sub-row"><div class="item-sub-name">${item.name}</div><div class="item-sub-qty"></div><div class="item-sub-rate"></div></div>`
               : ""
-          }`;
-  })
-  .join("")}
+            }`;
+        })
+        .join("")}
 </div>
 
 <div class="divider">-------------------------------------</div>
@@ -835,15 +859,14 @@ ${receiptData.items
 <div class="receipt-info">Subtotal</div>
 <div class="receipt-info">PKR ${receiptData.subtotal.toFixed(2)}</div>
 </div>
-${
-  discount > 0
-    ? `
+${discount > 0
+        ? `
 <div class="flex-item-row-cs">
 <div class="receipt-info">Discount</div>
 <div class="receipt-info">PKR ${discount.toFixed(2)}</div>
 </div>`
-    : ""
-}
+        : ""
+      }
 <div class="flex-item-row-cs">
 <div class="receipt-info">Grand Total</div>
 <div class="receipt-info">PKR ${finalTotal.toFixed(2)}</div>
@@ -856,21 +879,19 @@ ${
 </div>
 <div class="flex-item-row-cs">
 <div class="payment-info">Amount Paid:</div>
-<div class="payment-method">PKR ${
-      receiptData.amountPaid
+<div class="payment-method">PKR ${receiptData.amountPaid
         ? receiptData.amountPaid.toFixed(2)
         : finalTotal.toFixed(2)
-    }</div> 
+      }</div> 
 </div>
-${
-  receiptData.changeAmount && receiptData.changeAmount > 0
-    ? `
+${receiptData.changeAmount && receiptData.changeAmount > 0
+        ? `
 <div class="flex-item-row-cs">
 <div class="payment-info">Change:</div>
 <div class="payment-method">PKR ${receiptData.changeAmount.toFixed(2)}</div>
 </div>`
-    : ""
-}
+        : ""
+      }
   
 ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
 
@@ -878,17 +899,14 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
 <div class="barcode">
   <svg id="barcode-svg"></svg>
 </div>
-<div class="barcode-number" id="barcode-number">${
-      receiptData.transactionId
-    }</div>
+<div class="barcode-number" id="barcode-number">${receiptData.transactionId
+      }</div>
 </div>
 
-<div class="thank-you">${
-      receiptData.thankYouMessage || "Thank you for shopping with us!"
-    }</div>
-<div style="font-size: 15px; margin-top: 6px; font-weight: bold; color: #000000;">${
-      receiptData.footerMessage || "Visit us again soon!"
-    }</div>
+<div class="thank-you">${receiptData.thankYouMessage || "Thank you for shopping with us!"
+      }</div>
+<div style="font-size: 15px; margin-top: 6px; font-weight: bold; color: #000000;">${receiptData.footerMessage || "Visit us again soon!"
+      }</div>
 `;
 
     // Print the receipt
@@ -928,11 +946,12 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
           payload.customerId = selectedCustomer;
         }
 
-        // Call create sale API
-        await apiClient.post("/sale", payload);
+        // Call create sale API and get the response
+        const saleResponse = await apiClient.post("/sale", payload);
+        const saleData = saleResponse.data.data;
 
-        // (You can keep your local transaction/receipt logic if you want)
-        const transactionId = generateTransactionId();
+        // Use the sale_number from backend as transaction ID
+        const transactionId = saleData.sale_number || generateTransactionId();
         const receiptData = generateReceiptData(
           transactionId,
           method,
@@ -957,15 +976,67 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
           description: `Transaction ${transactionId} completed via ${method}`,
         });
 
-        // Auto-download receipt
-        setTimeout(() => {
-          downloadReceipt(receiptData, branchName);
-          toast({
-            title: "Receipt Downloaded",
-            description: "Receipt has been saved to your downloads",
+        // Auto-print receipt from backend
+        try {
+          const receiptPayload = {
+            ...receiptData,
+            storeName: branchName.name || "MANPASAND GENERAL STORE",
+            store: branchName.name || "MANPASAND GENERAL STORE",
+            tagline: "Quality • Service • Value",
+            address: branchName.address + (branchName.address ? ", Karachi" : "") || "Main Shahrah-e-Faisal, Karachi",
+            cashier: "Muhammad",
+            customerType: selectedCustomer ? customers.find(c => c.id === selectedCustomer)?.email || "Walk-in" : "Walk-in",
+            discount: discountAmount,
+            total: total,
+            amountPaid: total,
+            changeAmount: 0
+          };
+
+          const selectedPrinterObj = printers.find(p => p.name === selectedPrinter);
+          console.log("Selected printer object:", selectedPrinterObj);
+          const columns = selectedPrinterObj?.receiptProfile?.columns ?? { fontA: 48, fontB: 64 };
+          const languageHint = selectedPrinterObj?.languageHint ?? 'escpos';
+
+
+          console.log("Sending print request:", {
+            receiptData: receiptPayload,
+            printerName: selectedPrinter
           });
-        }, 1000);
+
+          const printResponse = await apiClient.post("/barcode-generator/print-receipt", {
+            printer: {
+              name: selectedPrinter,
+              languageHint,
+              columns
+            },
+            job: {
+              copies: 1,
+              cut: true,
+              openDrawer: false
+            },
+            receiptData: receiptPayload
+          });
+
+          console.log("Print response:", printResponse);
+
+          if (printResponse.data.success) {
+            toast({
+              title: "Receipt Printed",
+              description: `Receipt sent to ${selectedPrinter}`,
+            });
+          } else {
+            throw new Error(printResponse.data.message || "Print failed");
+          }
+        } catch (printError) {
+          console.error("Print error:", printError);
+          toast({
+            variant: "destructive",
+            title: "Print Failed",
+            description: "Receipt could not be printed from backend",
+          });
+        }
       } catch (error) {
+        console.error("Payment error:", error);
         toast({
           variant: "destructive",
           title: "Payment Failed",
@@ -1007,18 +1078,18 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
 
   const handleScannerInput = async (scannedValue: string) => {
     setIsScanning(true);
-    
+
     try {
       // Clear the search term first
       setSearchTerm("");
-      
+
       // Find product by barcode
       const product = findProductByBarcode(scannedValue);
-      
+
       if (product) {
         // Add product to cart
         await addToCart(product, 1);
-        
+
         toast({
           title: "Product Added",
           description: `${product.name} added to cart via barcode scan`,
@@ -1078,8 +1149,8 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
               )}
               {holdSales.length > 0 && (
                 <div className="flex items-center">
-                  <Badge 
-                    variant="secondary" 
+                  <Badge
+                    variant="secondary"
                     className="mr-2 bg-blue-100 text-blue-800"
                   >
                     {holdSales.length} held
@@ -1113,9 +1184,9 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                   if (e.key === 'Enter' && searchTerm.trim()) {
                     e.preventDefault();
                     // Check if it looks like a barcode (numeric, 8+ digits or common barcode formats)
-                    const isBarcode = /^\d{8,}$/.test(searchTerm.trim()) || 
-                                    /^\d{12,13}$/.test(searchTerm.trim()) || // EAN-13, UPC-A
-                                    /^\d{8}$/.test(searchTerm.trim()); // EAN-8
+                    const isBarcode = /^\d{8,}$/.test(searchTerm.trim()) ||
+                      /^\d{12,13}$/.test(searchTerm.trim()) || // EAN-13, UPC-A
+                      /^\d{8}$/.test(searchTerm.trim()); // EAN-8
                     if (isBarcode) {
                       handleScannerInput(searchTerm.trim());
                     }
@@ -1231,9 +1302,8 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                     </p>
                     <div className="flex items-center justify-between mt-2">
                       <p
-                        className={`text-sm ${
-                          isLowStock ? "text-yellow-600" : "text-gray-500"
-                        }`}
+                        className={`text-sm ${isLowStock ? "text-yellow-600" : "text-gray-500"
+                          }`}
                       >
                         Stock:{" "}
                         {(product.available_stock ?? product.stock).toFixed(2)}
@@ -1286,6 +1356,28 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
             </select>
           </div>
 
+          {/* Printer Selection */}
+          <div className="mt-4">
+            <label className="block text-sm font-medium text-gray-700 mb-1">
+              Printer
+            </label>
+            <select
+              className="w-full border rounded px-3 py-2 bg-white text-gray-900"
+              value={selectedPrinter}
+              onChange={(e) => setSelectedPrinter(e.target.value)}
+            >
+              <option value="">Select printer</option>
+              {printers.map((printer) => (
+                <option key={printer.name} value={printer.name}>
+                  {printer.name} {printer.isDefault ? "(Default)" : ""}
+                </option>
+              ))}
+            </select>
+            {printers.length === 0 && (
+              <p className="text-xs text-gray-500 mt-1">Loading available printers...</p>
+            )}
+          </div>
+
           {/* Cart and Hold Sales Controls */}
           <div className="mt-4 space-y-4">
             {/* Cart Controls */}
@@ -1301,7 +1393,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 </>
               )}
             </div>
-            
+
             {/* Held Sales List */}
             {holdSales.length > 0 && (
               <div id="held-sales-list" className="space-y-2 border-t pt-4">
@@ -1408,7 +1500,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                               );
                               return;
                             }
-                            
+
                             const numValue = parseFloat(value);
                             if (!isNaN(numValue)) {
                               updateQuantityManual(item.id, numValue);
@@ -1522,7 +1614,8 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
               <Button
                 size="lg"
                 onClick={() => handlePayment("Cash")}
-                disabled={paymentLoading}
+                disabled={paymentLoading || !selectedPrinter}
+                title={!selectedPrinter ? "Please select a printer" : ""}
               >
                 <DollarSign className="h-4 w-4 mr-2" />
                 Cash
@@ -1531,12 +1624,18 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 size="lg"
                 variant="outline"
                 onClick={() => handlePayment("Card")}
-                disabled={paymentLoading}
+                disabled={paymentLoading || !selectedPrinter}
+                title={!selectedPrinter ? "Please select a printer" : ""}
               >
                 <CreditCard className="h-4 w-4 mr-2" />
                 Card
               </Button>
             </div>
+            {!selectedPrinter && cart.length > 0 && (
+              <p className="text-xs text-orange-600 text-center">
+                ⚠️ Please select a printer to proceed with payment
+              </p>
+            )}
           </div>
         )}
       </div>
