@@ -6,107 +6,122 @@ import PDFDocument from 'pdfkit';
 import { print } from 'pdf-to-printer';
 
 type PrintJobInput = {
-  printer: {
-    name: string;                        // Windows queue name
-    columns?: { fontA: number; fontB: number }; // optional; for layout logic only
-  };
+  printer: { name: string; columns?: { fontA: number; fontB: number } };
   job?: { copies?: number; cut?: boolean };
   receiptData: any;
 };
 
-function mm(n: number) { return n * 2.83464567; } // mm -> points
+function mm(n: number) { return n * 2.83464567; } // mm -> pt
 
 export async function printReceiptPDF(input: PrintJobInput) {
   const { printer, job, receiptData } = input;
   const copies = job?.copies ?? 1;
 
-  // 80mm wide ticket (height grows with content)
-  const pageWidth = mm(80);
-  const margins = { left: mm(3), right: mm(3), top: mm(4), bottom: mm(4) };
+  const pageWidth = mm(80);                       // 80mm roll
+  const margins = { left: mm(2), right: mm(2), top: mm(1), bottom: mm(1) };
+  const contentWidth = pageWidth - margins.left - margins.right;
 
-  // temp file
   const tmp = path.join(os.tmpdir(), `receipt_${Date.now()}.pdf`);
   const doc = new PDFDocument({
-    size: [pageWidth, mm(500)], // tall enough; we will let PDFKit expand via doc.addPage if needed
+    size: [pageWidth, mm(800)],                   // temporary tall page
     margins,
-    autoFirstPage: true
+    autoFirstPage: true,
+    pdfVersion: '1.4'
   });
-  const stream = fs.createWriteStream(tmp);
-  doc.pipe(stream);
 
-  // fonts
-  doc.font('Courier'); // monospaced; available on Windows
-  doc.fontSize(10.5);
+  const out = fs.createWriteStream(tmp);
+  doc.pipe(out);
 
-  // helpers
-  const widthChars = (printer.columns?.fontA ?? 48); // close to 80mm printable
+  // Colors & fonts — force solid black & bold for darkness
+  doc.fillColor('#000000');
+  doc.opacity(1);
+  doc.font('Courier-Bold');
+  const baseFontSize = 11.5;                      // a bit larger -> darker
+  doc.fontSize(baseFontSize);
+
+  // Helpers
+  const widthChars = (printer.columns?.fontA ?? 48);
   const twoCol = (l: string, r: string) => {
     l = l ?? ''; r = r ?? '';
     const pad = Math.max(1, widthChars - l.length - r.length);
     return l + ' '.repeat(pad) + r;
   };
+  const hr = (thickness = 1) => {
+    const y = doc.y + 2;
+    doc.moveTo(margins.left, y).lineTo(pageWidth - margins.right, y).lineWidth(thickness).stroke('#000000');
+    doc.moveDown(0.2);
+  };
+  const textLine = (t: string, opts: PDFKit.Mixins.TextOptions = {}) =>
+    doc.text(t, { ...opts, width: contentWidth, lineBreak: true, continued: false });
 
-  // Header
-  doc.fontSize(16).font('Courier-Bold').text((receiptData.storeName || 'MANPASAND GENERAL STORE').toUpperCase(), { align: 'center' });
-  doc.moveDown(0.1);
-  doc.fontSize(10.5).font('Courier').text(receiptData.tagline || 'Quality • Service • Value', { align: 'center' });
-  doc.text(receiptData.address || 'Karachi, Pakistan', { align: 'center' });
+  // ===== Header =====
+  doc.fontSize(16).text((receiptData.storeName || 'MANPASAND GENERAL STORE').toUpperCase(), {
+    align: 'center', width: contentWidth, lineGap: 0
+  });
   doc.moveDown(0.2);
-  doc.text(''.padEnd(widthChars, '-'));
+  doc.fontSize(baseFontSize);
+  textLine(receiptData.tagline || 'Quality • Service • Value', { align: 'center' });
+  textLine(receiptData.address || 'Karachi, Pakistan', { align: 'center' });
+  hr(1.2);
 
-  // Info
+  // ===== Info =====
   const ts = new Date(receiptData.timestamp || Date.now());
-  doc.text(`Receipt: ${receiptData.transactionId}`);
-  doc.text(`Date: ${ts.toLocaleDateString()} ${ts.toLocaleTimeString()}`);
-  doc.text(`Cashier: ${receiptData.cashier || 'Walk-in'}   Customer: ${receiptData.customerType || 'Walk-in'}`);
-  doc.text(''.padEnd(widthChars, '-'));
+  textLine(`Receipt: ${receiptData.transactionId}`);
+  textLine(`Date: ${ts.toLocaleDateString()} ${ts.toLocaleTimeString()}`);
+  textLine(`Cashier: ${receiptData.cashier || 'Walk-in'}   Customer: ${receiptData.customerType || 'Walk-in'}`);
+  hr(1.2);
 
-  // Items
-  doc.text(twoCol('ITEM                 QTY', 'AMOUNT'));
-  doc.text(''.padEnd(widthChars, '-'));
+  // ===== Items =====
+  textLine(twoCol('ITEM                 QTY', 'AMOUNT'), { lineBreak: false });
+  hr(1);
   for (const it of (receiptData.items || [])) {
     const amount = (Number(it.price || 0) * Number(it.quantity || 0)).toFixed(2);
     const name = String(it.name || '');
-    // main row
-    doc.text(twoCol(`${name.slice(0, 28)} ${it.quantity}x`, `PKR ${amount}`));
-    // overflow name on next line if too long
-    if (name.length > 28) doc.text(name);
+    textLine(twoCol(`${name.slice(0, 28)} ${it.quantity}x`, `PKR ${amount}`), { lineBreak: false });
+    if (name.length > 28) textLine(name); // overflow line
   }
-  doc.text(''.padEnd(widthChars, '-'));
+  hr(1.2);
 
+  // ===== Totals =====
   const subtotal = Number(receiptData.subtotal || 0);
   const discount = Number(receiptData.discount || 0);
   const total = Number(receiptData.total ?? Math.max(0, subtotal - discount));
 
-  doc.text(twoCol('Subtotal', `PKR ${subtotal.toFixed(2)}`));
-  if (discount > 0) doc.text(twoCol('Discount', `PKR ${discount.toFixed(2)}`));
-  doc.font('Courier-Bold');
-  doc.text(twoCol('TOTAL', `PKR ${total.toFixed(2)}`));
-  doc.font('Courier');
-  doc.text(''.padEnd(widthChars, '-'));
+  textLine(twoCol('Subtotal', `PKR ${subtotal.toFixed(2)}`), { lineBreak: false });
+  if (discount > 0) textLine(twoCol('Discount', `PKR ${discount.toFixed(2)}`), { lineBreak: false });
 
-  doc.text(twoCol('Payment', String(receiptData.paymentMethod || 'CASH').toUpperCase()));
-  if (receiptData.amountPaid != null) doc.text(twoCol('Paid', `PKR ${Number(receiptData.amountPaid).toFixed(2)}`));
-  if (receiptData.changeAmount > 0) doc.text(twoCol('Change', `PKR ${Number(receiptData.changeAmount).toFixed(2)}`));
-  doc.moveDown(0.5);
-  doc.text(receiptData.thankYouMessage || 'Thank you for shopping with us!', { align: 'center' });
-  if (receiptData.footerMessage) doc.text(receiptData.footerMessage, { align: 'center' });
+  doc.font('Courier-Bold').fontSize(13);
+  textLine(twoCol('TOTAL', `PKR ${total.toFixed(2)}`), { lineBreak: false });
+  doc.font('Courier-Bold').fontSize(baseFontSize);
+  hr(1.4);
+
+  textLine(twoCol('Payment', String(receiptData.paymentMethod || 'CASH').toUpperCase()), { lineBreak: false });
+  if (receiptData.amountPaid != null) textLine(twoCol('Paid', `PKR ${Number(receiptData.amountPaid).toFixed(2)}`), { lineBreak: false });
+  if (receiptData.changeAmount > 0) textLine(twoCol('Change', `PKR ${Number(receiptData.changeAmount).toFixed(2)}`), { lineBreak: false });
+
+  doc.moveDown(0.4);
+  textLine(receiptData.thankYouMessage || 'Thank you for shopping with us!', { align: 'center' });
+  if (receiptData.footerMessage) textLine(receiptData.footerMessage, { align: 'center' });
+
+  // ===== Trim the page height to content =====
+  const neededHeight = doc.y + margins.bottom + 2; // 2pt safety
+  if (neededHeight < doc.page.height) doc.page.height = neededHeight;
 
   doc.end();
   await new Promise<void>((resolve, reject) => {
-    stream.on('finish', () => resolve());
-    stream.on('error', reject);
+    out.on('finish', resolve);
+    out.on('error', reject);
   });
 
-  // print N copies
+  // Print N copies — prevent any scaling on Windows
   for (let i = 0; i < copies; i++) {
     await print(tmp, {
-      printer: printer.name    // your Windows queue name (USB is fine)
-    });
+        printer: printer.name,
+        scale: 'noscale',     // ✅ typed way to prevent any scaling
+        monochrome: true      // optional: forces B/W; often prints darker
+      });      
   }
 
-  // cleanup
   fs.unlink(tmp, () => {});
-
   return { success: true, printer: printer.name, copies };
 }
