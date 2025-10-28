@@ -64,6 +64,7 @@ export default function BarcodeGenerator() {
   const [globalExpiryDuration, setGlobalExpiryDuration] = useState("");
   const [availablePrinters, setAvailablePrinters] = useState<any[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState("");
+  const [selectedPaperSize, setSelectedPaperSize] = useState("50x30mm");
   const [isLoadingPrinters, setIsLoadingPrinters] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
@@ -501,42 +502,45 @@ export default function BarcodeGenerator() {
 
     setIsPrinting(true);
     try {
-      // Prepare products data for API
-      const productsData = selectedProducts.map((item) => ({
-        id: item.product.id,
-        name: item.product.name,
-        sku: item.product.sku,
-        code: item.product.code,
-        sales_rate_exc_dis_and_tax: item.product.sales_rate_exc_dis_and_tax,
-        netWeight: item.netWeight,
-        packageDate: item.packageDate.toISOString(),
-        expiryDate: item.expiryDate?.toISOString(),
-      }));
-
-      // Send print request to API
+      // Prepare print request for Zebra API
       const requestData = {
-        products: productsData,
         printerName: selectedPrinter,
-        settings: {
-          copies: 1,
-          paperSize: "50x30mm"
-        }
+        copies: 1,
+        paperSize: selectedPaperSize,
+        dpi: 203,
+        humanReadable: false,
+        lines: { 
+          showTitle: true, 
+          showMeta: true, 
+          showDates: true 
+        },
+        items: selectedProducts.map((sp) => ({
+          id: sp.product.id,
+          name: sp.product.name,
+          sku: sp.product.sku,
+          code: sp.product.code,
+          barcode: `${sp.product.sku || sp.product.code || 'PROD'}-${Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)))}`,
+          netWeight: sp.netWeight,
+          price: Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax))),
+          packageDateISO: sp.packageDate.toISOString(),
+          expiryDateISO: sp.expiryDate?.toISOString(),
+        }))
       };
       
-      console.log('Sending print request:', JSON.stringify(requestData, null, 2));
+      console.log('Sending Zebra print request:', JSON.stringify(requestData, null, 2));
       
-      const response = await apiClient.post('/barcode-generator/print', requestData);
+      const response = await apiClient.post('/barcode-generator/print-zebra', requestData);
 
       if (response.data.success) {
-      toast({
-        title: "Print Success",
-          description: response.data.message,
+        toast({
+          title: "Print Success",
+          description: response.data.message || "Barcodes sent to printer successfully",
         });
       } else {
         toast({
           variant: "destructive",
           title: "Print Failed",
-          description: response.data.message,
+          description: response.data.message || "Failed to print barcodes",
         });
       }
     } catch (error: any) {
@@ -718,6 +722,26 @@ export default function BarcodeGenerator() {
                   </Button>
                 </div>
               )}
+            </div>
+
+            {/* Paper Size Selection */}
+            <div className="space-y-2 border-t pt-4">
+              <Label htmlFor="paperSize">Paper Size</Label>
+              <Select
+                onValueChange={setSelectedPaperSize}
+                value={selectedPaperSize}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select paper size" />
+                </SelectTrigger>
+                <SelectContent>
+                  {paperSizes.map((size) => (
+                    <SelectItem key={size.value} value={size.value}>
+                      {size.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
 
             {/* Global Dates */}

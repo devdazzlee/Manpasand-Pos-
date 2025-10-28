@@ -48,3 +48,4 @@ Write-Host "3. Look at printer display - any error messages?"
 Write-Host "4. Press test button on printer if available"
 
 
+

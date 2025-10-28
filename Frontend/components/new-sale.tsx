@@ -52,6 +52,12 @@ interface Printer {
   name: string;
   isDefault?: boolean;
   status?: string;
+  receiptProfile?: {
+    roll: '80mm' | '58mm';
+    printableWidthMM: number;
+    columns: { fontA: number; fontB: number };
+  };
+  languageHint?: 'escpos' | 'zpl' | 'generic';
 }
 
 
@@ -392,7 +398,10 @@ export function NewSale() {
     ? (subtotal * globalDiscount) / 100
     : globalDiscount;
 
-  const total = Math.max(0, subtotal - discountAmount);
+  const taxPercent = 5; // 5% tax
+  const taxableAmount = Math.max(0, subtotal - discountAmount);
+  const taxAmount = (taxableAmount * taxPercent) / 100;
+  const total = taxableAmount + taxAmount;
 
   const generateTransactionId = () => {
     return `TXN${Date.now().toString().slice(-6)}`;
@@ -982,14 +991,18 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
             ...receiptData,
             storeName: branchName.name || "MANPASAND GENERAL STORE",
             store: branchName.name || "MANPASAND GENERAL STORE",
-            tagline: "Quality • Service • Value",
+            tagline: "Fresh • Fast • Friendly",
             address: branchName.address + (branchName.address ? ", Karachi" : "") || "Main Shahrah-e-Faisal, Karachi",
-            cashier: "Muhammad",
-            customerType: selectedCustomer ? customers.find(c => c.id === selectedCustomer)?.email || "Walk-in" : "Walk-in",
+            strn: "STRN 12-345679 STRN 12-3456789", // Sales Tax Registration Number
+            cashier: "Muhammad Walk-in",
+            customerType: selectedCustomer ? customers.find(c => c.id === selectedCustomer)?.name || "Walk-in" : "Walk-in",
             discount: discountAmount,
+            taxPercent: taxPercent, // 5% tax
             total: total,
             amountPaid: total,
-            changeAmount: 0
+            changeAmount: 0,
+            thankYouMessage: "Thank you for shopping!",
+            footerMessage: "Goods once sold can be exchanged within 7 days"
           };
 
           const selectedPrinterObj = printers.find(p => p.name === selectedPrinter);
@@ -1600,6 +1613,12 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 <div className="flex justify-between text-sm text-green-600">
                   <span>Discount:</span>
                   <span>- Rs {discountAmount.toFixed(2)}</span>
+                </div>
+              )}
+              {taxAmount > 0 && (
+                <div className="flex justify-between text-sm">
+                  <span>Tax ({taxPercent}%):</span>
+                  <span>Rs {taxAmount.toFixed(2)}</span>
                 </div>
               )}
               <Separator />
