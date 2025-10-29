@@ -196,83 +196,153 @@ function deriveReceiptProfile(p: Partial<PrinterInfo>) {
 }
 
 
-export class BarcodeService {
-  // Get available printers using Windows command
-  async getAvailablePrinters(): Promise<PrinterInfo[]> {
+// Linux printer detection functions
+async function getPrintersViaLPStat(): Promise<PrinterInfo[]> {
+  try {
+    // Get list of all printers
+    const { stdout: allPrinters } = await execFileAsync('lpstat', ['-p'], { timeout: 5000 });
+    
+    // Get default printer
+    let defaultPrinterName: string | null = null;
     try {
-      // 1) Primary: CIM
-      const cimPrinters = await getPrintersViaCIM().catch(() => []);
+      const { stdout: defaultOutput } = await execFileAsync('lpstat', ['-d'], { timeout: 5000 });
+      const match = defaultOutput.match(/system default destination: (\S+)/);
+      if (match) defaultPrinterName = match[1];
+    } catch {}
+
+    // Parse printer names from output
+    // Format: "printer PRINTER_NAME is idle.  enabled since ..."
+    const printerNames = allPrinters
+      .split('\n')
+      .filter(line => line.trim() && line.includes('printer'))
+      .map(line => {
+        const match = line.match(/printer (\S+) is/);
+        return match ? match[1] : null;
+      })
+      .filter(name => name !== null);
+
+    return printerNames.map((name: string) => ({
+      name,
+      id: `${name.toLowerCase().replace(/\s+/g, '-')}@linux`,
+      isDefault: name === defaultPrinterName,
+      status: 'available' as const,
+    }));
+  } catch (error) {
+    logger.error('lpstat failed:', error);
+    return [];
+  }
+}
+
+async function getPrintersViaCups(): Promise<PrinterInfo[]> {
+  try {
+    const { stdout } = await execAsync('lpstat -a', { timeout: 5000 });
+    const printerNames = stdout
+      .split('\n')
+      .filter(line => line.trim() && !line.startsWith('printer'))
+      .map(line => line.split(' ')[0])
+      .filter(name => name);
+
+    let defaultPrinterName: string | null = null;
+    try {
+      const { stdout: defaultOut } = await execAsync('lpstat -d', { timeout: 5000 });
+      const match = defaultOut.match(/system default destination: (\S+)/);
+      if (match) defaultPrinterName = match[1];
+    } catch {}
+
+    return printerNames.map((name: string) => ({
+      name,
+      id: `${name.toLowerCase().replace(/\s+/g, '-')}@linux`,
+      isDefault: name === defaultPrinterName,
+      status: 'available' as const,
+    }));
+  } catch (error) {
+    logger.error('lpstat -a failed:', error);
+    return [];
+  }
+}
+
+export class BarcodeService {
+  // Get available printers - supports both Windows and Linux
+  async getAvailablePrinters(): Promise<PrinterInfo[]> {
+    const platform = process.platform;
+    logger.info(`Detecting printers on platform: ${platform}`);
+
+    try {
       let printers: PrinterInfo[] = [];
-      if (cimPrinters.length) {
-        printers = normalizeAndSort(cimPrinters);
-      } else {
-        // 2) Fallback: Get-Printer + default from HKCU
-        const [gpPrintersRaw, defName] = await Promise.all([
-          getPrintersViaGetPrinter().catch(() => []),
-          getDefaultPrinterFromRegistryHKCU().catch(() => null),
-        ]);
-        // ensure id field
-        const gpPrinters = gpPrintersRaw.map((p: any) => ({
-          ...p,
-          id: `${String(p.name).toLowerCase().replace(/\s+/g, '-')}@${process.env.COMPUTERNAME || 'local'}`
-        })) as PrinterInfo[];
-        if (gpPrinters.length) {
-          printers = normalizeAndSort(gpPrinters, defName);
+
+      if (platform === 'win32') {
+        // Windows detection
+        const cimPrinters = await getPrintersViaCIM().catch(() => []);
+        if (cimPrinters.length) {
+          printers = normalizeAndSort(cimPrinters);
         } else {
-          // 3) Registry enumerate names
-          const { stdout } = await execFileAsync('reg', ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers'], { timeout: 5000, windowsHide: true });
-          const names = new Set<string>();
-          stdout.split(/\r?\n/).forEach(line => {
-            const m = line.match(/Printers\\([^\\\r\n]+)/);
-            if (m?.[1]) names.add(m[1]);
-          });
-          const def = await getDefaultPrinterFromRegistryHKCU().catch(() => null);
-          const regPrinters: PrinterInfo[] = Array.from(names).map(name => ({
-            name,
-            id: `${name.toLowerCase().replace(/\s+/g, '-')}@${process.env.COMPUTERNAME || 'local'}`,
-            isDefault: false,
-            status: 'available',
+          const [gpPrintersRaw, defName] = await Promise.all([
+            getPrintersViaGetPrinter().catch(() => []),
+            getDefaultPrinterFromRegistryHKCU().catch(() => null),
+          ]);
+          const gpPrinters = gpPrintersRaw.map((p: any) => ({
+            ...p,
+            id: `${String(p.name).toLowerCase().replace(/\s+/g, '-')}@windows`
           })) as PrinterInfo[];
-          printers = normalizeAndSort(regPrinters, def);
+          if (gpPrinters.length) {
+            printers = normalizeAndSort(gpPrinters, defName);
+          }
         }
+
+        // Enrich Windows printers
+        if (printers.length > 0) {
+          const limit = 3;
+          const out: PrinterInfo[] = [];
+          for (let i = 0; i < printers.length; i += limit) {
+            const chunk = printers.slice(i, i + limit);
+            const enriched = await Promise.all(chunk.map(async p => {
+              try {
+                const extra = await enrichPrinterInfo(p.name);
+                return {
+                  ...p,
+                  driver: extra.driver ?? null,
+                  port: extra.port ?? null,
+                  defaults: extra.defaults ?? null,
+                  languageHint: deriveLanguageHint({ ...p, ...extra }) as 'escpos' | 'zpl' | 'generic',
+                  receiptProfile: deriveReceiptProfile({ ...p, ...extra }),
+                };
+              } catch {
+                return {
+                  ...p,
+                  languageHint: deriveLanguageHint(p) as 'escpos' | 'zpl' | 'generic',
+                  receiptProfile: deriveReceiptProfile(p),
+                };
+              }
+            }));
+            out.push(...enriched);
+          }
+          printers = out;
+        }
+      } else if (platform === 'linux' || platform === 'darwin') {
+        // Linux/macOS detection
+        printers = await getPrintersViaLPStat().catch(() => []);
+        if (printers.length === 0) {
+          printers = await getPrintersViaCups().catch(() => []);
+        }
+
+        // Basic enrichment for Linux printers
+        printers = printers.map(p => ({
+          ...p,
+          languageHint: deriveLanguageHint(p) as 'escpos' | 'zpl' | 'generic',
+          receiptProfile: deriveReceiptProfile(p),
+        }));
       }
 
-      if (!printers.length) {
+      // Fallback to default if no printers found
+      if (printers.length === 0) {
+        logger.warn('No printers detected, returning default printer');
         return [{ name: 'Default Printer', id: 'default@local', isDefault: true, status: 'available' }];
       }
 
-      // 6.a) Enrich in parallel (limit concurrency to avoid PS storms)
-      const limit = 3;
-      const out: PrinterInfo[] = [];
-      for (let i = 0; i < printers.length; i += limit) {
-        const chunk = printers.slice(i, i + limit);
-        const enriched = await Promise.all(chunk.map(async p => {
-          try {
-            const extra = await enrichPrinterInfo(p.name);
-            const merged: PrinterInfo = {
-              ...p,
-              driver: extra.driver ?? p.driver ?? null,
-              port: extra.port ?? p.port ?? null,
-              defaults: extra.defaults ?? p.defaults ?? null,
-            };
-            merged.languageHint = deriveLanguageHint(merged);
-            merged.receiptProfile = deriveReceiptProfile(merged);
-            return merged;
-          } catch {
-            const merged: PrinterInfo = {
-              ...p,
-              languageHint: deriveLanguageHint(p),
-              receiptProfile: deriveReceiptProfile(p),
-            };
-            return merged;
-          }
-        }));
-        out.push(...enriched);
-      }
-
-      return out;
+      logger.info(`Found ${printers.length} printers`);
+      return printers;
     } catch (e) {
-      logger.error('Error getting printers (enriched):', e);
+      logger.error('Error getting printers:', e);
       return [{ name: 'Default Printer', id: 'default@local', isDefault: true, status: 'available' }];
     }
   }

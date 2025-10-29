@@ -1,226 +1,215 @@
-// src/services/barcode-zebra.service.ts
-import { execFile } from 'child_process';
-import util from 'util';
-import fs from 'fs';
+// src/services/barcode.service.ts (CMD-only)
 import os from 'os';
+import fs from 'fs';
 import path from 'path';
-import { logger } from '../utils/logger';
+import util from 'util';
+import { execFile } from 'child_process';
 const execFileAsync = util.promisify(execFile);
-
-// ===== Types =====
-export interface ZebraPrintItem {
-  id: string;
-  name: string;
-  sku?: string;
-  code?: string;
-  barcode: string;                 // final Code128 content to encode
-  netWeight: string;
-  price: number;                   // integer/rounded for printing
-  packageDateISO: string;          // e.g. 2025-10-27T...
-  expiryDateISO?: string;          // optional  
-}
-
-export type PaperPreset = '50x30mm' | '60x40mm' | '40x25mm';
-
-export interface ZebraPrintRequest {
-  printerName: string;             // e.g. "ZDesigner GC420t"
-  copies?: number;                 // per item
-  paperSize?: PaperPreset;         // UI dropdown
-  dpi?: 203 | 300;                 // default 203 for GC420t
-  humanReadable?: boolean;         // print text under barcode
-  items: ZebraPrintItem[];
-}
 
 export interface PrinterInfo {
   name: string;
-  id: string;
+  shareName?: string | null;
   isDefault: boolean;
   status: 'available' | 'offline' | 'unknown';
-  workOffline?: boolean;
-  printerStatus?: number;
-  port?: { name?: string | null; host?: string | null } | null;
-  driver?: { name?: string | null; version?: string | null; manufacturer?: string | null } | null;
-  defaults?: {
-    paperSize?: string | null;
-    pageWidthMM?: number | null;
-    pageHeightMM?: number | null;
-    orientation?: string | null;
-    dpi?: { x?: number | null; y?: number | null } | null;
-  } | null;
-  languageHint?: 'escpos' | 'zpl' | 'generic';
+  portName?: string | null;
 }
 
-// ===== Helpers for printers (same approach you use elsewhere) =====
-function safeParseJson<T = any>(text: string): T | null {
-  try { return JSON.parse(text); } catch { return null; }
+type BuildItemsInput = {
+  printerName: string;
+  copies?: number;
+  dpi?: 203 | 300;
+  paperSize?: '50x30mm' | '60x40mm' | '40x25mm';
+  humanReadable?: boolean;
+  items: Array<{
+    id: string; name: string; sku?: string; code?: string;
+    barcode: string; netWeight?: string; price?: number;
+    packageDateISO?: string; expiryDateISO?: string;
+  }>;
+};
+
+export class BarcodeService {
+  // ---- Discover printers without PowerShell ----
+  async getAvailablePrinters(): Promise<PrinterInfo[]> {
+    // WMIC is deprecated but still present on most Windows; no PS required
+    const { stdout } = await execFileAsync('wmic', [
+      'printer', 'get',
+      'Name,ShareName,Default,PrinterStatus,PortName',
+      '/format:csv'
+    ], { windowsHide: true, timeout: 8000, maxBuffer: 10 * 1024 * 1024 });
+
+    const lines = stdout.split(/\r?\n/).filter(Boolean).slice(1); // skip header
+    const list: PrinterInfo[] = [];
+    for (const line of lines) {
+      // CSV: Node,Default,Name,PortName,PrinterStatus,ShareName
+      const parts = line.split(',');
+      const Default = parts[1];
+      const Name = parts[2];
+      const PortName = parts[3];
+      const PrinterStatus = Number(parts[4] || 0);
+      const ShareName = parts[5] || '';
+
+      if (!Name) continue;
+      list.push({
+        name: Name,
+        shareName: ShareName || null,
+        isDefault: Default === 'TRUE',
+        status: (PrinterStatus === 0 || PrinterStatus === 3) ? 'available'
+               : (PrinterStatus === 1 ? 'offline' : 'unknown'),
+        portName: PortName || null
+      });
+    }
+
+    // fallback default from registry if WMIC didn’t mark any default
+    if (!list.some(p => p.isDefault)) {
+      try {
+        const { stdout: regOut } = await execFileAsync('reg', [
+          'query', 'HKCU\\Software\\Microsoft\\Windows NT\\CurrentVersion\\Windows', '/v', 'Device'
+        ], { windowsHide: true, timeout: 4000 });
+        const line = regOut.split(/\r?\n/).find(l => l.includes('REG_SZ'));
+        const val = line?.split('REG_SZ').pop()?.trim() || '';
+        const defName = val.split(',')[0]?.trim();
+        if (defName) {
+          const p = list.find(x => x.name.toLowerCase() === defName.toLowerCase());
+          if (p) p.isDefault = true;
+        }
+      } catch {}
+    }
+
+    // sort: default first
+    return list.sort((a, b) => Number(b.isDefault) - Number(a.isDefault) || a.name.localeCompare(b.name));
+  }
+
+  // ---- Build ZPL for items (same as before) ----
+  buildZPLForItems(input: BuildItemsInput): string {
+    const dpi = input.dpi ?? 203;
+    const dims = {
+      '50x30mm': { w: Math.round(50/25.4 * dpi), h: Math.round(30/25.4 * dpi) },
+      '60x40mm': { w: Math.round(60/25.4 * dpi), h: Math.round(40/25.4 * dpi) },
+      '40x25mm': { w: Math.round(40/25.4 * dpi), h: Math.round(25/25.4 * dpi) },
+    }[input.paperSize ?? '50x30mm'];
+    const HRI = input.humanReadable ? 'Y' : 'N';
+
+    const blocks: string[] = [];
+    for (const it of input.items) {
+      const title = (it.name || '').toUpperCase().slice(0, 26);
+      const wt    = it.netWeight ? `NET WT: ${it.netWeight}` : '';
+      const price = Number.isFinite(it.price) ? `RS ${Math.round(it.price!)}` : '';
+      const pkg   = it.packageDateISO ? new Date(it.packageDateISO).toLocaleDateString('en-GB') : '';
+      const exp   = it.expiryDateISO ? new Date(it.expiryDateISO).toLocaleDateString('en-GB') : '';
+
+      blocks.push(
+`^XA
+^PW${dims.w}
+^LL${dims.h}
+^LH0,0
+^CI28
+^CF0,28
+^FO10,10^FB${dims.w-20},2,0,L,0^FD${title}^FS
+^CF0,26
+^FO${dims.w-160},10^FB150,1,0,R,0^FD${price}^FS
+^BY2,2,60
+^FO10,80^BCN,60,${HRI},N,N
+^FD${it.barcode}^FS
+^CF0,20
+^FO10,150^FD${wt}^FS
+^CF0,18
+^FO10,170^FDPKG: ${pkg}^FS
+^FO${dims.w-160},170^FDEXP: ${exp}^FS
+^XZ`
+      );
+    }
+    const copies = input.copies ?? 1;
+    return Array(copies).fill(blocks.join('\n')).join('\n');
+  }
+
+  // ---- Send RAW ZPL without PowerShell ----
+  async printZPLRaw(args: { printerName: string; zpl: string; copies?: number }) {
+    const { printerName, zpl } = args;
+
+    const file = path.join(os.tmpdir(), `zpl_${Date.now()}_${Math.random().toString(36).slice(2)}.zpl`);
+    await fs.promises.writeFile(file, zpl, 'utf8');
+
+    // Prefer UNC if the queue is shared, else use PRINT.EXE with queue name.
+    let target = printerName;
+    if (!/^\\\\/i.test(printerName)) {
+      try {
+        const list = await this.getAvailablePrinters();
+        const p = list.find(x => x.name.toLowerCase() === printerName.toLowerCase());
+        if (p?.shareName) target = `\\\\localhost\\${p.shareName}`;
+      } catch {}
+    }
+
+    const attempts: Array<{ cmd: string; args: string[]; label: string }> = [];
+    if (/^\\\\/i.test(target)) attempts.push({ cmd: 'cmd.exe', args: ['/c', 'copy', '/b', file, target], label: 'COPY /B to UNC' });
+    attempts.push({ cmd: 'print', args: ['/D:' + `"${printerName}"`, file], label: 'PRINT /D to Queue' });
+
+    let lastErr: any = null;
+    for (const a of attempts) {
+      try {
+        await execFileAsync(a.cmd, a.args, { windowsHide: true, timeout: 15000, cwd: path.dirname(file) });
+        await fs.promises.unlink(file).catch(() => {});
+        return;
+      } catch (e) { lastErr = e; }
+    }
+    await fs.promises.unlink(file).catch(() => {});
+    throw new Error(`RAW send failed. Last error: ${lastErr?.stderr || lastErr?.message || lastErr}`);
+  }
 }
 
-async function getPrintersViaCIM(): Promise<PrinterInfo[]> {
-  const ps = [
-    '-NoProfile',
-    '-Command',
-    `$p = Get-CimInstance Win32_Printer | Select-Object Name,Default,WorkOffline,PrinterStatus,DriverName,PortName;
-     $p | ConvertTo-Json -Compress -Depth 3`
-  ];
-  const { stdout } = await execFileAsync('powershell', ps, { timeout: 6000, windowsHide: true, maxBuffer: 10 * 1024 * 1024 });
-  const data = safeParseJson(stdout);
-  if (!data) return [];
-  const arr = Array.isArray(data) ? data : [data];
-  return arr.map((p: any) => ({
-    name: p.Name,
-    id: `${String(p.Name).toLowerCase().replace(/\s+/g, '-')}@${process.env.COMPUTERNAME || 'local'}`,
-    isDefault: !!p.Default,
-    status: p.WorkOffline ? 'offline' : ((p.PrinterStatus === 3 || p.PrinterStatus === 0 || p.PrinterStatus == null) ? 'available' : 'unknown'),
-    workOffline: !!p.WorkOffline,
-    printerStatus: p.PrinterStatus ?? null,
-    port: { name: p.PortName ?? null, host: null },
-    driver: { name: p.DriverName ?? null, version: null, manufacturer: null },
-    defaults: null,
-    languageHint: ((p.DriverName || '').toLowerCase().includes('zebra') || (p.Name || '').toLowerCase().includes('zdesigner')) ? 'zpl' : 'generic'
-  }));
+// Standalone functions for simpler ZPL printing
+function buildZplLabel(p: {
+  code: string; title: string; netWt: string; price: string;
+  pkg: string; exp: string;
+}) {
+  return `^XA
+^CI28
+^PW609
+^LL406
+^LH0,0
+^FWN
+^CF0,28
+^FO20,15^FD${p.title}^FS
+^CF0,22
+^FO20,55^FDWt: ${p.netWt}^FS
+^FO320,55^FDRs ${p.price}^FS
+^BY3,3,180
+^FO30,95
+^BCN,180,N,N,N
+^FD${p.code}^FS
+^CF0,20
+^FO20,290^FDPKG: ${p.pkg}^FS
+^FO320,290^FDEXP: ${p.exp}^FS
+^XZ`;
 }
 
-export class ZebraBarcodeService {
-  // List printers (USB and TCP/IP) — no IP required
-  async listPrinters(): Promise<PrinterInfo[]> {
-    try {
-      const list = await getPrintersViaCIM();
-      if (list.length) return list.sort((a, b) => (Number(b.isDefault) - Number(a.isDefault)) || a.name.localeCompare(b.name));
-      return [{ name: 'Default Printer', id: 'default@local', isDefault: true, status: 'available', languageHint: 'generic' }];
-    } catch (e) {
-      logger.error('listPrinters error', e);
-      return [{ name: 'Default Printer', id: 'default@local', isDefault: true, status: 'available', languageHint: 'generic' }];
-    }
-  }
+export async function printZplRaw(printerName: string, zpl: string) {
+  // Use Windows print.exe to send RAW to a named printer queue.
+  // We write ZPL to a temp file then print it RAW (driver will not rasterize/rotate).
+  const tmp = path.join(os.tmpdir(), `label_${Date.now()}.zpl`);
+  await fs.promises.writeFile(tmp, zpl, "utf8");
 
-  // Send a tiny ZPL to verify spooling to a Windows queue by name
-  async testPrinter(printerName: string) {
-    const zpl =
-      '^XA^PW400^LL200^LH0,0' +
-      '^FO20,20^A0N,30,30^FDZebra Test^FS' +
-      '^FO20,70^BCN,60,Y,N,N^FDTEST123^FS' +
-      '^XZ';
-    await this.spoolZPL(printerName, zpl);
-    return { success: true, message: 'Test label sent' };
-  }
+  // /D:"queue name" must match exactly the printer name shown in Control Panel.
+  // /t sends RAW without formatting.
+  await execFileAsync("PRINT", ["/D:" + printerName, "/t", tmp], { windowsHide: true });
 
-  // Build + print labels
-  async printLabels(req: ZebraPrintRequest) {
-    const dpi = req.dpi ?? 203;
-    const copies = req.copies ?? 1;
-    const size = req.paperSize ?? '50x30mm';
-    const { wDots, hDots } = this.sizeToDots(size, dpi);
+  // Best-effort cleanup
+  fs.promises.unlink(tmp).catch(() => {});
+}
 
-    const labels: string[] = [];
-    for (const it of req.items) {
-      const title = (it.name || '').toUpperCase().slice(0, 32);
-      const pkg = new Date(it.packageDateISO);
-      const exp = it.expiryDateISO ? new Date(it.expiryDateISO) : undefined;
-
-      // Layout tuned for 50x30 @ 203dpi, scales by width/height from preset
-      const left = 20;
-      let y = 18;
-
-      const z: string[] = [];
-      z.push('^XA');
-      z.push(`^PW${wDots}`);
-      z.push(`^LL${hDots}`);
-      z.push('^LH0,0');
-
-      // Title
-      z.push(`^FO${left},${y}^A0N,26,26^FD${this.escapeZPL(title)}^FS`);
-      y += 30;
-
-      // Row: Net Wt | Price
-      z.push(`^FO${left},${y}^A0N,22,22^FDNET WT: ${this.escapeZPL(this.formatWeight(it.netWeight))}^FS`);
-      z.push(`^FO${wDots - 20 - 180},${y}^A0N,22,22^FDRs ${Math.round(it.price)}^FS`);
-      y += 28;
-
-      // Row: PKG | EXP
-      z.push(`^FO${left},${y}^A0N,20,20^FDPKG: ${this.dateGB(pkg)}^FS`);
-      z.push(`^FO${wDots - 20 - 220},${y}^A0N,20,20^FDEXP: ${exp ? this.dateGB(exp) : '--/--/----'}^FS`);
-      y += 28;
-
-      // Barcode (Code128)
-      // Height ~60 dots on 30mm label; HRI off (we draw text optionally below)
-      z.push(`^FO${left},${y}`);
-      z.push(`^BCN,60,N,N,N`);
-      z.push(`^FD${this.escapeZPL(it.barcode)}^FS`);
-      y += 72;
-
-      if (req.humanReadable) {
-        z.push(`^FO${left},${y}^A0N,18,18^FD${this.escapeZPL(it.barcode)}^FS`);
-        y += 22;
-      }
-
-      z.push('^XZ');
-
-      for (let c = 0; c < copies; c++) labels.push(z.join(''));
-    }
-
-    await this.spoolZPL(req.printerName, labels.join('\n'));
-    return { success: true, message: `Sent ${labels.length} label(s)` };
-  }
-
-  // ===== Low-level spooling (RAW to Windows queue by name) =====
-  private async spoolZPL(printerName: string, zplData: string): Promise<void> {
-    // Create temp file with ZPL data
-    const tmpFile = path.join(os.tmpdir(), `zebra_${Date.now()}.zpl`);
-    fs.writeFileSync(tmpFile, zplData, 'utf8');
-
-    try {
-      // Method 1: Use Windows COPY command for RAW printing
-      const escapedPrinter = printerName.replace(/"/g, '""');
-      const escapedFile = tmpFile.replace(/\\/g, '/');
-      
-      const psScript = `
-        $printerName = "${escapedPrinter}"
-        $filePath = "${escapedFile}"
-        $content = Get-Content $filePath -Raw -Encoding UTF8
-        $content | Out-Printer -Name $printerName
-      `;
-
-      await execFileAsync('powershell', [
-        '-NoProfile',
-        '-Command',
-        psScript
-      ], { timeout: 15000, windowsHide: true });
-
-      // Clean up temp file
-      if (fs.existsSync(tmpFile)) {
-        fs.unlinkSync(tmpFile);
-      }
-    } catch (error) {
-      // Clean up temp file on error
-      if (fs.existsSync(tmpFile)) {
-        fs.unlinkSync(tmpFile);
-      }
-      
-      logger.error(`Failed to print ZPL to ${printerName}:`, error);
-      throw new Error(`Failed to print to ${printerName}: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
-  // ===== Small helpers =====
-  private sizeToDots(preset: PaperPreset, dpi: number) {
-    const mmToDots = (mm: number) => Math.round((mm / 25.4) * dpi);
-    switch (preset) {
-      case '60x40mm': return { wDots: mmToDots(60), hDots: mmToDots(40) };
-      case '40x25mm': return { wDots: mmToDots(40), hDots: mmToDots(25) };
-      default:        return { wDots: mmToDots(50), hDots: mmToDots(30) };
-    }
-  }
-  private dateGB(d: Date) {
-    return d.toLocaleDateString('en-GB', { day:'2-digit', month:'2-digit', year:'numeric' });
-    // If you need fixed formatting without locale: 
-    // const dd = String(d.getDate()).padStart(2,'0'); const mm = String(d.getMonth()+1).padStart(2,'0'); const yy = d.getFullYear();
-    // return `${dd}/${mm}/${yy}`;
-  }
-  private formatWeight(s: string) {
-    return (s ?? '').trim() || 'Not specified';
-  }
-  private escapeZPL(s: string) {
-    // Escape ^ and \ and ~ which can break ZPL fields
-    return String(s).replace(/[\^~\\]/g, ' ');
-  }
+export function buildLabelsZpl(items: Array<{
+  name: string; sku?: string; code?: string;
+  netWeight: string; price: number; packageDateISO: string; expiryDateISO?: string;
+}>) {
+  return items.map((it) =>
+    buildZplLabel({
+      code: `${it.sku || it.code || "PROD"}-${Math.round(it.price)}`,
+      title: it.name.toUpperCase().slice(0, 28),
+      netWt: it.netWeight,
+      price: Math.round(it.price).toString(),
+      pkg: new Date(it.packageDateISO).toLocaleDateString("en-GB"),
+      exp: it.expiryDateISO
+        ? new Date(it.expiryDateISO).toLocaleDateString("en-GB")
+        : "__/__/____",
+    })
+  ).join("\n");
 }

@@ -4,11 +4,12 @@ import fs from 'fs';
 import {
   getPrinters,
   printReceipt,
-  printZebra,
+  // printZebraLikeLabels,
 } from '../controllers/barcode.controller';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { printReceiptPDF } from '../services/print-receipt-pdf.service';
+import { printLabelsController } from '../controllers/labels.controller';
 
 
 
@@ -32,7 +33,9 @@ router.post('/print-receipt', asyncHandler(async (req, res) => {
   new ApiResponse(result, 'Receipt sent to printer successfully').send(res);
 }));
 
-router.post('/print-zebra', printZebra);
+// router.post('/print-zebra', printZebraLikeLabels);
+router.post('/print-zebra', printLabelsController);
+
 
 
 

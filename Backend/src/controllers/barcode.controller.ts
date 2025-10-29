@@ -2,10 +2,11 @@ import { Request, Response } from 'express';
 import { BarcodeService } from '../services/barcode.service';
 import { ApiResponse } from '../utils/apiResponse';
 import asyncHandler from '../middleware/asyncHandler';
-import { ZebraBarcodeService } from '../services/zebra-barcode.service';
+import { BarcodeService as ZebraBarcodeService } from '../services/zebra-barcode.service';
+import { printBarcodeLabels } from '../services/label-pdf.service';
 
 const barcodeService = new BarcodeService();
-const zebra = new ZebraBarcodeService();
+const zebraService = new ZebraBarcodeService();
 
 // Get available printers
 const getPrinters = asyncHandler(async (req: Request, res: Response) => {
@@ -32,18 +33,25 @@ const printReceipt = asyncHandler(async (req, res) => {
 });
 
 
-export const printZebra = async (req: Request, res: Response) => {
-  const { printerName, copies, paperSize, dpi, humanReadable, items } = req.body || {};
-  if (!printerName || !Array.isArray(items) || items.length === 0) {
-    return res.status(400).json({ success: false, message: 'printerName and items[] are required' });
-  }
-  try {
-    const out = await zebra.printLabels({ printerName, copies, paperSize, dpi, humanReadable, items });
-    new ApiResponse(out, out.message).send(res);
-  } catch (e: any) {
-    res.status(500).json({ success: false, message: String(e?.message || e) });
-  }
-};
+// export async function printZebraLikeLabels(req: Request, res: Response) {
+//   const { printerName, copies, paperSize, dpi, humanReadable, items } = req.body || {};
+//   if (!printerName || !Array.isArray(items) || items.length === 0) {
+//     return res.status(400).json({ success: false, message: 'printerName and non-empty items[] are required' });
+//   }
+
+//   const r = await printBarcodeLabels({
+//     printerName,
+//     copies,
+//     paperSize,
+//     dpi,
+//     humanReadable,
+//     items
+//   });
+
+//   if (r.success) res.json({ success: true, message: r.message || 'Printed' });
+//   else res.status(500).json({ success: false, message: r.message || 'Print failed' });
+// }
 
 
-export { getPrinters, printReceipt };
+
+export { getPrinters, printReceipt  };
