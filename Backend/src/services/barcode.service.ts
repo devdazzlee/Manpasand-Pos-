@@ -276,15 +276,9 @@ export class BarcodeService {
     
     if (isCloudEnvironment) {
       logger.info('Running in cloud/serverless environment - skipping printer detection');
-      // Return a mock printer for cloud environments - actual printing not supported
-      return [{
-        name: 'Cloud Environment',
-        id: 'cloud@serverless',
-        isDefault: true,
-        status: 'available',
-        languageHint: 'escpos',
-        receiptProfile: { roll: '80mm', printableWidthMM: 72, columns: { fontA: 48, fontB: 64 } }
-      }];
+      // Return empty array - physical printers not accessible in cloud/serverless environments
+      // Frontend should handle empty printer list gracefully
+      return [];
     }
     
     logger.info(`Detecting printers on platform: ${platform}`);

@@ -22,6 +22,7 @@ import {
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { usePosData } from "@/hooks/use-pos-data";
+import { isKioskMode, enableKioskMode } from "@/utils/kiosk-printing";
 
 interface CartItem {
   id: string;
@@ -82,6 +83,18 @@ export function NewSale() {
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState<string>("");
+  const [kioskMode, setKioskMode] = useState(false);
+
+  // Detect kiosk mode on mount
+  useEffect(() => {
+    const kiosk = isKioskMode();
+    setKioskMode(kiosk);
+    if (kiosk) {
+      setSelectedPrinter('Default Printer');
+      setPrinters([{ name: 'Default Printer', isDefault: true, status: 'available' }]);
+      enableKioskMode();
+    }
+  }, []);
 
   const [branchName, setBranchName] = useState({
     name: "",
