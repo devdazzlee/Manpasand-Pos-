@@ -265,6 +265,28 @@ export class BarcodeService {
   // Get available printers - supports both Windows and Linux
   async getAvailablePrinters(): Promise<PrinterInfo[]> {
     const platform = process.platform;
+    
+    // Check if running in cloud/serverless environment (Vercel, AWS Lambda, etc.)
+    const isCloudEnvironment = 
+      process.env.VERCEL === '1' || 
+      process.env.VERCEL_ENV !== undefined ||
+      process.env.AWS_LAMBDA_FUNCTION_NAME !== undefined ||
+      process.env.LAMBDA_TASK_ROOT !== undefined ||
+      process.env.FUNCTION_NAME !== undefined;
+    
+    if (isCloudEnvironment) {
+      logger.info('Running in cloud/serverless environment - skipping printer detection');
+      // Return a mock printer for cloud environments - actual printing not supported
+      return [{
+        name: 'Cloud Environment',
+        id: 'cloud@serverless',
+        isDefault: true,
+        status: 'available',
+        languageHint: 'escpos',
+        receiptProfile: { roll: '80mm', printableWidthMM: 72, columns: { fontA: 48, fontB: 64 } }
+      }];
+    }
+    
     logger.info(`Detecting printers on platform: ${platform}`);
 
     try {
@@ -319,31 +341,67 @@ export class BarcodeService {
           printers = out;
         }
       } else if (platform === 'linux' || platform === 'darwin') {
-        // Linux/macOS detection
-        printers = await getPrintersViaLPStat().catch(() => []);
-        if (printers.length === 0) {
-          printers = await getPrintersViaCups().catch(() => []);
-        }
+        // Linux/macOS detection - only attempt if CUPS/lpstat commands are available
+        // Skip on serverless/cloud environments where these won't be available
+        try {
+          printers = await getPrintersViaLPStat().catch(() => []);
+          if (printers.length === 0) {
+            printers = await getPrintersViaCups().catch(() => []);
+          }
 
-        // Basic enrichment for Linux printers
-        printers = printers.map(p => ({
-          ...p,
-          languageHint: deriveLanguageHint(p) as 'escpos' | 'zpl' | 'generic',
-          receiptProfile: deriveReceiptProfile(p),
-        }));
+          // Basic enrichment for Linux printers
+          printers = printers.map(p => ({
+            ...p,
+            languageHint: deriveLanguageHint(p) as 'escpos' | 'zpl' | 'generic',
+            receiptProfile: deriveReceiptProfile(p),
+          }));
+        } catch (error) {
+          // Silently handle Linux printer detection failures (common in cloud environments)
+          logger.debug('Linux printer detection not available:', error);
+          printers = [];
+        }
+      } else {
+        // Unknown platform - skip printer detection
+        logger.info(`Platform ${platform} not supported for printer detection`);
+        printers = [];
       }
 
       // Fallback to default if no printers found
       if (printers.length === 0) {
-        logger.warn('No printers detected, returning default printer');
-        return [{ name: 'Default Printer', id: 'default@local', isDefault: true, status: 'available' }];
+        logger.info('No printers detected, returning default printer');
+        return [{
+          name: 'Default Printer',
+          id: 'default@local',
+          isDefault: true,
+          status: 'available' as const,
+          languageHint: 'escpos' as const,
+          receiptProfile: { roll: '80mm' as const, printableWidthMM: 72, columns: { fontA: 48, fontB: 64 } }
+        }];
       }
 
       logger.info(`Found ${printers.length} printers`);
       return printers;
-    } catch (e) {
-      logger.error('Error getting printers:', e);
-      return [{ name: 'Default Printer', id: 'default@local', isDefault: true, status: 'available' }];
+    } catch (e: any) {
+      // In cloud/serverless environments, printer detection failures are expected
+      const isExpectedError = 
+        e?.message?.includes('command not found') ||
+        e?.message?.includes('Not allowed by CORS') ||
+        process.env.VERCEL === '1';
+      
+      if (isExpectedError) {
+        logger.info('Printer detection not available in this environment:', e?.message || 'Unknown error');
+      } else {
+        logger.warn('Error getting printers:', e);
+      }
+      
+      return [{
+        name: 'Default Printer',
+        id: 'default@local',
+        isDefault: true,
+        status: 'available' as const,
+        languageHint: 'escpos' as const,
+        receiptProfile: { roll: '80mm' as const, printableWidthMM: 72, columns: { fontA: 48, fontB: 64 } }
+      }];
     }
   }
 
