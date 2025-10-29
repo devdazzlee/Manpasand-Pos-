@@ -463,3 +463,5 @@ The errors you're seeing are from old compiled code in `dist/` folder still runn
 
 **Recommended:** Start with QZ Tray for POS systems - it's free, works well, and has good community support.
 
+
+

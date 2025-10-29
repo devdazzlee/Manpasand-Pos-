@@ -128,3 +128,5 @@ export function getDefaultPrinterInfo(): { name: string; isDefault: boolean } {
   };
 }
 
+
+

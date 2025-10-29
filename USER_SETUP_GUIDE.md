@@ -302,3 +302,5 @@ foreach ($comp in $computers) {
 - Use PowerShell for bulk deployment
 - Configure via Group Policy (for Windows domain)
 
+
+

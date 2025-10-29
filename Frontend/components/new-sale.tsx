@@ -998,67 +998,225 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
           description: `Transaction ${transactionId} completed via ${method}`,
         });
 
-        // Auto-print receipt from backend
+        // Auto-print receipt
         try {
-          const receiptPayload = {
-            ...receiptData,
-            storeName: branchName.name || "MANPASAND GENERAL STORE",
-            store: branchName.name || "MANPASAND GENERAL STORE",
-            tagline: "Fresh • Fast • Friendly",
-            address: branchName.address + (branchName.address ? ", Karachi" : "") || "Main Shahrah-e-Faisal, Karachi",
-            strn: "STRN 12-345679 STRN 12-3456789", // Sales Tax Registration Number
-            cashier: "Muhammad Walk-in",
-            customerType: selectedCustomer ? customers.find(c => c.id === selectedCustomer)?.name || "Walk-in" : "Walk-in",
-            discount: discountAmount,
-            taxPercent: taxPercent, // 5% tax
-            total: total,
-            amountPaid: total,
-            changeAmount: 0,
-            thankYouMessage: "Thank you for shopping!",
-            footerMessage: "Goods once sold can be exchanged within 7 days"
-          };
-
-          const selectedPrinterObj = printers.find(p => p.name === selectedPrinter);
-          console.log("Selected printer object:", selectedPrinterObj);
-          const columns = selectedPrinterObj?.receiptProfile?.columns ?? { fontA: 48, fontB: 64 };
-          const languageHint = selectedPrinterObj?.languageHint ?? 'escpos';
-
-
-          console.log("Sending print request:", {
-            receiptData: receiptPayload,
-            printerName: selectedPrinter
-          });
-
-          const printResponse = await apiClient.post("/barcode-generator/print-receipt", {
-            printer: {
-              name: selectedPrinter,
-              languageHint,
-              columns
-            },
-            job: {
-              copies: 1,
-              cut: true,
-              openDrawer: false
-            },
-            receiptData: receiptPayload
-          });
-
-          console.log("Print response:", printResponse);
-
-          if (printResponse.data.success) {
-            toast({
-              title: "Receipt Printed",
-              description: `Receipt sent to ${selectedPrinter}`,
-            });
+          // In kiosk mode: Print directly from main window (popups don't respect --kiosk-printing)
+          if (kioskMode) {
+            // Use existing downloadReceipt function but trigger print from main window
+            // Create receipt content and print it in current window context
+            const receiptContent = `
+              <!DOCTYPE html>
+              <html>
+              <head>
+                <title>Receipt</title>
+                <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
+                <style>
+                  @media print {
+                    @page { size: 80mm auto; margin: 0; }
+                    body { margin: 0; padding: 5mm; }
+                  }
+                  body {
+                    font-family: 'Courier New', monospace;
+                    font-size: 12px;
+                    width: 80mm;
+                    margin: 0 auto;
+                    padding: 5mm;
+                    background: white;
+                  }
+                  .receipt { text-align: center; }
+                  .store-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
+                  .tagline { font-size: 10px; margin-bottom: 10px; }
+                  .header-line { border-top: 1px dashed #000; margin: 10px 0; }
+                  .item-row { text-align: left; margin: 5px 0; }
+                  .item-name { font-weight: bold; }
+                  .item-details { font-size: 10px; color: #666; }
+                  .total { font-size: 16px; font-weight: bold; margin-top: 10px; }
+                  .footer { margin-top: 15px; font-size: 10px; }
+                  #barcode-svg { margin: 10px 0; }
+                </style>
+              </head>
+              <body>
+                <div class="receipt">
+                  <div class="store-name">${branchName.name || "MANPASAND GENERAL STORE"}</div>
+                  <div class="tagline">Fresh • Fast • Friendly</div>
+                  <div class="header-line"></div>
+                  
+                  <div style="text-align: left;">
+                    <div>Receipt: ${receiptData.transactionId || 'N/A'}</div>
+                    <div>Date: ${new Date().toLocaleString()}</div>
+                    <div>Cashier: ${receiptData.cashier || 'Walk-in'}</div>
+                    <div>Customer: ${selectedCustomer ? (customers.find(c => c.id === selectedCustomer)?.name || "Walk-in") : "Walk-in"}</div>
+                  </div>
+                  
+                  <div class="header-line"></div>
+                  
+                  ${cart.map((item: CartItem) => `
+                    <div class="item-row">
+                      <div class="item-name">${item.name}</div>
+                      <div class="item-details">
+                        ${item.quantity} x ${item.price.toFixed(2)} = Rs ${(item.price * item.quantity).toFixed(2)}
+                        ${item.discount > 0 ? ` (Discount: Rs ${item.discount.toFixed(2)})` : ''}
+                      </div>
+                    </div>
+                  `).join('')}
+                  
+                  <div class="header-line"></div>
+                  
+                  <div style="text-align: left;">
+                    <div>Subtotal: Rs ${subtotal.toFixed(2)}</div>
+                    ${discountAmount > 0 ? `<div>Discount: Rs ${discountAmount.toFixed(2)}</div>` : ''}
+                    <div>Tax (5%): Rs ${(total * 0.05).toFixed(2)}</div>
+                    <div class="total">TOTAL: Rs ${total.toFixed(2)}</div>
+                    <div>Payment: ${method === 'cash' ? 'CASH' : method.toUpperCase()}</div>
+                    <div>Paid: Rs ${total.toFixed(2)}</div>
+                  </div>
+                  
+                  <div class="header-line"></div>
+                  
+                  <div id="barcode-svg"></div>
+                  <div id="barcode-number" style="display: none;">${receiptData.transactionId || 'N/A'}</div>
+                  
+                  <div class="footer">
+                    <div>Thank you for shopping!</div>
+                    <div>Goods once sold can be exchanged within 7 days</div>
+                  </div>
+                </div>
+                
+                <script>
+                  window.onload = function() {
+                    const barcodeElement = document.getElementById('barcode-svg');
+                    const barcodeNumber = document.getElementById('barcode-number').textContent;
+                    
+                    if (barcodeElement && barcodeNumber && window.JsBarcode) {
+                      try {
+                        JsBarcode(barcodeElement, barcodeNumber, {
+                          format: "CODE128",
+                          width: 2,
+                          height: 50,
+                          displayValue: true,
+                          margin: 0,
+                          background: "#ffffff",
+                          lineColor: "#000000"
+                        });
+                      } catch (error) {
+                        console.error('Barcode generation failed:', error);
+                      }
+                    }
+                    
+                    // Auto-print in kiosk mode - use Chrome's silent print
+                    setTimeout(() => {
+                      // Force print without dialog - Chrome kiosk mode handles this
+                      window.print();
+                      // Close window after a delay
+                      setTimeout(() => {
+                        window.close();
+                      }, 1000);
+                    }, 300);
+                  };
+                </script>
+              </body>
+              </html>
+            `;
+            
+            // In kiosk mode: Use iframe or print directly from main window (no popup!)
+            // Popup windows don't inherit --kiosk-printing flag from parent
+            const printFrame = document.createElement('iframe');
+            printFrame.style.position = 'fixed';
+            printFrame.style.right = '-9999px';
+            printFrame.style.width = '80mm';
+            printFrame.style.height = '297mm'; // A4 height
+            printFrame.style.border = 'none';
+            printFrame.style.visibility = 'hidden';
+            document.body.appendChild(printFrame);
+            
+            const frameDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
+            if (frameDoc) {
+              frameDoc.open();
+              frameDoc.write(receiptContent);
+              frameDoc.close();
+              
+              // Wait for content to load, then print from iframe (respects kiosk-printing)
+              setTimeout(() => {
+                if (printFrame.contentWindow) {
+                  printFrame.contentWindow.focus();
+                  printFrame.contentWindow.print();
+                  
+                  // Cleanup after print
+                  setTimeout(() => {
+                    if (printFrame.parentNode) {
+                      printFrame.parentNode.removeChild(printFrame);
+                    }
+                  }, 2000);
+                }
+              }, 500);
+              
+              toast({
+                title: "Printing Receipt",
+                description: "Receipt sent to default printer",
+              });
+            } else {
+              // Fallback: use downloadReceipt
+              downloadReceipt(receiptData, branchName);
+            }
           } else {
-            throw new Error(printResponse.data.message || "Print failed");
+            // Normal mode: Try backend API first, then fallback to browser
+            try {
+              const receiptPayload = {
+                ...receiptData,
+                storeName: branchName.name || "MANPASAND GENERAL STORE",
+                store: branchName.name || "MANPASAND GENERAL STORE",
+                tagline: "Fresh • Fast • Friendly",
+                address: branchName.address + (branchName.address ? ", Karachi" : "") || "Main Shahrah-e-Faisal, Karachi",
+                strn: "STRN 12-345679 STRN 12-3456789",
+                cashier: "Muhammad Walk-in",
+                customerType: selectedCustomer ? customers.find(c => c.id === selectedCustomer)?.name || "Walk-in" : "Walk-in",
+                discount: discountAmount,
+                taxPercent: taxPercent,
+                total: total,
+                amountPaid: total,
+                changeAmount: 0,
+                thankYouMessage: "Thank you for shopping!",
+                footerMessage: "Goods once sold can be exchanged within 7 days"
+              };
+
+              const selectedPrinterObj = printers.find(p => p.name === selectedPrinter);
+              const columns = selectedPrinterObj?.receiptProfile?.columns ?? { fontA: 48, fontB: 64 };
+              const languageHint = selectedPrinterObj?.languageHint ?? 'escpos';
+
+              const printResponse = await apiClient.post("/barcode-generator/print-receipt", {
+                printer: {
+                  name: selectedPrinter,
+                  languageHint,
+                  columns
+                },
+                job: {
+                  copies: 1,
+                  cut: true,
+                  openDrawer: false
+                },
+                receiptData: receiptPayload
+              });
+
+              if (printResponse.data.success) {
+                toast({
+                  title: "Receipt Printed",
+                  description: `Receipt sent to ${selectedPrinter}`,
+                });
+              } else {
+                throw new Error(printResponse.data.message || "Print failed");
+              }
+            } catch (backendError) {
+              // Fallback to browser print - use existing downloadReceipt function
+              console.log('Backend print failed, using browser print:', backendError);
+              downloadReceipt(receiptData, branchName);
+            }
           }
         } catch (printError) {
           console.error("Print error:", printError);
           toast({
             variant: "destructive",
             title: "Print Failed",
-            description: "Receipt could not be printed from backend",
+            description: "Receipt could not be printed. Please try again.",
           });
         }
       } catch (error) {
@@ -1382,27 +1540,34 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
             </select>
           </div>
 
-          {/* Printer Selection */}
-          <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Printer
-            </label>
-            <select
-              className="w-full border rounded px-3 py-2 bg-white text-gray-900"
-              value={selectedPrinter}
-              onChange={(e) => setSelectedPrinter(e.target.value)}
-            >
-              <option value="">Select printer</option>
-              {printers.map((printer) => (
-                <option key={printer.name} value={printer.name}>
-                  {printer.name} {printer.isDefault ? "(Default)" : ""}
-                </option>
-              ))}
-            </select>
-            {printers.length === 0 && (
-              <p className="text-xs text-gray-500 mt-1">Loading available printers...</p>
-            )}
-          </div>
+          {/* Printer Selection - Hidden in kiosk mode */}
+          {!kioskMode && (
+            <div className="mt-4">
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Printer
+              </label>
+              <select
+                className="w-full border rounded px-3 py-2 bg-white text-gray-900"
+                value={selectedPrinter}
+                onChange={(e) => setSelectedPrinter(e.target.value)}
+              >
+                <option value="">Select printer</option>
+                {printers.map((printer) => (
+                  <option key={printer.name} value={printer.name}>
+                    {printer.name} {printer.isDefault ? "(Default)" : ""}
+                  </option>
+                ))}
+              </select>
+              {printers.length === 0 && (
+                <p className="text-xs text-gray-500 mt-1">Loading available printers...</p>
+              )}
+            </div>
+          )}
+          {kioskMode && (
+            <div className="mt-4 p-2 bg-blue-50 rounded">
+              <p className="text-xs text-blue-700">🖨️ Kiosk Mode: Using default printer</p>
+            </div>
+          )}
 
           {/* Cart and Hold Sales Controls */}
           <div className="mt-4 space-y-4">
@@ -1663,7 +1828,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 Card
               </Button>
             </div>
-            {!selectedPrinter && cart.length > 0 && (
+            {!kioskMode && !selectedPrinter && cart.length > 0 && (
               <p className="text-xs text-orange-600 text-center">
                 ⚠️ Please select a printer to proceed with payment
               </p>

@@ -305,3 +305,5 @@ Since kiosk mode uses default printer, here's how to handle multiple printers:
 4. **Use `window.print()`** in your app
 5. **Done!** Silent printing works! 🎉
 
+
+
