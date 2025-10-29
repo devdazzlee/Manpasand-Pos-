@@ -46,6 +46,7 @@ connectRedis();
 app.use(cors({
   origin: [
     'https://pos.manpasandstore.com',
+    'https://manpasand-pos-t623.vercel.app',
     'http://localhost:3000',
     'http://localhost:5173'
   ],
