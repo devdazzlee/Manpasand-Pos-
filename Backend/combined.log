@@ -1141,3 +1141,7 @@
 {"level":"error","message":"Error: Invalid or expired session\n    at authenticate (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\auth.middleware.ts:32:13)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-10-29T19:32:53.945Z"}
 {"level":"error","message":"Error: Invalid or expired session\n    at authenticate (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\auth.middleware.ts:32:13)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-10-29T19:32:53.948Z"}
 {"level":"error","message":"Error: Invalid or expired session\n    at authenticate (D:\\Konain Bhai\\Manpasand-Pos-\\Backend\\src\\middleware\\auth.middleware.ts:32:13)\n    at processTicksAndRejections (node:internal/process/task_queues:105:5)","timestamp":"2025-10-29T19:32:53.953Z"}
+{"level":"info","message":"Detecting printers on platform: win32","timestamp":"2025-10-29T19:37:33.412Z"}
+{"level":"info","message":"Found 6 printers","timestamp":"2025-10-29T19:37:39.337Z"}
+{"level":"info","message":"Detecting printers on platform: win32","timestamp":"2025-10-29T19:37:39.341Z"}
+{"level":"info","message":"Found 6 printers","timestamp":"2025-10-29T19:37:42.522Z"}

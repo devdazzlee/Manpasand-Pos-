@@ -28,9 +28,49 @@ type BuildItemsInput = {
 };
 
 export class BarcodeService {
-  // ---- Discover printers without PowerShell ----
+  // ---- Discover printers - Platform agnostic ----
   async getAvailablePrinters(): Promise<PrinterInfo[]> {
-    // WMIC is deprecated but still present on most Windows; no PS required
+    const platform = process.platform;
+    
+    // Linux/macOS detection
+    if (platform === 'linux' || platform === 'darwin') {
+      try {
+        const { stdout: allPrinters } = await execFileAsync('lpstat', ['-p'], { timeout: 5000 });
+        let defaultPrinterName: string | null = null;
+        
+        try {
+          const { stdout: defaultOutput } = await execFileAsync('lpstat', ['-d'], { timeout: 5000 });
+          const match = defaultOutput.match(/system default destination: (\S+)/);
+          if (match) defaultPrinterName = match[1];
+        } catch {}
+
+        const printerNames = allPrinters
+          .split('\n')
+          .filter(line => line.trim() && line.includes('printer'))
+          .map(line => {
+            const match = line.match(/printer (\S+) is/);
+            return match ? match[1] : null;
+          })
+          .filter(name => name !== null);
+
+        if (printerNames.length > 0) {
+          return printerNames.map((name: any) => ({
+            name,
+            shareName: null,
+            isDefault: name === defaultPrinterName,
+            status: 'available' as const,
+            portName: null,
+          }));
+        }
+      } catch (error) {
+        console.log('Linux printer detection failed, returning default');
+      }
+      
+      // Return default for Linux if detection fails
+      return [{ name: 'Default Printer', shareName: null, isDefault: true, status: 'available', portName: null }];
+    }
+    
+    // Windows detection using WMIC
     const { stdout } = await execFileAsync('wmic', [
       'printer', 'get',
       'Name,ShareName,Default,PrinterStatus,PortName',
