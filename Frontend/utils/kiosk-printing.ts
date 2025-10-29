@@ -6,11 +6,16 @@
 
 /**
  * Check if running in Chrome kiosk mode
- * Detects common kiosk indicators
+ * Detects common kiosk indicators including --kiosk-printing flag
  */
 export function isKioskMode(): boolean {
   // Check for kiosk-specific conditions
   if (typeof window === 'undefined') return false;
+
+  // Check URL parameter for kiosk-printing flag (from batch file)
+  const urlParams = new URLSearchParams(window.location.search);
+  const hasKioskPrintingParam = urlParams.get('kiosk-printing') === 'true' ||
+                                 urlParams.get('kiosk') === 'true';
 
   // Check if running in fullscreen without address bar (common in kiosk)
   const isFullscreen = window.innerHeight === screen.height && 
@@ -19,8 +24,7 @@ export function isKioskMode(): boolean {
 
   // Check for kiosk indicators in user agent (some setups add this)
   const userAgent = window.navigator.userAgent.toLowerCase();
-  const hasKioskIndicators = userAgent.includes('kiosk') || 
-                             window.location.search.includes('kiosk=true');
+  const hasKioskIndicators = userAgent.includes('kiosk');
 
   // Check localStorage flag (can be set manually)
   const kioskFlag = localStorage.getItem('kiosk_mode') === 'true';
@@ -28,7 +32,8 @@ export function isKioskMode(): boolean {
   // Check if window.print is available (required for kiosk printing)
   const canPrint = typeof window.print === 'function';
 
-  return (isFullscreen || hasKioskIndicators || kioskFlag) && canPrint;
+  // Return true if any kiosk indicator is present
+  return (hasKioskPrintingParam || isFullscreen || hasKioskIndicators || kioskFlag) && canPrint;
 }
 
 /**

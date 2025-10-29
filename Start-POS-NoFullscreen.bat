@@ -43,8 +43,9 @@ echo    Flag: --kiosk-printing (silent printing, normal window)
 echo.
 
 REM Use direct execution - NO --kiosk flag (normal window)
+REM Add ?kiosk-printing=true to URL so frontend can detect it
 cd /d "C:\Program Files\Google\Chrome\Application"
-start "" chrome.exe --profile-directory="Default" --kiosk-printing https://pos.manpasandstore.com
+start "" chrome.exe --profile-directory="Default" --kiosk-printing "https://pos.manpasandstore.com?kiosk-printing=true"
 
 REM Wait for Chrome to fully start
 timeout /t 3 /nobreak >nul

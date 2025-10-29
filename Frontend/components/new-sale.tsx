@@ -1811,8 +1811,8 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
               <Button
                 size="lg"
                 onClick={() => handlePayment("Cash")}
-                disabled={paymentLoading || !selectedPrinter}
-                title={!selectedPrinter ? "Please select a printer" : ""}
+                disabled={paymentLoading || (!kioskMode && !selectedPrinter)}
+                title={!kioskMode && !selectedPrinter ? "Please select a printer" : ""}
               >
                 <DollarSign className="h-4 w-4 mr-2" />
                 Cash
@@ -1821,8 +1821,8 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 size="lg"
                 variant="outline"
                 onClick={() => handlePayment("Card")}
-                disabled={paymentLoading || !selectedPrinter}
-                title={!selectedPrinter ? "Please select a printer" : ""}
+                disabled={paymentLoading || (!kioskMode && !selectedPrinter)}
+                title={!kioskMode && !selectedPrinter ? "Please select a printer" : ""}
               >
                 <CreditCard className="h-4 w-4 mr-2" />
                 Card

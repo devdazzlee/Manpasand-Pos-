@@ -19,8 +19,9 @@ if "%ERRORLEVEL%"=="0" (
 )
 
 REM Launch Chrome with kiosk flags using direct execution
+REM Add ?kiosk-printing=true to URL so frontend can detect it
 cd /d "C:\Program Files\Google\Chrome\Application"
-start "" chrome.exe --profile-directory="Default" --kiosk-printing --kiosk https://pos.manpasandstore.com
+start "" chrome.exe --profile-directory="Default" --kiosk-printing --kiosk "https://pos.manpasandstore.com?kiosk-printing=true"
 
 exit
 
