@@ -23,6 +23,7 @@ import {
 import apiClient from "@/lib/apiClient";
 import { usePosData } from "@/hooks/use-pos-data";
 import { isKioskMode, enableKioskMode } from "@/utils/kiosk-printing";
+import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 
 interface CartItem {
   id: string;
@@ -439,12 +440,42 @@ export function NewSale() {
     };
   };
 
-  const printReceipt = (receiptContent: string) => {
-    const w = window.open("", "_blank", "width=800,height=600");
-    if (!w) return;
-
-    w.document.open();
-    w.document.write(`
+  const printReceipt = (receiptContent: string, useKioskMode: boolean = false) => {
+    // ALWAYS check URL params first - this is the most reliable indicator
+    const urlParams = new URLSearchParams(window.location.search);
+    const urlKioskMode = urlParams.get('kiosk-printing') === 'true' || urlParams.get('kiosk') === 'true';
+    
+    // Re-check kiosk mode to ensure it's detected (especially on production)
+    const isKioskDetected = isKioskMode();
+    const isKiosk = urlKioskMode || useKioskMode || kioskMode || isKioskDetected;
+    
+    console.log('Print Receipt - Kiosk Mode Detection:', { 
+      urlKioskMode,
+      useKioskMode, 
+      kioskMode, 
+      isKioskDetected,
+      finalDecision: isKiosk 
+    });
+    
+    // CRITICAL: ALWAYS use iframe when URL has kiosk-printing=true
+    // This is necessary because --kiosk-printing flag only works with iframe printing
+    // window.open() does NOT respect --kiosk-printing flag and will show print dialog
+    if (isKiosk) {
+      console.log('✅ Using iframe printing (kiosk mode detected) - Print dialog will be suppressed');
+      const printFrame = document.createElement('iframe');
+      printFrame.style.position = 'fixed';
+      printFrame.style.right = '-9999px';
+      printFrame.style.width = '100mm';
+      printFrame.style.height = 'auto';
+      printFrame.style.minHeight = 'auto';
+      printFrame.style.border = 'none';
+      printFrame.style.visibility = 'hidden';
+      document.body.appendChild(printFrame);
+      
+      const frameDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
+      if (frameDoc) {
+        frameDoc.open();
+        frameDoc.write(`
 <html>
   <head>
     <title>Receipt</title>
@@ -456,6 +487,8 @@ export function NewSale() {
         margin: 0; 
         padding: 0; 
         background: white;
+        height: auto;
+        min-height: auto;
       }
       
        body { 
@@ -464,9 +497,8 @@ export function NewSale() {
           line-height: 1.2;
           color: #000000;
           font-weight: bold;
-          display: flex;
-          justify-content: center;
-          padding: 10px;
+          display: block;
+          padding: 0;
         }
 
     .receipt {
@@ -476,8 +508,11 @@ export function NewSale() {
           color: #000000;
           font-weight: bold;
           text-align: center;
-          padding: 5mm;
+          padding: 1mm 2mm;
+          margin: 0;
           box-sizing: border-box;
+          height: auto;
+          min-height: auto;
         }
 
       /* Logo specific styles */
@@ -710,21 +745,30 @@ export function NewSale() {
         @page {
           size: 100mm auto;
           margin: 0;
-        }
-        
-        html, body {
-          width: 100mm;
-          margin: 0;
           padding: 0;
+        }
+      
+        html, body {
+          width: 100mm !important;
+          height: auto !important;
+          min-height: auto !important;
+          max-height: none !important;
+          margin: 0 !important;
+          padding: 0 !important;
           background: white !important;
           color: #000000 !important;
+          overflow: visible !important;
         }
         
         .receipt {
-            width: 100%;
-            margin: 0;
-            padding: 2mm;
-            box-shadow: none;
+            width: 100% !important;
+            height: auto !important;
+            min-height: auto !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 2mm !important;
+            box-shadow: none !important;
+            overflow: visible !important;
           }
         
         /* Logo print styles */
@@ -787,14 +831,705 @@ export function NewSale() {
           }
         }
         
-        // Auto-print after barcode generation
-        setTimeout(() => {
-          window.focus();
-          window.print();
-        }, 500);
+        // Wait for all images and content to load before calculating height
+        function calculateAndPrint() {
+          // Wait for images to load
+          const images = document.querySelectorAll('img');
+          let imagesLoaded = 0;
+          const totalImages = images.length;
+          
+          if (totalImages === 0) {
+            // No images, proceed immediately
+            proceedWithPrint();
+          } else {
+            images.forEach(img => {
+              if (img.complete) {
+                imagesLoaded++;
+                if (imagesLoaded === totalImages) {
+                  proceedWithPrint();
+                }
+              } else {
+                img.onload = () => {
+                  imagesLoaded++;
+                  if (imagesLoaded === totalImages) {
+                    proceedWithPrint();
+                  }
+                };
+                img.onerror = () => {
+                  imagesLoaded++;
+                  if (imagesLoaded === totalImages) {
+                    proceedWithPrint();
+                  }
+                };
+              }
+            });
+          }
+        }
+        
+        function proceedWithPrint() {
+          // Small delay to ensure everything is rendered
+          setTimeout(() => {
+            const receipt = document.querySelector('.receipt');
+            const body = document.body;
+            
+            if (receipt && body) {
+              // Get actual scroll height after all content is loaded
+              const receiptHeight = Math.max(receipt.scrollHeight, receipt.offsetHeight, body.scrollHeight);
+              const receiptHeightMM = Math.ceil(receiptHeight * 0.264583); // Convert px to mm
+              
+              // Update @page size dynamically using inline style - Set immediately to prevent paper waste
+              const style = document.createElement('style');
+              style.id = 'dynamic-page-size';
+              const existingStyle = document.getElementById('dynamic-page-size');
+              if (existingStyle) {
+                existingStyle.remove();
+              }
+              // Set page size exactly to content height - NO TOP MARGIN, minimal padding
+              // Force page size aggressively to override printer driver settings
+              style.textContent = '@page { size: 100mm ' + receiptHeightMM + 'mm !important; margin: 0 !important; } @media print { @page { size: 100mm ' + receiptHeightMM + 'mm !important; margin: 0 !important; padding: 0 !important; } html, body { width: 100mm !important; height: ' + receiptHeightMM + 'mm !important; min-height: ' + receiptHeightMM + 'mm !important; max-height: ' + receiptHeightMM + 'mm !important; margin: 0 !important; padding: 0 !important; } .receipt { margin: 0 !important; padding: 1mm 2mm !important; } body > * { margin-top: 0 !important; padding-top: 0 !important; } .receipt > *:first-child { margin-top: 0 !important; padding-top: 0 !important; } }';
+              document.head.appendChild(style);
+              
+              // Also try to set print media properties via JavaScript
+              try {
+                const mediaQuery = window.matchMedia('print');
+                if (mediaQuery && mediaQuery.matches) {
+                  // Force apply styles during print
+                }
+              } catch (e) {
+                // Ignore if not supported
+              }
+              
+              // Resize window to fit content height (only for window.open, not iframe)
+              if (window.opener === null && window.parent === window) {
+                const padding = 20;
+                window.resizeTo(400, Math.min(receiptHeight + padding, screen.height));
+              }
+              
+              // Wait longer for styles to apply before printing
+              setTimeout(() => {
+                window.focus();
+                // Try to print with explicit page size
+                const printWindow = window as any;
+                if (printWindow.document && printWindow.document.body) {
+                  printWindow.document.body.style.height = receiptHeightMM + 'mm';
+                }
+                window.print();
+              }, 200); // Increased delay to ensure styles apply
+            } else {
+              // Fallback: print immediately if receipt not found
+              setTimeout(() => {
+                window.focus();
+                window.print();
+              }, 500);
+            }
+          }, 100);
+        }
+        
+        // Start the process
+        calculateAndPrint();
       };
       
-      window.onafterprint = () => window.close();
+      window.onafterprint = () => {
+        if (window.opener === null && window.parent === window) {
+          window.close();
+        }
+      };
+    </script>
+  </body>
+</html>
+`);
+        frameDoc.close();
+        
+        // Wait for content to load, then resize iframe and print (respects kiosk-printing)
+        setTimeout(() => {
+          if (printFrame.contentWindow && frameDoc.body) {
+            // Wait for images to load
+            const images = frameDoc.querySelectorAll('img');
+            let imagesLoaded = 0;
+            const totalImages = images.length;
+            
+            function calculateAndPrintIframe() {
+              if (totalImages === 0) {
+                proceedWithPrintIframe();
+              } else {
+                images.forEach((img: any) => {
+                  if (img.complete) {
+                    imagesLoaded++;
+                    if (imagesLoaded === totalImages) {
+                      proceedWithPrintIframe();
+                    }
+                  } else {
+                    img.onload = () => {
+                      imagesLoaded++;
+                      if (imagesLoaded === totalImages) {
+                        proceedWithPrintIframe();
+                      }
+                    };
+                    img.onerror = () => {
+                      imagesLoaded++;
+                      if (imagesLoaded === totalImages) {
+                        proceedWithPrintIframe();
+                      }
+                    };
+                  }
+                });
+              }
+            }
+            
+            function proceedWithPrintIframe() {
+              setTimeout(() => {
+                if (!frameDoc) return;
+                
+                const receipt = frameDoc.querySelector('.receipt') as HTMLElement;
+                const body = frameDoc.body;
+                
+                if (receipt && body) {
+                  // Get actual content height - use receipt container's height only
+                  const receiptEl = receipt as HTMLElement;
+                  const contentHeight = receiptEl.scrollHeight || receiptEl.offsetHeight;
+                  
+                  // Only add minimal padding (1mm top + 1mm bottom = 2mm total)
+                  const paddingMM = 2;
+                  const contentHeightMM = Math.ceil((contentHeight * 0.264583) + paddingMM);
+                  
+                  // Resize iframe to content height
+                  printFrame.style.height = contentHeight + 'px';
+                  
+                  // Update @page size dynamically in iframe
+                  const style = frameDoc.createElement('style');
+                  style.id = 'dynamic-page-size-iframe';
+                  const existingStyle = frameDoc.getElementById('dynamic-page-size-iframe');
+                  if (existingStyle) {
+                    existingStyle.remove();
+                  }
+                  // Set page size immediately - NO TOP MARGIN, minimal padding
+                  style.textContent = '@page { size: 100mm ' + contentHeightMM + 'mm !important; margin: 0 !important; } @media print { @page { size: 100mm ' + contentHeightMM + 'mm !important; margin: 0 !important; padding: 0 !important; } html, body { width: 100mm !important; height: ' + contentHeightMM + 'mm !important; min-height: ' + contentHeightMM + 'mm !important; max-height: ' + contentHeightMM + 'mm !important; margin: 0 !important; padding: 0 !important; } .receipt { margin: 0 !important; padding: 1mm 2mm !important; } body > * { margin-top: 0 !important; padding-top: 0 !important; } .receipt > *:first-child { margin-top: 0 !important; padding-top: 0 !important; } }';
+                  frameDoc.head.appendChild(style);
+                  
+                  // Wait for style to apply, then print
+                  setTimeout(() => {
+                    if (printFrame.contentWindow) {
+                      printFrame.contentWindow.focus();
+                      printFrame.contentWindow.print();
+                      
+                      // Cleanup after print
+                      setTimeout(() => {
+                        if (printFrame.parentNode) {
+                          printFrame.parentNode.removeChild(printFrame);
+                        }
+                      }, 2000);
+                    }
+                  }, 100);
+                }
+              }, 100);
+            }
+            
+            calculateAndPrintIframe();
+          }
+        }, 600); // Wait for barcode generation
+      }
+      
+      return; // Exit early for kiosk mode
+    }
+    
+    // Normal mode: Use window.open (ONLY if kiosk mode not detected)
+    // WARNING: window.open() does NOT respect --kiosk-printing flag and will ALWAYS show print dialog
+    console.warn('⚠️ Using window.open (normal mode) - Print dialog WILL appear');
+    console.warn('⚠️ If you want silent printing, ensure URL has ?kiosk-printing=true parameter');
+    const w = window.open("", "_blank", "width=400,height=200");
+    if (!w) return;
+
+    w.document.open();
+    w.document.write(`
+<html>
+  <head>
+    <title>Receipt</title>
+    <!-- JsBarcode CDN for professional barcodes -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
+   <style>
+      /* Thermal printer optimized styles with larger fonts */
+      html, body { 
+        margin: 0; 
+        padding: 0; 
+        background: white;
+        height: auto;
+        min-height: auto;
+      }
+      
+       body { 
+          font-family: 'Courier New', monospace; 
+          font-size: 12px;
+          line-height: 1.2;
+          color: #000000;
+          font-weight: bold;
+          display: block;
+          padding: 0;
+        }
+
+    .receipt {
+          width: 100mm;
+          max-width: 500px;
+          background: white;
+          color: #000000;
+          font-weight: bold;
+          text-align: center;
+          padding: 1mm 2mm;
+          margin: 0;
+          box-sizing: border-box;
+          height: auto;
+          min-height: auto;
+        }
+
+      /* Logo specific styles */
+      .logo {
+        text-align: center;
+        margin-bottom: 12px; /* Increased from 8px */
+      }
+      
+      .logo img {
+        max-width: 180px; /* Increased from 160px */
+        height: 50px; /* Increased from 40px */
+        display: block;
+        margin: 0 auto;
+        object-fit: contain;
+      }
+      
+      .store-header {
+        font-weight: 900;
+        font-size: 24px; /* Increased from 16px */
+        margin-bottom: 6px; /* Increased from 4px */
+        color: #000000;
+      }
+      
+      .tagline, .address {
+        font-size: 16px; /* Increased from 10px */
+        margin-bottom: 4px; /* Increased from 2px */
+        color: #000000;
+        font-weight: bold;
+      }
+      
+      .divider {
+        margin: 6px 0; /* Increased from 4px */
+        color: #000000;
+        font-weight: bold;
+        border: none;
+        text-align: center;
+        font-size: 16px; /* Added explicit size */
+      }
+      
+      .receipt-info, .payment-info {
+        text-align: left;
+        font-size: 16px; /* Increased from 10px */
+        margin: 4px 0; /* Increased from 2px */
+        color: #000000;
+        font-weight: bold;
+      }
+      
+      .receipt-number, .payment-method {
+        font-weight: 900;
+        color: #000000;
+      }
+      
+      .flex-item-row-cs{
+        display: flex;
+        justify-content: space-between;
+        align-items: center;           
+        width: 100%;
+        box-sizing: border-box;
+        white-space: nowrap; /* Prevent line breaks */
+      }
+
+      /* Improved items section with larger fonts */
+      .items-section {
+        margin: 8px 0; /* Increased from 6px */
+        font-size: 16px; /* Increased from 10px */
+        line-height: 1.4; /* Increased from 1.3 */
+        font-family: 'Courier New', monospace;
+        font-weight: bold;
+      }
+
+      .items-header {
+        display: flex;
+        justify-content: space-between;
+        font-weight: 900;
+        font-size: 18px; /* Increased - was not specified */
+        margin-bottom: 6px; /* Increased from 4px */
+        padding-bottom: 3px; /* Increased from 2px */
+        border-bottom: 2px solid #000; /* Made thicker from 1px */
+      }
+
+      .items-header .item-col {
+        flex: 2;
+        text-align: left;
+      }
+
+      .items-header .qty-col {
+        flex: 1;
+        text-align: center;
+        min-width: 70px; /* Increased from 60px */
+      }
+
+      .items-header .rate-col {
+        flex: 1;
+        text-align: right;
+        min-width: 90px; /* Increased from 80px */
+      }
+
+      .item-row {
+        display: flex;
+        justify-content: space-between;
+        align-items: flex-start;
+        margin: 4px 0; /* Increased from 3px */
+        min-height: 20px; /* Increased from 16px */
+        font-weight: bold;
+        font-size: 16px; /* Added explicit size */
+      }
+
+      .item-name {
+        flex: 2;
+        text-align: left;
+        word-wrap: break-word;
+        overflow-wrap: break-word;
+        hyphens: auto;
+        line-height: 1.3; /* Increased from 1.2 */
+        padding-right: 8px;
+      }
+
+      .item-qty {
+        flex: 1;
+        text-align: center;
+        min-width: 70px; /* Increased from 60px */
+        white-space: nowrap;
+      }
+
+      .item-rate {
+        flex: 1;
+        text-align: right;
+        min-width: 90px; /* Increased from 80px */
+        white-space: nowrap;
+      }
+
+      /* Special styling for sub-items */
+      .item-sub-row {
+        display: flex;
+        margin: 2px 0 4px 0; /* Increased from 1px 0 3px 0 */
+        font-style: italic;
+        opacity: 0.8;
+        font-size: 14px; /* Increased from 9px */
+      }
+
+      .item-sub-name {
+        flex: 2;
+        text-align: left;
+        padding-left: 12px; /* Increased from 10px */
+        padding-right: 8px;
+      }
+
+      .item-sub-qty {
+        flex: 1;
+        text-align: center;
+        min-width: 70px; /* Increased from 60px */
+      }
+
+      .item-sub-rate {
+        flex: 1;
+        text-align: right;
+        min-width: 90px; /* Increased from 80px */
+      }
+      
+      .totals {
+        text-align: right;
+        font-size: 16px; /* Increased from 10px */
+        margin: 4px 0; /* Increased from 2px */
+        color: #000000;
+        font-weight: bold;
+      }
+      
+      .subtotal-section {
+        border-top: 2px solid black; /* Made thicker from 1px */
+        padding-top: 6px; /* Increased from 4px */
+        margin-top: 8px; /* Increased from 6px */
+        font-weight: bold;
+      }
+      
+      .grand-total {
+        font-weight: 900;
+        font-size: 18px; /* Increased from 12px */
+        color: #000000;
+        margin: 6px 0; /* Increased from 4px */
+        border-top: 2px solid black; /* Made thicker from 1px */
+        border-bottom: 2px solid black; /* Made thicker from 1px */
+        padding: 4px 0; /* Increased from 2px */
+      }
+      
+      .promo {
+        padding: 6px; /* Increased from 4px */
+        margin: 8px 0; /* Increased from 6px */
+        font-size: 14px; /* Increased from 9px */
+        color: #000000;
+        font-weight: bold;
+        text-align: left;
+      }
+      
+      /* Professional barcode styling */
+      .barcode-section {
+        text-align: center;
+        margin: 10px 0; /* Increased spacing */
+      }
+      
+      .barcode {
+        margin: 8px 0; /* Increased from 6px */
+        display: flex;
+        justify-content: center;
+        align-items: center;
+      }
+      
+      .barcode svg {
+        max-width: 100%;
+        height: 50px; /* Professional barcode height */
+      }
+      
+      .barcode-number {
+        font-size: 14px; /* Increased from 10px */
+        color: #000000;
+        margin-top: 6px; /* Increased from 4px */
+        font-weight: bold;
+        letter-spacing: 2px; /* Added for better readability */
+      }
+      
+      .thank-you {
+        font-size: 17px; /* Increased from 11px */
+        margin-top: 10px; /* Increased from 8px */
+        font-weight: 900;
+        color: #000000;
+        padding-top: 6px; /* Increased from 4px */
+      }
+
+      /* Print optimization - Set very small initial size to prevent paper waste */
+      @page {
+        size: 100mm 50mm;
+        margin: 0;
+        padding: 0;
+      }
+      
+      /* Override Chrome's default print page size */
+      @media print {
+        @page {
+          size: 100mm auto !important;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+      }
+      
+      @media print {
+        @page {
+          size: 100mm auto;
+          margin: 0 !important;
+          padding: 0 !important;
+        }
+        
+        html, body {
+          width: 100mm !important;
+          height: auto !important;
+          min-height: auto !important;
+          max-height: none !important;
+          margin: 0 !important;
+          padding: 0 !important;
+          background: white !important;
+          color: #000000 !important;
+          overflow: visible !important;
+        }
+        
+        .receipt {
+            width: 100% !important;
+            height: auto !important;
+            min-height: auto !important;
+            max-height: none !important;
+            margin: 0 !important;
+            padding: 1mm 2mm !important;
+            box-shadow: none !important;
+            overflow: visible !important;
+          }
+        
+        /* Ensure no top spacing */
+        body > * {
+          margin-top: 0 !important;
+          padding-top: 0 !important;
+        }
+        
+        .receipt > *:first-child {
+          margin-top: 0 !important;
+          padding-top: 0 !important;
+        }
+        
+        /* Logo print styles */
+        .logo img {
+          max-width: 140px !important;
+          height: 50px !important;
+          display: block !important;
+          margin: 0 auto !important;
+          object-fit: contain !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+          opacity: 1 !important;
+          visibility: visible !important;
+        }
+        
+        /* Force black text for printing but preserve images */
+        * {
+          color: #000000 !important;
+          font-weight: bold !important;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        
+        /* Barcode print optimization */
+        .barcode svg {
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        
+        /* Specific exclusion for images */
+        img, svg {
+          background: none !important;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="receipt">${receiptContent}</div>
+    <script>
+      // Generate professional barcode after content loads
+      window.onload = function() {
+        const barcodeElement = document.getElementById('barcode-svg');
+        const barcodeNumber = document.getElementById('barcode-number').textContent;
+        
+        if (barcodeElement && barcodeNumber && window.JsBarcode) {
+          try {
+            JsBarcode(barcodeElement, barcodeNumber, {
+              format: "CODE128",
+              width: 2,
+              height: 50,
+              displayValue: false,
+              margin: 0,
+              background: "#ffffff",
+              lineColor: "#000000"
+            });
+          } catch (error) {
+            console.error('Barcode generation failed:', error);
+            // Fallback to text-based barcode
+            barcodeElement.innerHTML = '<div style="font-family: monospace; font-size: 18px;">||||| |||| ||||| ||||</div>';
+          }
+        }
+        
+        // Wait for all images and content to load before calculating height
+        function calculateAndPrint() {
+          // Wait for images to load
+          const images = document.querySelectorAll('img');
+          let imagesLoaded = 0;
+          const totalImages = images.length;
+          
+          if (totalImages === 0) {
+            // No images, proceed immediately
+            proceedWithPrint();
+          } else {
+            images.forEach(img => {
+              if (img.complete) {
+                imagesLoaded++;
+                if (imagesLoaded === totalImages) {
+                  proceedWithPrint();
+                }
+              } else {
+                img.onload = () => {
+                  imagesLoaded++;
+                  if (imagesLoaded === totalImages) {
+                    proceedWithPrint();
+                  }
+                };
+                img.onerror = () => {
+                  imagesLoaded++;
+                  if (imagesLoaded === totalImages) {
+                    proceedWithPrint();
+                  }
+                };
+              }
+            });
+          }
+        }
+        
+        function proceedWithPrint() {
+          // Small delay to ensure everything is rendered
+          setTimeout(() => {
+            const receipt = document.querySelector('.receipt');
+            const body = document.body;
+            
+            if (receipt && body) {
+              // Get actual content height - use the receipt container's height, not body
+              // This ensures we match the content exactly without extra space
+              const receiptElement = receipt as HTMLElement;
+              const receiptHeight = receiptElement.scrollHeight || receiptElement.offsetHeight;
+              
+              // Only add minimal padding (1mm top + 1mm bottom = 2mm total)
+              const paddingMM = 2;
+              const receiptHeightMM = Math.ceil((receiptHeight * 0.264583) + paddingMM); // Convert px to mm
+              
+              // Update @page size dynamically using inline style - Set immediately to prevent paper waste
+              const style = document.createElement('style');
+              style.id = 'dynamic-page-size';
+              const existingStyle = document.getElementById('dynamic-page-size');
+              if (existingStyle) {
+                existingStyle.remove();
+              }
+              // Set page size exactly to content height - NO TOP MARGIN, minimal padding
+              // Force page size aggressively to override printer driver settings
+              style.textContent = '@page { size: 100mm ' + receiptHeightMM + 'mm !important; margin: 0 !important; } @media print { @page { size: 100mm ' + receiptHeightMM + 'mm !important; margin: 0 !important; padding: 0 !important; } html, body { width: 100mm !important; height: ' + receiptHeightMM + 'mm !important; min-height: ' + receiptHeightMM + 'mm !important; max-height: ' + receiptHeightMM + 'mm !important; margin: 0 !important; padding: 0 !important; } .receipt { margin: 0 !important; padding: 1mm 2mm !important; } body > * { margin-top: 0 !important; padding-top: 0 !important; } .receipt > *:first-child { margin-top: 0 !important; padding-top: 0 !important; } }';
+              document.head.appendChild(style);
+              
+              // Also try to set print media properties via JavaScript
+              try {
+                const mediaQuery = window.matchMedia('print');
+                if (mediaQuery && mediaQuery.matches) {
+                  // Force apply styles during print
+                }
+              } catch (e) {
+                // Ignore if not supported
+              }
+              
+              // Resize window to fit content height (only for window.open, not iframe)
+              if (window.opener === null && window.parent === window) {
+                const padding = 20;
+                window.resizeTo(400, Math.min(receiptHeight + padding, screen.height));
+              }
+              
+              // Wait longer for styles to apply before printing
+              setTimeout(() => {
+                window.focus();
+                // Try to print with explicit page size
+                const printWindow = window as any;
+                if (printWindow.document && printWindow.document.body) {
+                  printWindow.document.body.style.height = receiptHeightMM + 'mm';
+                }
+                window.print();
+              }, 200); // Increased delay to ensure styles apply
+            } else {
+              // Fallback: print immediately if receipt not found
+              setTimeout(() => {
+                window.focus();
+                window.print();
+              }, 500);
+            }
+          }, 100);
+        }
+        
+        // Start the process
+        calculateAndPrint();
+      };
+      
+      window.onafterprint = () => {
+        if (window.opener === null && window.parent === window) {
+          window.close();
+        }
+      };
     </script>
   </body>
 </html>
@@ -931,8 +1666,9 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
       }</div>
 `;
 
-    // Print the receipt
-    printReceipt(receiptContent);
+    // Print the receipt - re-check kiosk mode to ensure it's detected
+    const isKioskDetected = kioskMode || isKioskMode();
+    printReceipt(receiptContent, isKioskDetected);
   };
 
   const handlePayment = async (method: string) => {
@@ -1000,217 +1736,67 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
 
         // Auto-print receipt
         try {
-          // In kiosk mode: Print directly from main window (popups don't respect --kiosk-printing)
-          if (kioskMode) {
-            // Use existing downloadReceipt function but trigger print from main window
-            // Create receipt content and print it in current window context
-            const receiptContent = `
-              <!DOCTYPE html>
-              <html>
-              <head>
-                <title>Receipt</title>
-                <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
-                <style>
-                  @media print {
-                    @page { size: 80mm auto; margin: 0; }
-                    body { margin: 0; padding: 5mm; }
-                  }
-                  body {
-                    font-family: 'Courier New', monospace;
-                    font-size: 12px;
-                    width: 80mm;
-                    margin: 0 auto;
-                    padding: 5mm;
-                    background: white;
-                  }
-                  .receipt { text-align: center; }
-                  .store-name { font-size: 18px; font-weight: bold; margin-bottom: 5px; }
-                  .tagline { font-size: 10px; margin-bottom: 10px; }
-                  .header-line { border-top: 1px dashed #000; margin: 10px 0; }
-                  .item-row { text-align: left; margin: 5px 0; }
-                  .item-name { font-weight: bold; }
-                  .item-details { font-size: 10px; color: #666; }
-                  .total { font-size: 16px; font-weight: bold; margin-top: 10px; }
-                  .footer { margin-top: 15px; font-size: 10px; }
-                  #barcode-svg { margin: 10px 0; }
-                </style>
-              </head>
-              <body>
-                <div class="receipt">
-                  <div class="store-name">${branchName.name || "MANPASAND GENERAL STORE"}</div>
-                  <div class="tagline">Fresh • Fast • Friendly</div>
-                  <div class="header-line"></div>
-                  
-                  <div style="text-align: left;">
-                    <div>Receipt: ${receiptData.transactionId || 'N/A'}</div>
-                    <div>Date: ${new Date().toLocaleString()}</div>
-                    <div>Cashier: ${receiptData.cashier || 'Walk-in'}</div>
-                    <div>Customer: ${selectedCustomer ? (customers.find(c => c.id === selectedCustomer)?.name || "Walk-in") : "Walk-in"}</div>
-                  </div>
-                  
-                  <div class="header-line"></div>
-                  
-                  ${cart.map((item: CartItem) => `
-                    <div class="item-row">
-                      <div class="item-name">${item.name}</div>
-                      <div class="item-details">
-                        ${item.quantity} x ${item.price.toFixed(2)} = Rs ${(item.price * item.quantity).toFixed(2)}
-                        ${item.discount > 0 ? ` (Discount: Rs ${item.discount.toFixed(2)})` : ''}
-                      </div>
-                    </div>
-                  `).join('')}
-                  
-                  <div class="header-line"></div>
-                  
-                  <div style="text-align: left;">
-                    <div>Subtotal: Rs ${subtotal.toFixed(2)}</div>
-                    ${discountAmount > 0 ? `<div>Discount: Rs ${discountAmount.toFixed(2)}</div>` : ''}
-                    <div>Tax (5%): Rs ${(total * 0.05).toFixed(2)}</div>
-                    <div class="total">TOTAL: Rs ${total.toFixed(2)}</div>
-                    <div>Payment: ${method === 'cash' ? 'CASH' : method.toUpperCase()}</div>
-                    <div>Paid: Rs ${total.toFixed(2)}</div>
-                  </div>
-                  
-                  <div class="header-line"></div>
-                  
-                  <div id="barcode-svg"></div>
-                  <div id="barcode-number" style="display: none;">${receiptData.transactionId || 'N/A'}</div>
-                  
-                  <div class="footer">
-                    <div>Thank you for shopping!</div>
-                    <div>Goods once sold can be exchanged within 7 days</div>
-                  </div>
-                </div>
-                
-                <script>
-                  window.onload = function() {
-                    const barcodeElement = document.getElementById('barcode-svg');
-                    const barcodeNumber = document.getElementById('barcode-number').textContent;
-                    
-                    if (barcodeElement && barcodeNumber && window.JsBarcode) {
-                      try {
-                        JsBarcode(barcodeElement, barcodeNumber, {
-                          format: "CODE128",
-                          width: 2,
-                          height: 50,
-                          displayValue: true,
-                          margin: 0,
-                          background: "#ffffff",
-                          lineColor: "#000000"
-                        });
-                      } catch (error) {
-                        console.error('Barcode generation failed:', error);
-                      }
-                    }
-                    
-                    // Auto-print in kiosk mode - use Chrome's silent print
-                    setTimeout(() => {
-                      // Force print without dialog - Chrome kiosk mode handles this
-                      window.print();
-                      // Close window after a delay
-                      setTimeout(() => {
-                        window.close();
-                      }, 1000);
-                    }, 300);
-                  };
-                </script>
-              </body>
-              </html>
-            `;
-            
-            // In kiosk mode: Use iframe or print directly from main window (no popup!)
-            // Popup windows don't inherit --kiosk-printing flag from parent
-            const printFrame = document.createElement('iframe');
-            printFrame.style.position = 'fixed';
-            printFrame.style.right = '-9999px';
-            printFrame.style.width = '80mm';
-            printFrame.style.height = '297mm'; // A4 height
-            printFrame.style.border = 'none';
-            printFrame.style.visibility = 'hidden';
-            document.body.appendChild(printFrame);
-            
-            const frameDoc = printFrame.contentDocument || printFrame.contentWindow?.document;
-            if (frameDoc) {
-              frameDoc.open();
-              frameDoc.write(receiptContent);
-              frameDoc.close();
-              
-              // Wait for content to load, then print from iframe (respects kiosk-printing)
-              setTimeout(() => {
-                if (printFrame.contentWindow) {
-                  printFrame.contentWindow.focus();
-                  printFrame.contentWindow.print();
-                  
-                  // Cleanup after print
-                  setTimeout(() => {
-                    if (printFrame.parentNode) {
-                      printFrame.parentNode.removeChild(printFrame);
-                    }
-                  }, 2000);
-                }
-              }, 500);
-              
-              toast({
-                title: "Printing Receipt",
-                description: "Receipt sent to default printer",
-              });
-            } else {
-              // Fallback: use downloadReceipt
-              downloadReceipt(receiptData, branchName);
-            }
+          // Prepare receipt data for local print server (same format as backend)
+          const receiptDataForServer: ReceiptData = {
+            storeName: branchName.name || "MANPASAND GENERAL STORE",
+            tagline: "Quality • Service • Value",
+            address: branchName.address ? `${branchName.address}, Karachi` : "Main Shahrah-e-Faisal, Karachi",
+            transactionId: transactionId,
+            timestamp: new Date().toISOString(),
+            cashier: receiptData.cashier || "Walk-in",
+            customerType: selectedCustomer 
+              ? customers.find(c => c.id === selectedCustomer)?.name || "Walk-in" 
+              : "Walk-in",
+            items: cart.map(item => ({
+              name: item.name,
+              quantity: item.quantity,
+              price: item.price,
+              unit: 'pc'
+            })),
+            subtotal: subtotal,
+            discount: discountAmount > 0 ? discountAmount : undefined,
+            taxPercent: taxPercent,
+            total: total,
+            paymentMethod: method === "Cash" ? "CASH" : "CARD",
+            amountPaid: total,
+            changeAmount: 0,
+            thankYouMessage: "Thank you for shopping!",
+            footerMessage: "Visit us again soon!"
+          };
+
+          // Get printer name - use selected printer or default
+          const printerName = kioskMode 
+            ? 'Default Printer' 
+            : selectedPrinter || 'BlackCopper 80mm Series';
+
+          const printerObj = {
+            name: printerName,
+            columns: { fontA: 48, fontB: 64 } // Default columns
+          };
+
+          const job = {
+            copies: 1,
+            cut: true,
+            openDrawer: false
+          };
+
+          // Try local print server first, fallback to browser print
+          // Use same API format as backend: printer, receiptData, job
+          const printSuccess = await printReceiptViaServer(printerObj, receiptDataForServer, job);
+
+          if (printSuccess.success) {
+            toast({
+              title: "Receipt Printed",
+              description: `Receipt sent to ${printerName}`,
+            });
           } else {
-            // Normal mode: Try backend API first, then fallback to browser
-            try {
-              const receiptPayload = {
-                ...receiptData,
-                storeName: branchName.name || "MANPASAND GENERAL STORE",
-                store: branchName.name || "MANPASAND GENERAL STORE",
-                tagline: "Fresh • Fast • Friendly",
-                address: branchName.address + (branchName.address ? ", Karachi" : "") || "Main Shahrah-e-Faisal, Karachi",
-                strn: "STRN 12-345679 STRN 12-3456789",
-                cashier: "Muhammad Walk-in",
-                customerType: selectedCustomer ? customers.find(c => c.id === selectedCustomer)?.name || "Walk-in" : "Walk-in",
-                discount: discountAmount,
-                taxPercent: taxPercent,
-                total: total,
-                amountPaid: total,
-                changeAmount: 0,
-                thankYouMessage: "Thank you for shopping!",
-                footerMessage: "Goods once sold can be exchanged within 7 days"
-              };
-
-              const selectedPrinterObj = printers.find(p => p.name === selectedPrinter);
-              const columns = selectedPrinterObj?.receiptProfile?.columns ?? { fontA: 48, fontB: 64 };
-              const languageHint = selectedPrinterObj?.languageHint ?? 'escpos';
-
-              const printResponse = await apiClient.post("/barcode-generator/print-receipt", {
-                printer: {
-                  name: selectedPrinter,
-                  languageHint,
-                  columns
-                },
-                job: {
-                  copies: 1,
-                  cut: true,
-                  openDrawer: false
-                },
-                receiptData: receiptPayload
-              });
-
-              if (printResponse.data.success) {
-                toast({
-                  title: "Receipt Printed",
-                  description: `Receipt sent to ${selectedPrinter}`,
-                });
-              } else {
-                throw new Error(printResponse.data.message || "Print failed");
-              }
-            } catch (backendError) {
-              // Fallback to browser print - use existing downloadReceipt function
-              console.log('Backend print failed, using browser print:', backendError);
-              downloadReceipt(receiptData, branchName);
-            }
+            // Fallback to browser print if server failed
+            console.warn('Print server failed, using browser print:', printSuccess.error);
+            downloadReceipt(receiptData, branchName);
           }
+          
+          // Old browser printing code removed - now uses local print server with browser fallback
+          
         } catch (printError) {
           console.error("Print error:", printError);
           toast({

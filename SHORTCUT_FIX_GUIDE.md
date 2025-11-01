@@ -121,3 +121,5 @@ start "" chrome.exe --kiosk-printing --kiosk https://pos.manpasandstore.com
 
 
 
+
+
