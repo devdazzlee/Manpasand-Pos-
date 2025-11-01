@@ -30,15 +30,22 @@ echo [STEP 1/3] Installing node-windows package...
 echo.
 
 REM Check if node-windows is installed
-if not exist "node_modules\node-windows" (
+echo Checking for node-windows package...
+npm list node-windows >nul 2>&1
+if %errorLevel% neq 0 (
+    echo [INFO] node-windows not found, installing...
     echo Installing node-windows...
     call npm install node-windows --save
     if %errorLevel% neq 0 (
         echo [ERROR] Failed to install node-windows
+        echo.
+        echo Try installing manually:
+        echo   npm install node-windows --save
+        echo.
         pause
         exit /b 1
     )
-    echo [OK] node-windows installed
+    echo [OK] node-windows installed successfully
 ) else (
     echo [OK] node-windows already installed
 )

@@ -12,11 +12,11 @@
     "stop-service": "node stop-service.js"
   },
   "dependencies": {
-    "express": "^4.18.2",
+    "bwip-js": "^4.0.0",
     "cors": "^2.8.5",
-    "pdfkit": "^0.14.0",
+    "express": "^4.18.2",
     "pdf-to-printer": "^5.6.0",
-    "bwip-js": "^4.0.0"
+    "pdfkit": "^0.14.0"
   },
   "devDependencies": {
     "nodemon": "^3.0.1"
@@ -24,7 +24,13 @@
   "optionalDependencies": {
     "node-windows": "^1.0.0-beta.8"
   },
-  "keywords": ["pos", "receipt", "printer", "thermal", "pdf"],
+  "keywords": [
+    "pos",
+    "receipt",
+    "printer",
+    "thermal",
+    "pdf"
+  ],
   "author": "",
   "license": "ISC"
 }

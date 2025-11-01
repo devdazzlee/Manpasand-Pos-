@@ -32,3 +32,4 @@ svc.on('error', function(err) {
 console.log('🗑️  Uninstalling Manpasand Print Server service...');
 svc.uninstall();
 
+

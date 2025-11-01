@@ -2,9 +2,21 @@
  * Print Server API Client
  * Sends print requests to local print server running on client machine
  * Uses same API format as backend (printer, job, receiptData)
+ * Falls back to backend API if local server is not available
  */
 
-const PRINT_SERVER_URL = 'http://localhost:3001';
+import { PRINT_API_BASE, PRINT_API_FALLBACK } from '@/config/constants';
+
+// Determine which print server to use based on availability
+const getPrintServerUrl = (): string => {
+  // Try local print server first
+  return PRINT_API_BASE;
+};
+
+// Fallback to backend API if local server fails
+const getFallbackUrl = (): string => {
+  return PRINT_API_FALLBACK;
+};
 
 export interface ReceiptItem {
   name: string;
@@ -51,43 +63,99 @@ export interface PrintJob {
 }
 
 /**
- * Check if print server is available
+ * Check if local print server is available
  */
 export async function checkPrintServer(): Promise<boolean> {
   try {
-    const response = await fetch(`${PRINT_SERVER_URL}/health`, {
+    // Create timeout controller for compatibility
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 2000);
+    
+    const response = await fetch(`${getPrintServerUrl()}/health`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
+      signal: controller.signal,
     });
+    
+    clearTimeout(timeoutId);
     const data = await response.json();
-    return data.status === 'ok' && data.printerInitialized === true;
+    return data.status === 'ok';
   } catch (error) {
-    console.error('Print server not available:', error);
+    console.log('Local print server not available, will use backend API');
     return false;
   }
 }
 
 /**
- * Get available printers from local print server
+ * Get available printers - tries local server first, then backend
  */
 export async function getPrinters(): Promise<{
   success: boolean;
   data?: Array<{ name: string; isDefault?: boolean; status?: string }>;
   error?: string;
 }> {
+  // Try local print server first
+  console.log('🔍 Checking for local print server...');
+  const isLocalAvailable = await checkPrintServer();
+  
+  if (isLocalAvailable) {
+    console.log('✅ Local print server available, using:', getPrintServerUrl());
+    try {
+      const response = await fetch(`${getPrintServerUrl()}/printers`, {
+        method: 'GET',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+      const result = await response.json();
+      if (result.success) {
+        console.log('✅ Got printers from local print server');
+        return result;
+      }
+    } catch (error: any) {
+      console.warn('⚠️ Local print server failed, trying backend:', error.message);
+    }
+  } else {
+    console.log('⚠️ Local print server not available, using backend');
+  }
+
+  // Fallback to backend API
   try {
-    const response = await fetch(`${PRINT_SERVER_URL}/printers`, {
+    console.log('📡 Using backend API for printers:', `${getFallbackUrl()}/printers`);
+    const response = await fetch(`${getFallbackUrl()}/printers`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
     });
+    
+    if (!response.ok) {
+      throw new Error(`Backend API returned ${response.status}`);
+    }
+    
     const result = await response.json();
-    return result;
+    
+    // Backend returns { success: true, data: [...] } or { data: [...] }
+    if (result.success && result.data) {
+      return {
+        success: true,
+        data: result.data,
+      };
+    } else if (result.data) {
+      return {
+        success: true,
+        data: result.data,
+      };
+    } else {
+      return {
+        success: true,
+        data: result,
+      };
+    }
   } catch (error: any) {
-    console.error('Error getting printers:', error);
+    console.error('Error getting printers from backend:', error);
     return {
       success: false,
       error: error.message || 'Failed to get printers',
@@ -96,7 +164,8 @@ export async function getPrinters(): Promise<{
 }
 
 /**
- * Print receipt via local print server (same format as backend API)
+ * Print receipt - tries local server first, then backend API
+ * Uses same API format (printer, job, receiptData)
  */
 export async function printReceiptViaServer(
   printer: Printer,
@@ -107,8 +176,44 @@ export async function printReceiptViaServer(
   error?: string;
   message?: string;
 }> {
+  // Try local print server first
+  const isLocalAvailable = await checkPrintServer();
+  
+  if (isLocalAvailable) {
+    try {
+      const response = await fetch(`${getPrintServerUrl()}/print-receipt`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          printer,
+          job: job ?? { copies: 1, cut: true, openDrawer: false },
+          receiptData,
+        }),
+      });
+
+      const result = await response.json();
+
+      if (!response.ok) {
+        throw new Error(result.message || result.error || 'Print failed');
+      }
+
+      console.log('✅ Receipt printed via local print server');
+      return {
+        success: true,
+        message: result.message || 'Receipt printed successfully',
+      };
+    } catch (error: any) {
+      console.warn('Local print server failed, trying backend:', error.message);
+      // Continue to fallback below
+    }
+  }
+
+  // Fallback to backend API
   try {
-    const response = await fetch(`${PRINT_SERVER_URL}/print-receipt`, {
+    console.log('📡 Using backend API for printing');
+    const response = await fetch(`${getFallbackUrl()}/print-receipt`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -126,12 +231,13 @@ export async function printReceiptViaServer(
       throw new Error(result.message || result.error || 'Print failed');
     }
 
+    console.log('✅ Receipt printed via backend API');
     return {
       success: true,
       message: result.message || 'Receipt printed successfully',
     };
   } catch (error: any) {
-    console.error('Print server error:', error);
+    console.error('Print failed (both local and backend):', error);
     return {
       success: false,
       error: error.message || 'Failed to connect to print server',

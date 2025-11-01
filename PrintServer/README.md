@@ -114,6 +114,14 @@ The easiest way to make the server start automatically and restart if it closes:
 2. Select **"Run as administrator"**
 3. Done! ✅
 
+**What happens after installation:**
+- ✅ Service is installed
+- ✅ Service is started automatically
+- ✅ Service is set to start on boot
+- ✅ **No need to run any JS files!** It's all automatic.
+
+**Next steps:** See `QUICK-START.md` for verification and testing
+
 **Manual Setup:**
 ```bash
 # Install node-windows
@@ -131,6 +139,17 @@ node start-service.js
 - ✅ Auto-restarts if it crashes or closes
 - ✅ Runs in background (no user interaction needed)
 - ✅ Runs even when no user is logged in
+
+**How does it start automatically?**
+
+Think of it like this:
+1. When you install the service, Windows adds your print server to a special list
+2. This list says: "Start these programs automatically when Windows boots"
+3. Every time your laptop starts, Windows checks this list
+4. Windows sees "Manpasand Print Server" and automatically runs `node server.js`
+5. Your print server starts - no user interaction needed!
+
+**Still confused?** 📖 See `HOW-AUTO-START-WORKS.md` for detailed explanation with diagrams
 
 **Service Management:**
 - **Start:** `node start-service.js` or `start-service.bat`

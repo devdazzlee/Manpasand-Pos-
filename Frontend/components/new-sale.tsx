@@ -23,7 +23,7 @@ import {
 import apiClient from "@/lib/apiClient";
 import { usePosData } from "@/hooks/use-pos-data";
 import { isKioskMode, enableKioskMode } from "@/utils/kiosk-printing";
-import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
+import { printReceiptViaServer, getPrinters, type ReceiptData } from "@/lib/print-server";
 
 interface CartItem {
   id: string;
@@ -362,16 +362,22 @@ export function NewSale() {
 
   const loadPrinters = async () => {
     try {
-      const response = await apiClient.get(`/barcode-generator/printers`);
-      const printerList = response.data.data || response.data;
-      setPrinters(printerList);
+      // Use print server function - tries local server first, then backend
+      const result = await getPrinters();
+      
+      if (result.success && result.data) {
+        const printerList = result.data;
+        setPrinters(printerList);
 
-      // Auto-select default printer if available
-      const defaultPrinter = printerList.find((p: Printer) => p.isDefault);
-      if (defaultPrinter) {
-        setSelectedPrinter(defaultPrinter.name);
-      } else if (printerList.length > 0) {
-        setSelectedPrinter(printerList[0].name);
+        // Auto-select default printer if available
+        const defaultPrinter = printerList.find((p: Printer) => p.isDefault);
+        if (defaultPrinter) {
+          setSelectedPrinter(defaultPrinter.name);
+        } else if (printerList.length > 0) {
+          setSelectedPrinter(printerList[0].name);
+        }
+      } else {
+        throw new Error(result.error || 'Failed to get printers');
       }
     } catch (err) {
       console.error("Failed to load printers:", err);
