@@ -310,3 +310,7 @@ Since kiosk mode uses default printer, here's how to handle multiple printers:
 
 
 
+
+
+
+

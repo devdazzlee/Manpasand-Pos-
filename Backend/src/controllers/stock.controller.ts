@@ -18,27 +18,38 @@ const adjustStockController = asyncHandler(async (req: Request, res: Response) =
     new ApiResponse(stock, "Stock adjusted successfully").send(res);
 });
 
+const transferStockController = asyncHandler(async (req: Request, res: Response) => {
+    const result = await stockService.transferStock({ ...req.body, createdBy: req.user!.id });
+    new ApiResponse(result, "Stock transferred successfully").send(res);
+});
+
 const getStocksController = asyncHandler(async (req: Request, res: Response) => {
-    const branchId = (req.query.branchId as string) || req.user?.branch_id;
-    if (!branchId || branchId === "null" || branchId === "undefined" || branchId === "") {
-        throw new AppError(400, "Branch ID is required");
-    }
-    const stocks = await stockService.getStockByBranch(branchId);
-    new ApiResponse(stocks, "Stocks retrieved successfully").send(res);
+    const branchId = req.query.branchId as string;
+    const page = Number(req.query.page) || 1;
+    const limit = Number(req.query.limit) || 20;
+    const search = req.query.search as string | undefined;
+    
+    const result = await stockService.getStockByBranch(branchId || "", page, limit, search);
+    new ApiResponse(result.data, "Stocks retrieved successfully", 200, true, result.meta).send(res);
 });
 
 const getStockMovementsController = asyncHandler(async (req: Request, res: Response) => {
-    const branchId = (req.query.branchId as string) || req.user?.branch_id;
-    if (!branchId || branchId === "null" || branchId === "undefined" || branchId === "") {
-        throw new AppError(400, "Branch ID is required");
-    }
-    const movements = await stockService.getStockMovements(branchId);
+    const branchId = req.query.branchId as string;
+    const movements = await stockService.getStockMovements(branchId || "");
     new ApiResponse(movements, "Stock movement history retrieved").send(res);
+});
+
+const getTodayStockMovementsController = asyncHandler(async (req: Request, res: Response) => {
+    const branchId = req.query.branchId as string;
+    const movements = await stockService.getTodayStockMovements(branchId || undefined);
+    new ApiResponse(movements, "Today's stock movements retrieved").send(res);
 });
 
 export {
     createStockController,
     adjustStockController,
+    transferStockController,
     getStocksController,
     getStockMovementsController,
+    getTodayStockMovementsController,
 };

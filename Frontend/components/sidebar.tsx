@@ -29,6 +29,7 @@ import {
   StoreIcon,
   Barcode,
   X,
+  Warehouse,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -91,6 +92,7 @@ const menuSections: SidebarMenuSection[] = [
     expandable: true,
     items: [
       { id: "inventory", label: "Products", icon: Package },
+      { id: "stock-management", label: "Stock Management", icon: Warehouse },
       { id: "categories", label: "Categories", icon: Grid3X3 },
       { id: "sub-categories", label: "Sub-Categories", icon: Grid3X3 },
       { id: "branches", label: "Branches", icon: Grid3X3 },

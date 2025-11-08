@@ -1,7 +1,7 @@
 import { Stock, StockMovement } from "@prisma/client";
 import { prisma } from '../prisma/client';
 import { AppError } from "../utils/apiError";
-import { addDecimal } from "../utils/helpers";
+import { addDecimal, asNumber } from "../utils/helpers";
 
 class StockService {
     async createStock({ productId, branchId, quantity, createdBy }: {
@@ -87,18 +87,184 @@ class StockService {
         });
     }
 
-    async getStockByBranch(branchId: string) {
-        return prisma.stock.findMany({
-            where: { branch_id: branchId },
-            include: { product: true },
-            orderBy: { last_updated: "desc" },
+    async transferStock({ productId, fromBranchId, toBranchId, quantity, notes, createdBy }: {
+        productId: string;
+        fromBranchId: string;
+        toBranchId: string;
+        quantity: number;
+        notes?: string;
+        createdBy: string;
+    }) {
+        if (fromBranchId === toBranchId) {
+            throw new AppError(400, "Cannot transfer to the same branch");
+        }
+
+        if (quantity <= 0) {
+            throw new AppError(400, "Quantity must be greater than 0");
+        }
+
+        return prisma.$transaction(async (tx) => {
+            // Get source stock
+            const sourceStock = await tx.stock.findUnique({
+                where: { product_id_branch_id: { product_id: productId, branch_id: fromBranchId } },
+            });
+
+            if (!sourceStock) {
+                throw new AppError(404, "Source stock not found");
+            }
+
+            const sourceQty = asNumber(sourceStock.current_quantity);
+            if (sourceQty < quantity) {
+                throw new AppError(400, "Insufficient stock for transfer");
+            }
+
+            // Deduct from source branch
+            const newSourceQty = addDecimal(sourceStock.current_quantity, -quantity);
+            await tx.stock.update({
+                where: { product_id_branch_id: { product_id: productId, branch_id: fromBranchId } },
+                data: { current_quantity: newSourceQty },
+            });
+
+            // Check if destination stock exists
+            let destinationStock = await tx.stock.findUnique({
+                where: { product_id_branch_id: { product_id: productId, branch_id: toBranchId } },
+            });
+
+            let finalDestQty;
+            if (!destinationStock) {
+                // Create destination stock if it doesn't exist
+                destinationStock = await tx.stock.create({
+                    data: {
+                        product_id: productId,
+                        branch_id: toBranchId,
+                        current_quantity: quantity,
+                    },
+                });
+                finalDestQty = quantity;
+            } else {
+                // Add to destination branch
+                const newDestQty = addDecimal(destinationStock.current_quantity, quantity);
+                await tx.stock.update({
+                    where: { product_id_branch_id: { product_id: productId, branch_id: toBranchId } },
+                    data: { current_quantity: newDestQty },
+                });
+                finalDestQty = newDestQty;
+            }
+
+            // Create transfer out movement
+            await tx.stockMovement.create({
+                data: {
+                    product_id: productId,
+                    branch_id: fromBranchId,
+                    movement_type: "TRANSFER_OUT",
+                    quantity_change: -quantity,
+                    previous_qty: sourceStock.current_quantity,
+                    new_qty: newSourceQty,
+                    notes: notes || `Transferred to ${toBranchId}`,
+                    created_by: createdBy,
+                },
+            });
+
+            // Create transfer in movement
+            await tx.stockMovement.create({
+                data: {
+                    product_id: productId,
+                    branch_id: toBranchId,
+                    movement_type: "TRANSFER_IN",
+                    quantity_change: quantity,
+                    previous_qty: destinationStock.current_quantity || 0,
+                    new_qty: finalDestQty,
+                    notes: notes || `Transferred from ${fromBranchId}`,
+                    created_by: createdBy,
+                },
+            });
+
+            return {
+                success: true,
+                fromBranch: { newQty: newSourceQty },
+                toBranch: { newQty: finalDestQty },
+            };
         });
+    }
+
+    async getStockByBranch(branchId: string, page: number = 1, limit: number = 20, search?: string) {
+        const skip = (page - 1) * limit;
+        
+        const where: any = {};
+        
+        // Only filter by branch if branchId is provided
+        if (branchId && branchId.trim() !== "") {
+            where.branch_id = branchId;
+        }
+        
+        if (search && search.trim() !== "") {
+            where.product = {
+                name: {
+                    contains: search,
+                    mode: 'insensitive' as any
+                }
+            };
+        }
+        
+        const [stocks, total] = await Promise.all([
+            prisma.stock.findMany({
+                where,
+                include: { product: true, branch: true },
+                orderBy: { last_updated: "desc" },
+                skip,
+                take: limit,
+            }),
+            prisma.stock.count({ where })
+        ]);
+        
+        console.log('🔍 Stock Service Result:', {
+            requestedLimit: limit,
+            actualReturned: stocks.length,
+            totalInDatabase: total,
+            branchId,
+            page
+        });
+        
+        return {
+            data: stocks,
+            meta: {
+                total,
+                page,
+                limit,
+                totalPages: Math.ceil(total / limit),
+            },
+        };
     }
 
     async getStockMovements(branchId: string) {
         return prisma.stockMovement.findMany({
             where: { branch_id: branchId },
-            include: { product: true },
+            include: { product: true, branch: true, user: { select: { email: true } } },
+            orderBy: { created_at: "desc" },
+        });
+    }
+
+    async getTodayStockMovements(branchId?: string) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+        
+        const whereClause: any = {
+            created_at: {
+                gte: today,
+                lt: tomorrow,
+            }
+        };
+
+        if (branchId && branchId !== "") {
+            whereClause.branch_id = branchId;
+        }
+
+        return prisma.stockMovement.findMany({
+            where: whereClause,
+            include: { product: true, branch: true, user: { select: { email: true } } },
             orderBy: { created_at: "desc" },
         });
     }

@@ -26,6 +26,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Search,
   Plus,
@@ -90,6 +91,13 @@ export function Stocks() {
   const [isAdding, setIsAdding] = useState(false);
   const [isAdjusting, setIsAdjusting] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+
+  // Pagination for products
+  const [productPage, setProductPage] = useState(1);
+  const [productSearch, setProductSearch] = useState("");
+  const [products, setProducts] = useState<Product[]>([]);
+  const [totalProducts, setTotalProducts] = useState(0);
+  const [loadingProducts, setLoadingProducts] = useState(false);
 
   // Dialog state
   const [isAddOpen, setIsAddOpen] = useState(false);
@@ -178,6 +186,45 @@ export function Stocks() {
     fetchData();
   }, [branchFilter]);
 
+  // Fetch products with search and pagination
+  useEffect(() => {
+    const fetchProducts = async () => {
+      setLoadingProducts(true);
+      try {
+        const params: any = {
+          page: productPage,
+          limit: 100,
+          is_active: true,
+        };
+        
+        if (productSearch) {
+          params.search = productSearch;
+        }
+
+        const response = await apiClient.get(`${API_BASE}/products`, { params });
+        const data = response.data.data || response.data;
+        
+        if (productPage === 1) {
+          setProducts(data.products || data);
+        } else {
+          setProducts(prev => [...prev, ...(data.products || data)]);
+        }
+        setTotalProducts(data.meta?.total || (data.products || data).length);
+      } catch (e: any) {
+        console.log(e);
+        toast({
+          title: "Error",
+          description: "Failed to load products",
+          variant: "destructive",
+        });
+      } finally {
+        setLoadingProducts(false);
+      }
+    };
+
+    fetchProducts();
+  }, [productPage, productSearch]);
+
   // Filter stocks by product name
   const filteredStocks = stocks.filter((s) =>
     s.product.name.toLowerCase().includes(searchTerm.toLowerCase())
@@ -219,6 +266,16 @@ export function Stocks() {
     } finally {
       setIsAdding(false);
     }
+  };
+
+  const loadMoreProducts = () => {
+    setProductPage(prev => prev + 1);
+  };
+
+  const handleProductSearch = (search: string) => {
+    setProductSearch(search);
+    setProductPage(1);
+    setProducts([]);
   };
 
   const handleAdjust = async () => {
@@ -305,22 +362,54 @@ export function Stocks() {
               </DialogHeader>
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="add-product">Product</Label>
-                  <select
-                    id="add-product"
-                    className="block w-full border rounded p-2"
+                  <Label htmlFor="add-product-search">Search Product</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                    <Input
+                      id="add-product-search"
+                      placeholder="Search products..."
+                      value={productSearch}
+                      onChange={(e) => handleProductSearch(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="add-product">Product *</Label>
+                  <Select
                     value={addForm.productId}
-                    onChange={(e) =>
-                      setAddForm({ ...addForm, productId: e.target.value })
+                    onValueChange={(value) =>
+                      setAddForm({ ...addForm, productId: value })
                     }
                   >
-                    <option value="">Select product</option>
-                    {globalProducts.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select product" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[300px]">
+                      {products.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                      {products.length < totalProducts && (
+                        <div className="p-2 text-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={loadMoreProducts}
+                            disabled={loadingProducts}
+                            className="w-full"
+                          >
+                            {loadingProducts ? (
+                              <Loader2 className="animate-spin h-4 w-4" />
+                            ) : (
+                              `Load More (${totalProducts - products.length} remaining)`
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label htmlFor="add-branch">Branch</Label>
@@ -383,22 +472,54 @@ export function Stocks() {
               </DialogHeader>
               <div className="space-y-4">
                 <div>
-                  <Label htmlFor="adj-product">Product</Label>
-                  <select
-                    id="adj-product"
-                    className="block w-full border rounded p-2"
+                  <Label htmlFor="adjust-product-search">Search Product</Label>
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                    <Input
+                      id="adjust-product-search"
+                      placeholder="Search products..."
+                      value={productSearch}
+                      onChange={(e) => handleProductSearch(e.target.value)}
+                      className="pl-10"
+                    />
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="adj-product">Product *</Label>
+                  <Select
                     value={adjForm.productId}
-                    onChange={(e) =>
-                      setAdjForm({ ...adjForm, productId: e.target.value })
+                    onValueChange={(value) =>
+                      setAdjForm({ ...adjForm, productId: value })
                     }
                   >
-                    <option value="">Select product</option>
-                    {globalProducts.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {p.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select product" />
+                    </SelectTrigger>
+                    <SelectContent className="max-h-[300px]">
+                      {products.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                      {products.length < totalProducts && (
+                        <div className="p-2 text-center">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={loadMoreProducts}
+                            disabled={loadingProducts}
+                            className="w-full"
+                          >
+                            {loadingProducts ? (
+                              <Loader2 className="animate-spin h-4 w-4" />
+                            ) : (
+                              `Load More (${totalProducts - products.length} remaining)`
+                            )}
+                          </Button>
+                        </div>
+                      )}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label htmlFor="adj-branch">Branch</Label>

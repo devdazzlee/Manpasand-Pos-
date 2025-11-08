@@ -163,3 +163,7 @@ D:\Konain Bhai\Manpasand-Pos-\PrintServer\
 
 **That's all you need!** Just one file to run: `install-and-start.bat`
 
+
+
+
+

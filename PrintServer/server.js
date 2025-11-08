@@ -14,8 +14,8 @@ const PORT = 3001; // Local print server port
 const logoPath = fs.existsSync(path.join(__dirname, '../Frontend/public/logo.png'))
   ? path.resolve(__dirname, '../Frontend/public/logo.png')
   : fs.existsSync(path.join(__dirname, 'logo.png'))
-  ? path.resolve(__dirname, 'logo.png')
-  : null;
+    ? path.resolve(__dirname, 'logo.png')
+    : null;
 
 if (logoPath) {
   console.log('Logo path resolved to:', logoPath);
@@ -28,7 +28,7 @@ const corsOptions = {
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps, curl, Postman)
     if (!origin) return callback(null, true);
-    
+
     // Allow requests from Vercel frontend domain
     const allowedOrigins = [
       'https://pos.manpasandstore.com',
@@ -38,7 +38,7 @@ const corsOptions = {
       'http://127.0.0.1:3000',
       'http://127.0.0.1:3001'
     ];
-    
+
     // Check if origin is in allowed list or contains vercel.app
     if (allowedOrigins.includes(origin) || origin.includes('.vercel.app')) {
       callback(null, true);
@@ -98,10 +98,10 @@ async function getPrintersViaCIM() {
     `$p = Get-CimInstance Win32_Printer | Select-Object Name,Default,WorkOffline,PrinterStatus,DriverName,PortName,ServerName,ShareName;
      $p | ConvertTo-Json -Compress -Depth 3`
   ];
-  const { stdout } = await execFileAsync('powershell', ps, { 
-    timeout: 5000, 
-    windowsHide: true, 
-    maxBuffer: 10 * 1024 * 1024 
+  const { stdout } = await execFileAsync('powershell', ps, {
+    timeout: 5000,
+    windowsHide: true,
+    maxBuffer: 10 * 1024 * 1024
   });
   const data = safeParseJson(stdout);
   if (!data) return [];
@@ -130,10 +130,10 @@ async function getPrintersViaGetPrinter() {
     `$p = Get-Printer | Select-Object Name, PrinterStatus, WorkOffline;
      $p | ConvertTo-Json -Compress -Depth 3`
   ];
-  const { stdout } = await execFileAsync('powershell', ps, { 
-    timeout: 5000, 
-    windowsHide: true, 
-    maxBuffer: 10 * 1024 * 1024 
+  const { stdout } = await execFileAsync('powershell', ps, {
+    timeout: 5000,
+    windowsHide: true,
+    maxBuffer: 10 * 1024 * 1024
   });
   const data = safeParseJson(stdout);
   if (!data) return [];
@@ -154,9 +154,9 @@ async function getDefaultPrinterFromRegistryHKCU() {
     '/v',
     'Device'
   ];
-  const { stdout } = await execFileAsync(cmd[0], cmd.slice(1), { 
-    timeout: 4000, 
-    windowsHide: true 
+  const { stdout } = await execFileAsync(cmd[0], cmd.slice(1), {
+    timeout: 4000,
+    windowsHide: true
   });
   const line = stdout.split(/\r?\n/).find(l => l.includes('REG_SZ'));
   if (!line) return null;
@@ -203,7 +203,7 @@ function deriveReceiptProfile(p) {
 // Get available printers (same as backend) - Windows only for now
 async function getAvailablePrinters() {
   const platform = process.platform;
-  
+
   if (platform !== 'win32') {
     console.log(`Platform ${platform} not supported for printer detection`);
     return [];
@@ -302,10 +302,10 @@ app.post('/print-receipt', async (req, res) => {
     const logoToUse = receiptData.logoPath || logoPath;
 
     // Paper geometry (80mm roll) - same as backend
-    const pageWidth = mm(80);
+    const pageWidth = mm(72);
     const margins = {
-      left: mm(2.5),
-      right: mm(2.5),
+      left: mm(1.0),
+      right: mm(1.0),
       top: mm(4),
       bottom: mm(5)
     };
@@ -328,10 +328,10 @@ app.post('/print-receipt', async (req, res) => {
     doc.fillColor('#000').strokeColor('#000').opacity(1);
 
     // Global sizes (same as backend)
-    const BODY_MAX = 10.5;
-    const BODY_MIN = 7.6;
-    const TOTAL_MAX = 12.0;
-    const TOTAL_MIN = 7.5;
+    const BODY_MAX = 9.4;
+    const BODY_MIN = 7.0;
+    const TOTAL_MAX = 11.2;
+    const TOTAL_MIN = 7.8;
     const HEAD_MAX = 16;
 
     doc.font(baseFont).fontSize(BODY_MAX);
@@ -369,13 +369,13 @@ app.post('/print-receipt', async (req, res) => {
         drawX = x + (width - textWidth) / 2;
       }
 
-      doc.text(text, drawX, y);
+      doc.text(text, drawX, y, { lineBreak: false });
       return size;
     }
 
     // Draw a two-column row (left label, right value)
     function rowLR(label, value, y, opts) {
-      const LBL_W = W * 0.40;
+      const LBL_W = W * 0.45;
       const maxSize = opts?.maxSize ?? BODY_MAX;
       const minSize = opts?.minSize ?? BODY_MIN;
       const font = opts?.bold ? boldFont : baseFont;
@@ -389,7 +389,7 @@ app.post('/print-receipt', async (req, res) => {
         doc.fontSize(sizeL);
       }
       doc.fontSize(sizeL);
-      doc.text(label, margins.left, y);
+      doc.text(label, margins.left, y, { lineBreak: false });
 
       // Right value - NO WIDTH CONSTRAINT
       doc.font(font);
@@ -406,7 +406,7 @@ app.post('/print-receipt', async (req, res) => {
       }
       doc.fontSize(sizeR);
       const finalValueWidth = doc.widthOfString(value);
-      doc.text(value, margins.left + W - finalValueWidth, y);
+      doc.text(value, margins.left + W - finalValueWidth, y, { lineBreak: false });
 
       const used = Math.min(sizeL, sizeR);
       return lineH(used);
@@ -418,9 +418,9 @@ app.post('/print-receipt', async (req, res) => {
       const minSize = opts?.header ? TOTAL_MIN : BODY_MIN;
       const font = opts?.header ? boldFont : baseFont;
 
-      const itemW = opts?.header ? W * 0.30 : W * 0.35;
-      const qtyW = opts?.header ? W * 0.15 : W * 0.15;
-      const rateW = opts?.header ? W * 0.55 : W * 0.50;
+      const itemW = opts?.header ? W * 0.48 : W * 0.50;
+      const qtyW = opts?.header ? W * 0.18 : W * 0.16;
+      const rateW = W - (itemW + qtyW);
 
       const X_ITEM = margins.left;
       const X_QTY = X_ITEM + itemW;
@@ -537,8 +537,10 @@ app.post('/print-receipt', async (req, res) => {
     // Cashier | Customer
     const cashierName = receiptData.cashier || 'Walk-in';
     const customerType = receiptData.customerType || 'Walk-in';
-    const lh3 = rowLR(`Cashier  ${cashierName}`, customerType, y);
-    y += lh3 + 2;
+    const lh3 = rowLR('Cashier', cashierName, y);
+    y += lh3;
+    const lh4 = rowLR('Customer', customerType, y);
+    y += lh4 + 2;
 
     y += hr(y, 'dotted');
 
@@ -666,7 +668,7 @@ app.post('/print-receipt', async (req, res) => {
     }
 
     // Cleanup
-    fs.unlink(tmp, () => {});
+    fs.unlink(tmp, () => { });
 
     res.json({
       success: true,

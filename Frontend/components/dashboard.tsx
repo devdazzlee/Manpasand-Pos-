@@ -32,6 +32,7 @@ import { Notifications } from "@/components/notifications";
 import { Branches } from "./branches";
 import Inventory from "./inventory";
 import { Stocks } from "./Stocks";
+import { StockManagement } from "./StockManagement";
 import { Sales } from "./sales";
 import Orders from "./orders";
 import Subcategories from "./sub-categories";
@@ -98,6 +99,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <Customers />;
       case "loyalty":
         return <Stocks />;
+      case "stock-management":
+        return <StockManagement />;
       case "designation":
         return <Designation />;
       case "employees":

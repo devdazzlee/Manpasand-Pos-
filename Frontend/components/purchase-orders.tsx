@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,8 +19,18 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Search, Eye, Edit, Send, FileText, Trash2, Package, DollarSign, Clock, CheckCircle } from "lucide-react"
+import { Plus, Search, Eye, Edit, Send, FileText, Trash2, Package, DollarSign, Clock, CheckCircle, Loader2 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import apiClient from "@/lib/apiClient"
+import { API_BASE } from "@/config/constants"
+import { usePosData } from "@/hooks/use-pos-data"
+
+interface Product {
+  id: string
+  name: string
+  sku?: string
+  purchase_rate?: number
+}
 
 interface PurchaseOrderItem {
   id: string
@@ -60,6 +70,19 @@ interface NewItem {
 export function PurchaseOrders() {
   const { toast } = useToast()
   const today = new Date().toISOString().split("T")[0]
+
+  // Global store data
+  const { 
+    products: globalProducts, 
+    isAnyLoading: globalLoading,
+  } = usePosData()
+
+  // Product state for searchable dropdown
+  const [productPage, setProductPage] = useState(1)
+  const [productSearch, setProductSearch] = useState("")
+  const [products, setProducts] = useState<Product[]>([])
+  const [totalProducts, setTotalProducts] = useState(0)
+  const [loadingProducts, setLoadingProducts] = useState(false)
 
   const [orders, setOrders] = useState<PurchaseOrder[]>([
     {
@@ -193,6 +216,45 @@ export function PurchaseOrders() {
     { value: "Gadget Hub", label: "Gadget Hub", contact: "orders@gadgethub.com" },
   ]
 
+  // Fetch products with search and pagination
+  useEffect(() => {
+    const fetchProducts = async () => {
+      setLoadingProducts(true)
+      try {
+        const params: any = {
+          page: productPage,
+          limit: 100,
+          is_active: true,
+        }
+        
+        if (productSearch) {
+          params.search = productSearch
+        }
+
+        const response = await apiClient.get(`${API_BASE}/products`, { params })
+        const data = response.data.data || response.data
+        
+        if (productPage === 1) {
+          setProducts(data.products || data)
+        } else {
+          setProducts(prev => [...prev, ...(data.products || data)])
+        }
+        setTotalProducts(data.meta?.total || (data.products || data).length)
+      } catch (e: any) {
+        console.log(e)
+        toast({
+          title: "Error",
+          description: "Failed to load products",
+          variant: "destructive",
+        })
+      } finally {
+        setLoadingProducts(false)
+      }
+    }
+
+    fetchProducts()
+  }, [productPage, productSearch])
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "draft":
@@ -250,6 +312,16 @@ export function PurchaseOrders() {
     const tax = subtotal * 0.18 // 18% GST
     const total = subtotal + tax
     return { subtotal, tax, total }
+  }
+
+  const loadMoreProducts = () => {
+    setProductPage(prev => prev + 1)
+  }
+
+  const handleProductSearch = (search: string) => {
+    setProductSearch(search)
+    setProductPage(1)
+    setProducts([])
   }
 
   const handleAddItem = () => {
@@ -705,27 +777,76 @@ export function PurchaseOrders() {
               <div className="space-y-2">
                 <Label>Items</Label>
                 <div className="border rounded-lg p-4">
-                  <div className="grid grid-cols-4 gap-2 mb-4">
-                    <Input
-                      placeholder="Product"
-                      value={newItem.product}
-                      onChange={(e) => setNewItem((prev) => ({ ...prev, product: e.target.value }))}
-                    />
-                    <Input
-                      placeholder="Quantity"
-                      type="number"
-                      value={newItem.quantity}
-                      onChange={(e) => setNewItem((prev) => ({ ...prev, quantity: e.target.value }))}
-                    />
-                    <Input
-                      placeholder="Unit Price"
-                      type="number"
-                      value={newItem.unitPrice}
-                      onChange={(e) => setNewItem((prev) => ({ ...prev, unitPrice: e.target.value }))}
-                    />
-                    <Button variant="outline" onClick={handleAddItem}>
-                      Add Item
-                    </Button>
+                  <div className="space-y-4 mb-4">
+                    <div>
+                      <Label htmlFor="item-product-search">Search Product</Label>
+                      <div className="relative">
+                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                        <Input
+                          id="item-product-search"
+                          placeholder="Search products..."
+                          value={productSearch}
+                          onChange={(e) => handleProductSearch(e.target.value)}
+                          className="pl-10"
+                        />
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-4 gap-2">
+                      <Select
+                        value={newItem.product}
+                        onValueChange={(value) => {
+                          setNewItem((prev) => ({ ...prev, product: value }))
+                          // Auto-fill unit price if product has purchase rate
+                          const selectedProduct = products.find(p => p.name === value)
+                          if (selectedProduct?.purchase_rate) {
+                            setNewItem((prev) => ({ ...prev, unitPrice: selectedProduct.purchase_rate?.toString() || "" }))
+                          }
+                        }}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Select product" />
+                        </SelectTrigger>
+                        <SelectContent className="max-h-[300px]">
+                          {products.map((p) => (
+                            <SelectItem key={p.id} value={p.name}>
+                              {p.name}
+                            </SelectItem>
+                          ))}
+                          {products.length < totalProducts && (
+                            <div className="p-2 text-center">
+                              <Button
+                                variant="ghost"
+                                size="sm"
+                                onClick={loadMoreProducts}
+                                disabled={loadingProducts}
+                                className="w-full"
+                              >
+                                {loadingProducts ? (
+                                  <Loader2 className="animate-spin h-4 w-4" />
+                                ) : (
+                                  `Load More (${totalProducts - products.length} remaining)`
+                                )}
+                              </Button>
+                            </div>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      <Input
+                        placeholder="Quantity"
+                        type="number"
+                        value={newItem.quantity}
+                        onChange={(e) => setNewItem((prev) => ({ ...prev, quantity: e.target.value }))}
+                      />
+                      <Input
+                        placeholder="Unit Price"
+                        type="number"
+                        value={newItem.unitPrice}
+                        onChange={(e) => setNewItem((prev) => ({ ...prev, unitPrice: e.target.value }))}
+                      />
+                      <Button variant="outline" onClick={handleAddItem}>
+                        Add Item
+                      </Button>
+                    </div>
                   </div>
 
                   {orderItems.length > 0 && (
@@ -1081,27 +1202,76 @@ export function PurchaseOrders() {
             <div className="space-y-2">
               <Label>Items</Label>
               <div className="border rounded-lg p-4">
-                <div className="grid grid-cols-4 gap-2 mb-4">
-                  <Input
-                    placeholder="Product"
-                    value={newItem.product}
-                    onChange={(e) => setNewItem((prev) => ({ ...prev, product: e.target.value }))}
-                  />
-                  <Input
-                    placeholder="Quantity"
-                    type="number"
-                    value={newItem.quantity}
-                    onChange={(e) => setNewItem((prev) => ({ ...prev, quantity: e.target.value }))}
-                  />
-                  <Input
-                    placeholder="Unit Price"
-                    type="number"
-                    value={newItem.unitPrice}
-                    onChange={(e) => setNewItem((prev) => ({ ...prev, unitPrice: e.target.value }))}
-                  />
-                  <Button variant="outline" onClick={handleAddItem}>
-                    Add Item
-                  </Button>
+                <div className="space-y-4 mb-4">
+                  <div>
+                    <Label htmlFor="edit-item-product-search">Search Product</Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                      <Input
+                        id="edit-item-product-search"
+                        placeholder="Search products..."
+                        value={productSearch}
+                        onChange={(e) => handleProductSearch(e.target.value)}
+                        className="pl-10"
+                      />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-4 gap-2">
+                    <Select
+                      value={newItem.product}
+                      onValueChange={(value) => {
+                        setNewItem((prev) => ({ ...prev, product: value }))
+                        // Auto-fill unit price if product has purchase rate
+                        const selectedProduct = products.find(p => p.name === value)
+                        if (selectedProduct?.purchase_rate) {
+                          setNewItem((prev) => ({ ...prev, unitPrice: selectedProduct.purchase_rate?.toString() || "" }))
+                        }
+                      }}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Select product" />
+                      </SelectTrigger>
+                      <SelectContent className="max-h-[300px]">
+                        {products.map((p) => (
+                          <SelectItem key={p.id} value={p.name}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                        {products.length < totalProducts && (
+                          <div className="p-2 text-center">
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={loadMoreProducts}
+                              disabled={loadingProducts}
+                              className="w-full"
+                            >
+                              {loadingProducts ? (
+                                <Loader2 className="animate-spin h-4 w-4" />
+                              ) : (
+                                `Load More (${totalProducts - products.length} remaining)`
+                              )}
+                            </Button>
+                          </div>
+                        )}
+                      </SelectContent>
+                    </Select>
+                    <Input
+                      placeholder="Quantity"
+                      type="number"
+                      value={newItem.quantity}
+                      onChange={(e) => setNewItem((prev) => ({ ...prev, quantity: e.target.value }))}
+                    />
+                    <Input
+                      placeholder="Unit Price"
+                      type="number"
+                      value={newItem.unitPrice}
+                      onChange={(e) => setNewItem((prev) => ({ ...prev, unitPrice: e.target.value }))}
+                    />
+                    <Button variant="outline" onClick={handleAddItem}>
+                      Add Item
+                    </Button>
+                  </div>
                 </div>
 
                 {orderItems.length > 0 && (

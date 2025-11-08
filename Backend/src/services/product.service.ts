@@ -724,25 +724,25 @@ export class ProductService {
         return {
             data: products.map(p => {
                 // Calculate available stock
-                let currentStock: Numeric = 0;
-                let reservedStock: Numeric = 0;
-                let minimumStock: Numeric = 0;
-                let maximumStock: Numeric = 0;
+                let currentStock: Prisma.Decimal = new Prisma.Decimal(0);
+                let reservedStock: Prisma.Decimal = new Prisma.Decimal(0);
+                let minimumStock: Prisma.Decimal = new Prisma.Decimal(0);
+                let maximumStock: Prisma.Decimal = new Prisma.Decimal(0);
 
                 if (branch_id && p.stock && Array.isArray(p.stock) && p.stock.length > 0) {
                     // Single branch stock
                     const stockData = p.stock[0];
-                    currentStock = stockData.current_quantity || 0;
-                    reservedStock = stockData.reserved_quantity || 0;
-                    minimumStock = stockData.minimum_quantity || 0;
-                    maximumStock = stockData.maximum_quantity || 0;
+                    currentStock = stockData.current_quantity || new Prisma.Decimal(0);
+                    reservedStock = stockData.reserved_quantity || new Prisma.Decimal(0);
+                    minimumStock = stockData.minimum_quantity || new Prisma.Decimal(0);
+                    maximumStock = stockData.maximum_quantity || new Prisma.Decimal(0);
                 } else if (p.stock && Array.isArray(p.stock)) {
                     // Multiple branches - sum up all stock
                     p.stock.forEach((stockItem: any) => {
-                        currentStock += stockItem.current_quantity || 0;
-                        reservedStock += stockItem.reserved_quantity || 0;
-                        minimumStock += stockItem.minimum_quantity || 0;
-                        maximumStock += stockItem.maximum_quantity || 0;
+                        currentStock = currentStock.plus(stockItem.current_quantity || 0);
+                        reservedStock = reservedStock.plus(stockItem.reserved_quantity || 0);
+                        minimumStock = minimumStock.plus(stockItem.minimum_quantity || 0);
+                        maximumStock = maximumStock.plus(stockItem.maximum_quantity || 0);
                     });
                 }
 
@@ -750,7 +750,7 @@ export class ProductService {
                     ...p,
                     current_stock: asNumber(currentStock),
                     reserved_stock: asNumber(reservedStock),
-                    available_stock: asNumber(currentStock) - asNumber(reservedStock),
+                    available_stock: asNumber(currentStock.minus(reservedStock)),
                     minimum_stock: asNumber(minimumStock),
                     maximum_stock: asNumber(maximumStock),
                     order_count: p._count.order_items,

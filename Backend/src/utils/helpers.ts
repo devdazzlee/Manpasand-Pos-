@@ -16,8 +16,11 @@ export const formatPhoneNumber = (phone: string): string => {
   return phone.replace(/\D/g, '');
 };
 
-export function asNumber(x: number | Prisma.Decimal): number {
-  return typeof x === 'number' ? x : x.toNumber();
+export function asNumber(x: number | Prisma.Decimal | null | undefined): number {
+  if (x === null || x === undefined) return 0;
+  if (typeof x === 'number') return x;
+  if (typeof x === 'object' && 'toNumber' in x) return x.toNumber();
+  return 0;
 }
 
 

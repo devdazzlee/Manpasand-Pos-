@@ -16,3 +16,35 @@ Stacktrace:   at System.Runtime.InteropServices.Marshal.ThrowExceptionForHRInter
    at winsw.WrapperService.OnShutdown()
 2025-11-01 07:57:05 - Starting C:\Program Files\nodejs\node.exe  --max_old_space_size=4096 "D:\Konain Bhai\Manpasand-Pos-\PrintServer\node_modules\node-windows\lib\wrapper.js" --file "D:\Konain Bhai\Manpasand-Pos-\PrintServer\server.js" --scriptoptions= --log "Manpasand Print Server wrapper" --grow 0.5 --wait 2 --maxrestarts 5 --abortonerror n --stopparentfirst undefined
 2025-11-01 07:57:05 - Started 6068
+2025-11-04 14:23:09 - Stopping manpasandprintserver.exe
+2025-11-04 14:23:09 - ProcessKill 6068
+2025-11-04 14:23:09 - Shutdown exception
+Message:A system shutdown is in progress.
+
+Stacktrace:   at System.Runtime.InteropServices.Marshal.ThrowExceptionForHRInternal(Int32 errorCode, IntPtr errorInfo)
+   at System.Management.ManagementScope.InitializeGuts(Object o)
+   at System.Management.ManagementScope.Initialize()
+   at System.Management.ManagementObjectSearcher.Initialize()
+   at System.Management.ManagementObjectSearcher.Get()
+   at winsw.WrapperService.GetChildPids(Int32 pid)
+   at winsw.WrapperService.StopProcessAndChildren(Int32 pid)
+   at winsw.WrapperService.StopIt()
+   at winsw.WrapperService.OnShutdown()
+2025-11-04 14:23:36 - Starting C:\Program Files\nodejs\node.exe  --max_old_space_size=4096 "D:\Konain Bhai\Manpasand-Pos-\PrintServer\node_modules\node-windows\lib\wrapper.js" --file "D:\Konain Bhai\Manpasand-Pos-\PrintServer\server.js" --scriptoptions= --log "Manpasand Print Server wrapper" --grow 0.5 --wait 2 --maxrestarts 5 --abortonerror n --stopparentfirst undefined
+2025-11-04 14:23:36 - Started 6172
+2025-11-07 14:08:23 - Stopping manpasandprintserver.exe
+2025-11-07 14:08:23 - ProcessKill 6172
+2025-11-07 14:08:23 - Shutdown exception
+Message:A system shutdown is in progress.
+
+Stacktrace:   at System.Runtime.InteropServices.Marshal.ThrowExceptionForHRInternal(Int32 errorCode, IntPtr errorInfo)
+   at System.Management.ManagementScope.InitializeGuts(Object o)
+   at System.Management.ManagementScope.Initialize()
+   at System.Management.ManagementObjectSearcher.Initialize()
+   at System.Management.ManagementObjectSearcher.Get()
+   at winsw.WrapperService.GetChildPids(Int32 pid)
+   at winsw.WrapperService.StopProcessAndChildren(Int32 pid)
+   at winsw.WrapperService.StopIt()
+   at winsw.WrapperService.OnShutdown()
+2025-11-07 14:08:55 - Starting C:\Program Files\nodejs\node.exe  --max_old_space_size=4096 "D:\Konain Bhai\Manpasand-Pos-\PrintServer\node_modules\node-windows\lib\wrapper.js" --file "D:\Konain Bhai\Manpasand-Pos-\PrintServer\server.js" --scriptoptions= --log "Manpasand Print Server wrapper" --grow 0.5 --wait 2 --maxrestarts 5 --abortonerror n --stopparentfirst undefined
+2025-11-07 14:08:55 - Started 5096
