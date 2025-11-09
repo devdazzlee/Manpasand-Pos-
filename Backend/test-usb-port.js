@@ -46,3 +46,4 @@ console.log('\nTry manually checking: Control Panel > Devices and Printers');
 
 
 
+

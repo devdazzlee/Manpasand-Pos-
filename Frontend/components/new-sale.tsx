@@ -19,11 +19,14 @@ import {
   DollarSign,
   Scan,
   RefreshCw,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { usePosData } from "@/hooks/use-pos-data";
 import { isKioskMode, enableKioskMode } from "@/utils/kiosk-printing";
 import { printReceiptViaServer, getPrinters, type ReceiptData } from "@/lib/print-server";
+import { ScrollArea } from "@/components/ui/scroll-area";
 
 interface CartItem {
   id: string;
@@ -72,6 +75,8 @@ export function NewSale() {
   const [holdSales, setHoldSales] = useState<CartItem[][]>([]);
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [globalDiscountType, setGlobalDiscountType] = useState<'percentage' | 'amount'>('percentage');
+  const [taxValue, setTaxValue] = useState(5);
+  const [taxType, setTaxType] = useState<'percentage' | 'amount'>('percentage');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(
     null
@@ -85,6 +90,8 @@ export function NewSale() {
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState<string>("");
   const [kioskMode, setKioskMode] = useState(false);
+  const [showPrinterSettings, setShowPrinterSettings] = useState(false);
+  const [showHeldSales, setShowHeldSales] = useState(false);
 
   // Detect kiosk mode on mount
   useEffect(() => {
@@ -418,10 +425,27 @@ export function NewSale() {
     ? (subtotal * globalDiscount) / 100
     : globalDiscount;
 
-  const taxPercent = 5; // 5% tax
+  const safeTaxValue = Number.isFinite(taxValue) ? taxValue : 0;
+  const normalizedTaxValue = Math.max(0, safeTaxValue);
   const taxableAmount = Math.max(0, subtotal - discountAmount);
-  const taxAmount = (taxableAmount * taxPercent) / 100;
+  const taxAmount = taxType === 'percentage'
+    ? (taxableAmount * normalizedTaxValue) / 100
+    : normalizedTaxValue;
   const total = taxableAmount + taxAmount;
+  const taxLabel =
+    taxType === 'percentage'
+      ? `Tax (${normalizedTaxValue % 1 === 0 ? normalizedTaxValue.toFixed(0) : normalizedTaxValue.toFixed(2)}%)`
+      : 'Tax (Fixed)';
+  const taxPercentForReceipt =
+    taxType === 'percentage'
+      ? normalizedTaxValue
+      : taxableAmount > 0
+      ? (taxAmount / taxableAmount) * 100
+      : 0;
+  const totalQuantity = cart.reduce(
+    (sum, item) => sum + item.quantity,
+    0
+  );
 
   const generateTransactionId = () => {
     return `TXN${Date.now().toString().slice(-6)}`;
@@ -1761,7 +1785,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
             })),
             subtotal: subtotal,
             discount: discountAmount > 0 ? discountAmount : undefined,
-            taxPercent: taxPercent,
+            taxPercent: taxPercentForReceipt > 0 ? taxPercentForReceipt : undefined,
             total: total,
             paymentMethod: method === "Cash" ? "CASH" : "CARD",
             amountPaid: total,
@@ -1984,6 +2008,57 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
           </div>
         </div>
 
+        {!kioskMode ? (
+          <div className="mb-4">
+            <div className="rounded-2xl border border-dashed border-blue-200 bg-white shadow-sm">
+              <button
+                type="button"
+                onClick={() => setShowPrinterSettings((prev) => !prev)}
+                className="flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-blue-50/40"
+              >
+                <div>
+                  <p className="text-sm font-semibold text-gray-900">Printer Settings</p>
+                  <p className="text-xs text-gray-500">
+                    Choose the receipt printer before completing a sale.
+                  </p>
+                </div>
+                <div className="rounded-full bg-blue-100 p-1 text-blue-600">
+                  {showPrinterSettings ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </div>
+              </button>
+              {showPrinterSettings && (
+                <div className="space-y-3 border-t border-blue-100 px-4 py-4">
+                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Select printer
+                  </label>
+                  <select
+                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                    value={selectedPrinter}
+                    onChange={(e) => setSelectedPrinter(e.target.value)}
+                  >
+                    <option value="">Choose a printer</option>
+                    {printers.map((printer) => (
+                      <option key={printer.name} value={printer.name}>
+                        {printer.name} {printer.isDefault ? "(Default)" : ""}
+                      </option>
+                    ))}
+                  </select>
+                  {printers.length === 0 && (
+                    <p className="text-xs text-gray-500">Loading available printers...</p>
+                  )}
+                  <p className="text-xs text-gray-500">
+                    A printer must be selected to enable payments and automatic receipt printing.
+                  </p>
+                </div>
+              )}
+            </div>
+          </div>
+        ) : (
+          <div className="mb-4 rounded-xl border border-blue-100 bg-blue-50 px-4 py-3 text-sm text-blue-700">
+            🖨️ Kiosk mode active. Receipts print automatically using the default printer.
+          </div>
+        )}
+
         {/* Categories */}
         <div className="flex space-x-2 mb-6 overflow-x-auto">
           {categories.map((category) => (
@@ -2106,173 +2181,221 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
 
       {/* Cart Section */}
       <div className="w-full lg:w-[400px] bg-white lg:border-l border-gray-200 flex flex-col">
-        <div className="p-4 border-b border-gray-200">
-          <h2 className="text-xl font-bold text-gray-900">
-            Cart ({cart.length} items •{" "}
-            {cart.reduce((sum, item) => sum + item.quantity, 0).toFixed(2)}{" "}
-            total qty)
-          </h2>
-
-          {/* Customer Selection */}
-          <div className="mt-4">
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Customer
-            </label>
-            <select
-              className="w-full border rounded px-3 py-2 bg-white text-gray-900"
-              value={selectedCustomer ?? ""}
-              onChange={(e) => setSelectedCustomer(e.target.value || null)}
-            >
-              <option value="">Walk-in Customer</option>
-              {customers.map((customer: any) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.email}
-                </option>
-              ))}
-            </select>
+        <div className="border-b border-gray-200 bg-slate-50/60 p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="text-xl font-semibold text-gray-900">Sale Summary</h2>
+              {cart.length === 0 && (
+                <p className="mt-1 text-xs text-gray-500">
+                  Scan a product or search to start a new sale.
+                </p>
+              )}
+            </div>
+            <div className="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-600 shadow-sm">
+              {cart.length} item{cart.length === 1 ? "" : "s"}
+            </div>
           </div>
 
-          {/* Printer Selection - Hidden in kiosk mode */}
-          {!kioskMode && (
-            <div className="mt-4">
-              <label className="block text-sm font-medium text-gray-700 mb-1">
-                Printer
-              </label>
-              <select
-                className="w-full border rounded px-3 py-2 bg-white text-gray-900"
-                value={selectedPrinter}
-                onChange={(e) => setSelectedPrinter(e.target.value)}
+          {cart.length > 0 && (
+            <div className="mt-3 grid grid-cols-3 gap-1.5">
+              <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+                <p className="text-[9px] uppercase tracking-wide text-gray-500">Items</p>
+                <p className="text-sm font-semibold text-gray-900">{cart.length}</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+                <p className="text-[9px] uppercase tracking-wide text-gray-500">Quantity</p>
+                <p className="text-sm font-semibold text-gray-900">{totalQuantity.toFixed(2)}</p>
+              </div>
+              <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
+                <p className="text-[9px] uppercase tracking-wide text-gray-500">Total</p>
+                <p className="text-sm font-semibold text-gray-900">Rs {total.toFixed(2)}</p>
+              </div>
+            </div>
+          )}
+
+          {cart.length > 0 && (
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={clearCart}
+                className="flex-1 min-w-[120px] border-dashed"
               >
-                <option value="">Select printer</option>
-                {printers.map((printer) => (
-                  <option key={printer.name} value={printer.name}>
-                    {printer.name} {printer.isDefault ? "(Default)" : ""}
-                  </option>
-                ))}
-              </select>
-              {printers.length === 0 && (
-                <p className="text-xs text-gray-500 mt-1">Loading available printers...</p>
-              )}
-            </div>
-          )}
-          {kioskMode && (
-            <div className="mt-4 p-2 bg-blue-50 rounded">
-              <p className="text-xs text-blue-700">🖨️ Kiosk Mode: Using default printer</p>
+                Clear Cart
+              </Button>
+              <Button
+                variant="default"
+                size="sm"
+                onClick={holdCurrentSale}
+                className="flex-1 min-w-[120px]"
+              >
+                Hold Sale
+              </Button>
             </div>
           )}
 
-          {/* Cart and Hold Sales Controls */}
-          <div className="mt-4 space-y-4">
-            {/* Cart Controls */}
-            <div className="flex gap-2">
-              {cart.length > 0 && (
-                <>
-                  <Button variant="outline" onClick={clearCart} className="flex-1">
-                    Clear Cart
-                  </Button>
-                  <Button variant="default" onClick={holdCurrentSale} className="flex-1">
-                    Hold Sale
-                  </Button>
-                </>
-              )}
-            </div>
+          {holdSales.length > 0 && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setShowHeldSales((prev) => !prev)}
+              className="mt-3 w-full justify-between border border-gray-200 bg-white hover:bg-white"
+            >
+              <span className="text-sm font-medium text-gray-700">
+                Held Sales ({holdSales.length})
+              </span>
+              {showHeldSales ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+            </Button>
+          )}
 
-            {/* Held Sales List */}
-            {holdSales.length > 0 && (
-              <div id="held-sales-list" className="space-y-2 border-t pt-4">
-                <div className="flex items-center justify-between">
-                  <h3 className="font-medium">Held Sales</h3>
-                  <Badge variant="secondary">{holdSales.length}</Badge>
-                </div>
-                <div className="max-h-40 overflow-y-auto space-y-2">
+          {holdSales.length > 0 && showHeldSales && (
+            <div id="held-sales-list" className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3">
+              <ScrollArea className="max-h-32">
+                <div className="space-y-2 pr-2">
                   {holdSales.map((sale, index) => {
-                    const saleTotal = sale.reduce((sum, item) => sum + (item.price * item.quantity), 0);
+                    const saleTotal = sale.reduce(
+                      (sum, item) => sum + item.price * item.quantity,
+                      0
+                    );
                     return (
                       <Button
                         key={index}
                         variant="outline"
                         onClick={() => retrieveHoldSale(index)}
-                        className="w-full justify-between py-2 h-auto"
+                        className="h-auto w-full justify-between border-gray-200 py-2"
                       >
-                        <div className="flex flex-col items-start">
-                          <span className="font-medium">Sale #{index + 1}</span>
-                          <span className="text-xs text-gray-500">{sale.length} items</span>
+                        <div className="flex flex-col items-start text-left">
+                          <span className="font-medium text-gray-900">Sale #{index + 1}</span>
+                          <span className="text-xs text-gray-500">
+                            {sale.length} items • Rs {saleTotal.toFixed(2)}
+                          </span>
                         </div>
-                        <div className="text-right">
-                          <span className="font-medium">Rs {saleTotal.toFixed(2)}</span>
-                        </div>
+                        <span className="text-xs font-semibold text-blue-600">Resume</span>
                       </Button>
                     );
                   })}
                 </div>
-              </div>
-            )}
-          </div>
+              </ScrollArea>
+            </div>
+          )}
+
         </div>
 
-        <div className="flex-1 overflow-auto p-4">
-          {cart.length === 0 ? (
-            <div className="text-center text-gray-500 mt-8">
-              <p>Your cart is empty</p>
-              <p className="text-sm">Add products to get started</p>
-            </div>
-          ) : (
-            <div className="space-y-3">
-              {cart.map((item) => (
-                <div
-                  key={item.id}
-                  className="p-3 border rounded-lg space-y-2"
-                >
-                  <div className="flex justify-between items-start">
-                    <h4 className="font-medium text-gray-900">{item.name}</h4>
-                    <Button
-                      size="sm"
-                      variant="ghost"
-                      onClick={() => removeFromCart(item.id)}
-                      className="text-red-600 hover:text-red-700 h-6 w-6 p-0 -mt-1 -mr-1"
-                    >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
-
-                  {/* Price Control */}
-                  <div className="grid grid-cols-2 gap-2">
-                    <div>
-                      <label className="text-xs text-gray-600">Price (Rs)</label>
-                      <Input
-                        type="number"
-                        value={item.price}
-                        onChange={(e) => updateItemPrice(item.id, parseFloat(e.target.value))}
-                        className="h-7 text-sm"
-                        min="0"
-                        step="0.01"
-                      />
+        <div className="flex-1 overflow-hidden">
+          <div className="h-full overflow-auto px-4 py-3">
+            {cart.length === 0 ? (
+              <div className="mt-8 text-center text-gray-500">
+                <p className="font-medium text-gray-600">Your cart is empty</p>
+                <p className="text-sm text-gray-500">Add products to see them here.</p>
+              </div>
+            ) : (
+              <div className="space-y-2">
+                {cart.map((item) => (
+                  <div
+                    key={item.id}
+                    className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="space-y-1">
+                        <h4 className="text-sm font-semibold text-gray-900 leading-snug">{item.name}</h4>
+                        <p className="text-xs text-gray-500">
+                          Unit: Rs {item.price.toFixed(2)} • Total: Rs {(item.price * item.quantity).toFixed(2)}
+                        </p>
+                      </div>
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        onClick={() => removeFromCart(item.id)}
+                        className="h-7 w-7 p-0 text-red-500 hover:text-red-600"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
                     </div>
-                    <div>
-                      <label className="text-xs text-gray-600">Quantity</label>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            const currentItem = cart.find(cartItem => cartItem.id === item.id);
-                            if (currentItem && currentItem.quantity > 0.01) {
-                              updateQuantity(item.id, -1);
-                            }
-                          }}
-                          className="h-7 px-2"
-                          disabled={item.quantity <= 0.01}
-                        >
-                          <Minus className="h-3 w-3" />
-                        </Button>
 
+                    <div className="mt-3 grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                          Price (Rs)
+                        </label>
                         <Input
                           type="number"
-                          value={item.quantity}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            // Allow empty string for clearing
-                            if (value === '') {
+                          value={item.price}
+                          onChange={(e) => updateItemPrice(item.id, parseFloat(e.target.value))}
+                          className="mt-1 h-8 text-sm"
+                          min="0"
+                          step="0.01"
+                        />
+                      </div>
+                      <div>
+                        <label className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                          Quantity
+                        </label>
+                        <div className="mt-1 flex items-center gap-1">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => {
+                              const currentItem = cart.find((cartItem) => cartItem.id === item.id);
+                              if (currentItem && currentItem.quantity > 0.01) {
+                                updateQuantity(item.id, -1);
+                              }
+                            }}
+                            className="h-8 w-8 p-0"
+                            disabled={item.quantity <= 0.01}
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <Input
+                            type="number"
+                            value={item.quantity}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              if (value === "") {
+                                setCart(
+                                  cart.map((cartItem) => {
+                                    if (cartItem.id === item.id) {
+                                      return { ...cartItem, quantity: 0 };
+                                    }
+                                    return cartItem;
+                                  })
+                                );
+                                return;
+                              }
+
+                              const numValue = parseFloat(value);
+                              if (!isNaN(numValue)) {
+                                updateQuantityManual(item.id, numValue);
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const value = parseFloat(e.target.value);
+                              if (isNaN(value) || value <= 0) {
+                                setCart(
+                                  cart.map((cartItem) => {
+                                    if (cartItem.id === item.id) {
+                                      return { ...cartItem, quantity: 0.01 };
+                                    }
+                                    return cartItem;
+                                  })
+                                );
+                              }
+                            }}
+                            className="h-8 w-16 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            min="0"
+                            step="0.01"
+                          />
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => updateQuantity(item.id, 1)}
+                            className="h-8 w-8 p-0"
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            onClick={() => {
                               setCart(
                                 cart.map((cartItem) => {
                                   if (cartItem.id === item.id) {
@@ -2281,150 +2404,132 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                                   return cartItem;
                                 })
                               );
-                              return;
-                            }
-
-                            const numValue = parseFloat(value);
-                            if (!isNaN(numValue)) {
-                              updateQuantityManual(item.id, numValue);
-                            }
-                          }}
-                          onBlur={(e) => {
-                            const value = parseFloat(e.target.value);
-                            if (isNaN(value) || value <= 0) {
-                              // Set to minimum if invalid or empty
-                              setCart(
-                                cart.map((cartItem) => {
-                                  if (cartItem.id === item.id) {
-                                    return { ...cartItem, quantity: 0.01 };
-                                  }
-                                  return cartItem;
-                                })
-                              );
-                            }
-                          }}
-                          className="h-7 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          min="0"
-                          step="0.01"
-                        />
-
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => updateQuantity(item.id, 1)}
-                          className="h-7 px-2"
-                        >
-                          <Plus className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => {
-                            setCart(
-                              cart.map((cartItem) => {
-                                if (cartItem.id === item.id) {
-                                  return { ...cartItem, quantity: 0 };
-                                }
-                                return cartItem;
-                              })
-                            );
-                          }}
-                          className="h-7 px-2 text-red-600 hover:text-red-700"
-                          title="Clear quantity"
-                        >
-                          ×
-                        </Button>
+                            }}
+                            className="h-8 w-8 p-0 text-red-500 hover:text-red-600"
+                            title="Clear quantity"
+                          >
+                            ×
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   </div>
-
-                  <div className="text-sm text-gray-500">
-                    Total: Rs {(item.price * item.quantity).toFixed(2)}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
+                ))}
+              </div>
+            )}
+          </div>
         </div>
 
         {cart.length > 0 && (
-          <div className="p-4 border-t border-gray-200 space-y-4">
-            {/* Discount Controls */}
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Discount</label>
-              <div className="flex items-center gap-2">
-                <select
-                  className="border rounded h-9 px-2"
-                  value={globalDiscountType}
-                  onChange={(e) => setGlobalDiscountType(e.target.value as 'percentage' | 'amount')}
+          <div className="border-t border-gray-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_-20px_rgba(15,23,42,0.4)] backdrop-blur">
+            <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-2.5">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                  <div>
+                    <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                      Discount
+                    </label>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <select
+                        className="h-8 rounded border border-gray-200 px-2 text-xs"
+                        value={globalDiscountType}
+                        onChange={(e) =>
+                          setGlobalDiscountType(e.target.value as "percentage" | "amount")
+                        }
+                      >
+                        <option value="percentage">%</option>
+                        <option value="amount">Rs</option>
+                      </select>
+                      <Input
+                        type="number"
+                        value={globalDiscount}
+                        onChange={(e) => setGlobalDiscount(parseFloat(e.target.value) || 0)}
+                        className="h-8 flex-1 text-xs"
+                        min="0"
+                        step={globalDiscountType === "percentage" ? "1" : "0.01"}
+                        max={globalDiscountType === "percentage" ? "100" : undefined}
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                      Tax
+                    </label>
+                    <div className="mt-1 flex items-center gap-1.5">
+                      <select
+                        className="h-8 rounded border border-gray-200 px-2 text-xs"
+                        value={taxType}
+                        onChange={(e) => setTaxType(e.target.value as "percentage" | "amount")}
+                      >
+                        <option value="percentage">%</option>
+                        <option value="amount">Rs</option>
+                      </select>
+                      <Input
+                        type="number"
+                        value={taxValue}
+                        onChange={(e) => setTaxValue(Number.isNaN(parseFloat(e.target.value)) ? 0 : parseFloat(e.target.value))}
+                        className="h-8 flex-1 text-xs"
+                        min="0"
+                        step={taxType === "percentage" ? "0.1" : "0.01"}
+                        max={taxType === "percentage" ? "100" : undefined}
+                      />
+                    </div>
+                  </div>
+                </div>
+                <div className="rounded-lg border border-gray-200 bg-slate-50 p-2.5 text-xs">
+                  <div className="flex items-center justify-between text-gray-600 text-xs font-medium">
+                    <span>Subtotal</span>
+                    <span>Rs {subtotal.toFixed(2)}</span>
+                  </div>
+                  {discountAmount > 0 && (
+                    <div className="mt-1 flex items-center justify-between text-green-600 text-xs font-medium">
+                      <span>Discount</span>
+                      <span>- Rs {discountAmount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  {taxAmount > 0 && (
+                    <div className="mt-1 flex items-center justify-between text-gray-600 text-xs font-medium">
+                      <span>{taxLabel}</span>
+                      <span>Rs {taxAmount.toFixed(2)}</span>
+                    </div>
+                  )}
+                  <div className="mt-1 flex items-center justify-between text-blue-700 text-sm font-semibold">
+                    <span>Payable</span>
+                    <span>Rs {total.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-1.5">
+                <Button
+                  size="sm"
+                  onClick={() => handlePayment("Cash")}
+                  disabled={paymentLoading || (!kioskMode && !selectedPrinter)}
+                  title={!kioskMode && !selectedPrinter ? "Please select a printer" : ""}
+                  className="h-10 text-sm"
                 >
-                  <option value="percentage">%</option>
-                  <option value="amount">Rs</option>
-                </select>
-                <Input
-                  type="number"
-                  value={globalDiscount}
-                  onChange={(e) => setGlobalDiscount(parseFloat(e.target.value) || 0)}
-                  className="flex-1"
-                  min="0"
-                  step={globalDiscountType === 'percentage' ? '1' : '0.01'}
-                  max={globalDiscountType === 'percentage' ? '100' : undefined}
-                />
+                  <DollarSign className="mr-2 h-4 w-4" />
+                  Cash
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => handlePayment("Card")}
+                  disabled={paymentLoading || (!kioskMode && !selectedPrinter)}
+                  title={!kioskMode && !selectedPrinter ? "Please select a printer" : ""}
+                  className="h-10 text-sm"
+                >
+                  <CreditCard className="mr-2 h-4 w-4" />
+                  Card
+                </Button>
               </div>
-            </div>
 
-            {/* Totals */}
-            <div className="space-y-2">
-              <div className="flex justify-between text-sm">
-                <span>Subtotal:</span>
-                <span>Rs {subtotal.toFixed(2)}</span>
-              </div>
-              {discountAmount > 0 && (
-                <div className="flex justify-between text-sm text-green-600">
-                  <span>Discount:</span>
-                  <span>- Rs {discountAmount.toFixed(2)}</span>
-                </div>
+              {!kioskMode && !selectedPrinter && (
+                <p className="text-xs text-center font-medium text-orange-600">
+                  ⚠️ Select a printer to enable payments
+                </p>
               )}
-              {taxAmount > 0 && (
-                <div className="flex justify-between text-sm">
-                  <span>Tax ({taxPercent}%):</span>
-                  <span>Rs {taxAmount.toFixed(2)}</span>
-                </div>
-              )}
-              <Separator />
-              <div className="flex justify-between font-bold text-lg">
-                <span>Total:</span>
-                <span>Rs {total.toFixed(2)}</span>
-              </div>
             </div>
-
-            {/* Payment Buttons */}
-            <div className="grid grid-cols-2 gap-2">
-              <Button
-                size="lg"
-                onClick={() => handlePayment("Cash")}
-                disabled={paymentLoading || (!kioskMode && !selectedPrinter)}
-                title={!kioskMode && !selectedPrinter ? "Please select a printer" : ""}
-              >
-                <DollarSign className="h-4 w-4 mr-2" />
-                Cash
-              </Button>
-              <Button
-                size="lg"
-                variant="outline"
-                onClick={() => handlePayment("Card")}
-                disabled={paymentLoading || (!kioskMode && !selectedPrinter)}
-                title={!kioskMode && !selectedPrinter ? "Please select a printer" : ""}
-              >
-                <CreditCard className="h-4 w-4 mr-2" />
-                Card
-              </Button>
-            </div>
-            {!kioskMode && !selectedPrinter && cart.length > 0 && (
-              <p className="text-xs text-orange-600 text-center">
-                ⚠️ Please select a printer to proceed with payment
-              </p>
-            )}
           </div>
         )}
       </div>
