@@ -52,10 +52,17 @@ import { getPrinters, printReceiptViaServer, type ReceiptData } from "@/lib/prin
 
 interface SaleItem {
   id: string;
-  product: { name: string; sku?: string };
+  product: {
+    name: string;
+    sku?: string;
+    unit?: { name?: string };
+    unit_name?: string;
+  };
   quantity: number;
   unit_price?: string;
   line_total: string;
+  unit?: { name?: string };
+  unit_name?: string;
 }
 
 interface Customer {
@@ -323,6 +330,7 @@ export function SalesHistory() {
         (item.product as any)?.unit_name ||
         (item as any)?.unit?.name ||
         (item as any)?.unit_name ||
+        (item as any)?.unitName ||
         undefined;
 
       return {
@@ -369,7 +377,10 @@ export function SalesHistory() {
       .map((item) => {
         const name =
           item.name.length > 20 ? `${item.name.substring(0, 17)}...` : item.name;
-        const unitLabel = item.unit ? String(item.unit) : "";
+        const unitLabel =
+          item.unitName ||
+          (typeof item.unit === "string" ? item.unit : "") ||
+          "";
         const qty = unitLabel ? `${item.quantity} ${unitLabel}` : `${item.quantity}`;
         const rate = `PKR ${((item.price || 0) * (item.quantity || 0)).toFixed(1)}`;
         return `<div class="item-row">

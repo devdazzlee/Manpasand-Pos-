@@ -45,6 +45,7 @@ interface CartItem {
   discount: number;
   unitId?: string;
   unitName?: string;
+  unit?: string;
 }
 
 interface Product {
@@ -268,6 +269,7 @@ export function NewSale() {
           discount: 0,
           unitId: product.unitId,
           unitName: product.unitName,
+          unit: product.unitName,
         },
       ]);
     }
@@ -1656,7 +1658,11 @@ export function NewSale() {
         .map((item: any) => {
           const itemName =
             item.name.length > 20 ? `${item.name.substring(0, 17)}...` : item.name;
-          const unitLabel = item.unit ? String(item.unit) : "";
+          const unitLabel =
+            item.unitName ||
+            item.unit ||
+            (item.product?.unit?.name ?? item.product?.unit_name) ||
+            "";
           const qty = unitLabel ? `${item.quantity} ${unitLabel}` : `${item.quantity}`;
           const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
           return `<div class="item-row">
@@ -2383,7 +2389,7 @@ export function NewSale() {
                       <div className="space-y-1">
                         <h4 className="text-sm font-semibold text-gray-900 leading-snug">{item.name}</h4>
                         <p className="text-xs text-gray-500">
-                          Unit: Rs {item.price.toFixed(2)} • Total: Rs {(item.price * item.quantity).toFixed(2)}
+                          Unit: Rs {item.price.toFixed(2)} • Line Total: Rs {(item.price * item.quantity).toFixed(2)}
                         </p>
                       </div>
                       <Button
