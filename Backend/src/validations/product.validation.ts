@@ -55,6 +55,7 @@ export const listProductsSchema = z.object({
         is_active: z.string().optional(),
         display_on_pos: z.string().optional(),
         branch_id: z.string().optional(),
+        fetch_all: z.string().optional(),
     }),
 });
 

@@ -6,10 +6,17 @@ import { LoadingButton } from "@/components/ui/loading-button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Separator } from "@/components/ui/separator";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useLoading } from "@/hooks/use-loading";
 import { useToast } from "@/hooks/use-toast";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Search,
   Plus,
@@ -36,6 +43,8 @@ interface CartItem {
   quantity: number;
   category: string;
   discount: number;
+  unitId?: string;
+  unitName?: string;
 }
 
 interface Product {
@@ -51,6 +60,8 @@ interface Product {
   reserved_stock?: number;
   minimum_stock?: number;
   maximum_stock?: number;
+  unitId?: string;
+  unitName?: string;
 }
 
 interface Printer {
@@ -71,12 +82,13 @@ export function NewSale() {
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [holdSaleDialogOpen, setHoldSaleDialogOpen] = useState(false);
+  const [paymentMethodPending, setPaymentMethodPending] = useState<"Cash" | "Card" | null>(null);
+  const [tenderedAmount, setTenderedAmount] = useState("");
+  const [calculatedChange, setCalculatedChange] = useState(0);
+  const [paymentError, setPaymentError] = useState("");
   const [holdSales, setHoldSales] = useState<CartItem[][]>([]);
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [globalDiscountType, setGlobalDiscountType] = useState<'percentage' | 'amount'>('percentage');
-  const [taxValue, setTaxValue] = useState(5);
-  const [taxType, setTaxType] = useState<'percentage' | 'amount'>('percentage');
   const searchInputRef = useRef<HTMLInputElement>(null);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(
     null
@@ -161,12 +173,28 @@ export function NewSale() {
     };
   }, []); // Empty dependency array since we only want to fetch once on mount
 
-  // Handle search updates
+  // Handle search and category updates
   useEffect(() => {
-    // Don't trigger search if searchTerm is empty
+    const categoryFilter =
+      selectedCategory !== "all" ? selectedCategory : undefined;
+
     if (!searchTerm) {
-      // Reset to initial products when search is cleared
-      fetchProducts(true);
+      const loadByCategory = async () => {
+        try {
+          await fetchProducts({
+            force: true,
+            categoryId: categoryFilter,
+          });
+        } catch (error) {
+          toast({
+            variant: "destructive",
+            title: "Failed to load products",
+            description: "Could not fetch products from the server",
+          });
+        }
+      };
+
+      loadByCategory();
       return;
     }
 
@@ -174,7 +202,11 @@ export function NewSale() {
 
     const handleSearch = async () => {
       try {
-        await fetchProducts(true, searchTerm); // Force refresh with search term
+        await fetchProducts({
+          force: true,
+          search: searchTerm,
+          categoryId: categoryFilter,
+        });
       } catch (error) {
         toast({
           variant: "destructive",
@@ -186,7 +218,7 @@ export function NewSale() {
 
     const debounceTimer = setTimeout(handleSearch, 300); // Debounce search
     return () => clearTimeout(debounceTimer);
-  }, [searchTerm]); // Remove fetchProducts and toast from dependencies
+  }, [searchTerm, selectedCategory]);
 
   const filteredProducts = products.filter((product) => {
     // Only filter by category since search is now handled by the API
@@ -234,6 +266,8 @@ export function NewSale() {
           quantity: quantity,
           category: product.category,
           discount: 0,
+          unitId: product.unitId,
+          unitName: product.unitName,
         },
       ]);
     }
@@ -421,31 +455,30 @@ export function NewSale() {
     0
   );
 
-  const discountAmount = globalDiscountType === 'percentage'
-    ? (subtotal * globalDiscount) / 100
-    : globalDiscount;
+  const discountAmount =
+    globalDiscountType === "percentage"
+      ? (subtotal * globalDiscount) / 100
+      : globalDiscount;
 
-  const safeTaxValue = Number.isFinite(taxValue) ? taxValue : 0;
-  const normalizedTaxValue = Math.max(0, safeTaxValue);
-  const taxableAmount = Math.max(0, subtotal - discountAmount);
-  const taxAmount = taxType === 'percentage'
-    ? (taxableAmount * normalizedTaxValue) / 100
-    : normalizedTaxValue;
-  const total = taxableAmount + taxAmount;
-  const taxLabel =
-    taxType === 'percentage'
-      ? `Tax (${normalizedTaxValue % 1 === 0 ? normalizedTaxValue.toFixed(0) : normalizedTaxValue.toFixed(2)}%)`
-      : 'Tax (Fixed)';
-  const taxPercentForReceipt =
-    taxType === 'percentage'
-      ? normalizedTaxValue
-      : taxableAmount > 0
-      ? (taxAmount / taxableAmount) * 100
-      : 0;
+  const total = Math.max(0, subtotal - discountAmount);
   const totalQuantity = cart.reduce(
     (sum, item) => sum + item.quantity,
     0
   );
+
+  useEffect(() => {
+    if (!paymentDialogOpen) {
+      return;
+    }
+
+    const numericValue = parseFloat(tenderedAmount);
+    if (Number.isNaN(numericValue)) {
+      setCalculatedChange(0);
+      return;
+    }
+
+    setCalculatedChange(Math.max(0, numericValue - total));
+  }, [paymentDialogOpen, tenderedAmount, total]);
 
   const generateTransactionId = () => {
     return `TXN${Date.now().toString().slice(-6)}`;
@@ -456,7 +489,10 @@ export function NewSale() {
     paymentMethod: string,
     cart: CartItem[],
     subtotal: number,
-    total: number
+    total: number,
+    amountPaid: number,
+    changeAmount: number,
+    discount?: number
   ) => {
     return {
       transactionId,
@@ -467,6 +503,9 @@ export function NewSale() {
       paymentMethod,
       cashier: "Muhammad",
       store: "MANPASAND Store #001",
+      amountPaid,
+      changeAmount,
+      discount,
     };
   };
 
@@ -1573,127 +1612,119 @@ export function NewSale() {
     const finalTotal = receiptData.subtotal - discount;
 
     const receiptContent = `
- <div class="logo">
-<img 
-  src="${window.location.origin}/logo.png" 
-  alt="Logo" 
-  style="max-width:140px;height:50px;display:block;margin:0 auto;
-         object-fit:contain;
-         filter: grayscale(100%) contrast(200%);
-         image-rendering: pixelated;
-         -webkit-print-color-adjust: exact; 
-         print-color-adjust: exact;" />
-</div>
-<div class="store-header">${receiptData.storeName || "MANPASAND GENERAL STORE"
-      }</div>
-<div class="tagline">${receiptData.tagline || "Quality • Service • Value"}</div>
-<div class="address">${branchName.address + ", Karachi" || "Main Shahrah-e-Faisal, Karachi"
-      }</div>
+  <div class="logo">
+    <img
+      src="${window.location.origin}/logo.png"
+      alt="Logo"
+      style="max-width:140px;height:50px;display:block;margin:0 auto;
+             object-fit:contain;
+             filter: grayscale(100%) contrast(200%);
+             image-rendering: pixelated;
+             -webkit-print-color-adjust: exact;
+             print-color-adjust: exact;" />
+  </div>
+  <div class="store-header">${receiptData.storeName || "MANPASAND GENERAL STORE"}</div>
+  <div class="tagline">${receiptData.tagline || "Quality • Service • Value"}</div>
+  <div class="address">${branchName.address ? `${branchName.address}, Karachi` : "Main Shahrah-e-Faisal, Karachi"}</div>
 
-<div class="divider">-------------------------------------</div>
+  <div class="divider">-------------------------------------</div>
 
-<div class="receipt-info">Receipt # <span class="receipt-number">${receiptData.transactionId
-      }</span></div>
-<div class="receipt-info">${new Date(receiptData.timestamp).toLocaleDateString(
-        "en-US",
-        {
-          month: "short",
-          day: "2-digit",
-          year: "numeric",
-        }
-      )} ${new Date(receiptData.timestamp).toLocaleTimeString("en-US", {
+  <div class="receipt-info">Receipt # <span class="receipt-number">${receiptData.transactionId}</span></div>
+  <div class="receipt-info">${new Date(receiptData.timestamp).toLocaleDateString("en-US", {
+        month: "short",
+        day: "2-digit",
+        year: "numeric",
+      })} ${new Date(receiptData.timestamp).toLocaleTimeString("en-US", {
         hour: "2-digit",
         minute: "2-digit",
         hour12: true,
       })}</div>
-<div class="flex-item-row-cs">
-<div class="receipt-info">Cashier: ${receiptData.cashier || "Walk-in"}</div>
-<div class="receipt-info">${receiptData.customerType || "Walk-in"}</div>  
-</div>
+  <div class="flex-item-row-cs">
+    <div class="receipt-info">Cashier: ${receiptData.cashier || "Walk-in"}</div>
+    <div class="receipt-info">${receiptData.customerType || "Walk-in"}</div>
+  </div>
 
-<div class="divider">-------------------------------------</div>
+  <div class="divider">-------------------------------------</div>
 
-<div class="items-section">
-<div class="items-header">
-  <div class="item-col">ITEM</div>
-  <div class="qty-col">QTY</div>
-  <div class="rate-col">RATE</div>
-</div>
-
-${receiptData.items
+  <div class="items-section">
+    <div class="items-header">
+      <div class="item-col">ITEM</div>
+      <div class="qty-col">QTY</div>
+      <div class="rate-col">RATE</div>
+    </div>
+    ${receiptData.items
         .map((item: any) => {
           const itemName =
-            item.name.length > 20 ? item.name.substring(0, 17) + "..." : item.name;
-          const qty = `${item.quantity} pc`;
+            item.name.length > 20 ? `${item.name.substring(0, 17)}...` : item.name;
+          const unitLabel = item.unit ? String(item.unit) : "";
+          const qty = unitLabel ? `${item.quantity} ${unitLabel}` : `${item.quantity}`;
           const rate = `PKR ${(item.price * item.quantity).toFixed(1)}`;
-
           return `<div class="item-row">
-            <div class="item-name">${itemName}</div>
-            <div class="item-qty">${qty}</div>
-            <div class="item-rate">${rate}</div>
-          </div>
-          ${item.name.length > 20
-              ? `<div class="item-sub-row"><div class="item-sub-name">${item.name}</div><div class="item-sub-qty"></div><div class="item-sub-rate"></div></div>`
-              : ""
-            }`;
+        <div class="item-name">${itemName}</div>
+        <div class="item-qty">${qty}</div>
+        <div class="item-rate">${rate}</div>
+      </div>
+      ${
+        item.name.length > 20
+          ? `<div class="item-sub-row"><div class="item-sub-name">${item.name}</div><div class="item-sub-qty"></div><div class="item-sub-rate"></div></div>`
+          : ""
+      }`;
         })
         .join("")}
-</div>
+  </div>
 
-<div class="divider">-------------------------------------</div>
+  <div class="divider">-------------------------------------</div>
 
-<div class="flex-item-row-cs">
-<div class="receipt-info">Subtotal</div>
-<div class="receipt-info">PKR ${receiptData.subtotal.toFixed(2)}</div>
-</div>
-${discount > 0
-        ? `
-<div class="flex-item-row-cs">
-<div class="receipt-info">Discount</div>
-<div class="receipt-info">PKR ${discount.toFixed(2)}</div>
-</div>`
-        : ""
+  <div class="flex-item-row-cs">
+    <div class="receipt-info">Subtotal</div>
+    <div class="receipt-info">PKR ${receiptData.subtotal.toFixed(2)}</div>
+  </div>
+  ${
+        discount > 0
+          ? `<div class="flex-item-row-cs">
+    <div class="receipt-info">Discount</div>
+    <div class="receipt-info">PKR ${discount.toFixed(2)}</div>
+  </div>`
+          : ""
       }
-<div class="flex-item-row-cs">
-<div class="receipt-info">Grand Total</div>
-<div class="receipt-info">PKR ${finalTotal.toFixed(2)}</div>
-</div>
+  <div class="flex-item-row-cs">
+    <div class="receipt-info">Grand Total</div>
+    <div class="receipt-info">PKR ${finalTotal.toFixed(2)}</div>
+  </div>
 
-<div class="divider">-------------------------------------</div>
-<div class="flex-item-row-cs">
-<div class="payment-info">Payment Method:</div>
-<div class="payment-method">${receiptData.paymentMethod.toUpperCase()}</div>
-</div>
-<div class="flex-item-row-cs">
-<div class="payment-info">Amount Paid:</div>
-<div class="payment-method">PKR ${receiptData.amountPaid
-        ? receiptData.amountPaid.toFixed(2)
-        : finalTotal.toFixed(2)
-      }</div> 
-</div>
-${receiptData.changeAmount && receiptData.changeAmount > 0
-        ? `
-<div class="flex-item-row-cs">
-<div class="payment-info">Change:</div>
-<div class="payment-method">PKR ${receiptData.changeAmount.toFixed(2)}</div>
-</div>`
-        : ""
+  <div class="divider">-------------------------------------</div>
+  <div class="flex-item-row-cs">
+    <div class="payment-info">Payment Method:</div>
+    <div class="payment-method">${receiptData.paymentMethod.toUpperCase()}</div>
+  </div>
+  <div class="flex-item-row-cs">
+    <div class="payment-info">Amount Paid:</div>
+    <div class="payment-method">PKR ${
+        receiptData.amountPaid ? receiptData.amountPaid.toFixed(2) : finalTotal.toFixed(2)
+      }</div>
+  </div>
+  ${
+        receiptData.changeAmount && receiptData.changeAmount > 0
+          ? `<div class="flex-item-row-cs">
+    <div class="payment-info">Change:</div>
+    <div class="payment-method">PKR ${receiptData.changeAmount.toFixed(2)}</div>
+  </div>`
+          : ""
       }
-  
-${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
 
-<div class="barcode-section">
-<div class="barcode">
-  <svg id="barcode-svg"></svg>
-</div>
-<div class="barcode-number" id="barcode-number">${receiptData.transactionId
-      }</div>
-</div>
+  ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
 
-<div class="thank-you">${receiptData.thankYouMessage || "Thank you for shopping with us!"
-      }</div>
-<div style="font-size: 15px; margin-top: 6px; font-weight: bold; color: #000000;">${receiptData.footerMessage || "Visit us again soon!"
-      }</div>
+  <div class="barcode-section">
+    <div class="barcode">
+      <svg id="barcode-svg"></svg>
+    </div>
+    <div class="barcode-number" id="barcode-number">${receiptData.transactionId}</div>
+  </div>
+
+  <div class="thank-you">${receiptData.thankYouMessage || "Thank you for shopping with us!"}</div>
+  <div style="font-size: 15px; margin-top: 6px; font-weight: bold; color: #000000;">
+    ${receiptData.footerMessage || "Visit us again soon!"}
+  </div>
 `;
 
     // Print the receipt - re-check kiosk mode to ensure it's detected
@@ -1701,11 +1732,73 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
     printReceipt(receiptContent, isKioskDetected);
   };
 
-  const handlePayment = async (method: string) => {
-    await withPaymentLoading(async () => {
+  const resetPaymentState = () => {
+    setPaymentDialogOpen(false);
+    setPaymentMethodPending(null);
+    setTenderedAmount("");
+    setCalculatedChange(0);
+    setPaymentError("");
+  };
+
+  const handlePaymentDialogOpenChange = (open: boolean) => {
+    if (open) {
+      setPaymentDialogOpen(true);
+      return;
+    }
+    resetPaymentState();
+  };
+
+  const startPayment = (method: "Cash" | "Card") => {
+    setPaymentMethodPending(method);
+    setTenderedAmount(total.toFixed(2));
+    setPaymentError("");
+    setCalculatedChange(0);
+    setPaymentDialogOpen(true);
+  };
+
+  const handleTenderedInputChange = (value: string) => {
+    setTenderedAmount(value);
+    if (paymentError) {
+      setPaymentError("");
+    }
+  };
+
+  const confirmPayment = async () => {
+    if (!paymentMethodPending) {
+      return;
+    }
+
+    const amountNumber = parseFloat(tenderedAmount);
+    if (Number.isNaN(amountNumber)) {
+      setPaymentError("Enter a valid amount received.");
+      return;
+    }
+
+    if (amountNumber < total) {
+      setPaymentError("Received amount cannot be less than the payable total.");
+      return;
+    }
+
+    const change = Math.max(0, amountNumber - total);
+    setPaymentError("");
+
+    const success = await handlePayment(paymentMethodPending, amountNumber, change);
+    if (success) {
+      resetPaymentState();
+    }
+  };
+
+  const handlePayment = async (
+    method: "Cash" | "Card",
+    amountPaid: number,
+    changeAmount: number
+  ) => {
+    const cartSnapshot = cart.map((item) => ({ ...item }));
+
+    return await withPaymentLoading(async () => {
       try {
         // Prepare items for API
-        const saleItems = cart.map((item) => ({
+        const saleItems = cartSnapshot.map((item) => ({
           productId: item.id,
           quantity: item.quantity,
           price: item.price,
@@ -1717,7 +1810,6 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
           const branchStr = localStorage.getItem("branch");
           console.log(branchStr);
           if (branchStr) {
-            const branchObj = branchStr;
             branchId = branchStr || "";
           }
         } catch (e) {
@@ -1743,9 +1835,12 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
         const receiptData = generateReceiptData(
           transactionId,
           method,
-          cart,
+          cartSnapshot,
           subtotal,
-          total
+          total,
+          amountPaid,
+          changeAmount,
+          discountAmount > 0 ? discountAmount : undefined
         );
 
         // Save transaction to local storage (simulate database)
@@ -1757,7 +1852,6 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
 
         setLastTransactionId(transactionId);
         setCart([]);
-        setPaymentDialogOpen(false);
 
         toast({
           title: "Payment Successful",
@@ -1770,49 +1864,63 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
           const receiptDataForServer: ReceiptData = {
             storeName: branchName.name || "MANPASAND GENERAL STORE",
             tagline: "Quality • Service • Value",
-            address: branchName.address ? `${branchName.address}, Karachi` : "Main Shahrah-e-Faisal, Karachi",
+            address: branchName.address
+              ? `${branchName.address}, Karachi`
+              : "Main Shahrah-e-Faisal, Karachi",
             transactionId: transactionId,
             timestamp: new Date().toISOString(),
             cashier: receiptData.cashier || "Walk-in",
-            customerType: selectedCustomer 
-              ? customers.find(c => c.id === selectedCustomer)?.name || "Walk-in" 
+            customerType: selectedCustomer
+              ? customers.find((c) => c.id === selectedCustomer)?.name ||
+                "Walk-in"
               : "Walk-in",
-            items: cart.map(item => ({
-              name: item.name,
-              quantity: item.quantity,
-              price: item.price,
-              unit: 'pc'
-            })),
+            items: cartSnapshot.map((item) => {
+              const unitLabel =
+                (item as any)?.unit?.name ||
+                (item as any)?.unitName ||
+                (item as any)?.unit_name ||
+                (item as any)?.unit ||
+                undefined;
+              return {
+                name: item.name,
+                quantity: item.quantity,
+                price: item.price,
+                unit: unitLabel,
+              };
+            }),
             subtotal: subtotal,
             discount: discountAmount > 0 ? discountAmount : undefined,
-            taxPercent: taxPercentForReceipt > 0 ? taxPercentForReceipt : undefined,
             total: total,
             paymentMethod: method === "Cash" ? "CASH" : "CARD",
-            amountPaid: total,
-            changeAmount: 0,
+            amountPaid,
+            changeAmount: changeAmount > 0 ? changeAmount : undefined,
             thankYouMessage: "Thank you for shopping!",
-            footerMessage: "Visit us again soon!"
+            footerMessage: "Visit us again soon!",
           };
 
           // Get printer name - use selected printer or default
-          const printerName = kioskMode 
-            ? 'Default Printer' 
-            : selectedPrinter || 'BlackCopper 80mm Series';
+          const printerName = kioskMode
+            ? "Default Printer"
+            : selectedPrinter || "BlackCopper 80mm Series";
 
           const printerObj = {
             name: printerName,
-            columns: { fontA: 48, fontB: 64 } // Default columns
+            columns: { fontA: 48, fontB: 64 }, // Default columns
           };
 
           const job = {
             copies: 1,
             cut: true,
-            openDrawer: false
+            openDrawer: false,
           };
 
           // Try local print server first, fallback to browser print
           // Use same API format as backend: printer, receiptData, job
-          const printSuccess = await printReceiptViaServer(printerObj, receiptDataForServer, job);
+          const printSuccess = await printReceiptViaServer(
+            printerObj,
+            receiptDataForServer,
+            job
+          );
 
           if (printSuccess.success) {
             toast({
@@ -1821,12 +1929,12 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
             });
           } else {
             // Fallback to browser print if server failed
-            console.warn('Print server failed, using browser print:', printSuccess.error);
+            console.warn(
+              "Print server failed, using browser print:",
+              printSuccess.error
+            );
             downloadReceipt(receiptData, branchName);
           }
-          
-          // Old browser printing code removed - now uses local print server with browser fallback
-          
         } catch (printError) {
           console.error("Print error:", printError);
           toast({
@@ -1835,6 +1943,8 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
             description: "Receipt could not be printed. Please try again.",
           });
         }
+
+        return true;
       } catch (error) {
         console.error("Payment error:", error);
         toast({
@@ -1842,6 +1952,7 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
           title: "Payment Failed",
           description: "There was an error processing your payment",
         });
+        return false;
       }
     });
   };
@@ -2126,51 +2237,24 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {filteredProducts.map((product) => {
               const cartItem = cart.find((item) => item.id === product.id);
-              const currentStock = product.available_stock ?? product.stock;
-              const isOutOfStock = currentStock <= 0;
-              const isLowStock = currentStock <= 5 && currentStock > 0;
-
               return (
                 <Card
                   key={product.id}
-                  className={`cursor-pointer hover:shadow-md transition-shadow`}
+                  className="cursor-pointer hover:shadow-sm transition-shadow"
                   onClick={() => handleProductClick(product)}
                 >
-                  <CardContent className="p-4">
-                    <div className="aspect-square bg-gray-100 rounded-lg mb-3 flex items-center justify-center relative">
-                      <span className="text-2xl">🛒</span>
-                      {cartItem && (
-                        <Badge className="absolute -top-2 -right-2 bg-blue-600">
-                          {cartItem.quantity.toFixed(2)}
-                        </Badge>
-                      )}
-                    </div>
-                    <h3 className="font-medium text-gray-900 mb-1">
-                      {product.name}
+                  <CardContent className="p-2 space-y-1">
+                    <h3 className="text-xs font-semibold text-gray-900 leading-tight line-clamp-2 flex items-center justify-between gap-1">
+                      <span className="flex-1">{product.name}</span>
+                      <span className="shrink-0 text-[11px] font-medium text-gray-700">
+                        {product.price.toFixed(2)}
+                      </span>
                     </h3>
-                    <p className="text-lg font-bold text-blue-600">
-                      Rs {product.price.toFixed(2)}
-                    </p>
-                    <div className="flex items-center justify-between mt-2">
-                      <p
-                        className={`text-sm ${isLowStock ? "text-yellow-600" : "text-gray-500"
-                          }`}
-                      >
-                        Stock:{" "}
-                        {(product.available_stock ?? product.stock).toFixed(2)}
-                      </p>
-                      {isLowStock && (
-                        <Badge
-                          variant="secondary"
-                          className="bg-yellow-100 text-yellow-800"
-                        >
-                          Low Stock
-                        </Badge>
-                      )}
-                    </div>
-                    <Badge variant="secondary" className="mt-2">
-                      {product.category}
-                    </Badge>
+                    {cartItem && (
+                      <Badge className="bg-blue-600 text-[10px] px-1.5 py-0.5">
+                        {cartItem.quantity.toFixed(2)}
+                      </Badge>
+                    )}
                   </CardContent>
                 </Card>
               );
@@ -2424,78 +2508,50 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
           <div className="border-t border-gray-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_-20px_rgba(15,23,42,0.4)] backdrop-blur">
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-2.5">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                      Discount
-                    </label>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <select
-                        className="h-8 rounded border border-gray-200 px-2 text-xs"
-                        value={globalDiscountType}
-                        onChange={(e) =>
-                          setGlobalDiscountType(e.target.value as "percentage" | "amount")
-                        }
-                      >
-                        <option value="percentage">%</option>
-                        <option value="amount">Rs</option>
-                      </select>
-                      <Input
-                        type="number"
-                        value={globalDiscount}
-                        onChange={(e) => setGlobalDiscount(parseFloat(e.target.value) || 0)}
-                        className="h-8 flex-1 text-xs"
-                        min="0"
-                        step={globalDiscountType === "percentage" ? "1" : "0.01"}
-                        max={globalDiscountType === "percentage" ? "100" : undefined}
-                      />
-                    </div>
-                  </div>
-                  <div>
-                    <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                      Tax
-                    </label>
-                    <div className="mt-1 flex items-center gap-1.5">
-                      <select
-                        className="h-8 rounded border border-gray-200 px-2 text-xs"
-                        value={taxType}
-                        onChange={(e) => setTaxType(e.target.value as "percentage" | "amount")}
-                      >
-                        <option value="percentage">%</option>
-                        <option value="amount">Rs</option>
-                      </select>
-                      <Input
-                        type="number"
-                        value={taxValue}
-                        onChange={(e) => setTaxValue(Number.isNaN(parseFloat(e.target.value)) ? 0 : parseFloat(e.target.value))}
-                        className="h-8 flex-1 text-xs"
-                        min="0"
-                        step={taxType === "percentage" ? "0.1" : "0.01"}
-                        max={taxType === "percentage" ? "100" : undefined}
-                      />
-                    </div>
+                <div>
+                  <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
+                    Discount
+                  </label>
+                  <div className="mt-1 flex items-center gap-1.5">
+                    <select
+                      className="h-8 rounded border border-gray-200 px-2 text-xs"
+                      value={globalDiscountType}
+                      onChange={(e) =>
+                        setGlobalDiscountType(
+                          e.target.value as "percentage" | "amount"
+                        )
+                      }
+                    >
+                      <option value="percentage">%</option>
+                      <option value="amount">Rs</option>
+                    </select>
+                    <Input
+                      type="number"
+                      value={globalDiscount}
+                      onChange={(e) =>
+                        setGlobalDiscount(parseFloat(e.target.value) || 0)
+                      }
+                      className="h-8 flex-1 text-xs"
+                      min="0"
+                      step={globalDiscountType === "percentage" ? "1" : "0.01"}
+                      max={globalDiscountType === "percentage" ? "100" : undefined}
+                    />
                   </div>
                 </div>
                 <div className="rounded-lg border border-gray-200 bg-slate-50 p-2.5 text-xs">
                   <div className="flex items-center justify-between text-gray-600 text-xs font-medium">
                     <span>Subtotal</span>
-                    <span>Rs {subtotal.toFixed(2)}</span>
+                    <span className="text-sm font-semibold text-blue-700">{subtotal.toFixed(2)}</span>
                   </div>
                   {discountAmount > 0 && (
                     <div className="mt-1 flex items-center justify-between text-green-600 text-xs font-medium">
                       <span>Discount</span>
-                      <span>- Rs {discountAmount.toFixed(2)}</span>
-                    </div>
-                  )}
-                  {taxAmount > 0 && (
-                    <div className="mt-1 flex items-center justify-between text-gray-600 text-xs font-medium">
-                      <span>{taxLabel}</span>
-                      <span>Rs {taxAmount.toFixed(2)}</span>
+                      <span>- {discountAmount.toFixed(2)}</span>
                     </div>
                   )}
                   <div className="mt-1 flex items-center justify-between text-blue-700 text-sm font-semibold">
                     <span>Payable</span>
-                    <span>Rs {total.toFixed(2)}</span>
+                    <span>{total.toFixed(2)}</span>
                   </div>
                 </div>
               </div>
@@ -2503,9 +2559,8 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
               <div className="grid grid-cols-2 gap-1.5">
                 <Button
                   size="sm"
-                  onClick={() => handlePayment("Cash")}
-                  disabled={paymentLoading || (!kioskMode && !selectedPrinter)}
-                  title={!kioskMode && !selectedPrinter ? "Please select a printer" : ""}
+                  onClick={() => startPayment("Cash")}
+                  disabled={paymentLoading}
                   className="h-10 text-sm"
                 >
                   <DollarSign className="mr-2 h-4 w-4" />
@@ -2514,26 +2569,82 @@ ${receiptData.promo ? `<div class="promo">${receiptData.promo}</div>` : ""}
                 <Button
                   size="sm"
                   variant="outline"
-                  onClick={() => handlePayment("Card")}
-                  disabled={paymentLoading || (!kioskMode && !selectedPrinter)}
-                  title={!kioskMode && !selectedPrinter ? "Please select a printer" : ""}
+                  onClick={() => startPayment("Card")}
+                  disabled={paymentLoading}
                   className="h-10 text-sm"
                 >
                   <CreditCard className="mr-2 h-4 w-4" />
                   Card
                 </Button>
               </div>
-
-              {!kioskMode && !selectedPrinter && (
-                <p className="text-xs text-center font-medium text-orange-600">
-                  ⚠️ Select a printer to enable payments
-                </p>
-              )}
             </div>
           </div>
         )}
       </div>
 
+      <Dialog
+        open={paymentDialogOpen}
+        onOpenChange={handlePaymentDialogOpenChange}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {paymentMethodPending ? `${paymentMethodPending} Payment` : "Payment"}
+            </DialogTitle>
+            <DialogDescription>
+              Enter the amount received to calculate the change due.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg bg-slate-50 p-3 text-sm">
+              <div className="flex items-center justify-between text-gray-600">
+                <span>Payable Amount</span>
+                <span className="font-semibold text-gray-900">
+                  Rs {total.toFixed(2)}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-green-600 font-semibold">
+                <span>Change Due</span>
+                <span>Rs {calculatedChange.toFixed(2)}</span>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Amount Received
+              </label>
+              <Input
+                type="number"
+                autoFocus
+                value={tenderedAmount}
+                onChange={(e) => handleTenderedInputChange(e.target.value)}
+                className="mt-1"
+                min="0"
+                step="0.01"
+              />
+            </div>
+            {paymentError && (
+              <p className="text-sm text-red-600">{paymentError}</p>
+            )}
+          </div>
+          <DialogFooter className="pt-2">
+            <Button
+              variant="outline"
+              onClick={resetPaymentState}
+              disabled={paymentLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmPayment}
+              disabled={paymentLoading || !paymentMethodPending}
+            >
+              {paymentLoading
+                ? "Processing..."
+                : `Confirm ${paymentMethodPending ?? "Payment"}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

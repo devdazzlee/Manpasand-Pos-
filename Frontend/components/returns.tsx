@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
+import { useState, useMemo, useEffect, useRef } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -16,7 +16,6 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle, Loader2, Minus } from "lucide-react"
@@ -106,9 +105,13 @@ export function Returns() {
   const [selectedReturnItems, setSelectedReturnItems] = useState<SelectedReturnItem[]>([])
 
   const [isProcessOpen, setIsProcessOpen] = useState(false)
+  const [saleDropdownOpen, setSaleDropdownOpen] = useState(false)
   const [selectedReturn, setSelectedReturn] = useState<ReturnItem | null>(null)
   const [isViewOpen, setIsViewOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
+  const [saleSearch, setSaleSearch] = useState("")
+  const saleSearchInputRef = useRef<HTMLInputElement | null>(null)
+  const saleDropdownRef = useRef<HTMLDivElement | null>(null)
   const [newReturn, setNewReturn] = useState<NewReturn>({
     saleId: "",
     customerId: "",
@@ -160,6 +163,27 @@ export function Returns() {
     fetchReturns()
   }, [])
 
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        saleDropdownRef.current &&
+        !saleDropdownRef.current.contains(event.target as Node)
+      ) {
+        setSaleDropdownOpen(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    if (!isProcessOpen) {
+      setSaleSearch("")
+      setSaleDropdownOpen(false)
+    }
+  }, [isProcessOpen])
+
   const getStatusColor = (status: string) => {
     switch (status) {
       case "PENDING":
@@ -188,6 +212,22 @@ export function Returns() {
       return matchesSearch
     })
   }, [returns, searchTerm])
+
+  const filteredSales = useMemo(() => {
+    const term = saleSearch.trim().toLowerCase()
+    if (!term) return sales
+
+    return sales.filter((sale) => {
+      const saleNumber = sale.sale_number.toLowerCase()
+      const customerName = sale.customer?.name?.toLowerCase() || ""
+      const customerEmail = sale.customer?.email?.toLowerCase() || ""
+      return (
+        saleNumber.includes(term) ||
+        customerName.includes(term) ||
+        customerEmail.includes(term)
+      )
+    })
+  }, [saleSearch, sales])
 
   const getFilteredReturnsByStatus = (status: string) => {
     if (status === "all") return filteredReturns
@@ -267,6 +307,11 @@ export function Returns() {
     const sale = sales.find(s => s.id === saleId)
     setSelectedSale(sale || null)
     setNewReturn(prev => ({ ...prev, saleId }))
+    setSaleDropdownOpen(false)
+    setSaleSearch(sale?.sale_number || "")
+    requestAnimationFrame(() => {
+      saleSearchInputRef.current?.blur()
+    })
     
     // Initialize selected return items
     if (sale) {
@@ -387,28 +432,59 @@ export function Returns() {
               <DialogDescription>Process a customer return or refund</DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
-              <div className="space-y-2">
-                <Label htmlFor="sale-select">Select Sale *</Label>
-                <Select
-                  value={newReturn.saleId}
-                  onValueChange={handleSaleSelect}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a sale to return" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {sales.map((sale) => (
-                      <SelectItem key={sale.id} value={sale.id}>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{sale.sale_number}</span>
-                          <span className="text-xs text-gray-500">
-                            {sale.customer?.name || sale.customer?.email || "No customer"} • Rs {Number(sale.total_amount).toLocaleString()}
-                          </span>
+              <div className="space-y-2" ref={saleDropdownRef}>
+                <Label htmlFor="sale-search">Select Sale *</Label>
+                <div className="relative">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    ref={saleSearchInputRef}
+                    id="sale-search"
+                    placeholder="Search by sale #, customer name, or email"
+                    value={saleSearch}
+                    onFocus={() => setSaleDropdownOpen(true)}
+                    autoComplete="off"
+                    onChange={(e) => {
+                      setSaleSearch(e.target.value)
+                      setSaleDropdownOpen(true)
+                    }}
+                    className="pl-9"
+                  />
+                  {saleDropdownOpen && (
+                    <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                      {salesLoading ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">
+                          Loading sales...
                         </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                      ) : filteredSales.length === 0 ? (
+                        <div className="px-3 py-2 text-sm text-gray-500">
+                          No matching sales found
+                        </div>
+                      ) : (
+                        filteredSales.map((sale) => (
+                          <button
+                            key={sale.id}
+                            type="button"
+                            className={`w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${
+                              newReturn.saleId === sale.id
+                                ? "bg-blue-50 font-semibold text-blue-900"
+                                : "text-gray-800"
+                            }`}
+                            onMouseDown={(event) => event.preventDefault()}
+                            onClick={() => handleSaleSelect(sale.id)}
+                          >
+                            <div className="flex flex-col">
+                              <span>{sale.sale_number}</span>
+                              <span className="text-xs text-gray-500">
+                                {sale.customer?.name || sale.customer?.email || "No customer"} • Rs{" "}
+                                {Number(sale.total_amount).toLocaleString()}
+                              </span>
+                            </div>
+                          </button>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </div>
               </div>
 
               {selectedSale && (

@@ -8,7 +8,7 @@ export function usePosData() {
   const refreshAllData = async () => {
     try {
       await Promise.all([
-        store.fetchProducts(true),
+        store.fetchProducts({ force: true }),
         store.fetchCategories(true),
         store.fetchCustomers(true)
       ])
@@ -41,7 +41,7 @@ export function usePosData() {
     
     // Actions
     refreshAllData,
-    fetchProducts: (force?: boolean, search?: string) => store.fetchProducts(force, search),
+    fetchProducts: (options?: { force?: boolean; search?: string; categoryId?: string }) => store.fetchProducts(options),
     fetchCategories: store.fetchCategories,
     fetchCustomers: store.fetchCustomers,
     clearStore: store.clearStore,

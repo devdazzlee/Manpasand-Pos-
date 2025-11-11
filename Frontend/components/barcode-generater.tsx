@@ -164,7 +164,7 @@ export default function BarcodeGenerator() {
     const fetchData = async () => {
       try {
         if (searchTerm.length >= 2) {
-          await fetchProducts(true, searchTerm);
+          await fetchProducts({ force: true, search: searchTerm });
         } else {
           await fetchProducts();
         }

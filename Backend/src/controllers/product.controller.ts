@@ -45,7 +45,8 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
         subcategory_id,
         is_active,
         display_on_pos,
-        branch_id
+        branch_id,
+        fetch_all,
     } = req.query;
 
     const result = await productService.listProducts({
@@ -57,10 +58,11 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
         branch_id: branch_id as string | undefined,
+        fetchAll: fetch_all ? fetch_all === 'true' : false,
     });
     console.log(result);
 
-    new ApiResponse(result.data, 'Products retrieved successfully', 200).send(res);
+    new ApiResponse(result.data, 'Products retrieved successfully', 200, true, result.meta).send(res);
 });
 
 export const getFeaturedProducts = asyncHandler(async (req: Request, res: Response) => {

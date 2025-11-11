@@ -78,7 +78,7 @@ interface StoreState {
   lastCustomersFetch: number | null
   
   // Actions
-  fetchProducts: (force?: boolean, search?: string) => Promise<void>
+  fetchProducts: (options?: { force?: boolean; search?: string; categoryId?: string }) => Promise<void>
   fetchCategories: (force?: boolean) => Promise<void>
   fetchCustomers: (force?: boolean) => Promise<void>
   clearStore: () => void
@@ -101,25 +101,76 @@ export const useStore = create<StoreState>()(
       lastCategoriesFetch: null,
       lastCustomersFetch: null,
 
-      // Fetch products with caching
-      fetchProducts: async (force = false, search?: string) => {
+      // Fetch products with caching and full-database search support
+      fetchProducts: async (options?: { force?: boolean; search?: string; categoryId?: string }) => {
+        const { force = false, search, categoryId } = options ?? {}
         const state = get()
         const now = Date.now()
-        
-        // If searching, bypass cache
-        if (!search) {
-          // Check if we have cached data and it's still valid
-          if (!force && 
-              state.products.length > 0 && 
-              state.lastProductsFetch && 
-              (now - state.lastProductsFetch) < CACHE_DURATION) {
+        const hasFilters = Boolean(search) || Boolean(categoryId)
+
+        // Use cached data when no filters applied
+        if (!hasFilters) {
+          if (
+            !force &&
+            state.products.length > 0 &&
+            state.lastProductsFetch &&
+            now - state.lastProductsFetch < CACHE_DURATION
+          ) {
             console.log('Using cached products data')
             return
           }
         }
 
         set({ productsLoading: true })
-        
+
+        const mapProduct = (item: any): Product => ({
+          id: item.id,
+          name: item.name,
+          price: Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? item.purchase_rate ?? 0),
+          category: item.category?.name,
+          categoryId: item.category?.id,
+          barcode: item.barcode || item.sku,
+          stock: item.available_stock ?? item.current_stock ?? 0,
+          current_stock: item.current_stock ?? 0,
+          available_stock: item.available_stock ?? 0,
+          reserved_stock: item.reserved_stock ?? 0,
+          minimum_stock: item.minimum_stock ?? 0,
+          maximum_stock: item.maximum_stock ?? 0,
+          sku: item.sku,
+          subcategoryId: item.subcategory?.id,
+          subcategory: item.subcategory?.name,
+          unitId: item.unit?.id,
+          unitName: item.unit?.name,
+          taxId: item.tax?.id,
+          taxName: item.tax?.name,
+          supplierId: item.supplier?.id,
+          supplierName: item.supplier?.name,
+          brandId: item.brand?.id,
+          brandName: item.brand?.name,
+          colorId: item.color?.id,
+          colorName: item.color?.name,
+          sizeId: item.size?.id,
+          sizeName: item.size?.name,
+          purchase_rate: Number(item.purchase_rate) || 0,
+          sales_rate_exc_dis_and_tax: Number(item.sales_rate_exc_dis_and_tax) || 0,
+          sales_rate_inc_dis_and_tax: Number(item.sales_rate_inc_dis_and_tax) || 0,
+          discount_amount: item.discount_amount ? Number(item.discount_amount) : undefined,
+          min_qty: item.min_qty ? Number(item.min_qty) : undefined,
+          max_qty: item.max_qty ? Number(item.max_qty) : undefined,
+          is_active: item.is_active ?? true,
+          display_on_pos: item.display_on_pos ?? true,
+          is_batch: item.is_batch ?? false,
+          auto_fill_on_demand_sheet: item.auto_fill_on_demand_sheet ?? false,
+          non_inventory_item: item.non_inventory_item ?? false,
+          is_deal: item.is_deal ?? false,
+          is_featured: item.is_featured ?? false,
+          pct_or_hs_code: item.pct_or_hs_code,
+          description: item.description,
+          created_at: item.created_at,
+          updated_at: item.updated_at,
+          images: item.images || [],
+        })
+
         try {
           // Get branch_id from localStorage if available
           let branchId = null
@@ -130,74 +181,33 @@ export const useStore = create<StoreState>()(
               branchId = branchObj.id || branchStr
             }
           } catch (e) {
-            // If parsing fails, use the raw string
             branchId = localStorage.getItem("branch")
           }
 
-          const res = await apiClient.get("/products", {
-            params: {
-              limit: search ? 1000 : 100,  // Get all products when searching, otherwise limit to 100
-              page: 1,
-              branch_id: branchId,
-              search: search || undefined
-            }
-          })
-          
-          const apiProducts = res.data.data.map((item: any) => ({
-            id: item.id,
-            name: item.name,
-            price: Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? item.purchase_rate ?? 0),
-            category: item.category?.name,
-            categoryId: item.category?.id,
-            barcode: item.barcode || item.sku, // Use barcode field or fallback to SKU
-            stock: item.available_stock ?? item.current_stock ?? 0, // Use actual stock instead of max_qty
-            current_stock: item.current_stock ?? 0,
-            available_stock: item.available_stock ?? 0,
-            reserved_stock: item.reserved_stock ?? 0,
-            minimum_stock: item.minimum_stock ?? 0,
-            maximum_stock: item.maximum_stock ?? 0,
-            sku: item.sku,
-            subcategoryId: item.subcategory?.id,
-            subcategory: item.subcategory?.name,
-            unitId: item.unit?.id,
-            unitName: item.unit?.name,
-            taxId: item.tax?.id,
-            taxName: item.tax?.name,
-            supplierId: item.supplier?.id,
-            supplierName: item.supplier?.name,
-            brandId: item.brand?.id,
-            brandName: item.brand?.name,
-            colorId: item.color?.id,
-            colorName: item.color?.name,
-            sizeId: item.size?.id,
-            sizeName: item.size?.name,
-            purchase_rate: Number(item.purchase_rate) || 0,
-            sales_rate_exc_dis_and_tax: Number(item.sales_rate_exc_dis_and_tax) || 0,
-            sales_rate_inc_dis_and_tax: Number(item.sales_rate_inc_dis_and_tax) || 0,
-            discount_amount: item.discount_amount ? Number(item.discount_amount) : undefined,
-            min_qty: item.min_qty ? Number(item.min_qty) : undefined,
-            max_qty: item.max_qty ? Number(item.max_qty) : undefined,
-            is_active: item.is_active ?? true,
-            display_on_pos: item.display_on_pos ?? true,
-            is_batch: item.is_batch ?? false,
-            auto_fill_on_demand_sheet: item.auto_fill_on_demand_sheet ?? false,
-            non_inventory_item: item.non_inventory_item ?? false,
-            is_deal: item.is_deal ?? false,
-            is_featured: item.is_featured ?? false,
-            pct_or_hs_code: item.pct_or_hs_code,
-            description: item.description,
-            created_at: item.created_at,
-            updated_at: item.updated_at,
-            images: item.images || [],
-          }))
-          
-          set({ 
-            products: apiProducts, 
+          const params: Record<string, any> = {
+            branch_id: branchId || undefined,
+            fetch_all: true,
+          }
+
+          if (search) {
+            params.search = search
+          }
+
+          if (categoryId) {
+            params.category_id = categoryId
+          }
+
+          const res = await apiClient.get("/products", { params })
+          const rawProducts = Array.isArray(res.data?.data) ? res.data.data : []
+          const apiProducts = rawProducts.map(mapProduct)
+
+          set({
+            products: apiProducts,
             productsLoading: false,
-            lastProductsFetch: now
+            lastProductsFetch: now,
           })
-          
-          console.log(`Loaded ${apiProducts.length} products`)
+
+          console.log(`Loaded ${apiProducts.length} products${hasFilters ? ' (full search)' : ''}`)
         } catch (error) {
           console.log('Failed to fetch products:', error)
           set({ productsLoading: false })
