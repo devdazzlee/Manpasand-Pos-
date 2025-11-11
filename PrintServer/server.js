@@ -485,11 +485,13 @@ app.post('/print-receipt', async (req, res) => {
     }
 
     if (logoToUse && fs.existsSync(logoToUse)) {
-      const maxW = mm(40);
-      const maxH = mm(18);
+      const maxW = mm(48);
+      const maxH = mm(24);
       const x = (pageWidth - maxW) / 2;
-      doc.image(logoToUse, x, y, { fit: [maxW, maxH] });
-      y += maxH + mm(2.5);
+      doc.save();
+      doc.image(logoToUse, x, y, { fit: [maxW, maxH], align: 'center', valign: 'center' });
+      doc.restore();
+      y += maxH + mm(3);
     }
 
     // Address + Tagline
