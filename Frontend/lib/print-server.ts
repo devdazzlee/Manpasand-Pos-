@@ -23,6 +23,7 @@ export interface ReceiptItem {
   quantity: number;
   price: number;
   unit?: string;
+  unitName?: string;
 }
 
 export interface ReceiptData {

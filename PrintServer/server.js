@@ -472,44 +472,45 @@ app.post('/print-receipt', async (req, res) => {
     let y = margins.top;
 
     // Logo (if provided)
-    if (logoToUse && fs.existsSync(logoToUse)) {
-      const maxW = mm(30);
-      const maxH = mm(14);
-      const x = (pageWidth - maxW) / 2;
-      doc.image(logoToUse, x, y, { fit: [maxW, maxH] });
-      y += maxH + mm(2.0);
+    const branchLineTop = (receiptData.storeName || '').toUpperCase();
+    if (branchLineTop) {
+      doc.font(baseFont).fontSize(9.5);
+      drawFit(branchLineTop, margins.left, y, W, {
+        maxSize: 10,
+        minSize: 8,
+        align: 'center',
+        font: baseFont
+      });
+      y += lineH(9) * 0.7;
     }
 
-    // Store name
-    doc.font(boldFont);
-    const usedHead = drawFit(
-      (receiptData.storeName || 'MANPASAND GENERAL STORE').toUpperCase(),
-      margins.left,
-      y,
-      W,
-      { maxSize: HEAD_MAX, minSize: 11.0, align: 'center', font: boldFont }
-    );
-    y += lineH(usedHead) * 0.9;
+    if (logoToUse && fs.existsSync(logoToUse)) {
+      const maxW = mm(40);
+      const maxH = mm(18);
+      const x = (pageWidth - maxW) / 2;
+      doc.image(logoToUse, x, y, { fit: [maxW, maxH] });
+      y += maxH + mm(2.5);
+    }
 
-    // Tagline / Address
+    // Address + Tagline
+    doc.font(boldFont);
+    const branchAddress = receiptData.address || 'Karachi';
+    const usedAddrTop = drawFit(branchAddress, margins.left, y, W, {
+      maxSize: 11,
+      minSize: 8.5,
+      align: 'center',
+      font: boldFont
+    });
+    y += lineH(usedAddrTop) * 0.9;
+
     doc.font(baseFont);
-    const tg = receiptData.tagline || 'Quality • Service • Value';
+    const tg = 'Quality - Service - Value';
     const usedTg = drawFit(tg, margins.left, y, W, {
       maxSize: BODY_MAX,
       minSize: BODY_MIN,
       align: 'center'
     });
     y += lineH(usedTg) - 2;
-
-    const addr = receiptData.address || '';
-    if (addr) {
-      const usedAddr = drawFit(addr, margins.left, y, W, {
-        maxSize: BODY_MAX,
-        minSize: BODY_MIN,
-        align: 'center'
-      });
-      y += lineH(usedAddr) - 2;
-    }
 
     if (receiptData.strn) {
       const usedStrn = drawFit(receiptData.strn, margins.left, y, W, {
@@ -571,9 +572,6 @@ app.post('/print-receipt', async (req, res) => {
     y += rowLR('Subtotal', `PKR ${money(subtotal)}`, y);
     if (receiptData.discount != null && receiptData.discount !== undefined && Number(receiptData.discount) > 0) {
       y += rowLR('Discount', `- PKR ${money(discount)}`, y);
-    }
-    if (tax > 0) {
-      y += rowLR(`Tax (${receiptData.taxPercent?.toFixed(0) || 5}%)`, `PKR ${money(tax)}`, y);
     }
 
     y += rowLR('Grand Total', `PKR ${money(total)}`, y, {
@@ -643,13 +641,18 @@ app.post('/print-receipt', async (req, res) => {
       { maxSize: 10.6, minSize: 8.6, align: 'center', font: boldFont }
     );
     y += lineH(usedTy) - 2;
-    if (receiptData.footerMessage) {
-      const usedF = drawFit(receiptData.footerMessage, margins.left, y, W, {
+    const footerLines = [
+      'Branch: 021 34892110',
+      'Delivery Hotline WhatsApp: +92 342 3344040',
+      'Website: Manpasandstore.com'
+    ];
+    for (const line of footerLines) {
+      const usedF = drawFit(line, margins.left, y, W, {
         maxSize: 9.8,
         minSize: 8.0,
         align: 'center'
       });
-      y += lineH(usedF);
+      y += lineH(usedF) - 1;
     }
 
     // Trim height with safety buffer to avoid bottom cut (same as backend)
