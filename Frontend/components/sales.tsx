@@ -89,10 +89,15 @@ interface Sale {
       const loadMeta = async () => {
         setIsInitialLoading(true);
         try {
+          // Check if user is ADMIN - admins should see all products
+          const userRole = localStorage.getItem("role");
+          const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+          const productLimit = isAdmin ? 10000 : 100;
+          
           const [bRes, cRes, pRes] = await Promise.all([
             apiClient.get(`${API_BASE}/branches?limit=100`),
             apiClient.get(`${API_BASE}/customer`),
-            apiClient.get(`${API_BASE}/products?limit=100`),
+            apiClient.get(`${API_BASE}/products?limit=${productLimit}${isAdmin ? '&fetch_all=true' : ''}`),
           ]);
           setBranches(bRes.data.data);
           setCustomers(cRes.data.data);

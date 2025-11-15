@@ -203,11 +203,29 @@ export function StockManagement() {
     const fetchProducts = async () => {
       setLoadingProducts(true);
       try {
+        // Check if user is ADMIN - admins should see all products
+        const userRole = localStorage.getItem("role");
+        const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+        
         const params: any = {
           page: productPage,
-          limit: 100,
+          limit: isAdmin ? 10000 : 100, // Higher limit for admin to get all products
           is_active: true,
+          fetch_all: true,
         };
+        
+        // Don't filter by branch_id for admin users
+        if (!isAdmin) {
+          const branchStr = localStorage.getItem("branch");
+          if (branchStr && branchStr !== "Not Found") {
+            try {
+              const branchObj = JSON.parse(branchStr);
+              params.branch_id = branchObj.id || branchStr;
+            } catch (e) {
+              params.branch_id = branchStr;
+            }
+          }
+        }
         
         if (productSearch) {
           params.search = productSearch;

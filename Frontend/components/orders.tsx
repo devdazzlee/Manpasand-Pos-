@@ -47,9 +47,14 @@ const Orders: React.FC = () => {
   const fetchMetadata = async () => {
     setIsInitialLoading(true);
     try {
+      // Check if user is ADMIN - admins should see all products
+      const userRole = localStorage.getItem("role");
+      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+      const productLimit = isAdmin ? 10000 : 100;
+      
       const [cRes, pRes] = await Promise.all([
         apiClient.get(`${API_BASE}/customer`),
-        apiClient.get(`${API_BASE}/products?limit=100`),
+        apiClient.get(`${API_BASE}/products?limit=${productLimit}${isAdmin ? '&fetch_all=true' : ''}`),
       ]);
       setCustomers(cRes.data.data);
       setProducts(pRes.data.data);

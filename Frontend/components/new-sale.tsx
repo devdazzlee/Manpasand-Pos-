@@ -101,18 +101,58 @@ export function NewSale() {
   const { toast } = useToast();
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
   const [printers, setPrinters] = useState<Printer[]>([]);
-  const [selectedPrinter, setSelectedPrinter] = useState<string>("");
+  const [savedPrinterObj, setSavedPrinterObj] = useState<Printer | null>(() => {
+    // Load saved printer object from localStorage on initial state
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('savedPrinter');
+      if (saved) {
+        try {
+          const printer = JSON.parse(saved);
+          return printer;
+        } catch (e) {
+          return null;
+        }
+      }
+    }
+    return null;
+  });
+  const [selectedPrinter, setSelectedPrinter] = useState<string>(() => {
+    // Load saved printer name for dropdown
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('savedPrinter');
+      if (saved) {
+        try {
+          const printer = JSON.parse(saved);
+          return printer.name || "";
+        } catch (e) {
+          return "";
+        }
+      }
+    }
+    return "";
+  });
   const [kioskMode, setKioskMode] = useState(false);
   const [showPrinterSettings, setShowPrinterSettings] = useState(false);
   const [showHeldSales, setShowHeldSales] = useState(false);
+
+  // Save selected printer object to localStorage whenever it changes
+  useEffect(() => {
+    if (savedPrinterObj) {
+      localStorage.setItem('savedPrinter', JSON.stringify(savedPrinterObj));
+      // Also update selectedPrinter name for the dropdown
+      setSelectedPrinter(savedPrinterObj.name);
+    }
+  }, [savedPrinterObj]);
 
   // Detect kiosk mode on mount
   useEffect(() => {
     const kiosk = isKioskMode();
     setKioskMode(kiosk);
     if (kiosk) {
+      const defaultPrinter: Printer = { name: 'Default Printer', isDefault: true, status: 'available' };
+      setSavedPrinterObj(defaultPrinter);
       setSelectedPrinter('Default Printer');
-      setPrinters([{ name: 'Default Printer', isDefault: true, status: 'available' }]);
+      setPrinters([defaultPrinter]);
       enableKioskMode();
     }
   }, []);
@@ -412,11 +452,31 @@ export function NewSale() {
         const printerList = result.data;
         setPrinters(printerList);
 
-        // Auto-select default printer if available
+        // Try to restore saved printer object from localStorage first
+        const savedPrinterStr = localStorage.getItem('savedPrinter');
+        if (savedPrinterStr) {
+          try {
+            const savedPrinter: Printer = JSON.parse(savedPrinterStr);
+            // Check if saved printer still exists in the list
+            const foundPrinter = printerList.find((p: Printer) => p.name === savedPrinter.name);
+            if (foundPrinter) {
+              // Use the current printer data from API (in case it was updated)
+              setSavedPrinterObj(foundPrinter);
+              setSelectedPrinter(foundPrinter.name);
+              return;
+            }
+          } catch (e) {
+            console.error("Failed to parse saved printer:", e);
+          }
+        }
+        
+        // No saved printer or saved printer not found, use default
         const defaultPrinter = printerList.find((p: Printer) => p.isDefault);
         if (defaultPrinter) {
+          setSavedPrinterObj(defaultPrinter);
           setSelectedPrinter(defaultPrinter.name);
         } else if (printerList.length > 0) {
+          setSavedPrinterObj(printerList[0]);
           setSelectedPrinter(printerList[0].name);
         }
       } else {
@@ -1904,14 +1964,44 @@ export function NewSale() {
             footerMessage: "Visit us again soon!",
           };
 
-          // Get printer name - use selected printer or default
-          const printerName = kioskMode
-            ? "Default Printer"
-            : selectedPrinter || "BlackCopper 80mm Series";
+          // Get printer object from saved state or localStorage
+          let printerToUse: Printer | null = savedPrinterObj;
+          
+          // If not in state, try to load from localStorage
+          if (!printerToUse) {
+            const savedPrinterStr = localStorage.getItem('savedPrinter');
+            if (savedPrinterStr) {
+              try {
+                printerToUse = JSON.parse(savedPrinterStr);
+              } catch (e) {
+                console.error("Failed to parse saved printer:", e);
+              }
+            }
+          }
 
+          // Fallback: use default printer from printers list
+          if (!printerToUse && printers.length > 0) {
+            printerToUse = printers.find((p) => p.isDefault) || printers[0];
+          }
+
+          // Final fallback for kiosk mode
+          if (kioskMode) {
+            printerToUse = { name: 'Default Printer', isDefault: true, status: 'available' };
+          }
+
+          // If still no printer, show error
+          if (!printerToUse) {
+            throw new Error("No printer selected. Please select a printer in settings.");
+          }
+
+          // Send full printer object from localStorage to API
+          // Use the complete printer object saved in localStorage with all its properties
+          // This ensures all printer details (name, receiptProfile, languageHint, status, etc.) are sent to API
           const printerObj = {
-            name: printerName,
-            columns: { fontA: 48, fontB: 64 }, // Default columns
+            // Spread all properties from saved printer object (name, receiptProfile, languageHint, status, etc.)
+            ...printerToUse,
+            // Include columns for backward compatibility (in case receiptProfile.columns doesn't exist)
+            columns: printerToUse.receiptProfile?.columns || { fontA: 48, fontB: 64 },
           };
 
           const job = {
@@ -1931,7 +2021,7 @@ export function NewSale() {
           if (printSuccess.success) {
             toast({
               title: "Receipt Printed",
-              description: `Receipt sent to ${printerName}`,
+              description: `Receipt sent to ${printerToUse.name}`,
             });
           } else {
             // Fallback to browser print if server failed
@@ -2151,7 +2241,15 @@ export function NewSale() {
                   <select
                     className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
                     value={selectedPrinter}
-                    onChange={(e) => setSelectedPrinter(e.target.value)}
+                    onChange={(e) => {
+                      const printerName = e.target.value;
+                      setSelectedPrinter(printerName);
+                      // Find and save the full printer object
+                      const selectedPrinterObj = printers.find((p) => p.name === printerName);
+                      if (selectedPrinterObj) {
+                        setSavedPrinterObj(selectedPrinterObj);
+                      }
+                    }}
                   >
                     <option value="">Choose a printer</option>
                     {printers.map((printer) => (

@@ -172,21 +172,34 @@ export const useStore = create<StoreState>()(
         })
 
         try {
-          // Get branch_id from localStorage if available
+          // Check if user is ADMIN - admins should see all products
+          const userRole = localStorage.getItem("role")
+          const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN"
+          
+          // Get branch_id from localStorage if available (only for non-admin users)
           let branchId = null
-          try {
-            const branchStr = localStorage.getItem("branch")
-            if (branchStr) {
-              const branchObj = JSON.parse(branchStr)
-              branchId = branchObj.id || branchStr
+          if (!isAdmin) {
+            try {
+              const branchStr = localStorage.getItem("branch")
+              if (branchStr && branchStr !== "Not Found") {
+                const branchObj = JSON.parse(branchStr)
+                branchId = branchObj.id || branchStr
+              }
+            } catch (e) {
+              branchId = localStorage.getItem("branch")
+              if (branchId === "Not Found") {
+                branchId = null
+              }
             }
-          } catch (e) {
-            branchId = localStorage.getItem("branch")
           }
 
           const params: Record<string, any> = {
-            branch_id: branchId || undefined,
             fetch_all: true,
+            // For admin users, don't filter by branch_id to get all products
+            // For branch users, filter by their branch_id
+            ...(branchId && !isAdmin ? { branch_id: branchId } : {}),
+            // Add limit for admin to get all products (increase if needed)
+            ...(isAdmin ? { limit: 10000 } : {}),
           }
 
           if (search) {

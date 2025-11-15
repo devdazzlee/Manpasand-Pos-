@@ -472,18 +472,6 @@ app.post('/print-receipt', async (req, res) => {
     let y = margins.top;
 
     // Logo (if provided)
-    const branchLineTop = (receiptData.storeName || '').toUpperCase();
-    if (branchLineTop) {
-      doc.font(baseFont).fontSize(9.5);
-      drawFit(branchLineTop, margins.left, y, W, {
-        maxSize: 10,
-        minSize: 8,
-        align: 'center',
-        font: baseFont
-      });
-      y += lineH(9) * 0.7;
-    }
-
     if (logoToUse && fs.existsSync(logoToUse)) {
       const maxW = mm(48);
       const maxH = mm(24);
@@ -656,6 +644,16 @@ app.post('/print-receipt', async (req, res) => {
       });
       y += lineH(usedF) - 1;
     }
+
+    // Powered by credit
+    y += hr(y, 'dotted', 0.5) + 2;
+    const poweredBy = drawFit('Powered by Ace Studios', margins.left, y, W, {
+      maxSize: 8.5,
+      minSize: 7.0,
+      align: 'center',
+      font: baseFont
+    });
+    y += lineH(poweredBy);
 
     // Trim height with safety buffer to avoid bottom cut (same as backend)
     const needed = y + margins.bottom + 16;
