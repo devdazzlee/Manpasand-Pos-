@@ -1919,11 +1919,6 @@ export function NewSale() {
         setLastTransactionId(transactionId);
         setCart([]);
 
-        toast({
-          title: "Payment Successful",
-          description: `Transaction ${transactionId} completed via ${method}`,
-        });
-
         // Auto-print receipt
         try {
           // Prepare receipt data for local print server (same format as backend)
@@ -2019,10 +2014,7 @@ export function NewSale() {
           );
 
           if (printSuccess.success) {
-            toast({
-              title: "Receipt Printed",
-              description: `Receipt sent to ${printerToUse.name}`,
-            });
+            // Receipt printed successfully (toast removed as per user request)
           } else {
             // Fallback to browser print if server failed
             console.warn(
@@ -2721,7 +2713,7 @@ export function NewSale() {
                 autoFocus
                 value={tenderedAmount}
                 onChange={(e) => handleTenderedInputChange(e.target.value)}
-                className="mt-1"
+                className="mt-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 min="0"
                 step="0.01"
               />
