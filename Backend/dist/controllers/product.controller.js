@@ -31,7 +31,7 @@ exports.toggleProductStatus = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(null, 'Product status changed successfully').send(res);
 });
 exports.listProducts = (0, asyncHandler_1.default)(async (req, res) => {
-    const { page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, branch_id } = req.query;
+    const { page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, branch_id, fetch_all, } = req.query;
     const result = await productService.listProducts({
         page: Number(page),
         limit: Number(limit),
@@ -41,9 +41,10 @@ exports.listProducts = (0, asyncHandler_1.default)(async (req, res) => {
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
         branch_id: branch_id,
+        fetchAll: fetch_all ? fetch_all === 'true' : false,
     });
     console.log(result);
-    new apiResponse_1.ApiResponse(result.data, 'Products retrieved successfully', 200).send(res);
+    new apiResponse_1.ApiResponse(result.data, 'Products retrieved successfully', 200, true, result.meta).send(res);
 });
 exports.getFeaturedProducts = (0, asyncHandler_1.default)(async (req, res) => {
     console.log('Fetching featured products');

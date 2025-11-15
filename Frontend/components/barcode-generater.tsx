@@ -62,6 +62,9 @@ export default function BarcodeGenerator() {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentProductId, setCurrentProductId] = useState("");
   const [globalExpiryDuration, setGlobalExpiryDuration] = useState("");
+  const [productDropdownOpen, setProductDropdownOpen] = useState(false);
+  const productSearchInputRef = useRef<HTMLInputElement | null>(null);
+  const productDropdownRef = useRef<HTMLDivElement | null>(null);
   const [availablePrinters, setAvailablePrinters] = useState<any[]>([]);
   const [selectedPrinter, setSelectedPrinter] = useState("");
   const [selectedPaperSize, setSelectedPaperSize] = useState("3x2inch");
@@ -180,6 +183,21 @@ export default function BarcodeGenerator() {
     const debounceTimer = setTimeout(fetchData, 300);
     return () => clearTimeout(debounceTimer);
   }, [searchTerm]);
+
+  // Handle click outside to close dropdown
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        productDropdownRef.current &&
+        !productDropdownRef.current.contains(event.target as Node)
+      ) {
+        setProductDropdownOpen(false);
+      }
+    };
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Fetch printers on component mount with delay to avoid conflicts
   useEffect(() => {
@@ -317,13 +335,11 @@ export default function BarcodeGenerator() {
     );
   }, [products, searchTerm]);
 
-  const addProduct = () => {
-    if (!currentProductId) return;
-
-    const product = products.find((p) => p.id === currentProductId);
+  const handleProductSelect = (productId: string) => {
+    const product = products.find((p) => p.id === productId);
     if (!product) return;
 
-    if (selectedProducts.some((sp) => sp.product.id === currentProductId)) {
+    if (selectedProducts.some((sp) => sp.product.id === productId)) {
       toast({
         variant: "destructive",
         title: "Product already selected",
@@ -350,6 +366,16 @@ export default function BarcodeGenerator() {
 
     setSelectedProducts((prev) => [...prev, newItem]);
     setCurrentProductId("");
+    setSearchTerm("");
+    setProductDropdownOpen(false);
+    if (productSearchInputRef.current) {
+      productSearchInputRef.current.blur();
+    }
+  };
+
+  const addProduct = () => {
+    if (!currentProductId) return;
+    handleProductSelect(currentProductId);
   };
 
   const removeProduct = (itemId: string) => {
@@ -981,51 +1007,61 @@ export default function BarcodeGenerator() {
           <CardContent className="space-y-4">
 
 
-            {/* Search */}
-            <div className="space-y-2 border-t pt-4">
-              <Label htmlFor="search">Search Products</Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  id="search"
-                  placeholder="Search by name, SKU, or code..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="pl-10"
-                />
-              </div>
-            </div>
-
-            {/* Product Selection */}
-            <div className="space-y-2">
-              <Label htmlFor="product">
+            {/* Product Search Dropdown - Combined Search and Select */}
+            <div className="space-y-2 border-t pt-4" ref={productDropdownRef}>
+              <Label htmlFor="product-search">
                 Add Product ({filteredProducts.length} available)
               </Label>
-              <div className="flex gap-2">
-                <Select
-                  onValueChange={setCurrentProductId}
-                  value={currentProductId}
-                >
-                  <SelectTrigger className="flex-1">
-                    <SelectValue placeholder="Choose a product" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {filteredProducts.map((product) => (
-                      <SelectItem key={product.id} value={product.id}>
-                        <div className="flex flex-col">
-                          <span className="font-medium">{product.name}</span>
-                          <span className="text-xs text-gray-500">
-                            SKU: {product.sku} | Rs{" "}
-                            {product.sales_rate_exc_dis_and_tax}
-                          </span>
-                        </div>
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Button onClick={addProduct} disabled={!currentProductId}>
-                  <Plus className="h-4 w-4" />
-                </Button>
+              <div className="relative">
+                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                <Input
+                  ref={productSearchInputRef}
+                  id="product-search"
+                  placeholder="Search by name, SKU, or code..."
+                  value={searchTerm}
+                  onFocus={() => setProductDropdownOpen(true)}
+                  autoComplete="off"
+                  onChange={(e) => {
+                    setSearchTerm(e.target.value);
+                    setProductDropdownOpen(true);
+                  }}
+                  className="pl-9"
+                />
+                {productDropdownOpen && (
+                  <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                    {productsLoading ? (
+                      <div className="px-3 py-2 text-sm text-gray-500">
+                        Loading products...
+                      </div>
+                    ) : filteredProducts.length === 0 ? (
+                      <div className="px-3 py-2 text-sm text-gray-500">
+                        {searchTerm ? "No matching products found" : "No products available"}
+                      </div>
+                    ) : (
+                      filteredProducts.map((product) => (
+                        <button
+                          key={product.id}
+                          type="button"
+                          className={`w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${
+                            currentProductId === product.id
+                              ? "bg-blue-50 font-semibold text-blue-900"
+                              : "text-gray-800"
+                          }`}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => handleProductSelect(product.id)}
+                        >
+                          <div className="flex flex-col">
+                            <span className="font-medium">{product.name}</span>
+                            <span className="text-xs text-gray-500">
+                              SKU: {product.sku || "N/A"} | Rs{" "}
+                              {product.sales_rate_exc_dis_and_tax || 0}
+                            </span>
+                          </div>
+                        </button>
+                      ))
+                    )}
+                  </div>
+                )}
               </div>
             </div>
 

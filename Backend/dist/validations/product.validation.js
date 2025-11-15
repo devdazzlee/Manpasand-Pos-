@@ -53,6 +53,7 @@ exports.listProductsSchema = zod_1.z.object({
         is_active: zod_1.z.string().optional(),
         display_on_pos: zod_1.z.string().optional(),
         branch_id: zod_1.z.string().optional(),
+        fetch_all: zod_1.z.string().optional(),
     }),
 });
 //# sourceMappingURL=product.validation.js.map

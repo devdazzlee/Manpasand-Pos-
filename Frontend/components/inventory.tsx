@@ -1199,18 +1199,25 @@ export default function Inventory() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={String(pageSize)} onValueChange={value => { setPageSize(Number(value)); setCurrentPage(1); }}>
-            <SelectTrigger className="w-32">
-              <SelectValue placeholder="Page Size" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="10">10</SelectItem>
-              <SelectItem value="20">20</SelectItem>
-              <SelectItem value="50">50</SelectItem>
-              <SelectItem value="100">100</SelectItem>
-              <SelectItem value="0">All</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="page-size" className="text-sm font-medium whitespace-nowrap">
+              Items per page:
+            </Label>
+            <Select value={String(pageSize)} onValueChange={value => { setPageSize(Number(value)); setCurrentPage(1); }}>
+              <SelectTrigger className="w-32" id="page-size">
+                <SelectValue placeholder="Page Size" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10</SelectItem>
+                <SelectItem value="25">25</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+                <SelectItem value="200">200</SelectItem>
+                <SelectItem value="500">500</SelectItem>
+                <SelectItem value="0">All</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
         {/* Products Table */}
@@ -1305,64 +1312,117 @@ export default function Inventory() {
                 </div>
                 {/* Pagination */}
                 {(totalPages > 1 || pageSize === 0) && (
-                  <div className="flex flex-col md:flex-row md:items-center md:justify-between mt-4 space-y-2 md:space-y-0">
-                    <div className="text-sm text-gray-500 mb-2 md:mb-0">
-                      {pageSize === 0 ? (
-                        <>Showing all {totalProducts} products</>
-                      ) : (
-                        <>Page {currentPage} of {totalPages} (Total: {totalProducts} products)</>
+                  <div className="flex flex-col gap-4 mt-6 pt-4 border-t">
+                    {/* Pagination Info */}
+                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                      <div className="text-sm text-gray-600">
+                        {pageSize === 0 ? (
+                          <>Showing all <span className="font-semibold">{totalProducts}</span> products</>
+                        ) : (
+                          <>
+                            Showing <span className="font-semibold">{(currentPage - 1) * pageSize + 1}</span> to{" "}
+                            <span className="font-semibold">{Math.min(currentPage * pageSize, totalProducts)}</span> of{" "}
+                            <span className="font-semibold">{totalProducts}</span> products
+                            {" "}(Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>)
+                          </>
+                        )}
+                      </div>
+                      
+                      {/* Page Size Selector */}
+                      {pageSize !== 0 && (
+                        <div className="flex items-center gap-2">
+                          <Label htmlFor="pagination-page-size" className="text-sm font-medium whitespace-nowrap">
+                            Items per page:
+                          </Label>
+                          <Select 
+                            value={String(pageSize)} 
+                            onValueChange={value => { 
+                              setPageSize(Number(value)); 
+                              setCurrentPage(1); 
+                            }}
+                          >
+                            <SelectTrigger className="w-32" id="pagination-page-size">
+                              <SelectValue placeholder="Page Size" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="10">10</SelectItem>
+                              <SelectItem value="25">25</SelectItem>
+                              <SelectItem value="50">50</SelectItem>
+                              <SelectItem value="100">100</SelectItem>
+                              <SelectItem value="200">200</SelectItem>
+                              <SelectItem value="500">500</SelectItem>
+                              <SelectItem value="0">All</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       )}
                     </div>
-                    {pageSize !== 0 && (
-                      <div className="flex items-center space-x-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage(1)}
-                          disabled={currentPage === 1}
-                        >
-                          First
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                          disabled={currentPage === 1}
-                        >
-                          Previous
-                        </Button>
-                        <Input
-                          type="number"
-                          min={1}
-                          max={totalPages}
-                          value={gotoPage}
-                          onChange={e => setGotoPage(e.target.value)}
-                          onKeyDown={e => {
-                            if (e.key === "Enter") {
-                              const page = Math.max(1, Math.min(Number(gotoPage), totalPages))
-                              if (!isNaN(page)) setCurrentPage(page)
-                              setGotoPage("")
-                            }
-                          }}
-                          placeholder="Go to page"
-                          className="w-24 h-8 px-2 text-sm"
-                        />
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                          disabled={currentPage === totalPages}
-                        >
-                          Next
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => setCurrentPage(totalPages)}
-                          disabled={currentPage === totalPages}
-                        >
-                          Last
-                        </Button>
+
+                    {/* Pagination Controls */}
+                    {pageSize !== 0 && totalPages > 1 && (
+                      <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage(1)}
+                            disabled={currentPage === 1}
+                            className="min-w-[80px]"
+                          >
+                            First
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                            disabled={currentPage === 1}
+                            className="min-w-[80px]"
+                          >
+                            Previous
+                          </Button>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm text-gray-600">Go to page:</span>
+                          <Input
+                            type="number"
+                            min={1}
+                            max={totalPages}
+                            value={gotoPage}
+                            onChange={e => setGotoPage(e.target.value)}
+                            onKeyDown={e => {
+                              if (e.key === "Enter") {
+                                const page = Math.max(1, Math.min(Number(gotoPage), totalPages))
+                                if (!isNaN(page)) setCurrentPage(page)
+                                setGotoPage("")
+                              }
+                            }}
+                            placeholder="Page #"
+                            className="w-20 h-9 px-2 text-sm text-center"
+                          />
+                          <span className="text-sm text-gray-500">/ {totalPages}</span>
+                        </div>
+                        
+                        <div className="flex items-center gap-1">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                            disabled={currentPage === totalPages}
+                            className="min-w-[80px]"
+                          >
+                            Next
+                          </Button>
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setCurrentPage(totalPages)}
+                            disabled={currentPage === totalPages}
+                            className="min-w-[80px]"
+                          >
+                            Last
+                          </Button>
+                        </div>
                       </div>
                     )}
                   </div>

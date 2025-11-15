@@ -11,6 +11,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   Search,
   Plus,
@@ -130,6 +131,9 @@ export function Categories() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editFileInputRef = useRef<HTMLInputElement>(null)
   const { toast } = useToast()
+  const [selectedCategoryForProducts, setSelectedCategoryForProducts] = useState<Category | null>(null)
+  const [categoryProducts, setCategoryProducts] = useState<any[]>([])
+  const [loadingProducts, setLoadingProducts] = useState(false)
 
   const [newCategory, setNewCategory] = useState<CreateCategoryData>({
     name: "",
@@ -279,12 +283,57 @@ export function Categories() {
     }
   }
 
-  // Fetch categories from API
+  // Fetch categories from API with product counts
   const fetchCategories = async () => {
     try {
       setIsLoading(true)
       const response = await apiClient.get("/categories")
-      setCategories(response.data.data || [])
+      const categoriesData = response.data.data || []
+      
+      // Fetch product counts for each category
+      const categoriesWithCounts = await Promise.all(
+        categoriesData.map(async (category: Category) => {
+          try {
+            // Check if user is ADMIN - admins should see all products
+            const userRole = localStorage.getItem("role");
+            const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+            
+            const params: any = {
+              category_id: category.id,
+              fetch_all: true,
+              limit: isAdmin ? 10000 : 1000, // Higher limit for admin
+            };
+            
+            // Don't filter by branch_id for admin users
+            if (!isAdmin) {
+              const branchStr = localStorage.getItem("branch");
+              if (branchStr && branchStr !== "Not Found") {
+                try {
+                  const branchObj = JSON.parse(branchStr);
+                  params.branch_id = branchObj.id || branchStr;
+                } catch (e) {
+                  params.branch_id = branchStr;
+                }
+              }
+            }
+            
+            const productsResponse = await apiClient.get("/products", { params });
+            const products = productsResponse.data?.data || [];
+            return {
+              ...category,
+              productCount: Array.isArray(products) ? products.length : 0,
+            };
+          } catch (error) {
+            console.error(`Error fetching products for category ${category.id}:`, error);
+            return {
+              ...category,
+              productCount: 0,
+            };
+          }
+        })
+      );
+      
+      setCategories(categoriesWithCounts);
     } catch (error: any) {
       console.log("Error fetching categories:", error)
       toast({
@@ -295,6 +344,55 @@ export function Categories() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  // Fetch products for a specific category
+  const fetchCategoryProducts = async (categoryId: string) => {
+    try {
+      setLoadingProducts(true);
+      // Check if user is ADMIN - admins should see all products
+      const userRole = localStorage.getItem("role");
+      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+      
+      const params: any = {
+        category_id: categoryId,
+        fetch_all: true,
+        limit: isAdmin ? 10000 : 1000, // Higher limit for admin
+      };
+      
+      // Don't filter by branch_id for admin users
+      if (!isAdmin) {
+        const branchStr = localStorage.getItem("branch");
+        if (branchStr && branchStr !== "Not Found") {
+          try {
+            const branchObj = JSON.parse(branchStr);
+            params.branch_id = branchObj.id || branchStr;
+          } catch (e) {
+            params.branch_id = branchStr;
+          }
+        }
+      }
+      
+      const response = await apiClient.get("/products", { params });
+      const products = response.data?.data || [];
+      setCategoryProducts(Array.isArray(products) ? products : []);
+    } catch (error: any) {
+      console.error("Error fetching category products:", error);
+      toast({
+        title: "Error",
+        description: error.response?.data?.message || "Failed to fetch products",
+        variant: "destructive",
+      });
+      setCategoryProducts([]);
+    } finally {
+      setLoadingProducts(false);
+    }
+  }
+
+  // Handle category card click to show products
+  const handleCategoryClick = (category: Category) => {
+    setSelectedCategoryForProducts(category);
+    fetchCategoryProducts(category.id);
   }
 
   // Create category
@@ -765,7 +863,11 @@ export function Categories() {
       {/* Categories Grid */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4 md:gap-6">
         {filteredCategories.map((category) => (
-          <Card key={category.id} className="hover:shadow-md transition-shadow">
+          <Card 
+            key={category.id} 
+            className="hover:shadow-md transition-shadow cursor-pointer"
+            onClick={() => handleCategoryClick(category)}
+          >
             <CardHeader className="pb-3">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-3">
@@ -840,9 +942,9 @@ export function Categories() {
               <div className="flex items-center justify-between mt-4">
                 <div className="flex items-center space-x-2">
                   <Package className="h-4 w-4 text-gray-400" />
-                  <span className="text-sm text-gray-600">{category.productCount || 0} products</span>
+                  <span className="text-sm font-medium text-gray-700">{category.productCount || 0} products</span>
                 </div>
-                <div className="flex space-x-2">
+                <div className="flex space-x-2" onClick={(e) => e.stopPropagation()}>
                   <Button size="sm" variant="outline" onClick={() => handleEditDialogOpen(category)}>
                     <Edit className="h-3 w-3" />
                   </Button>
@@ -1038,6 +1140,68 @@ export function Categories() {
                   "Update Category"
                 )}
               </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Products Dialog - Show products in selected category */}
+      <Dialog open={!!selectedCategoryForProducts} onOpenChange={(open) => !open && setSelectedCategoryForProducts(null)}>
+        <DialogContent className="max-w-4xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>
+              Products in "{selectedCategoryForProducts?.name}" Category
+            </DialogTitle>
+          </DialogHeader>
+          {loadingProducts ? (
+            <div className="flex items-center justify-center py-8">
+              <Loader2 className="h-6 w-6 animate-spin mr-2" />
+              <span>Loading products...</span>
+            </div>
+          ) : categoryProducts.length === 0 ? (
+            <div className="text-center py-8 text-gray-500">
+              <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+              <p>No products found in this category.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              <div className="text-sm text-gray-600 mb-4">
+                Total: <span className="font-semibold">{categoryProducts.length}</span> products
+              </div>
+              <div className="max-h-[60vh] overflow-y-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Product Name</TableHead>
+                      <TableHead>SKU</TableHead>
+                      <TableHead>Price</TableHead>
+                      <TableHead>Stock</TableHead>
+                      <TableHead>Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {categoryProducts.map((product: any) => (
+                      <TableRow key={product.id}>
+                        <TableCell className="font-medium">{product.name}</TableCell>
+                        <TableCell>{product.sku || "N/A"}</TableCell>
+                        <TableCell>
+                          Rs {product.sales_rate_inc_dis_and_tax || product.sales_rate_exc_dis_and_tax || product.purchase_rate || 0}
+                        </TableCell>
+                        <TableCell>
+                          {product.available_stock ?? product.current_stock ?? 0}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            className={product.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}
+                          >
+                            {product.is_active ? "Active" : "Inactive"}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           )}
         </DialogContent>

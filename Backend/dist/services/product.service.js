@@ -573,7 +573,7 @@ class ProductService {
             data: { is_active: !product.is_active },
         });
     }
-    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active = true, display_on_pos = true, branch_id, }) {
+    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active = true, display_on_pos = true, branch_id, fetchAll = false, }) {
         const where = {};
         if (search) {
             where.OR = [
@@ -594,79 +594,157 @@ class ProductService {
         if (display_on_pos !== undefined) {
             where.display_on_pos = display_on_pos;
         }
-        const [products, total] = await Promise.all([
-            client_2.prisma.product.findMany({
-                where,
-                skip: (page - 1) * limit,
-                take: limit,
-                orderBy: { created_at: 'desc' },
-                include: {
-                    unit: true,
-                    category: true,
-                    subcategory: true,
-                    size: true,
-                    supplier: true,
-                    brand: true,
-                    color: true,
-                    tax: true,
-                    stock: branch_id ? {
-                        where: { branch_id },
-                        select: {
-                            current_quantity: true,
-                            reserved_quantity: true,
-                            minimum_quantity: true,
-                            maximum_quantity: true,
-                        }
-                    } : true,
-                    _count: {
-                        select: { order_items: true },
+        const normalizedLimit = limit && limit > 0 ? limit : 10;
+        const pageSize = fetchAll ? 100 : normalizedLimit;
+        const minimalSelect = {
+            id: true,
+            name: true,
+            sku: true,
+            purchase_rate: true,
+            sales_rate_exc_dis_and_tax: true,
+            sales_rate_inc_dis_and_tax: true,
+            discount_amount: true,
+            is_active: true,
+            display_on_pos: true,
+            created_at: true,
+            updated_at: true,
+            category: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+            subcategory: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+            unit: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+            stock: branch_id
+                ? {
+                    where: { branch_id },
+                    select: {
+                        current_quantity: true,
+                        reserved_quantity: true,
+                        minimum_quantity: true,
+                        maximum_quantity: true,
+                    },
+                }
+                : {
+                    select: {
+                        current_quantity: true,
+                        reserved_quantity: true,
+                        minimum_quantity: true,
+                        maximum_quantity: true,
+                        branch_id: true,
                     },
                 },
-            }),
-            client_2.prisma.product.count({ where }),
-        ]);
-        console.log("products >>>", products);
+            _count: {
+                select: { order_items: true },
+            },
+        };
+        const detailedSelect = {
+            ...minimalSelect,
+            description: true,
+            tax_id: true,
+            category_id: true,
+            subcategory_id: true,
+            supplier_id: true,
+            brand_id: true,
+            color_id: true,
+            size_id: true,
+            brand: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+            supplier: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+            color: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+            size: {
+                select: {
+                    id: true,
+                    name: true,
+                },
+            },
+            tax: {
+                select: {
+                    id: true,
+                    name: true,
+                    percentage: true,
+                },
+            },
+        };
+        const select = fetchAll ? minimalSelect : detailedSelect;
+        const fetchPage = async (pageNumber) => client_2.prisma.product.findMany({
+            where,
+            orderBy: { created_at: 'desc' },
+            skip: (pageNumber - 1) * pageSize,
+            take: pageSize,
+            select,
+        });
+        const total = await client_2.prisma.product.count({ where });
+        const chunkPageCount = Math.max(1, Math.ceil(total / pageSize));
+        const paginatedTotalPages = Math.max(1, Math.ceil(total / Math.max(normalizedLimit, 1)));
+        const pagesToFetch = fetchAll ? Array.from({ length: chunkPageCount }, (_, i) => i + 1) : [page];
+        const pageResults = await Promise.all(pagesToFetch.map((pageNumber) => fetchPage(pageNumber)));
+        const products = fetchAll ? pageResults.flat() : pageResults[0] || [];
+        const mapped = products.map((p) => {
+            let currentStock = new client_1.Prisma.Decimal(0);
+            let reservedStock = new client_1.Prisma.Decimal(0);
+            let minimumStock = new client_1.Prisma.Decimal(0);
+            let maximumStock = new client_1.Prisma.Decimal(0);
+            const rawStock = p.stock;
+            const rawCount = p._count;
+            if (branch_id && rawStock && Array.isArray(rawStock) && rawStock.length > 0) {
+                const stockData = rawStock[0];
+                currentStock = stockData.current_quantity || new client_1.Prisma.Decimal(0);
+                reservedStock = stockData.reserved_quantity || new client_1.Prisma.Decimal(0);
+                minimumStock = stockData.minimum_quantity || new client_1.Prisma.Decimal(0);
+                maximumStock = stockData.maximum_quantity || new client_1.Prisma.Decimal(0);
+            }
+            else if (rawStock && Array.isArray(rawStock)) {
+                rawStock.forEach((stockItem) => {
+                    currentStock = currentStock.plus(stockItem.current_quantity || 0);
+                    reservedStock = reservedStock.plus(stockItem.reserved_quantity || 0);
+                    minimumStock = minimumStock.plus(stockItem.minimum_quantity || 0);
+                    maximumStock = maximumStock.plus(stockItem.maximum_quantity || 0);
+                });
+            }
+            return {
+                ...p,
+                current_stock: (0, helpers_1.asNumber)(currentStock),
+                reserved_stock: (0, helpers_1.asNumber)(reservedStock),
+                available_stock: (0, helpers_1.asNumber)(currentStock.minus(reservedStock)),
+                minimum_stock: (0, helpers_1.asNumber)(minimumStock),
+                maximum_stock: (0, helpers_1.asNumber)(maximumStock),
+                order_count: rawCount?.order_items ?? 0,
+            };
+        });
         return {
-            data: products.map(p => {
-                // Calculate available stock
-                let currentStock = new client_1.Prisma.Decimal(0);
-                let reservedStock = new client_1.Prisma.Decimal(0);
-                let minimumStock = new client_1.Prisma.Decimal(0);
-                let maximumStock = new client_1.Prisma.Decimal(0);
-                if (branch_id && p.stock && Array.isArray(p.stock) && p.stock.length > 0) {
-                    // Single branch stock
-                    const stockData = p.stock[0];
-                    currentStock = stockData.current_quantity || new client_1.Prisma.Decimal(0);
-                    reservedStock = stockData.reserved_quantity || new client_1.Prisma.Decimal(0);
-                    minimumStock = stockData.minimum_quantity || new client_1.Prisma.Decimal(0);
-                    maximumStock = stockData.maximum_quantity || new client_1.Prisma.Decimal(0);
-                }
-                else if (p.stock && Array.isArray(p.stock)) {
-                    // Multiple branches - sum up all stock
-                    p.stock.forEach((stockItem) => {
-                        currentStock = currentStock.plus(stockItem.current_quantity || 0);
-                        reservedStock = reservedStock.plus(stockItem.reserved_quantity || 0);
-                        minimumStock = minimumStock.plus(stockItem.minimum_quantity || 0);
-                        maximumStock = maximumStock.plus(stockItem.maximum_quantity || 0);
-                    });
-                }
-                return {
-                    ...p,
-                    current_stock: (0, helpers_1.asNumber)(currentStock),
-                    reserved_stock: (0, helpers_1.asNumber)(reservedStock),
-                    available_stock: (0, helpers_1.asNumber)(currentStock.minus(reservedStock)),
-                    minimum_stock: (0, helpers_1.asNumber)(minimumStock),
-                    maximum_stock: (0, helpers_1.asNumber)(maximumStock),
-                    order_count: p._count.order_items,
-                    _count: undefined,
-                    stock: undefined, // Remove the raw stock data
-                };
-            }),
+            data: mapped,
             meta: {
                 total,
-                page,
-                limit,
-                totalPages: Math.ceil(total / limit),
+                page: fetchAll ? 1 : page,
+                limit: fetchAll ? mapped.length : normalizedLimit,
+                totalPages: fetchAll ? 1 : paginatedTotalPages,
+                fetchAll,
             },
         };
     }
