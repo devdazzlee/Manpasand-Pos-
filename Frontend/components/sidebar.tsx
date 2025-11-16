@@ -101,7 +101,6 @@ const menuSections: SidebarMenuSection[] = [
       { id: "colors", label: "Colors", icon: Package },
       { id: "sizes", label: "Sizes", icon: Package },
       // { id: "purchase-orders", label: "Purchase Orders", icon: FileText },
-      { id: "pricing", label: "Pricing & Margins", icon: PriceTag },
     ],
   },
   {
@@ -110,7 +109,6 @@ const menuSections: SidebarMenuSection[] = [
     expandable: true,
     items: [
       { id: "customers", label: "Customers", icon: Users },
-      { id: "loyalty", label: "Stocks", icon: Gift },
       // { id: "gift-cards", label: "Gift Cards", icon: CreditCard },
       { id: "employees", label: "Employees", icon: UserCheck },
       { id: "shifts", label: "Shift Management", icon: Clock },

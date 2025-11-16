@@ -125,6 +125,7 @@ export function Returns() {
   const [sales, setSales] = useState<Sale[]>([])
   const [loading, setLoading] = useState(true) // Start with true to show loader on initial load
   const [salesLoading, setSalesLoading] = useState(false)
+  const [processingReturn, setProcessingReturn] = useState(false) // Separate loading state for process return button
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [selectedReturnItems, setSelectedReturnItems] = useState<SelectedReturnItem[]>([])
   // Track return quantity input values as strings to allow decimal point typing
@@ -344,7 +345,8 @@ export function Returns() {
   // Calculate stats
   const today = new Date().toISOString().split('T')[0]
   const todayReturns = returns.filter((r) => r.sale_date.startsWith(today)).length
-  const todayValue = returns.filter((r) => r.sale_date.startsWith(today)).reduce((sum, r) => sum + Number(r.total_amount), 0)
+  // Use Math.abs to ensure return value is always positive (returns are stored as negative in some systems)
+  const todayValue = returns.filter((r) => r.sale_date.startsWith(today)).reduce((sum, r) => sum + Math.abs(Number(r.total_amount)), 0)
   const pendingReturns = returns.filter((r) => r.status === "PENDING").length
   const returnRate = returns.length > 0 ? ((returns.length / sales.length) * 100).toFixed(1) : "0.0"
 
@@ -444,7 +446,10 @@ export function Returns() {
   }, [products, exchangeProductSearch])
 
   const handleProcessReturn = async () => {
-    if (!newReturn.saleId || (newReturn.returnedItems.length === 0 && newReturn.exchangedItems.length === 0)) {
+    // Filter out items with quantity 0 before validation
+    const validReturnedItems = newReturn.returnedItems.filter(item => item.quantity > 0)
+    
+    if (!newReturn.saleId || (validReturnedItems.length === 0 && newReturn.exchangedItems.length === 0)) {
       toast({
         title: "Missing Information",
         description: "Please select a sale and add items to return or exchange.",
@@ -486,26 +491,61 @@ export function Returns() {
       return
     }
 
-    setLoading(true)
-    try {
-      const response = await apiClient.patch(`/sale/${newReturn.saleId}/refund`, {
-        customerId: newReturn.customerId || undefined,
-        returnType: newReturn.returnType,
-        refundMethod: newReturn.refundMethod || undefined,
-        returnedItems: newReturn.returnedItems,
-        exchangedItems: newReturn.exchangedItems,
-        notes: newReturn.notes,
+    // Validate that we have at least one item to return or exchange
+    if (validReturnedItems.length === 0 && newReturn.exchangedItems.length === 0) {
+      toast({
+        title: "Missing Information",
+        description: "Please select at least one item to return or add items for exchange.",
+        variant: "destructive",
       })
+      return
+    }
 
+    setProcessingReturn(true) // Set processing state for button
+    try {
+      // Prepare the request payload - ensure all quantities are numbers
+      const payload: any = {
+        returnedItems: validReturnedItems.map(item => ({
+          productId: item.productId,
+          quantity: Number(item.quantity) // Ensure quantity is a number, not a string
+        })),
+        notes: newReturn.notes || "",
+      }
+
+      // Add exchange items if return type is EXCHANGE - ensure quantities and prices are numbers
+      if (newReturn.returnType === "EXCHANGE" && newReturn.exchangedItems.length > 0) {
+        payload.exchangedItems = newReturn.exchangedItems.map(item => ({
+          productId: item.productId,
+          quantity: Number(item.quantity), // Ensure quantity is a number
+          price: Number(item.price) // Ensure price is a number
+        }))
+      }
+
+      // Add refund method if return type is REFUND
+      if (newReturn.returnType === "REFUND" && newReturn.refundMethod) {
+        payload.refundMethod = newReturn.refundMethod
+      }
+
+      // Add customer ID if available
+      if (newReturn.customerId) {
+        payload.customerId = newReturn.customerId
+      }
+
+      console.log("📤 Processing return with payload:", payload)
+      
+      const response = await apiClient.patch(`/sale/${newReturn.saleId}/refund`, payload)
+
+      // Show success toast
       toast({
         title: "Return Processed",
         description: "Return has been processed successfully.",
+        variant: "default",
       })
 
-      // Refresh data
-      await fetchReturns()
-      await fetchSales()
-
+      // Close modal immediately after success (before any other state changes)
+      setIsProcessOpen(false)
+      
+      // Reset form after closing modal
       setNewReturn({
         saleId: "",
         customerId: "",
@@ -518,15 +558,44 @@ export function Returns() {
       setSelectedReturnItems([])
       setExchangeItems([])
       setExchangeProductSearch("")
-      setIsProcessOpen(false)
+      setSelectedSale(null)
+      
+      // Refresh data after closing modal (don't await to avoid blocking)
+      fetchReturns()
+      fetchSales()
     } catch (error: any) {
+      console.error("❌ Error processing return:", error)
+      console.error("Error response:", error.response?.data)
+      
+      // Extract detailed error message
+      let errorMessage = "An error occurred while processing the return."
+      if (error.response?.data?.message) {
+        errorMessage = error.response.data.message
+      } else if (error.response?.data?.error) {
+        errorMessage = error.response.data.error
+      } else if (error.response?.data?.errors) {
+        // Handle validation errors array
+        const errors = error.response.data.errors
+        if (Array.isArray(errors)) {
+          errorMessage = errors.map((e: any) => e.message || e).join(", ")
+        } else if (typeof errors === 'object') {
+          errorMessage = Object.entries(errors)
+            .map(([field, messages]: [string, any]) => {
+              const msg = Array.isArray(messages) ? messages.join(", ") : messages
+              return `${field}: ${msg}`
+            })
+            .join("; ")
+        }
+      }
+      
       toast({
         variant: "destructive",
         title: "Failed to process return",
-        description: error.response?.data?.message || "An error occurred while processing the return.",
+        description: errorMessage,
       })
+      // Don't close modal on error - let user see the error and try again
     } finally {
-      setLoading(false)
+      setProcessingReturn(false) // Reset processing state
     }
   }
 
@@ -637,7 +706,7 @@ export function Returns() {
               <TableCell className="font-medium">{returnItem.sale_number}</TableCell>
               <TableCell>{returnItem.customer?.name || returnItem.customer?.email || "N/A"}</TableCell>
               <TableCell>{new Date(returnItem.sale_date).toLocaleDateString()}</TableCell>
-              <TableCell>Rs {Number(returnItem.total_amount).toLocaleString()}</TableCell>
+              <TableCell>Rs {Math.abs(Number(returnItem.total_amount)).toLocaleString()}</TableCell>
               <TableCell className="capitalize">{returnItem.payment_method}</TableCell>
               <TableCell>
                 <Badge className={getStatusColor(returnItem.status)}>{returnItem.status}</Badge>
@@ -669,7 +738,16 @@ export function Returns() {
           <h1 className="text-2xl md:text-3xl font-bold">Returns & Refunds</h1>
           <p className="text-sm md:text-base text-gray-600">Process customer returns and refunds</p>
         </div>
-        <Dialog open={isProcessOpen} onOpenChange={setIsProcessOpen}>
+        <Dialog 
+          open={isProcessOpen} 
+          onOpenChange={(open) => {
+            // Prevent closing modal while processing
+            if (!open && processingReturn) {
+              return
+            }
+            setIsProcessOpen(open)
+          }}
+        >
           <DialogTrigger asChild>
             <Button>
               <Plus className="w-4 h-4 mr-2" />
@@ -726,7 +804,7 @@ export function Returns() {
                               <span>{sale.sale_number}</span>
                               <span className="text-xs text-gray-500">
                                 {sale.customer?.name || sale.customer?.email || "No customer"} • Rs{" "}
-                                {Number(sale.total_amount).toLocaleString()}
+                                {Math.abs(Number(sale.total_amount)).toLocaleString()}
                               </span>
                             </div>
                           </button>
@@ -743,7 +821,7 @@ export function Returns() {
                   <div className="text-sm space-y-1">
                     <div><strong>Sale Number:</strong> {selectedSale.sale_number}</div>
                     <div><strong>Customer:</strong> {selectedSale.customer?.name || selectedSale.customer?.email || "N/A"}</div>
-                    <div><strong>Total Amount:</strong> Rs {Number(selectedSale.total_amount).toLocaleString()}</div>
+                    <div><strong>Total Amount:</strong> Rs {Math.abs(Number(selectedSale.total_amount)).toLocaleString()}</div>
                     <div><strong>Items:</strong> {selectedSale.sale_items.length}</div>
                   </div>
                 </div>
@@ -1110,12 +1188,16 @@ export function Returns() {
               </div>
             </div>
             <DialogFooter>
-              <Button variant="outline" onClick={() => setIsProcessOpen(false)}>
+              <Button 
+                variant="outline" 
+                onClick={() => setIsProcessOpen(false)}
+                disabled={processingReturn}
+              >
                 Cancel
               </Button>
-              <Button onClick={handleProcessReturn} disabled={loading}>
-                {loading && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                Process Return
+              <Button onClick={handleProcessReturn} disabled={processingReturn}>
+                {processingReturn && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
+                {processingReturn ? "Processing..." : "Process Return"}
               </Button>
             </DialogFooter>
           </DialogContent>
@@ -1252,7 +1334,7 @@ export function Returns() {
                       <strong>Payment Method:</strong> {selectedReturn.payment_method}
                     </div>
                     <div>
-                      <strong>Total Amount:</strong> Rs {Number(selectedReturn.total_amount).toLocaleString()}
+                      <strong>Total Amount:</strong> Rs {Math.abs(Number(selectedReturn.total_amount)).toLocaleString()}
                     </div>
                   </div>
                 </div>

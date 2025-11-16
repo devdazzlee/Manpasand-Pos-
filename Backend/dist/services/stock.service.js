@@ -10,23 +10,38 @@ class StockService {
             const exists = await tx.stock.findUnique({
                 where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
             });
-            if (exists)
-                throw new apiError_1.AppError(400, "Stock already exists for this product in branch");
-            const stock = await tx.stock.create({
-                data: {
-                    product_id: productId,
-                    branch_id: branchId,
-                    current_quantity: quantity,
-                },
-            });
+            let stock;
+            let previousQty = 0;
+            let newQty = quantity;
+            if (exists) {
+                // If stock exists, add to existing quantity
+                previousQty = (0, helpers_1.asNumber)(exists.current_quantity);
+                newQty = (0, helpers_1.addDecimal)(exists.current_quantity, quantity);
+                stock = await tx.stock.update({
+                    where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
+                    data: {
+                        current_quantity: newQty,
+                    },
+                });
+            }
+            else {
+                // If stock doesn't exist, create new entry
+                stock = await tx.stock.create({
+                    data: {
+                        product_id: productId,
+                        branch_id: branchId,
+                        current_quantity: quantity,
+                    },
+                });
+            }
             await tx.stockMovement.create({
                 data: {
                     product_id: productId,
                     branch_id: branchId,
-                    movement_type: "ADJUSTMENT",
+                    movement_type: "PURCHASE",
                     quantity_change: quantity,
-                    previous_qty: 0,
-                    new_qty: quantity,
+                    previous_qty: previousQty,
+                    new_qty: newQty,
                     created_by: createdBy,
                 },
             });
@@ -152,19 +167,65 @@ class StockService {
             };
         });
     }
-    async getStockByBranch(branchId, page = 1, limit = 20, search) {
+    async removeStock({ productId, branchId, quantity, reason, createdBy }) {
+        if (quantity <= 0) {
+            throw new apiError_1.AppError(400, "Quantity must be greater than 0");
+        }
+        return client_1.prisma.$transaction(async (tx) => {
+            const stock = await tx.stock.findUnique({
+                where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
+            });
+            if (!stock)
+                throw new apiError_1.AppError(404, "Stock not found");
+            const currentQty = (0, helpers_1.asNumber)(stock.current_quantity);
+            if (currentQty < quantity) {
+                throw new apiError_1.AppError(400, "Insufficient stock to remove");
+            }
+            const newQty = (0, helpers_1.addDecimal)(stock.current_quantity, -quantity);
+            await tx.stock.update({
+                where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
+                data: {
+                    current_quantity: newQty,
+                },
+            });
+            await tx.stockMovement.create({
+                data: {
+                    product_id: productId,
+                    branch_id: branchId,
+                    movement_type: "DAMAGE",
+                    quantity_change: -quantity,
+                    previous_qty: stock.current_quantity,
+                    new_qty: newQty,
+                    notes: reason || "Stock removed",
+                    created_by: createdBy,
+                },
+            });
+            return { newQty };
+        });
+    }
+    async getStockByBranch(branchId, page = 1, limit = 20, search, userRole) {
         const skip = (page - 1) * limit;
         const where = {};
-        // Only filter by branch if branchId is provided
-        if (branchId && branchId.trim() !== "") {
+        // Only filter by branch if branchId is provided AND user is not admin
+        if (branchId && branchId.trim() !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
             where.branch_id = branchId;
         }
         if (search && search.trim() !== "") {
             where.product = {
-                name: {
-                    contains: search,
-                    mode: 'insensitive'
-                }
+                OR: [
+                    {
+                        name: {
+                            contains: search,
+                            mode: 'insensitive'
+                        }
+                    },
+                    {
+                        sku: {
+                            contains: search,
+                            mode: 'insensitive'
+                        }
+                    }
+                ]
             };
         }
         const [stocks, total] = await Promise.all([
@@ -182,6 +243,7 @@ class StockService {
             actualReturned: stocks.length,
             totalInDatabase: total,
             branchId,
+            userRole,
             page
         });
         return {
@@ -194,14 +256,19 @@ class StockService {
             },
         };
     }
-    async getStockMovements(branchId) {
+    async getStockMovements(branchId, userRole) {
+        const where = {};
+        // Only filter by branch if branchId is provided AND user is not admin
+        if (branchId && branchId.trim() !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
+            where.branch_id = branchId;
+        }
         return client_1.prisma.stockMovement.findMany({
-            where: { branch_id: branchId },
+            where,
             include: { product: true, branch: true, user: { select: { email: true } } },
             orderBy: { created_at: "desc" },
         });
     }
-    async getTodayStockMovements(branchId) {
+    async getTodayStockMovements(branchId, userRole) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         const tomorrow = new Date(today);
@@ -212,7 +279,8 @@ class StockService {
                 lt: tomorrow,
             }
         };
-        if (branchId && branchId !== "") {
+        // Only filter by branch if branchId is provided AND user is not admin
+        if (branchId && branchId !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
             whereClause.branch_id = branchId;
         }
         return client_1.prisma.stockMovement.findMany({

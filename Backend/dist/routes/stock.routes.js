@@ -10,6 +10,7 @@ router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(["SU
 router.post("/", (0, validation_middleware_1.validate)(stock_validation_1.createStockSchema), stock_controller_1.createStockController);
 router.patch("/adjust", (0, validation_middleware_1.validate)(stock_validation_1.adjustStockSchema), stock_controller_1.adjustStockController);
 router.post("/transfer", (0, validation_middleware_1.validate)(stock_validation_1.transferStockSchema), stock_controller_1.transferStockController);
+router.delete("/remove", (0, validation_middleware_1.validate)(stock_validation_1.removeStockSchema), stock_controller_1.removeStockController);
 router.get("/", stock_controller_1.getStocksController);
 router.get("/history", stock_controller_1.getStockMovementsController);
 router.get("/today", stock_controller_1.getTodayStockMovementsController);

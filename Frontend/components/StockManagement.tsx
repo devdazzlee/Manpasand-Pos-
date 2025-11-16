@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,19 +10,18 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Plus, ArrowRightLeft, RefreshCw, TrendingUp, TrendingDown, Package, Loader2, Calendar, Edit, Check, ChevronsUpDown } from "lucide-react";
+import { Search, Plus, ArrowRightLeft, RefreshCw, TrendingUp, TrendingDown, Package, Loader2, Calendar, Edit } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
 import { usePosData } from "@/hooks/use-pos-data";
+import { PageLoader } from "@/components/ui/page-loader";
 import { Textarea } from "@/components/ui/textarea";
-import { Command, CommandEmpty, CommandGroup, CommandInput, CommandItem, CommandList } from "@/components/ui/command";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
 
 interface Product {
   id: string;
   name: string;
+  sku?: string;
 }
 
 interface Branch {
@@ -79,8 +78,7 @@ export function StockManagement() {
   const [isTransferring, setIsTransferring] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
 
-  // Pagination for products
-  const [productPage, setProductPage] = useState(1);
+  // Product search state
   const [productSearch, setProductSearch] = useState("");
   const [products, setProducts] = useState<Product[]>([]);
   const [totalProducts, setTotalProducts] = useState(0);
@@ -94,31 +92,52 @@ export function StockManagement() {
   const [isTransferOpen, setIsTransferOpen] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
+  const [isRemoveOpen, setIsRemoveOpen] = useState(false);
 
-  // Popover state for product comboboxes
-  const [addProductOpen, setAddProductOpen] = useState(false);
-  const [adjustProductOpen, setAdjustProductOpen] = useState(false);
-  const [transferProductOpen, setTransferProductOpen] = useState(false);
+  // Dropdown state for product selection
+  const [addProductDropdownOpen, setAddProductDropdownOpen] = useState(false);
+  const [adjustProductDropdownOpen, setAdjustProductDropdownOpen] = useState(false);
+  const [transferProductDropdownOpen, setTransferProductDropdownOpen] = useState(false);
+  const [removeProductDropdownOpen, setRemoveProductDropdownOpen] = useState(false);
+  
+  // Refs for dropdown containers
+  const addProductDropdownRef = React.useRef<HTMLDivElement>(null);
+  const adjustProductDropdownRef = React.useRef<HTMLDivElement>(null);
+  const transferProductDropdownRef = React.useRef<HTMLDivElement>(null);
+  const removeProductDropdownRef = React.useRef<HTMLDivElement>(null);
+  
+  // Refs for search inputs
+  const addProductSearchRef = React.useRef<HTMLInputElement>(null);
+  const adjustProductSearchRef = React.useRef<HTMLInputElement>(null);
+  const transferProductSearchRef = React.useRef<HTMLInputElement>(null);
+  const removeProductSearchRef = React.useRef<HTMLInputElement>(null);
 
   // Form state
   const [transferForm, setTransferForm] = useState({
     productId: "",
     fromBranchId: "",
     toBranchId: "",
-    quantity: 1,
+    quantity: "" as string | number,
     notes: "",
   });
 
   const [addForm, setAddForm] = useState({
     productId: "",
     branchId: "",
-    quantity: 1,
+    quantity: "" as string | number,
   });
 
   const [adjustForm, setAdjustForm] = useState({
     productId: "",
     branchId: "",
-    quantityChange: 0,
+    quantityChange: "" as string | number,
+    reason: "",
+  });
+
+  const [removeForm, setRemoveForm] = useState({
+    productId: "",
+    branchId: "",
+    quantity: "" as string | number,
     reason: "",
   });
 
@@ -161,8 +180,12 @@ export function StockManagement() {
           limit: stockPageSize.toString(),
         });
         
-        // Only add branchId if a specific branch is selected
-        if (branchFilter && branchFilter !== "all") {
+        // Check if user is admin - don't filter by branch for admin
+        const userRole = localStorage.getItem("role");
+        const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+        
+        // Only add branchId if a specific branch is selected AND user is not admin
+        if (branchFilter && branchFilter !== "all" && !isAdmin) {
           params.append('branchId', branchFilter);
         }
         
@@ -172,8 +195,8 @@ export function StockManagement() {
         
         const [sRes, hRes, tRes] = await Promise.all([
           apiClient.get(`${API_BASE}/stock?${params}`),
-          apiClient.get(`${API_BASE}/stock/history${branchFilter && branchFilter !== "all" ? `?branchId=${branchFilter}` : ""}`),
-          apiClient.get(`${API_BASE}/stock/today${branchFilter && branchFilter !== "all" ? `?branchId=${branchFilter}` : ""}`),
+          apiClient.get(`${API_BASE}/stock/history${branchFilter && branchFilter !== "all" && !isAdmin ? `?branchId=${branchFilter}` : ""}`),
+          apiClient.get(`${API_BASE}/stock/today${branchFilter && branchFilter !== "all" && !isAdmin ? `?branchId=${branchFilter}` : ""}`),
         ]);
         
         setAllStocks(sRes.data.data || []);
@@ -198,62 +221,146 @@ export function StockManagement() {
     fetchData();
   }, [branchFilter, stockPage, stockPageSize, searchTerm]);
 
-  // Fetch products with search and pagination
-  useEffect(() => {
-    const fetchProducts = async () => {
-      setLoadingProducts(true);
-      try {
-        // Check if user is ADMIN - admins should see all products
-        const userRole = localStorage.getItem("role");
-        const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
-        
-        const params: any = {
-          page: productPage,
-          limit: isAdmin ? 10000 : 100, // Higher limit for admin to get all products
-          is_active: true,
-          fetch_all: true,
-        };
-        
-        // Don't filter by branch_id for admin users
-        if (!isAdmin) {
-          const branchStr = localStorage.getItem("branch");
-          if (branchStr && branchStr !== "Not Found") {
-            try {
-              const branchObj = JSON.parse(branchStr);
-              params.branch_id = branchObj.id || branchStr;
-            } catch (e) {
-              params.branch_id = branchStr;
-            }
+  // Function to fetch products from API
+  const fetchProductsFromAPI = useCallback(async (searchTerm: string = "") => {
+    setLoadingProducts(true);
+    try {
+      // Check if user is ADMIN - admins should see all products
+      const userRole = localStorage.getItem("role");
+      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+      
+      const params: any = {
+        limit: isAdmin ? 10000 : 1000, // Get all products for admin
+        fetch_all: true,
+      };
+      
+      // Add search term if provided
+      if (searchTerm && searchTerm.trim().length > 0) {
+        params.search = searchTerm.trim();
+      }
+      
+      // Don't filter by branch_id or is_active for admin users
+      if (!isAdmin) {
+        const branchStr = localStorage.getItem("branch");
+        if (branchStr && branchStr !== "Not Found") {
+          try {
+            const branchObj = JSON.parse(branchStr);
+            params.branch_id = branchObj.id || branchStr;
+          } catch (e) {
+            params.branch_id = branchStr;
           }
         }
-        
-        if (productSearch) {
-          params.search = productSearch;
-        }
+        params.is_active = true;
+      }
 
-        const response = await apiClient.get(`${API_BASE}/products`, { params });
-        const data = response.data.data || response.data;
-        
-        if (productPage === 1) {
-          setProducts(data.products || data);
-        } else {
-          setProducts(prev => [...prev, ...(data.products || data)]);
-        }
-        setTotalProducts(data.meta?.total || (data.products || data).length);
-      } catch (e: any) {
-        console.log(e);
-        toast({
-          title: "Error",
-          description: "Failed to load products",
-          variant: "destructive",
-        });
-      } finally {
-        setLoadingProducts(false);
+      const response = await apiClient.get(`${API_BASE}/products`, { params });
+      const data = response.data.data || response.data;
+      const productsList = data.products || data || [];
+      
+      setProducts(productsList);
+      setTotalProducts(data.meta?.total || productsList.length);
+    } catch (e: any) {
+      console.log(e);
+      toast({
+        title: "Error",
+        description: "Failed to load products",
+        variant: "destructive",
+      });
+    } finally {
+      setLoadingProducts(false);
+    }
+  }, []);
+
+  // Live search products from API with debouncing - like returns modal
+  useEffect(() => {
+    // Debounce API calls - wait 300ms after user stops typing
+    const timeoutId = setTimeout(() => {
+      fetchProductsFromAPI(productSearch);
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [productSearch, fetchProductsFromAPI]); // Fetch when search term changes
+
+  // Fetch initial products when Add Stock modal opens
+  useEffect(() => {
+    if (isAddOpen) {
+      // Fetch initial products when modal opens
+      fetchProductsFromAPI("");
+    } else {
+      // Clear products when modal closes
+      setProducts([]);
+      setProductSearch("");
+    }
+  }, [isAddOpen, fetchProductsFromAPI]);
+
+  // Fetch initial products when Adjust Stock modal opens
+  useEffect(() => {
+    if (isAdjustOpen) {
+      // Fetch initial products when modal opens
+      fetchProductsFromAPI("");
+    } else {
+      // Clear products when modal closes
+      setProducts([]);
+      setProductSearch("");
+    }
+  }, [isAdjustOpen, fetchProductsFromAPI]);
+
+  // Fetch initial products when Transfer Stock modal opens
+  useEffect(() => {
+    if (isTransferOpen) {
+      // Fetch initial products when modal opens
+      fetchProductsFromAPI("");
+    } else {
+      // Clear products when modal closes
+      setProducts([]);
+      setProductSearch("");
+    }
+  }, [isTransferOpen, fetchProductsFromAPI]);
+
+  // Fetch initial products when Remove Stock modal opens
+  useEffect(() => {
+    if (isRemoveOpen) {
+      // Fetch initial products when modal opens
+      fetchProductsFromAPI("");
+    } else {
+      // Clear products when modal closes
+      setProducts([]);
+      setProductSearch("");
+    }
+  }, [isRemoveOpen, fetchProductsFromAPI]);
+
+  // Handle clicks outside dropdowns to close them
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        addProductDropdownRef.current &&
+        !addProductDropdownRef.current.contains(event.target as Node)
+      ) {
+        setAddProductDropdownOpen(false);
+      }
+      if (
+        adjustProductDropdownRef.current &&
+        !adjustProductDropdownRef.current.contains(event.target as Node)
+      ) {
+        setAdjustProductDropdownOpen(false);
+      }
+      if (
+        transferProductDropdownRef.current &&
+        !transferProductDropdownRef.current.contains(event.target as Node)
+      ) {
+        setTransferProductDropdownOpen(false);
+      }
+      if (
+        removeProductDropdownRef.current &&
+        !removeProductDropdownRef.current.contains(event.target as Node)
+      ) {
+        setRemoveProductDropdownOpen(false);
       }
     };
 
-    fetchProducts();
-  }, [productPage, productSearch]);
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   // Stock pagination is now handled by backend
   const totalStockPages = stockMeta.totalPages;
@@ -271,15 +378,20 @@ export function StockManagement() {
 
   // Stats - note: these are for current page only, not total
   const totalItems = totalStocks; // Total from backend
-  const totalQuantity = allStocks.reduce((sum, s) => sum + Number(s.current_quantity || 0), 0);
+  // Calculate total quantity - use absolute value to show positive total
+  const totalQuantity = Math.abs(allStocks.reduce((sum, s) => sum + Number(s.current_quantity || 0), 0));
   const lowStockItems = allStocks.filter((s) => Number(s.current_quantity || 0) <= 10).length;
 
   // Handlers
   const handleTransfer = async () => {
-    if (!transferForm.productId || !transferForm.fromBranchId || !transferForm.toBranchId || transferForm.quantity <= 0) {
+    const quantity = typeof transferForm.quantity === "string" 
+      ? (transferForm.quantity === "" ? 0 : Number(transferForm.quantity) || 0)
+      : transferForm.quantity;
+    
+    if (!transferForm.productId || !transferForm.fromBranchId || !transferForm.toBranchId || quantity <= 0) {
       toast({
         title: "Error",
-        description: "Please fill all required fields",
+        description: "Please fill all required fields with valid values",
         variant: "destructive",
       });
       return;
@@ -291,12 +403,14 @@ export function StockManagement() {
         productId: transferForm.productId,
         fromBranchId: transferForm.fromBranchId,
         toBranchId: transferForm.toBranchId,
-        quantity: transferForm.quantity,
+        quantity: quantity,
         notes: transferForm.notes,
       });
 
       setIsTransferOpen(false);
-      setTransferForm({ productId: "", fromBranchId: "", toBranchId: "", quantity: 1, notes: "" });
+      setTransferForm({ productId: "", fromBranchId: "", toBranchId: "", quantity: "", notes: "" });
+      setProductSearch("");
+      setTransferProductDropdownOpen(false);
 
       // Reload data
       const params = new URLSearchParams({
@@ -341,10 +455,14 @@ export function StockManagement() {
   };
 
   const handleAddStock = async () => {
-    if (!addForm.productId || !addForm.branchId || addForm.quantity <= 0) {
+    const quantity = typeof addForm.quantity === "string" 
+      ? (addForm.quantity === "" ? 0 : Number(addForm.quantity) || 0)
+      : addForm.quantity;
+    
+    if (!addForm.productId || !addForm.branchId || !quantity || quantity <= 0) {
       toast({
         title: "Error",
-        description: "Please fill all required fields",
+        description: "Please fill all required fields with valid values",
         variant: "destructive",
       });
       return;
@@ -355,11 +473,13 @@ export function StockManagement() {
       await apiClient.post(`${API_BASE}/stock`, {
         productId: addForm.productId,
         branchId: addForm.branchId,
-        quantity: addForm.quantity,
+        quantity: quantity, // Ensure it's a number
       });
 
       setIsAddOpen(false);
-      setAddForm({ productId: "", branchId: "", quantity: 1 });
+      setAddForm({ productId: "", branchId: "", quantity: "" });
+      setProductSearch("");
+      setAddProductDropdownOpen(false);
 
       // Reload data
       const params = new URLSearchParams({
@@ -404,10 +524,14 @@ export function StockManagement() {
   };
 
   const handleAdjustStock = async () => {
-    if (!adjustForm.productId || !adjustForm.branchId) {
+    const quantityChange = typeof adjustForm.quantityChange === "string" 
+      ? (adjustForm.quantityChange === "" || adjustForm.quantityChange === "-" ? 0 : Number(adjustForm.quantityChange) || 0)
+      : adjustForm.quantityChange;
+    
+    if (!adjustForm.productId || !adjustForm.branchId || quantityChange === 0) {
       toast({
         title: "Error",
-        description: "Please fill all required fields",
+        description: "Please fill all required fields and enter a non-zero quantity change",
         variant: "destructive",
       });
       return;
@@ -418,12 +542,14 @@ export function StockManagement() {
       await apiClient.patch(`${API_BASE}/stock/adjust`, {
         productId: adjustForm.productId,
         branchId: adjustForm.branchId,
-        quantityChange: adjustForm.quantityChange,
+        quantityChange: quantityChange,
         reason: adjustForm.reason,
       });
 
       setIsAdjustOpen(false);
-      setAdjustForm({ productId: "", branchId: "", quantityChange: 0, reason: "" });
+      setAdjustForm({ productId: "", branchId: "", quantityChange: "", reason: "" });
+      setProductSearch("");
+      setAdjustProductDropdownOpen(false);
 
       // Reload data
       const params = new URLSearchParams({
@@ -467,6 +593,85 @@ export function StockManagement() {
     }
   };
 
+  const handleRemoveStock = async () => {
+    const quantity = typeof removeForm.quantity === "string" 
+      ? (removeForm.quantity === "" ? 0 : Number(removeForm.quantity) || 0)
+      : removeForm.quantity;
+    
+    if (!removeForm.productId || !removeForm.branchId || !quantity || quantity <= 0) {
+      toast({
+        title: "Error",
+        description: "Please fill all required fields with valid values",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setIsTransferring(true);
+    try {
+      await apiClient.delete(`${API_BASE}/stock/remove`, {
+        data: {
+          productId: removeForm.productId,
+          branchId: removeForm.branchId,
+          quantity: quantity, // Ensure it's a number
+          reason: removeForm.reason,
+        },
+      });
+
+      setIsRemoveOpen(false);
+      setRemoveForm({ productId: "", branchId: "", quantity: "", reason: "" });
+      setProductSearch("");
+      setRemoveProductDropdownOpen(false);
+
+      // Reload data
+      const userRole = localStorage.getItem("role");
+      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+      
+      const params = new URLSearchParams({
+        page: stockPage.toString(),
+        limit: stockPageSize.toString(),
+      });
+      
+      if (branchFilter && branchFilter !== "all" && !isAdmin) {
+        params.append('branchId', branchFilter);
+      }
+      
+      if (searchTerm.trim()) {
+        params.append('search', searchTerm.trim());
+      }
+      
+      const [sRes, hRes, tRes] = await Promise.all([
+        apiClient.get(`${API_BASE}/stock?${params}`),
+        apiClient.get(`${API_BASE}/stock/history${branchFilter && branchFilter !== "all" && !isAdmin ? `?branchId=${branchFilter}` : ""}`),
+        apiClient.get(`${API_BASE}/stock/today${branchFilter && branchFilter !== "all" && !isAdmin ? `?branchId=${branchFilter}` : ""}`),
+      ]);
+      setAllStocks(sRes.data.data);
+      setTotalStocks(sRes.data.meta?.total || 0);
+      if (sRes.data.meta) {
+        setStockMeta(sRes.data.meta);
+      }
+      setHistory(hRes.data.data);
+      setTodayMovements(tRes.data.data);
+
+      toast({
+        title: "Success",
+        description: "Stock removed successfully",
+      });
+    } catch (e: any) {
+      console.log(e);
+      let errorMessage = "Failed to remove stock";
+      if (e.response?.data?.message) errorMessage = e.response.data.message;
+      else if (e.message) errorMessage = e.message;
+      toast({
+        title: "Error",
+        description: errorMessage,
+        variant: "destructive",
+      });
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
   const getMovementBadge = (type: string) => {
     const colors: Record<string, string> = {
       PURCHASE: "bg-green-100 text-green-800",
@@ -481,29 +686,16 @@ export function StockManagement() {
     return <Badge className={colors[type] || "bg-gray-100 text-gray-800"}>{type}</Badge>;
   };
 
-  const loadMoreProducts = () => {
-    setProductPage(prev => prev + 1);
-  };
-
   const handleProductSearch = (search: string) => {
     setProductSearch(search);
-    setProductPage(1);
-    setProducts([]);
   };
 
-  // Use the products directly from API (already filtered by productSearch)
+  // Products are already filtered by API search, so use them directly
   const filteredProductsForCombobox = products;
 
   if (isInitialLoading) {
     return (
-      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <div className="text-center">
-            <Loader2 className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" />
-            <p className="text-sm md:text-base text-gray-600">Loading stock management data...</p>
-          </div>
-        </div>
-      </div>
+      <PageLoader message="Loading stock management data..." />
     );
   }
 
@@ -533,7 +725,17 @@ export function StockManagement() {
           >
             <RefreshCw className={`h-4 w-4 ${globalLoading ? 'animate-spin' : ''}`} />
           </Button>
-          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <Dialog 
+            open={isAddOpen} 
+            onOpenChange={(open) => {
+              setIsAddOpen(open);
+              if (!open) {
+                setProductSearch("");
+                setAddProductDropdownOpen(false);
+                setProducts([]);
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button className="bg-green-600 hover:bg-green-700">
                 <Plus className="h-4 w-4 mr-2" />
@@ -545,81 +747,66 @@ export function StockManagement() {
                 <DialogTitle>Add Stock</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
-                <div>
-                  <Label>Product *</Label>
-                  <Popover open={addProductOpen} onOpenChange={setAddProductOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={addProductOpen}
-                        className="w-full justify-between"
-                      >
-                        {addForm.productId
-                          ? products.find((p) => p.id === addForm.productId)?.name
-                          : "Select product..."}
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-full p-0" align="start">
-                      <Command>
-                        <CommandInput 
-                          placeholder="Search product..." 
-                          value={productSearch}
-                          onValueChange={handleProductSearch}
-                        />
-                        <CommandList>
-                          <CommandEmpty>
-                            {loadingProducts ? (
-                              <div className="flex items-center justify-center py-6">
-                                <Loader2 className="animate-spin h-4 w-4" />
+                <div className="space-y-2" ref={addProductDropdownRef}>
+                  <Label htmlFor="add-product-search">Product *</Label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      ref={addProductSearchRef}
+                      id="add-product-search"
+                      placeholder="Search product by name or SKU..."
+                      value={productSearch}
+                      onFocus={() => setAddProductDropdownOpen(true)}
+                      autoComplete="off"
+                      onChange={(e) => {
+                        setProductSearch(e.target.value);
+                        setAddProductDropdownOpen(true);
+                      }}
+                      className="pl-9"
+                    />
+                    {addProductDropdownOpen && (
+                      <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                        {loadingProducts ? (
+                          <div className="px-3 py-2 text-sm text-gray-500 flex items-center gap-2">
+                            <Loader2 className="animate-spin h-4 w-4" />
+                            Loading products...
+                          </div>
+                        ) : filteredProductsForCombobox.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                            {productSearch && productSearch.trim().length > 0 
+                              ? "No matching products found" 
+                              : "No products available"}
+                          </div>
+                        ) : (
+                          filteredProductsForCombobox.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className={`w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${
+                                addForm.productId === p.id
+                                  ? "bg-blue-50 font-semibold text-blue-900"
+                                  : "text-gray-800"
+                              }`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                setAddForm({ ...addForm, productId: p.id });
+                                setAddProductDropdownOpen(false);
+                                setProductSearch(products.find(pr => pr.id === p.id)?.name || "");
+                                addProductSearchRef.current?.blur();
+                              }}
+                            >
+                              <div className="flex flex-col">
+                                <span>{p.name}</span>
+                                {p.sku && (
+                                  <span className="text-xs text-gray-500">SKU: {p.sku}</span>
+                                )}
                               </div>
-                            ) : (
-                              "No product found."
-                            )}
-                          </CommandEmpty>
-                          <CommandGroup>
-                            {filteredProductsForCombobox.map((p) => (
-                              <CommandItem
-                                key={p.id}
-                                value={p.id}
-                                onSelect={() => {
-                                  setAddForm({ ...addForm, productId: p.id });
-                                  setAddProductOpen(false);
-                                  handleProductSearch("");
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    addForm.productId === p.id ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                {p.name}
-                              </CommandItem>
-                            ))}
-                            {products.length < totalProducts && (
-                              <CommandItem disabled>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={loadMoreProducts}
-                                  disabled={loadingProducts}
-                                  className="w-full"
-                                >
-                                  {loadingProducts ? (
-                                    <Loader2 className="animate-spin h-4 w-4" />
-                                  ) : (
-                                    `Load More (${totalProducts - products.length} remaining)`
-                                  )}
-                                </Button>
-                              </CommandItem>
-                            )}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="add-branch">Branch *</Label>
@@ -645,12 +832,22 @@ export function StockManagement() {
                   <Label htmlFor="add-quantity">Quantity *</Label>
                   <Input
                     id="add-quantity"
-                    type="number"
-                    min={1}
-                    value={addForm.quantity}
-                    onChange={(e) =>
-                      setAddForm({ ...addForm, quantity: Number(e.target.value) })
-                    }
+                    type="text"
+                    inputMode="decimal"
+                    value={typeof addForm.quantity === "string" ? addForm.quantity : (addForm.quantity === 1 ? "" : String(addForm.quantity))}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Allow empty, numbers, and single decimal point
+                      if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                        setAddForm({ ...addForm, quantity: value }); // Keep as string while typing
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const value = e.target.value === "" ? 0 : Number(e.target.value) || 0;
+                      setAddForm({ ...addForm, quantity: value <= 0 ? 1 : value });
+                    }}
+                    placeholder="Enter quantity"
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </div>
                 <Button
@@ -674,7 +871,17 @@ export function StockManagement() {
             </DialogContent>
           </Dialog>
 
-          <Dialog open={isAdjustOpen} onOpenChange={setIsAdjustOpen}>
+          <Dialog 
+            open={isAdjustOpen} 
+            onOpenChange={(open) => {
+              setIsAdjustOpen(open);
+              if (!open) {
+                setProductSearch("");
+                setAdjustProductDropdownOpen(false);
+                setProducts([]);
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button variant="outline">
                 <Edit className="h-4 w-4 mr-2" />
@@ -686,81 +893,66 @@ export function StockManagement() {
                 <DialogTitle>Adjust Stock</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
-                <div>
-                  <Label>Product *</Label>
-                  <Popover open={adjustProductOpen} onOpenChange={setAdjustProductOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={adjustProductOpen}
-                        className="w-full justify-between"
-                      >
-                        {adjustForm.productId
-                          ? products.find((p) => p.id === adjustForm.productId)?.name
-                          : "Select product..."}
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-full p-0" align="start">
-                      <Command>
-                        <CommandInput 
-                          placeholder="Search product..." 
-                          value={productSearch}
-                          onValueChange={handleProductSearch}
-                        />
-                        <CommandList>
-                          <CommandEmpty>
-                            {loadingProducts ? (
-                              <div className="flex items-center justify-center py-6">
-                                <Loader2 className="animate-spin h-4 w-4" />
+                <div className="space-y-2" ref={adjustProductDropdownRef}>
+                  <Label htmlFor="adjust-product-search">Product *</Label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      ref={adjustProductSearchRef}
+                      id="adjust-product-search"
+                      placeholder="Search product by name or SKU..."
+                      value={productSearch}
+                      onFocus={() => setAdjustProductDropdownOpen(true)}
+                      autoComplete="off"
+                      onChange={(e) => {
+                        setProductSearch(e.target.value);
+                        setAdjustProductDropdownOpen(true);
+                      }}
+                      className="pl-9"
+                    />
+                    {adjustProductDropdownOpen && (
+                      <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                        {loadingProducts ? (
+                          <div className="px-3 py-2 text-sm text-gray-500 flex items-center gap-2">
+                            <Loader2 className="animate-spin h-4 w-4" />
+                            Loading products...
+                          </div>
+                        ) : filteredProductsForCombobox.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                            {productSearch && productSearch.trim().length > 0 
+                              ? "No matching products found" 
+                              : "No products available"}
+                          </div>
+                        ) : (
+                          filteredProductsForCombobox.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className={`w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${
+                                adjustForm.productId === p.id
+                                  ? "bg-blue-50 font-semibold text-blue-900"
+                                  : "text-gray-800"
+                              }`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                setAdjustForm({ ...adjustForm, productId: p.id });
+                                setAdjustProductDropdownOpen(false);
+                                setProductSearch(products.find(pr => pr.id === p.id)?.name || "");
+                                adjustProductSearchRef.current?.blur();
+                              }}
+                            >
+                              <div className="flex flex-col">
+                                <span>{p.name}</span>
+                                {p.sku && (
+                                  <span className="text-xs text-gray-500">SKU: {p.sku}</span>
+                                )}
                               </div>
-                            ) : (
-                              "No product found."
-                            )}
-                          </CommandEmpty>
-                          <CommandGroup>
-                            {filteredProductsForCombobox.map((p) => (
-                              <CommandItem
-                                key={p.id}
-                                value={p.id}
-                                onSelect={() => {
-                                  setAdjustForm({ ...adjustForm, productId: p.id });
-                                  setAdjustProductOpen(false);
-                                  handleProductSearch("");
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    adjustForm.productId === p.id ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                {p.name}
-                              </CommandItem>
-                            ))}
-                            {products.length < totalProducts && (
-                              <CommandItem disabled>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={loadMoreProducts}
-                                  disabled={loadingProducts}
-                                  className="w-full"
-                                >
-                                  {loadingProducts ? (
-                                    <Loader2 className="animate-spin h-4 w-4" />
-                                  ) : (
-                                    `Load More (${totalProducts - products.length} remaining)`
-                                  )}
-                                </Button>
-                              </CommandItem>
-                            )}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="adjust-branch">Branch *</Label>
@@ -786,12 +978,25 @@ export function StockManagement() {
                   <Label htmlFor="adjust-quantity">Quantity Change *</Label>
                   <Input
                     id="adjust-quantity"
-                    type="number"
-                    value={adjustForm.quantityChange}
-                    onChange={(e) =>
-                      setAdjustForm({ ...adjustForm, quantityChange: Number(e.target.value) })
-                    }
+                    type="text"
+                    inputMode="decimal"
+                    value={typeof adjustForm.quantityChange === "string" ? adjustForm.quantityChange : (adjustForm.quantityChange === 0 ? "" : String(adjustForm.quantityChange))}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Allow empty, numbers, negative sign, and single decimal point
+                      if (value === "" || /^-?\d*\.?\d*$/.test(value)) {
+                        setAdjustForm({ 
+                          ...adjustForm, 
+                          quantityChange: value // Keep as string while typing
+                        });
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const value = e.target.value === "" || e.target.value === "-" ? 0 : Number(e.target.value) || 0;
+                      setAdjustForm({ ...adjustForm, quantityChange: value });
+                    }}
                     placeholder="Enter positive or negative number"
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                   <p className="text-xs text-gray-500 mt-1">
                     Positive to add, negative to deduct
@@ -830,7 +1035,175 @@ export function StockManagement() {
             </DialogContent>
           </Dialog>
 
-          <Dialog open={isTransferOpen} onOpenChange={setIsTransferOpen}>
+          <Dialog 
+            open={isRemoveOpen} 
+            onOpenChange={(open) => {
+              setIsRemoveOpen(open);
+              if (!open) {
+                setProductSearch("");
+                setRemoveProductDropdownOpen(false);
+                setProducts([]);
+              }
+            }}
+          >
+            <DialogTrigger asChild>
+              <Button variant="outline" className="bg-red-50 hover:bg-red-100 text-red-700 border-red-300">
+                <Package className="h-4 w-4 mr-2" />
+                Remove Stock
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-md">
+              <DialogHeader>
+                <DialogTitle>Remove Stock</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="space-y-2" ref={removeProductDropdownRef}>
+                  <Label htmlFor="remove-product-search">Product *</Label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      ref={removeProductSearchRef}
+                      id="remove-product-search"
+                      placeholder="Search product by name or SKU..."
+                      value={productSearch}
+                      onFocus={() => setRemoveProductDropdownOpen(true)}
+                      autoComplete="off"
+                      onChange={(e) => {
+                        setProductSearch(e.target.value);
+                        setRemoveProductDropdownOpen(true);
+                      }}
+                      className="pl-9"
+                    />
+                    {removeProductDropdownOpen && (
+                      <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                        {loadingProducts ? (
+                          <div className="px-3 py-2 text-sm text-gray-500 flex items-center gap-2">
+                            <Loader2 className="animate-spin h-4 w-4" />
+                            Loading products...
+                          </div>
+                        ) : filteredProductsForCombobox.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                            {productSearch && productSearch.trim().length > 0 
+                              ? "No matching products found" 
+                              : "No products available"}
+                          </div>
+                        ) : (
+                          filteredProductsForCombobox.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className={`w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${
+                                removeForm.productId === p.id
+                                  ? "bg-blue-50 font-semibold text-blue-900"
+                                  : "text-gray-800"
+                              }`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                setRemoveForm({ ...removeForm, productId: p.id });
+                                setRemoveProductDropdownOpen(false);
+                                setProductSearch(products.find(pr => pr.id === p.id)?.name || "");
+                                removeProductSearchRef.current?.blur();
+                              }}
+                            >
+                              <div className="flex flex-col">
+                                <span>{p.name}</span>
+                                {p.sku && (
+                                  <span className="text-xs text-gray-500">SKU: {p.sku}</span>
+                                )}
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+                </div>
+                <div>
+                  <Label htmlFor="remove-branch">Branch *</Label>
+                  <Select
+                    value={removeForm.branchId}
+                    onValueChange={(value) =>
+                      setRemoveForm({ ...removeForm, branchId: value })
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {branches.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="remove-quantity">Quantity to Remove *</Label>
+                  <Input
+                    id="remove-quantity"
+                    type="text"
+                    inputMode="decimal"
+                    value={typeof removeForm.quantity === "string" ? removeForm.quantity : (removeForm.quantity === 1 ? "" : String(removeForm.quantity))}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Allow empty, numbers, and single decimal point
+                      if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                        setRemoveForm({ ...removeForm, quantity: value }); // Keep as string while typing
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const value = e.target.value === "" ? 0 : Number(e.target.value) || 0;
+                      setRemoveForm({ ...removeForm, quantity: value <= 0 ? 1 : value });
+                    }}
+                    placeholder="Enter quantity to remove"
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="remove-reason">Reason (Optional)</Label>
+                  <Textarea
+                    id="remove-reason"
+                    value={removeForm.reason}
+                    onChange={(e) =>
+                      setRemoveForm({ ...removeForm, reason: e.target.value })
+                    }
+                    placeholder="Enter reason for removal (e.g., damaged, expired, etc.)..."
+                    rows={3}
+                  />
+                </div>
+                <Button
+                  onClick={handleRemoveStock}
+                  disabled={isTransferring}
+                  className="w-full bg-red-600 hover:bg-red-700"
+                >
+                  {isTransferring ? (
+                    <>
+                      <Loader2 className="animate-spin h-4 w-4 mr-2" />
+                      Removing...
+                    </>
+                  ) : (
+                    <>
+                      <Package className="h-4 w-4 mr-2" />
+                      Remove Stock
+                    </>
+                  )}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
+
+          <Dialog 
+            open={isTransferOpen} 
+            onOpenChange={(open) => {
+              setIsTransferOpen(open);
+              if (!open) {
+                setProductSearch("");
+                setTransferProductDropdownOpen(false);
+                setProducts([]);
+              }
+            }}
+          >
             <DialogTrigger asChild>
               <Button className="bg-blue-600 hover:bg-blue-700">
                 <ArrowRightLeft className="h-4 w-4 mr-2" />
@@ -842,81 +1215,66 @@ export function StockManagement() {
                 <DialogTitle>Transfer Stock Between Branches</DialogTitle>
               </DialogHeader>
               <div className="space-y-4">
-                <div>
-                  <Label>Product *</Label>
-                  <Popover open={transferProductOpen} onOpenChange={setTransferProductOpen}>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        role="combobox"
-                        aria-expanded={transferProductOpen}
-                        className="w-full justify-between"
-                      >
-                        {transferForm.productId
-                          ? products.find((p) => p.id === transferForm.productId)?.name
-                          : "Select product..."}
-                        <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-full p-0" align="start">
-                      <Command>
-                        <CommandInput 
-                          placeholder="Search product..." 
-                          value={productSearch}
-                          onValueChange={handleProductSearch}
-                        />
-                        <CommandList>
-                          <CommandEmpty>
-                            {loadingProducts ? (
-                              <div className="flex items-center justify-center py-6">
-                                <Loader2 className="animate-spin h-4 w-4" />
+                <div className="space-y-2" ref={transferProductDropdownRef}>
+                  <Label htmlFor="transfer-product-search">Product *</Label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      ref={transferProductSearchRef}
+                      id="transfer-product-search"
+                      placeholder="Search product by name or SKU..."
+                      value={productSearch}
+                      onFocus={() => setTransferProductDropdownOpen(true)}
+                      autoComplete="off"
+                      onChange={(e) => {
+                        setProductSearch(e.target.value);
+                        setTransferProductDropdownOpen(true);
+                      }}
+                      className="pl-9"
+                    />
+                    {transferProductDropdownOpen && (
+                      <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                        {loadingProducts ? (
+                          <div className="px-3 py-2 text-sm text-gray-500 flex items-center gap-2">
+                            <Loader2 className="animate-spin h-4 w-4" />
+                            Loading products...
+                          </div>
+                        ) : filteredProductsForCombobox.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                            {productSearch && productSearch.trim().length > 0 
+                              ? "No matching products found" 
+                              : "No products available"}
+                          </div>
+                        ) : (
+                          filteredProductsForCombobox.map((p) => (
+                            <button
+                              key={p.id}
+                              type="button"
+                              className={`w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${
+                                transferForm.productId === p.id
+                                  ? "bg-blue-50 font-semibold text-blue-900"
+                                  : "text-gray-800"
+                              }`}
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => {
+                                setTransferForm({ ...transferForm, productId: p.id });
+                                setTransferProductDropdownOpen(false);
+                                setProductSearch(products.find(pr => pr.id === p.id)?.name || "");
+                                transferProductSearchRef.current?.blur();
+                              }}
+                            >
+                              <div className="flex flex-col">
+                                <span>{p.name}</span>
+                                {p.sku && (
+                                  <span className="text-xs text-gray-500">SKU: {p.sku}</span>
+                                )}
                               </div>
-                            ) : (
-                              "No product found."
-                            )}
-                          </CommandEmpty>
-                          <CommandGroup>
-                            {filteredProductsForCombobox.map((p) => (
-                              <CommandItem
-                                key={p.id}
-                                value={p.id}
-                                onSelect={() => {
-                                  setTransferForm({ ...transferForm, productId: p.id });
-                                  setTransferProductOpen(false);
-                                  handleProductSearch("");
-                                }}
-                              >
-                                <Check
-                                  className={cn(
-                                    "mr-2 h-4 w-4",
-                                    transferForm.productId === p.id ? "opacity-100" : "opacity-0"
-                                  )}
-                                />
-                                {p.name}
-                              </CommandItem>
-                            ))}
-                            {products.length < totalProducts && (
-                              <CommandItem disabled>
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  onClick={loadMoreProducts}
-                                  disabled={loadingProducts}
-                                  className="w-full"
-                                >
-                                  {loadingProducts ? (
-                                    <Loader2 className="animate-spin h-4 w-4" />
-                                  ) : (
-                                    `Load More (${totalProducts - products.length} remaining)`
-                                  )}
-                                </Button>
-                              </CommandItem>
-                            )}
-                          </CommandGroup>
-                        </CommandList>
-                      </Command>
-                    </PopoverContent>
-                  </Popover>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 <div>
                   <Label htmlFor="transfer-from">From Branch *</Label>
@@ -962,15 +1320,28 @@ export function StockManagement() {
                   <Label htmlFor="transfer-quantity">Quantity *</Label>
                   <Input
                     id="transfer-quantity"
-                    type="number"
-                    min={1}
-                    value={transferForm.quantity}
-                    onChange={(e) =>
+                    type="text"
+                    inputMode="decimal"
+                    value={typeof transferForm.quantity === "string" ? transferForm.quantity : (transferForm.quantity === 1 ? "" : String(transferForm.quantity))}
+                    onChange={(e) => {
+                      const value = e.target.value;
+                      // Allow empty, numbers, and single decimal point
+                      if (value === "" || /^\d*\.?\d*$/.test(value)) {
+                        setTransferForm({
+                          ...transferForm,
+                          quantity: value, // Keep as string while typing
+                        });
+                      }
+                    }}
+                    onBlur={(e) => {
+                      const value = e.target.value === "" ? 0 : Number(e.target.value) || 0;
                       setTransferForm({
                         ...transferForm,
-                        quantity: Number(e.target.value),
-                      })
-                    }
+                        quantity: value <= 0 ? 1 : value,
+                      });
+                    }}
+                    placeholder="Enter quantity"
+                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </div>
                 <div>
@@ -1025,7 +1396,9 @@ export function StockManagement() {
             <TrendingUp className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-green-600">{totalQuantity.toFixed(2)}</div>
+            <div className={`text-2xl font-bold ${totalQuantity < 0 ? "text-red-600" : "text-green-600"}`}>
+              {totalQuantity.toFixed(2)}
+            </div>
           </CardContent>
         </Card>
         <Card>
@@ -1134,7 +1507,7 @@ export function StockManagement() {
                               return (
                                 <TableRow key={s.id}>
                                   <TableCell className="font-medium">{s.product.name}</TableCell>
-                                  <TableCell className="text-sm text-gray-500">{s.product.id.slice(0, 8)}</TableCell>
+                                  <TableCell className="text-sm text-gray-500">{s.product.sku || s.product.id.slice(0, 8)}</TableCell>
                                   <TableCell>
                                     <Badge variant={qty <= 10 ? "destructive" : qty < 0 ? "outline" : "secondary"}>
                                       {qty.toFixed(2)}

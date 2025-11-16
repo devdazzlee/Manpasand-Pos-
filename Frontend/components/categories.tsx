@@ -27,6 +27,7 @@ import {
   ImageIcon,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { PageLoader } from "@/components/ui/page-loader"
 import apiClient from "@/lib/apiClient"
 
 // Image compression utility
@@ -287,7 +288,16 @@ export function Categories() {
   const fetchCategories = async () => {
     try {
       setIsLoading(true)
-      const response = await apiClient.get("/categories")
+      // Check if user is ADMIN - admins should see all categories
+      const userRole = localStorage.getItem("role");
+      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+      
+      const params: any = {
+        fetch_all: true,
+        limit: isAdmin ? 10000 : 1000, // Higher limit for admin
+      };
+      
+      const response = await apiClient.get("/categories", { params })
       const categoriesData = response.data.data || []
       
       // Fetch product counts for each category
@@ -613,15 +623,14 @@ export function Categories() {
       (category.description && category.description.toLowerCase().includes(searchTerm.toLowerCase())),
   )
 
-  const activeCategories = categories.filter((c) => c.status === "active").length
+  // Count active categories - check both status field and is_active field
+  const activeCategories = categories.filter((c) => 
+    c.status === "active" || (c as any).is_active === true
+  ).length
   const totalProducts = categories.reduce((sum, c) => sum + (c.productCount || 0), 0)
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
+    return <PageLoader message="Loading categories..." />
   }
 
   return (

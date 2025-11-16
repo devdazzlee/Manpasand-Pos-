@@ -25,8 +25,8 @@ export default function Home() {
         console.log("📍 Branch Address:", branchAddress || "N/A");
         console.log("🆔 Branch ID:", branchId);
         console.log("👤 User Role:", userRole);
-      } else if (branchId && branchId !== "Not Found") {
-        // Fetch branch name if not in localStorage
+      } else if (branchId && branchId !== "Not Found" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
+        // Fetch branch name if not in localStorage (skip for admin users)
         (async () => {
           try {
             const apiClient = (await import("@/lib/apiClient")).default;

@@ -197,6 +197,18 @@ export function SalesHistory() {
       try {
         const branchStr = localStorage.getItem("branch");
         if (!branchStr) return;
+        // Skip if branch is "Not Found" or user is admin
+        const userRole = localStorage.getItem("role");
+        const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+        
+        if (branchStr === "Not Found" || isAdmin) {
+          setBranchInfo({
+            name: "Admin",
+            address: "",
+          });
+          return;
+        }
+        
         setBranchInfo((prev) => ({
           ...prev,
           name: branchStr,

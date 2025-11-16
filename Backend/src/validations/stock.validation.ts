@@ -4,7 +4,7 @@ const createStockSchema = z.object({
     body: z.object({
         productId: z.string().min(1),
         branchId: z.string().min(1),
-        quantity: z.number().int().min(1),
+        quantity: z.number().positive().min(0.01), // Allow decimals for stock quantities
     }),
 });
 
@@ -27,4 +27,13 @@ const transferStockSchema = z.object({
     }),
 });
 
-export { createStockSchema, adjustStockSchema, transferStockSchema };
+const removeStockSchema = z.object({
+    body: z.object({
+        productId: z.string().min(1, "Product ID is required"),
+        branchId: z.string().min(1, "Branch ID is required"),
+        quantity: z.number().positive().min(0.01, "Quantity must be greater than 0"),
+        reason: z.string().optional(),
+    }),
+});
+
+export { createStockSchema, adjustStockSchema, transferStockSchema, removeStockSchema };

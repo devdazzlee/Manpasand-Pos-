@@ -1,12 +1,12 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.transferStockSchema = exports.adjustStockSchema = exports.createStockSchema = void 0;
+exports.removeStockSchema = exports.transferStockSchema = exports.adjustStockSchema = exports.createStockSchema = void 0;
 const zod_1 = require("zod");
 const createStockSchema = zod_1.z.object({
     body: zod_1.z.object({
         productId: zod_1.z.string().min(1),
         branchId: zod_1.z.string().min(1),
-        quantity: zod_1.z.number().int().min(1),
+        quantity: zod_1.z.number().positive().min(0.01), // Allow decimals for stock quantities
     }),
 });
 exports.createStockSchema = createStockSchema;
@@ -29,4 +29,13 @@ const transferStockSchema = zod_1.z.object({
     }),
 });
 exports.transferStockSchema = transferStockSchema;
+const removeStockSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        productId: zod_1.z.string().min(1, "Product ID is required"),
+        branchId: zod_1.z.string().min(1, "Branch ID is required"),
+        quantity: zod_1.z.number().positive().min(0.01, "Quantity must be greater than 0"),
+        reason: zod_1.z.string().optional(),
+    }),
+});
+exports.removeStockSchema = removeStockSchema;
 //# sourceMappingURL=stock.validation.js.map

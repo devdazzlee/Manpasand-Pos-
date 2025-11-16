@@ -15,24 +15,40 @@ class StockService {
                 where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
             });
 
-            if (exists) throw new AppError(400, "Stock already exists for this product in branch");
+            let stock;
+            let previousQty = 0;
+            let newQty = quantity;
 
-            const stock = await tx.stock.create({
-                data: {
-                    product_id: productId,
-                    branch_id: branchId,
-                    current_quantity: quantity,
-                },
-            });
+            if (exists) {
+                // If stock exists, add to existing quantity
+                previousQty = asNumber(exists.current_quantity);
+                newQty = addDecimal(exists.current_quantity, quantity);
+                
+                stock = await tx.stock.update({
+                    where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
+                    data: {
+                        current_quantity: newQty,
+                    },
+                });
+            } else {
+                // If stock doesn't exist, create new entry
+                stock = await tx.stock.create({
+                    data: {
+                        product_id: productId,
+                        branch_id: branchId,
+                        current_quantity: quantity,
+                    },
+                });
+            }
 
             await tx.stockMovement.create({
                 data: {
                     product_id: productId,
                     branch_id: branchId,
-                    movement_type: "ADJUSTMENT",
+                    movement_type: "PURCHASE",
                     quantity_change: quantity,
-                    previous_qty: 0,
-                    new_qty: quantity,
+                    previous_qty: previousQty,
+                    new_qty: newQty,
                     created_by: createdBy,
                 },
             });
@@ -187,22 +203,81 @@ class StockService {
         });
     }
 
-    async getStockByBranch(branchId: string, page: number = 1, limit: number = 20, search?: string) {
+    async removeStock({ productId, branchId, quantity, reason, createdBy }: {
+        productId: string;
+        branchId: string;
+        quantity: number;
+        reason?: string;
+        createdBy: string;
+    }) {
+        if (quantity <= 0) {
+            throw new AppError(400, "Quantity must be greater than 0");
+        }
+
+        return prisma.$transaction(async (tx) => {
+            const stock = await tx.stock.findUnique({
+                where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
+            });
+
+            if (!stock) throw new AppError(404, "Stock not found");
+
+            const currentQty = asNumber(stock.current_quantity);
+            if (currentQty < quantity) {
+                throw new AppError(400, "Insufficient stock to remove");
+            }
+
+            const newQty = addDecimal(stock.current_quantity, -quantity);
+            
+            await tx.stock.update({
+                where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
+                data: {
+                    current_quantity: newQty,
+                },
+            });
+
+            await tx.stockMovement.create({
+                data: {
+                    product_id: productId,
+                    branch_id: branchId,
+                    movement_type: "DAMAGE",
+                    quantity_change: -quantity,
+                    previous_qty: stock.current_quantity,
+                    new_qty: newQty,
+                    notes: reason || "Stock removed",
+                    created_by: createdBy,
+                },
+            });
+
+            return { newQty };
+        });
+    }
+
+    async getStockByBranch(branchId: string, page: number = 1, limit: number = 20, search?: string, userRole?: string) {
         const skip = (page - 1) * limit;
         
         const where: any = {};
         
-        // Only filter by branch if branchId is provided
-        if (branchId && branchId.trim() !== "") {
+        // Only filter by branch if branchId is provided AND user is not admin
+        if (branchId && branchId.trim() !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
             where.branch_id = branchId;
         }
         
         if (search && search.trim() !== "") {
             where.product = {
-                name: {
-                    contains: search,
-                    mode: 'insensitive' as any
-                }
+                OR: [
+                    {
+                        name: {
+                            contains: search,
+                            mode: 'insensitive' as any
+                        }
+                    },
+                    {
+                        sku: {
+                            contains: search,
+                            mode: 'insensitive' as any
+                        }
+                    }
+                ]
             };
         }
         
@@ -222,6 +297,7 @@ class StockService {
             actualReturned: stocks.length,
             totalInDatabase: total,
             branchId,
+            userRole,
             page
         });
         
@@ -236,15 +312,22 @@ class StockService {
         };
     }
 
-    async getStockMovements(branchId: string) {
+    async getStockMovements(branchId: string, userRole?: string) {
+        const where: any = {};
+        
+        // Only filter by branch if branchId is provided AND user is not admin
+        if (branchId && branchId.trim() !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
+            where.branch_id = branchId;
+        }
+        
         return prisma.stockMovement.findMany({
-            where: { branch_id: branchId },
+            where,
             include: { product: true, branch: true, user: { select: { email: true } } },
             orderBy: { created_at: "desc" },
         });
     }
 
-    async getTodayStockMovements(branchId?: string) {
+    async getTodayStockMovements(branchId?: string, userRole?: string) {
         const today = new Date();
         today.setHours(0, 0, 0, 0);
         
@@ -258,7 +341,8 @@ class StockService {
             }
         };
 
-        if (branchId && branchId !== "") {
+        // Only filter by branch if branchId is provided AND user is not admin
+        if (branchId && branchId !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
             whereClause.branch_id = branchId;
         }
 

@@ -28,27 +28,36 @@ const getStocksController = asyncHandler(async (req: Request, res: Response) => 
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 20;
     const search = req.query.search as string | undefined;
+    const userRole = req.user?.role as string | undefined;
     
-    const result = await stockService.getStockByBranch(branchId || "", page, limit, search);
+    const result = await stockService.getStockByBranch(branchId || "", page, limit, search, userRole);
     new ApiResponse(result.data, "Stocks retrieved successfully", 200, true, result.meta).send(res);
 });
 
 const getStockMovementsController = asyncHandler(async (req: Request, res: Response) => {
     const branchId = req.query.branchId as string;
-    const movements = await stockService.getStockMovements(branchId || "");
+    const userRole = req.user?.role as string | undefined;
+    const movements = await stockService.getStockMovements(branchId || "", userRole);
     new ApiResponse(movements, "Stock movement history retrieved").send(res);
 });
 
 const getTodayStockMovementsController = asyncHandler(async (req: Request, res: Response) => {
     const branchId = req.query.branchId as string;
-    const movements = await stockService.getTodayStockMovements(branchId || undefined);
+    const userRole = req.user?.role as string | undefined;
+    const movements = await stockService.getTodayStockMovements(branchId || undefined, userRole);
     new ApiResponse(movements, "Today's stock movements retrieved").send(res);
+});
+
+const removeStockController = asyncHandler(async (req: Request, res: Response) => {
+    const stock = await stockService.removeStock({ ...req.body, createdBy: req.user!.id });
+    new ApiResponse(stock, "Stock removed successfully").send(res);
 });
 
 export {
     createStockController,
     adjustStockController,
     transferStockController,
+    removeStockController,
     getStocksController,
     getStockMovementsController,
     getTodayStockMovementsController,

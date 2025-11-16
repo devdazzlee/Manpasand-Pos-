@@ -5,11 +5,12 @@ import {
     createStockController,
     adjustStockController,
     transferStockController,
+    removeStockController,
     getStocksController,
     getStockMovementsController,
     getTodayStockMovementsController,
 } from "../controllers/stock.controller";
-import { createStockSchema, adjustStockSchema, transferStockSchema } from "../validations/stock.validation";
+import { createStockSchema, adjustStockSchema, transferStockSchema, removeStockSchema } from "../validations/stock.validation";
 
 const router = Router();
 
@@ -18,6 +19,7 @@ router.use(authenticate, authorize(["SUPER_ADMIN", "ADMIN"]));
 router.post("/", validate(createStockSchema), createStockController);
 router.patch("/adjust", validate(adjustStockSchema), adjustStockController);
 router.post("/transfer", validate(transferStockSchema), transferStockController);
+router.delete("/remove", validate(removeStockSchema), removeStockController);
 router.get("/", getStocksController);
 router.get("/history", getStockMovementsController);
 router.get("/today", getTodayStockMovementsController);

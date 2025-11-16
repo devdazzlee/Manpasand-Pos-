@@ -446,7 +446,17 @@ export function NewSale() {
   const getBranchName = async () => {
     try {
       const branchId = localStorage.getItem("branch");
-      if (!branchId) throw new Error("No branch id in localStorage");
+      const userRole = localStorage.getItem("role");
+      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+      
+      // Skip for admin users or if branch is "Not Found"
+      if (!branchId || branchId === "Not Found" || isAdmin) {
+        setBranchName({
+          name: "Admin",
+          address: "",
+        });
+        return;
+      }
 
       const data = await apiClient.get(`/branches/${branchId}`); // axios-style
       setBranchName({
@@ -2164,9 +2174,6 @@ export function NewSale() {
           <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
             <div>
               <h1 className="text-2xl md:text-3xl font-bold text-gray-900">New Sales</h1>
-              <p className="text-sm text-orange-600 font-medium">
-                ⚠️ TESTING MODE: Negative sales allowed
-              </p>
               {lastTransactionId && (
                 <p className="text-sm text-green-600">
                   Last transaction: {lastTransactionId}
@@ -2238,14 +2245,6 @@ export function NewSale() {
                 disabled={isScanning}
               />
             </div>
-            <LoadingButton
-              variant="outline"
-              size="icon"
-              loading={scanLoading}
-              onClick={handleBarcodeScan}
-            >
-              <Scan className="h-4 w-4" />
-            </LoadingButton>
           </div>
         </div>
 
