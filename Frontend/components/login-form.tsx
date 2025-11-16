@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { Button } from "@/components/ui/button"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { Input } from "@/components/ui/input"
@@ -11,6 +11,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
 import { Store, Eye, EyeOff } from "lucide-react"
 import { loginRequest } from "@/lib/api"
+import { Checkbox } from "@/components/ui/checkbox"
 
 interface LoginResponse {
   success: boolean
@@ -35,9 +36,33 @@ export function LoginForm({ onLogin }: LoginFormProps) {
   const [showPassword, setShowPassword] = useState(false)
   const [error, setError] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [rememberMe, setRememberMe] = useState(false)
+  const [rememberPassword, setRememberPassword] = useState(false)
   const { toast } = useToast()
 
-    const handleSubmit = async (e: React.FormEvent) => {
+  // Load saved credentials on mount
+  useEffect(() => {
+    try {
+      const savedRememberMe = localStorage.getItem("rememberMe") === "true"
+      const savedRememberPassword = localStorage.getItem("rememberPassword") === "true"
+      const savedUsername = localStorage.getItem("savedUsername") || ""
+      const savedPassword = localStorage.getItem("savedPassword") || ""
+
+      if (savedRememberMe && savedUsername) {
+        setRememberMe(true)
+        setUsername(savedUsername)
+      }
+
+      if (savedRememberPassword && savedPassword) {
+        setRememberPassword(true)
+        setPassword(savedPassword)
+      }
+    } catch {
+      // ignore localStorage errors
+    }
+  }, [])
+
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     e.stopPropagation()
     
@@ -48,6 +73,25 @@ export function LoginForm({ onLogin }: LoginFormProps) {
       const response = await loginRequest(username, password) as LoginResponse
       const { token, branch, user } = response.data
       toast({ variant: "success", title: "Login successful" })
+
+      // Save / clear username based on "Remember me"
+      if (rememberMe) {
+        localStorage.setItem("savedUsername", username)
+        localStorage.setItem("rememberMe", "true")
+      } else {
+        localStorage.removeItem("savedUsername")
+        localStorage.removeItem("rememberMe")
+      }
+
+      // Save / clear password based on "Save password"
+      if (rememberPassword) {
+        localStorage.setItem("savedPassword", password)
+        localStorage.setItem("rememberPassword", "true")
+      } else {
+        localStorage.removeItem("savedPassword")
+        localStorage.removeItem("rememberPassword")
+      }
+
       onLogin(token, branch, user)
     } catch (err: any) {
       const errorMessage = err?.message || "Login failed. Please try again."
@@ -112,6 +156,31 @@ export function LoginForm({ onLogin }: LoginFormProps) {
                     <Eye className="h-4 w-4 text-gray-400" />
                   )}
                 </Button>
+              </div>
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-gray-700">
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="remember-me"
+                  checked={rememberMe}
+                  onCheckedChange={(checked) => setRememberMe(Boolean(checked))}
+                  disabled={isLoading}
+                />
+                <Label htmlFor="remember-me" className="text-xs font-normal cursor-pointer">
+                  Remember me
+                </Label>
+              </div>
+              <div className="flex items-center space-x-2">
+                <Checkbox
+                  id="remember-password"
+                  checked={rememberPassword}
+                  onCheckedChange={(checked) => setRememberPassword(Boolean(checked))}
+                  disabled={isLoading}
+                />
+                <Label htmlFor="remember-password" className="text-[11px] font-normal cursor-pointer text-gray-600">
+                  Save password on this device
+                </Label>
               </div>
             </div>
             {error && (

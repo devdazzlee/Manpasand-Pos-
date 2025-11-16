@@ -35,11 +35,10 @@ apiClient.interceptors.response.use(
   (error) => {
     // Handle 401 unauthorized errors
     if (error.response?.status === 401) {
-      // Clear invalid token
-      localStorage.removeItem("token");
-
-      // Redirect to login or trigger logout
-      window.location.href = "/";
+      // Previously we auto-logged the user out here.
+      // As per requirements, do NOT force logout automatically.
+      // Just log the issue so the user can choose when to log out.
+      console.warn("API returned 401 (unauthorized). Please check login/token.", error.response?.data);
     }
 
     return Promise.reject(error);

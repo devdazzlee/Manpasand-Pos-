@@ -8,7 +8,6 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { useLoading } from "@/hooks/use-loading";
-import { useToast } from "@/hooks/use-toast";
 import {
   Dialog,
   DialogContent,
@@ -80,6 +79,9 @@ interface Printer {
 
 export function NewSale() {
   const [cart, setCart] = useState<CartItem[]>([]);
+  // Track input values as strings to allow decimal point typing
+  const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
+  const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -91,6 +93,13 @@ export function NewSale() {
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [globalDiscountType, setGlobalDiscountType] = useState<'percentage' | 'amount'>('percentage');
   const searchInputRef = useRef<HTMLInputElement>(null);
+  // Refs for price and quantity inputs for keyboard navigation
+  const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const quantityInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const lastAddedProductId = useRef<string | null>(null);
+  // Refs for cart items and scrollable container
+  const cartItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const cartScrollContainerRef = useRef<HTMLDivElement | null>(null);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(
     null
   );
@@ -98,7 +107,6 @@ export function NewSale() {
     useLoading();
   const [scanLoading, setScanLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
-  const { toast } = useToast();
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
   const [printers, setPrinters] = useState<Printer[]>([]);
   const [savedPrinterObj, setSavedPrinterObj] = useState<Printer | null>(() => {
@@ -191,13 +199,7 @@ export function NewSale() {
           loadPrinters(),
         ]);
       } catch (error) {
-        if (mounted) {
-          toast({
-            variant: "destructive",
-            title: "Failed to load data",
-            description: "Could not fetch data from server",
-          });
-        }
+        // Error loading data - no toast shown
       }
     };
 
@@ -227,11 +229,7 @@ export function NewSale() {
             categoryId: categoryFilter,
           });
         } catch (error) {
-          toast({
-            variant: "destructive",
-            title: "Failed to load products",
-            description: "Could not fetch products from the server",
-          });
+          // Error loading products - no toast shown
         }
       };
 
@@ -249,11 +247,7 @@ export function NewSale() {
           categoryId: categoryFilter,
         });
       } catch (error) {
-        toast({
-          variant: "destructive",
-          title: "Search failed",
-          description: "Could not fetch search results",
-        });
+        // Search failed - no toast shown
       }
     };
 
@@ -296,6 +290,19 @@ export function NewSale() {
             : item
         )
       );
+      lastAddedProductId.current = product.id;
+      
+      // Auto-scroll to existing item when quantity is updated
+      setTimeout(() => {
+        const cartItem = cartItemRefs.current[product.id];
+        if (cartItem && cartScrollContainerRef.current) {
+          cartItem.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'nearest',
+            inline: 'nearest'
+          });
+        }
+      }, 100);
     } else {
       setCart([
         ...cart,
@@ -312,7 +319,29 @@ export function NewSale() {
           unit: product.unitName,
         },
       ]);
+      lastAddedProductId.current = product.id;
+      
+      // Auto-scroll to newly added item
+      setTimeout(() => {
+        const cartItem = cartItemRefs.current[product.id];
+        if (cartItem && cartScrollContainerRef.current) {
+          cartItem.scrollIntoView({ 
+            behavior: 'smooth', 
+            block: 'nearest',
+            inline: 'nearest'
+          });
+        }
+      }, 150);
     }
+
+    // Auto-focus on price input after adding product
+    setTimeout(() => {
+      const priceInput = priceInputRefs.current[product.id];
+      if (priceInput) {
+        priceInput.focus();
+        priceInput.select();
+      }
+    }, 100);
 
     // Toast removed as per user request - no toast when selecting products
   };
@@ -351,10 +380,12 @@ export function NewSale() {
   };
 
   const updateQuantityManual = (id: string, newQuantity: number) => {
+    // Ensure quantity is valid (>= 0.01)
+    const validQuantity = Math.max(0.01, Number(newQuantity));
     setCart(
       cart.map((item) => {
         if (item.id === id) {
-          return { ...item, quantity: Number(newQuantity) };
+          return { ...item, quantity: validQuantity };
         }
         return item;
       })
@@ -362,11 +393,12 @@ export function NewSale() {
   };
 
   const updateItemPrice = (id: string, newPrice: number) => {
-    if (newPrice < 0) return;
+    // Ensure price is valid (>= 0)
+    const validPrice = Math.max(0, Number(newPrice));
     setCart(
       cart.map((item) => {
         if (item.id === id) {
-          return { ...item, price: Number(newPrice) };
+          return { ...item, price: validPrice };
         }
         return item;
       })
@@ -393,19 +425,10 @@ export function NewSale() {
 
   const holdCurrentSale = () => {
     if (cart.length === 0) {
-      toast({
-        variant: "destructive",
-        title: "Cannot Hold Empty Cart",
-        description: "Add some items to the cart first",
-      });
       return;
     }
     setHoldSales([...holdSales, [...cart]]);
     setCart([]);
-    toast({
-      title: "Sale Held",
-      description: `Sale #${holdSales.length + 1} has been held`,
-    });
   };
 
   const retrieveHoldSale = (index: number) => {
@@ -418,10 +441,6 @@ export function NewSale() {
     const heldSale = holdSales[index];
     setCart(heldSale);
     setHoldSales(holdSales.filter((_, i) => i !== index));
-    toast({
-      title: "Sale Retrieved",
-      description: `Held sale #${index + 1} has been restored`,
-    });
   };
 
   const getBranchName = async () => {
@@ -484,32 +503,16 @@ export function NewSale() {
       }
     } catch (err) {
       console.error("Failed to load printers:", err);
-      toast({
-        title: "Warning",
-        description: "Failed to load available printers",
-        variant: "destructive",
-      });
+      // Failed to load printers - no toast shown
     }
   };
 
   const removeFromCart = (id: string) => {
-    const item = cart.find((item) => item.id === id);
     setCart(cart.filter((item) => item.id !== id));
-
-    if (item) {
-      toast({
-        title: "Item Removed",
-        description: `${item.name} removed from cart`,
-      });
-    }
   };
 
   const clearCart = () => {
     setCart([]);
-    toast({
-      title: "Cart Cleared",
-      description: "All items removed from cart",
-    });
   };
 
   const subtotal = cart.reduce(
@@ -2025,21 +2028,13 @@ export function NewSale() {
           }
         } catch (printError) {
           console.error("Print error:", printError);
-          toast({
-            variant: "destructive",
-            title: "Print Failed",
-            description: "Receipt could not be printed. Please try again.",
-          });
+          // Print failed - no toast shown
         }
 
         return true;
       } catch (error) {
         console.error("Payment error:", error);
-        toast({
-          variant: "destructive",
-          title: "Payment Failed",
-          description: "There was an error processing your payment",
-        });
+        // Payment failed - no toast shown
         return false;
       }
     });
@@ -2059,17 +2054,8 @@ export function NewSale() {
       const randomProduct =
         products[Math.floor(Math.random() * products.length)];
       await addToCart(randomProduct);
-
-      toast({
-        title: "Barcode Scanned",
-        description: `Found ${randomProduct.name}`,
-      });
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Scan Failed",
-        description: "Could not read barcode",
-      });
+      // Scan failed - no toast shown
     } finally {
       setScanLoading(false);
     }
@@ -2088,18 +2074,8 @@ export function NewSale() {
       if (product) {
         // Add product to cart
         await addToCart(product, 1);
-
-        toast({
-          title: "Product Added",
-          description: `${product.name} added to cart via barcode scan`,
-        });
-      } else {
-        toast({
-          variant: "destructive",
-          title: "Product Not Found",
-          description: `No product found with barcode: ${scannedValue}`,
-        });
       }
+      // Product not found - no toast shown
     } finally {
       setIsScanning(false);
     }
@@ -2113,6 +2089,72 @@ export function NewSale() {
     setSelectedCategory(categoryId);
     // No need to set loading state as we're using cached data
   };
+
+  // Global keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Don't handle shortcuts when typing in inputs or dialogs
+      const target = e.target as HTMLElement;
+      if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        // If it's the search input, allow normal typing
+        if (target === searchInputRef.current) {
+          return;
+        }
+        // For other inputs, only handle special shortcuts
+        // 'C' for Cash, 'D' for Card when in payment dialog
+        if (paymentDialogOpen) {
+          if (e.key === 'c' || e.key === 'C') {
+            e.preventDefault();
+            if (!paymentMethodPending) {
+              startPayment("Cash");
+            }
+            return;
+          }
+          if (e.key === 'd' || e.key === 'D') {
+            e.preventDefault();
+            if (!paymentMethodPending) {
+              startPayment("Card");
+            }
+            return;
+          }
+        }
+        return;
+      }
+
+      // Global shortcuts (when not in input)
+      // 'C' for Cash payment
+      if ((e.key === 'c' || e.key === 'C') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        if (cart.length > 0 && total > 0 && !paymentDialogOpen) {
+          startPayment("Cash");
+        }
+        return;
+      }
+
+      // 'D' for Card payment
+      if ((e.key === 'd' || e.key === 'D') && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        e.preventDefault();
+        if (cart.length > 0 && total > 0 && !paymentDialogOpen) {
+          startPayment("Card");
+        }
+        return;
+      }
+
+      // Any alphabet key (a-z, A-Z) focuses search input
+      if (/^[a-zA-Z]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
+        if (searchInputRef.current) {
+          e.preventDefault();
+          searchInputRef.current.focus();
+          searchInputRef.current.select();
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [cart, total, paymentDialogOpen, paymentMethodPending, startPayment]);
 
   return (
     <div className="flex flex-col lg:flex-row h-screen">
@@ -2462,7 +2504,7 @@ export function NewSale() {
         </div>
 
         <div className="flex-1 overflow-hidden">
-          <div className="h-full overflow-auto px-4 py-3">
+          <div ref={cartScrollContainerRef} className="h-full overflow-auto px-4 py-3">
             {cart.length === 0 ? (
               <div className="mt-8 text-center text-gray-500">
                 <p className="font-medium text-gray-600">Your cart is empty</p>
@@ -2473,6 +2515,9 @@ export function NewSale() {
                 {cart.map((item) => (
                   <div
                     key={item.id}
+                    ref={(el) => {
+                      cartItemRefs.current[item.id] = el;
+                    }}
                     className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -2498,12 +2543,93 @@ export function NewSale() {
                           Price (Rs)
                         </label>
                         <Input
-                          type="number"
-                          value={item.price}
-                          onChange={(e) => updateItemPrice(item.id, parseFloat(e.target.value))}
-                          className="mt-1 h-8 text-sm"
-                          min="0"
-                          step="0.01"
+                          ref={(el) => {
+                            priceInputRefs.current[item.id] = el;
+                          }}
+                          type="text"
+                          inputMode="decimal"
+                          value={priceInputs[item.id] !== undefined ? priceInputs[item.id] : (item.price === 0 ? "" : String(item.price))}
+                          onKeyDown={(e) => {
+                            // Enter or Tab: Move to quantity input
+                            if (e.key === "Enter" || e.key === "Tab") {
+                              e.preventDefault();
+                              const quantityInput = quantityInputRefs.current[item.id];
+                              if (quantityInput) {
+                                quantityInput.focus();
+                                quantityInput.select();
+                              }
+                            }
+                          }}
+                          onChange={(e) => {
+                            const value = e.target.value;
+                            
+                            // Update local input state
+                            setPriceInputs(prev => ({ ...prev, [item.id]: value }));
+                            
+                            // Allow empty string - clear the value
+                            if (value === "") {
+                              setCart(
+                                cart.map((cartItem) => {
+                                  if (cartItem.id === item.id) {
+                                    return { ...cartItem, price: 0 };
+                                  }
+                                  return cartItem;
+                                })
+                              );
+                              return;
+                            }
+                            
+                            // Allow decimal point and numbers - validate format
+                            if (/^(\d*\.?\d*)$/.test(value)) {
+                              // If it's just a decimal point, don't update cart yet
+                              if (value === ".") {
+                                return;
+                              }
+                              
+                              const numValue = parseFloat(value);
+                              if (!isNaN(numValue) && numValue >= 0) {
+                                updateItemPrice(item.id, numValue);
+                              }
+                            }
+                          }}
+                          onBlur={(e) => {
+                            const value = e.target.value.trim();
+                            // Clear local input state
+                            setPriceInputs(prev => {
+                              const newState = { ...prev };
+                              delete newState[item.id];
+                              return newState;
+                            });
+                            
+                            // If empty or just a decimal point, set to 0
+                            if (value === "" || value === "." || value === "0") {
+                              setCart(
+                                cart.map((cartItem) => {
+                                  if (cartItem.id === item.id) {
+                                    return { ...cartItem, price: 0 };
+                                  }
+                                  return cartItem;
+                                })
+                              );
+                            } else {
+                              // Ensure valid number on blur
+                              const numValue = parseFloat(value);
+                              if (!isNaN(numValue) && numValue >= 0) {
+                                updateItemPrice(item.id, numValue);
+                              } else {
+                                // Invalid, reset to 0
+                                setCart(
+                                  cart.map((cartItem) => {
+                                    if (cartItem.id === item.id) {
+                                      return { ...cartItem, price: 0 };
+                                    }
+                                    return cartItem;
+                                  })
+                                );
+                              }
+                            }
+                          }}
+                          className="mt-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
                       </div>
                       <div>
@@ -2526,10 +2652,44 @@ export function NewSale() {
                             <Minus className="h-3 w-3" />
                           </Button>
                           <Input
-                            type="number"
-                            value={item.quantity}
+                            ref={(el) => {
+                              quantityInputRefs.current[item.id] = el;
+                            }}
+                            type="text"
+                            inputMode="decimal"
+                            value={quantityInputs[item.id] !== undefined ? quantityInputs[item.id] : (item.quantity === 0 || item.quantity === 0.01 ? "" : String(item.quantity))}
+                            onKeyDown={(e) => {
+                              // Enter: Move to payment (open payment dialog)
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                if (cart.length > 0 && total > 0) {
+                                  startPayment("Cash");
+                                }
+                              }
+                              // Tab: Move to next item or payment
+                              if (e.key === "Tab" && !e.shiftKey) {
+                                const currentIndex = cart.findIndex(cartItem => cartItem.id === item.id);
+                                if (currentIndex < cart.length - 1) {
+                                  // Move to next item's price
+                                  e.preventDefault();
+                                  const nextItem = cart[currentIndex + 1];
+                                  const nextPriceInput = priceInputRefs.current[nextItem.id];
+                                  if (nextPriceInput) {
+                                    nextPriceInput.focus();
+                                    nextPriceInput.select();
+                                  }
+                                } else {
+                                  // Last item, allow default tab behavior (might go to payment button)
+                                }
+                              }
+                            }}
                             onChange={(e) => {
                               const value = e.target.value;
+                              
+                              // Update local input state
+                              setQuantityInputs(prev => ({ ...prev, [item.id]: value }));
+                              
+                              // Allow empty string - clear the value
                               if (value === "") {
                                 setCart(
                                   cart.map((cartItem) => {
@@ -2541,15 +2701,31 @@ export function NewSale() {
                                 );
                                 return;
                               }
-
-                              const numValue = parseFloat(value);
-                              if (!isNaN(numValue)) {
-                                updateQuantityManual(item.id, numValue);
+                              
+                              // Allow decimal point and numbers - validate format
+                              if (/^(\d*\.?\d*)$/.test(value)) {
+                                // If it's just a decimal point, don't update cart yet
+                                if (value === ".") {
+                                  return;
+                                }
+                                
+                                const numValue = parseFloat(value);
+                                if (!isNaN(numValue) && numValue >= 0) {
+                                  updateQuantityManual(item.id, numValue);
+                                }
                               }
                             }}
                             onBlur={(e) => {
-                              const value = parseFloat(e.target.value);
-                              if (isNaN(value) || value <= 0) {
+                              const value = e.target.value.trim();
+                              // Clear local input state
+                              setQuantityInputs(prev => {
+                                const newState = { ...prev };
+                                delete newState[item.id];
+                                return newState;
+                              });
+                              
+                              // If empty or just a decimal point, set to minimum
+                              if (value === "" || value === "." || value === "0") {
                                 setCart(
                                   cart.map((cartItem) => {
                                     if (cartItem.id === item.id) {
@@ -2558,11 +2734,25 @@ export function NewSale() {
                                     return cartItem;
                                   })
                                 );
+                              } else {
+                                // Ensure valid number on blur
+                                const numValue = parseFloat(value);
+                                if (!isNaN(numValue) && numValue > 0) {
+                                  updateQuantityManual(item.id, numValue);
+                                } else {
+                                  // Invalid or <= 0, set to minimum
+                                  setCart(
+                                    cart.map((cartItem) => {
+                                      if (cartItem.id === item.id) {
+                                        return { ...cartItem, quantity: 0.01 };
+                                      }
+                                      return cartItem;
+                                    })
+                                  );
+                                }
                               }
                             }}
                             className="h-8 w-16 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            min="0"
-                            step="0.01"
                           />
                           <Button
                             size="sm"
@@ -2713,6 +2903,18 @@ export function NewSale() {
                 autoFocus
                 value={tenderedAmount}
                 onChange={(e) => handleTenderedInputChange(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter: Confirm payment
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    confirmPayment();
+                  }
+                  // Escape: Cancel payment
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    resetPaymentState();
+                  }
+                }}
                 className="mt-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 min="0"
                 step="0.01"

@@ -645,15 +645,30 @@ app.post('/print-receipt', async (req, res) => {
       y += lineH(usedF) - 1;
     }
 
-    // Powered by credit
+    // Powered by credit (Ace Studios)
     y += hr(y, 'dotted', 0.5) + 2;
+
     const poweredBy = drawFit('Powered by Ace Studios', margins.left, y, W, {
       maxSize: 8.5,
       minSize: 7.0,
       align: 'center',
       font: baseFont
     });
-    y += lineH(poweredBy);
+    y += lineH(poweredBy) - 1;
+
+    const aceLines = [
+      'Website: acesoface.com',
+      'Contact: +92 336 2500357'
+    ];
+    for (const line of aceLines) {
+      const usedAce = drawFit(line, margins.left, y, W, {
+        maxSize: 8.0,
+        minSize: 7.0,
+        align: 'center',
+        font: baseFont
+      });
+      y += lineH(usedAce) - 1;
+    }
 
     // Trim height with safety buffer to avoid bottom cut (same as backend)
     const needed = y + margins.bottom + 16;
