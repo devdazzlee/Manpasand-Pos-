@@ -18,8 +18,11 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle, Loader2, Minus } from "lucide-react"
+import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle, Loader2, Minus, X } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { PageLoader } from "@/components/ui/page-loader"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import apiClient from "@/lib/apiClient"
 
 interface Sale {
@@ -73,6 +76,8 @@ interface ReturnItem {
 interface NewReturn {
   saleId: string
   customerId?: string
+  returnType: "REFUND" | "EXCHANGE"
+  refundMethod?: string
   returnedItems: Array<{
     productId: string
     quantity: number
@@ -83,6 +88,25 @@ interface NewReturn {
     price: number
   }>
   notes: string
+}
+
+interface Product {
+  id: string
+  name: string
+  sku: string
+  sales_rate_exc_dis_and_tax: number
+  sales_rate_inc_dis_and_tax: number
+  purchase_rate: number
+  available_stock?: number
+  current_stock?: number
+}
+
+interface ExchangeItem {
+  productId: string
+  productName: string
+  sku: string
+  quantity: number
+  price: number
 }
 
 interface SelectedReturnItem {
@@ -99,10 +123,19 @@ export function Returns() {
 
   const [returns, setReturns] = useState<ReturnItem[]>([])
   const [sales, setSales] = useState<Sale[]>([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true) // Start with true to show loader on initial load
   const [salesLoading, setSalesLoading] = useState(false)
   const [selectedSale, setSelectedSale] = useState<Sale | null>(null)
   const [selectedReturnItems, setSelectedReturnItems] = useState<SelectedReturnItem[]>([])
+  // Track return quantity input values as strings to allow decimal point typing
+  const [returnQuantityInputs, setReturnQuantityInputs] = useState<Record<string, string>>({})
+  const [products, setProducts] = useState<Product[]>([])
+  const [productsLoading, setProductsLoading] = useState(false)
+  const [exchangeItems, setExchangeItems] = useState<ExchangeItem[]>([])
+  const [exchangeProductSearch, setExchangeProductSearch] = useState("")
+  const [exchangeProductDropdownOpen, setExchangeProductDropdownOpen] = useState(false)
+  const exchangeProductSearchRef = useRef<HTMLInputElement | null>(null)
+  const exchangeProductDropdownRef = useRef<HTMLDivElement | null>(null)
 
   const [isProcessOpen, setIsProcessOpen] = useState(false)
   const [saleDropdownOpen, setSaleDropdownOpen] = useState(false)
@@ -115,10 +148,46 @@ export function Returns() {
   const [newReturn, setNewReturn] = useState<NewReturn>({
     saleId: "",
     customerId: "",
+    returnType: "REFUND",
+    refundMethod: "",
     returnedItems: [],
     exchangedItems: [],
     notes: "",
   })
+
+  // Fetch products for exchange
+  const fetchProducts = async () => {
+    setProductsLoading(true)
+    try {
+      const userRole = localStorage.getItem("role")
+      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN"
+      
+      const params: any = {
+        fetch_all: true,
+        limit: isAdmin ? 10000 : 1000,
+        is_active: true,
+      }
+      
+      if (!isAdmin) {
+        const branchStr = localStorage.getItem("branch")
+        if (branchStr && branchStr !== "Not Found") {
+          try {
+            const branchObj = JSON.parse(branchStr)
+            params.branch_id = branchObj.id || branchStr
+          } catch (e) {
+            params.branch_id = branchStr
+          }
+        }
+      }
+      
+      const response = await apiClient.get("/products", { params })
+      setProducts(response.data?.data || [])
+    } catch (error: any) {
+      console.error("Error fetching products:", error)
+    } finally {
+      setProductsLoading(false)
+    }
+  }
 
   // Fetch sales and returns data
   const fetchSales = async () => {
@@ -177,10 +246,48 @@ export function Returns() {
     return () => document.removeEventListener("mousedown", handleClickOutside)
   }, [])
 
+  // Close exchange product dropdown when clicking outside
+  useEffect(() => {
+    const handleClickOutside = (event: MouseEvent) => {
+      if (
+        exchangeProductDropdownRef.current &&
+        !exchangeProductDropdownRef.current.contains(event.target as Node) &&
+        exchangeProductSearchRef.current &&
+        !exchangeProductSearchRef.current.contains(event.target as Node)
+      ) {
+        setExchangeProductDropdownOpen(false)
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside)
+    return () => document.removeEventListener("mousedown", handleClickOutside)
+  }, [])
+
+  useEffect(() => {
+    fetchReturns()
+    fetchSales()
+    fetchProducts()
+  }, [])
+
   useEffect(() => {
     if (!isProcessOpen) {
       setSaleSearch("")
       setSaleDropdownOpen(false)
+      setExchangeProductSearch("")
+      setExchangeProductDropdownOpen(false)
+      setExchangeItems([])
+      setSelectedReturnItems([])
+      setReturnQuantityInputs({})
+      setNewReturn({
+        saleId: "",
+        customerId: "",
+        returnType: "REFUND",
+        refundMethod: "",
+        returnedItems: [],
+        exchangedItems: [],
+        notes: "",
+      })
+      setSelectedSale(null)
     }
   }, [isProcessOpen])
 
@@ -241,11 +348,125 @@ export function Returns() {
   const pendingReturns = returns.filter((r) => r.status === "PENDING").length
   const returnRate = returns.length > 0 ? ((returns.length / sales.length) * 100).toFixed(1) : "0.0"
 
+  // Handle exchange product selection
+  const handleExchangeProductSelect = (productId: string) => {
+    const product = products.find((p) => p.id === productId)
+    if (!product) return
+
+    const price = product.sales_rate_inc_dis_and_tax || product.sales_rate_exc_dis_and_tax || product.purchase_rate || 0
+    
+    // Check if product already in exchange items
+    const existingItem = exchangeItems.find((item) => item.productId === productId)
+    if (existingItem) {
+      // Increment quantity
+      setExchangeItems((prev) =>
+        prev.map((item) =>
+          item.productId === productId
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        )
+      )
+    } else {
+      // Add new exchange item
+      setExchangeItems((prev) => [
+        ...prev,
+        {
+          productId: product.id,
+          productName: product.name,
+          sku: product.sku,
+          quantity: 1,
+          price: price,
+        },
+      ])
+    }
+
+    // Update newReturn.exchangedItems
+    const updatedExchangeItems = existingItem
+      ? exchangeItems.map((item) =>
+          item.productId === productId
+            ? { ...item, quantity: item.quantity + 1 }
+            : item
+        )
+      : [
+          ...exchangeItems,
+          {
+            productId: product.id,
+            quantity: 1,
+            price: price,
+          },
+        ]
+
+    setNewReturn((prev) => ({
+      ...prev,
+      exchangedItems: updatedExchangeItems,
+    }))
+
+    setExchangeProductSearch("")
+    setExchangeProductDropdownOpen(false)
+  }
+
+  // Handle exchange item quantity change
+  const handleExchangeQuantityChange = (productId: string, quantity: number) => {
+    if (quantity <= 0) {
+      // Remove item
+      setExchangeItems((prev) => prev.filter((item) => item.productId !== productId))
+      setNewReturn((prev) => ({
+        ...prev,
+        exchangedItems: prev.exchangedItems.filter((item) => item.productId !== productId),
+      }))
+    } else {
+      // Update quantity
+      setExchangeItems((prev) =>
+        prev.map((item) =>
+          item.productId === productId ? { ...item, quantity } : item
+        )
+      )
+      setNewReturn((prev) => ({
+        ...prev,
+        exchangedItems: prev.exchangedItems.map((item) =>
+          item.productId === productId ? { ...item, quantity } : item
+        ),
+      }))
+    }
+  }
+
+  // Filter products for exchange
+  const filteredExchangeProducts = useMemo(() => {
+    if (!exchangeProductSearch) return products.slice(0, 50)
+    const searchLower = exchangeProductSearch.toLowerCase()
+    return products
+      .filter(
+        (product) =>
+          product.name.toLowerCase().includes(searchLower) ||
+          product.sku.toLowerCase().includes(searchLower)
+      )
+      .slice(0, 50)
+  }, [products, exchangeProductSearch])
+
   const handleProcessReturn = async () => {
     if (!newReturn.saleId || (newReturn.returnedItems.length === 0 && newReturn.exchangedItems.length === 0)) {
       toast({
         title: "Missing Information",
         description: "Please select a sale and add items to return or exchange.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // Validate return type specific requirements
+    if (newReturn.returnType === "REFUND" && !newReturn.refundMethod) {
+      toast({
+        title: "Missing Information",
+        description: "Please select a refund method.",
+        variant: "destructive",
+      })
+      return
+    }
+
+    if (newReturn.returnType === "EXCHANGE" && newReturn.exchangedItems.length === 0) {
+      toast({
+        title: "Missing Information",
+        description: "Please add items for exchange.",
         variant: "destructive",
       })
       return
@@ -269,6 +490,8 @@ export function Returns() {
     try {
       const response = await apiClient.patch(`/sale/${newReturn.saleId}/refund`, {
         customerId: newReturn.customerId || undefined,
+        returnType: newReturn.returnType,
+        refundMethod: newReturn.refundMethod || undefined,
         returnedItems: newReturn.returnedItems,
         exchangedItems: newReturn.exchangedItems,
         notes: newReturn.notes,
@@ -286,11 +509,15 @@ export function Returns() {
       setNewReturn({
         saleId: "",
         customerId: "",
+        returnType: "REFUND",
+        refundMethod: "",
         returnedItems: [],
         exchangedItems: [],
         notes: "",
       })
       setSelectedReturnItems([])
+      setExchangeItems([])
+      setExchangeProductSearch("")
       setIsProcessOpen(false)
     } catch (error: any) {
       toast({
@@ -320,42 +547,61 @@ export function Returns() {
         productName: item.product.name,
         sku: item.product.sku,
         originalQuantity: item.quantity,
-        returnQuantity: 0,
+        returnQuantity: item.quantity, // Initialize with original quantity instead of 0
         unitPrice: item.unit_price
       }))
       setSelectedReturnItems(items)
+      
+      // Update newReturn.returnedItems with initial quantities
+      const returnedItems = items.map(i => ({
+        productId: i.productId,
+        quantity: i.returnQuantity
+      }))
+      setNewReturn(prev => ({
+        ...prev,
+        returnedItems
+      }))
     } else {
       setSelectedReturnItems([])
     }
   }
 
   const handleReturnQuantityChange = (productId: string, quantity: number) => {
-    setSelectedReturnItems(prev => 
-      prev.map(item => 
-        item.productId === productId 
-          ? { ...item, returnQuantity: Math.max(0, Math.min(quantity, item.originalQuantity)) }
-          : item
-      )
+    const item = selectedReturnItems.find((item) => item.productId === productId)
+    if (!item) return
+    
+    // Ensure quantity is valid: >= 0 and <= originalQuantity
+    const validQuantity = Math.max(0, Math.min(quantity, item.originalQuantity))
+    
+    setSelectedReturnItems((prev) => {
+      const updatedItems = prev.map((i) =>
+        i.productId === productId
+          ? { ...i, returnQuantity: validQuantity }
+          : i
     )
 
     // Update newReturn.returnedItems
-    const updatedItems = selectedReturnItems.map(item => 
-      item.productId === productId 
-        ? { ...item, returnQuantity: Math.max(0, Math.min(quantity, item.originalQuantity)) }
-        : item
-    )
-
     const returnedItems = updatedItems
-      .filter(item => item.returnQuantity > 0)
-      .map(item => ({
-        productId: item.productId,
-        quantity: item.returnQuantity
-      }))
+        .filter((i) => i.returnQuantity > 0)
+        .map((i) => ({
+          productId: i.productId,
+          quantity: i.returnQuantity
+        }))
 
-    setNewReturn(prev => ({
+      setNewReturn((prev) => ({
       ...prev,
       returnedItems
     }))
+      
+      return updatedItems
+    })
+    
+    // Clear local input state when value is set programmatically (via +/- buttons)
+    setReturnQuantityInputs((prev) => {
+      const newState = { ...prev }
+      delete newState[productId]
+      return newState
+    })
   }
 
   const handleViewReturn = (returnItem: ReturnItem) => {
@@ -411,6 +657,10 @@ export function Returns() {
       </div>
     </div>
   )
+
+  if (loading) {
+    return <PageLoader message="Loading returns..." />
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
@@ -499,6 +749,63 @@ export function Returns() {
                 </div>
               )}
 
+              {/* Return Type Selection */}
+              <div className="space-y-2">
+                <Label>Return Type *</Label>
+                <RadioGroup
+                  value={newReturn.returnType}
+                  onValueChange={(value: "REFUND" | "EXCHANGE") => {
+                    setNewReturn((prev) => ({
+                      ...prev,
+                      returnType: value,
+                      refundMethod: value === "EXCHANGE" ? "" : prev.refundMethod,
+                    }))
+                    if (value === "EXCHANGE") {
+                      setExchangeItems([])
+                      setNewReturn((prev) => ({ ...prev, exchangedItems: [] }))
+                    }
+                  }}
+                  className="flex gap-6"
+                >
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="REFUND" id="refund" />
+                    <Label htmlFor="refund" className="font-normal cursor-pointer">
+                      Refund
+                    </Label>
+                  </div>
+                  <div className="flex items-center space-x-2">
+                    <RadioGroupItem value="EXCHANGE" id="exchange" />
+                    <Label htmlFor="exchange" className="font-normal cursor-pointer">
+                      Exchange
+                    </Label>
+                  </div>
+                </RadioGroup>
+              </div>
+
+              {/* Refund Method Selection (only for Refund) */}
+              {newReturn.returnType === "REFUND" && (
+                <div className="space-y-2">
+                  <Label htmlFor="refund-method">Refund Method *</Label>
+                  <Select
+                    value={newReturn.refundMethod || ""}
+                    onValueChange={(value) =>
+                      setNewReturn((prev) => ({ ...prev, refundMethod: value }))
+                    }
+                  >
+                    <SelectTrigger id="refund-method">
+                      <SelectValue placeholder="Select refund method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cash">Cash</SelectItem>
+                      <SelectItem value="card">Card</SelectItem>
+                      <SelectItem value="bank_transfer">Bank Transfer</SelectItem>
+                      <SelectItem value="store_credit">Store Credit</SelectItem>
+                      <SelectItem value="original_payment">Original Payment Method</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
               {selectedReturnItems.length > 0 && (
                 <div className="space-y-2">
                   <Label>Select Items to Return</Label>
@@ -521,12 +828,130 @@ export function Returns() {
                             <Minus className="w-3 h-3" />
                           </Button>
                           <Input
-                            type="number"
-                            value={item.returnQuantity}
-                            onChange={(e) => handleReturnQuantityChange(item.productId, parseInt(e.target.value) || 0)}
-                            className="w-16 text-center"
-                            min={0}
-                            max={item.originalQuantity}
+                            type="text"
+                            inputMode="decimal"
+                            value={returnQuantityInputs[item.productId] !== undefined ? returnQuantityInputs[item.productId] : (item.returnQuantity === 0 ? "" : String(item.returnQuantity))}
+                            onChange={(e) => {
+                              const value = e.target.value
+                              
+                              // Update local input state
+                              setReturnQuantityInputs(prev => ({ ...prev, [item.productId]: value }))
+                              
+                              // Allow empty string - clear the value
+                              if (value === "") {
+                                setSelectedReturnItems((prev) =>
+                                  prev.map((i) =>
+                                    i.productId === item.productId
+                                      ? { ...i, returnQuantity: 0 }
+                                      : i
+                                  )
+                                )
+                                return
+                              }
+                              
+                              // Allow decimal point and numbers - validate format
+                              if (/^(\d*\.?\d*)$/.test(value)) {
+                                // If it's just a decimal point, don't update yet
+                                if (value === ".") {
+                                  return
+                                }
+                                
+                                const numValue = parseFloat(value)
+                                if (!isNaN(numValue) && numValue >= 0) {
+                                  // Validate: cannot exceed originalQuantity
+                                  if (numValue > item.originalQuantity) {
+                                    // Show error toast when exceeding original quantity
+                                    toast({
+                                      title: "Invalid Return Quantity",
+                                      description: `Return quantity (${numValue}) cannot exceed original sale quantity (${item.originalQuantity}) for ${item.productName}.`,
+                                      variant: "destructive",
+                                    })
+                                    // Set to max allowed (originalQuantity)
+                                    const validQuantity = item.originalQuantity
+                                    setSelectedReturnItems((prev) =>
+                                      prev.map((i) =>
+                                        i.productId === item.productId
+                                          ? { ...i, returnQuantity: validQuantity }
+                                          : i
+                                      )
+                                    )
+                                    // Update local input to show the corrected value
+                                    setReturnQuantityInputs(prev => ({ ...prev, [item.productId]: String(validQuantity) }))
+                                  } else {
+                                    const validQuantity = numValue
+                                    setSelectedReturnItems((prev) =>
+                                      prev.map((i) =>
+                                        i.productId === item.productId
+                                          ? { ...i, returnQuantity: validQuantity }
+                                          : i
+                                      )
+                                    )
+                                  }
+                                }
+                              }
+                            }}
+                            onBlur={(e) => {
+                              const value = e.target.value.trim()
+                              // Clear local input state
+                              setReturnQuantityInputs(prev => {
+                                const newState = { ...prev }
+                                delete newState[item.productId]
+                                return newState
+                              })
+                              
+                              // If empty or just a decimal point, set to 0
+                              if (value === "" || value === "." || value === "0") {
+                                setSelectedReturnItems((prev) =>
+                                  prev.map((i) =>
+                                    i.productId === item.productId
+                                      ? { ...i, returnQuantity: 0 }
+                                      : i
+                                  )
+                                )
+                              } else {
+                                // Ensure valid number on blur
+                                const numValue = parseFloat(value)
+                                if (!isNaN(numValue) && numValue >= 0) {
+                                  // Validate: cannot exceed originalQuantity
+                                  if (numValue > item.originalQuantity) {
+                                    // Show error toast when exceeding original quantity
+                                    toast({
+                                      title: "Invalid Return Quantity",
+                                      description: `Return quantity (${numValue}) cannot exceed original sale quantity (${item.originalQuantity}) for ${item.productName}.`,
+                                      variant: "destructive",
+                                    })
+                                    // Set to max allowed (originalQuantity)
+                                    const validQuantity = item.originalQuantity
+                                    setSelectedReturnItems((prev) =>
+                                      prev.map((i) =>
+                                        i.productId === item.productId
+                                          ? { ...i, returnQuantity: validQuantity }
+                                          : i
+                                      )
+                                    )
+                                  } else {
+                                    const validQuantity = numValue
+                                    setSelectedReturnItems((prev) =>
+                                      prev.map((i) =>
+                                        i.productId === item.productId
+                                          ? { ...i, returnQuantity: validQuantity }
+                                          : i
+                                      )
+                                    )
+                                  }
+                                } else {
+                                  // Invalid, reset to 0
+                                  setSelectedReturnItems((prev) =>
+                                    prev.map((i) =>
+                                      i.productId === item.productId
+                                        ? { ...i, returnQuantity: 0 }
+                                        : i
+                                    )
+                                  )
+                                }
+                              }
+                            }}
+                            className="w-16 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           />
                           <Button
                             variant="outline"
@@ -553,6 +978,120 @@ export function Returns() {
                           <strong>Total Return Value:</strong> Rs {selectedReturnItems
                             .reduce((total, item) => total + (item.returnQuantity * item.unitPrice), 0)
                             .toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {/* Exchange Items Section (only for Exchange) */}
+              {newReturn.returnType === "EXCHANGE" && (
+                <div className="space-y-2" ref={exchangeProductDropdownRef}>
+                  <Label htmlFor="exchange-product-search">
+                    Add Exchange Items ({filteredExchangeProducts.length} available)
+                  </Label>
+                  <div className="relative">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      ref={exchangeProductSearchRef}
+                      id="exchange-product-search"
+                      placeholder="Search products by name or SKU..."
+                      value={exchangeProductSearch}
+                      onFocus={() => setExchangeProductDropdownOpen(true)}
+                      autoComplete="off"
+                      onChange={(e) => {
+                        setExchangeProductSearch(e.target.value)
+                        setExchangeProductDropdownOpen(true)
+                      }}
+                      className="pl-9"
+                    />
+                    {exchangeProductDropdownOpen && (
+                      <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                        {productsLoading ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                            Loading products...
+                          </div>
+                        ) : filteredExchangeProducts.length === 0 ? (
+                          <div className="px-3 py-2 text-sm text-gray-500">
+                            {exchangeProductSearch ? "No matching products found" : "No products available"}
+                          </div>
+                        ) : (
+                          filteredExchangeProducts.map((product) => (
+                            <button
+                              key={product.id}
+                              type="button"
+                              className="w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 text-gray-800"
+                              onMouseDown={(event) => event.preventDefault()}
+                              onClick={() => handleExchangeProductSelect(product.id)}
+                            >
+                              <div className="flex flex-col">
+                                <span className="font-medium">{product.name}</span>
+                                <span className="text-xs text-gray-500">
+                                  SKU: {product.sku || "N/A"} | Rs{" "}
+                                  {product.sales_rate_inc_dis_and_tax || product.sales_rate_exc_dis_and_tax || product.purchase_rate || 0}
+                                </span>
+                              </div>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Exchange Items List */}
+                  {exchangeItems.length > 0 && (
+                    <div className="border rounded-lg p-4 space-y-3 mt-4">
+                      <Label>Exchange Items</Label>
+                      {exchangeItems.map((item) => (
+                        <div key={item.productId} className="flex items-center justify-between p-3 bg-white rounded border">
+                          <div className="flex-1">
+                            <div className="font-medium">{item.productName}</div>
+                            <div className="text-sm text-gray-500">
+                              SKU: {item.sku} • Price: Rs {Number(item.price).toLocaleString()}
+                            </div>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleExchangeQuantityChange(item.productId, item.quantity - 1)}
+                              disabled={item.quantity <= 1}
+                            >
+                              <Minus className="w-3 h-3" />
+                            </Button>
+                            <span className="w-12 text-center font-medium">{item.quantity}</span>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleExchangeQuantityChange(item.productId, item.quantity + 1)}
+                            >
+                              <Plus className="w-3 h-3" />
+                            </Button>
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              onClick={() => handleExchangeQuantityChange(item.productId, 0)}
+                              className="ml-2 text-red-600 hover:text-red-700"
+                            >
+                              <X className="w-3 h-3" />
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                      
+                      {/* Exchange Summary */}
+                      <div className="bg-green-50 p-3 rounded-lg mt-4">
+                        <h4 className="font-medium text-green-900 mb-2">Exchange Summary</h4>
+                        <div className="text-sm text-green-800 space-y-1">
+                          <div>
+                            <strong>Exchange Items:</strong> {exchangeItems.length}
+                          </div>
+                          <div>
+                            <strong>Total Exchange Value:</strong> Rs {exchangeItems
+                              .reduce((total, item) => total + (item.quantity * item.price), 0)
+                              .toLocaleString()}
+                          </div>
                         </div>
                       </div>
                     </div>
