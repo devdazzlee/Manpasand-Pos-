@@ -697,12 +697,19 @@ export function NewSale() {
 
         // Auto-print receipt
         try {
-          // Prepare receipt data for local print server (same format as backend)
-          console.log("Branch address:", branchName.address);
+          // Get branch name from localStorage (correct source)
+          const storedBranchName = localStorage.getItem("branchName");
+          
+          console.log("🏢 Current Branch:", storedBranchName);
+          
+          // Only show branch name and Karachi
+          const fullAddress = `${storedBranchName}, Karachi`
+         
+          console.log("fullAddress", fullAddress);
           const receiptDataForServer: ReceiptData = {
-            storeName: branchName.name || "MANPASAND GENERAL STORE",
+            storeName: storedBranchName || branchName.name || "MANPASAND GENERAL STORE",
             tagline: "Quality • Service • Value",
-            address: `${branchName.address}, Karachi`,
+            address: fullAddress,
             transactionId: transactionId,
             timestamp: new Date().toISOString(),
             cashier: receiptData.cashier || "Walk-in",

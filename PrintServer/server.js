@@ -314,7 +314,7 @@ app.post('/print-receipt', async (req, res) => {
     // PDF init - start with reasonable height, will be trimmed later
     const tmp = path.join(os.tmpdir(), `receipt_${Date.now()}.pdf`);
     const doc = new PDFDocument({
-      size: [pageWidth, mm(1400)],
+      size: [pageWidth, mm(1800)],
       margins,
       autoFirstPage: true,
       pdfVersion: '1.4'
@@ -646,7 +646,7 @@ app.post('/print-receipt', async (req, res) => {
     }
 
     // Powered by credit (Ace Studios)
-    y += hr(y, 'dotted', 0.5) + 2;
+    y += hr(y, 'dotted', 0.5) + 3;
 
     const poweredBy = drawFit('Powered by Ace Studios', margins.left, y, W, {
       maxSize: 8.5,
@@ -654,7 +654,7 @@ app.post('/print-receipt', async (req, res) => {
       align: 'center',
       font: baseFont
     });
-    y += lineH(poweredBy) - 1;
+    y += lineH(poweredBy) + 1;
 
     const aceLines = [
       'Website: acesoface.com',
@@ -667,12 +667,18 @@ app.post('/print-receipt', async (req, res) => {
         align: 'center',
         font: baseFont
       });
-      y += lineH(usedAce) - 1;
+      y += lineH(usedAce) + 1;
     }
 
     // Trim height with safety buffer to avoid bottom cut (same as backend)
-    const needed = y + margins.bottom + 16;
-    if (needed < doc.page.height) doc.page.height = needed;
+    // Increased buffer to ensure Ace Studios section is included
+    const needed = y + margins.bottom + 30;
+    if (needed < doc.page.height) {
+      doc.page.height = needed;
+    } else {
+      // If content exceeds initial height, ensure we have enough space
+      doc.page.height = needed + 20;
+    }
 
     doc.end();
     await new Promise((resolve, reject) => {
