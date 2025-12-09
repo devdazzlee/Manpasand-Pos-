@@ -11,7 +11,6 @@ const redis_1 = require("../config/redis");
 const app_1 = require("../config/app");
 const apiError_1 = require("../utils/apiError");
 const client_2 = require("@prisma/client");
-const convertToSeconds_1 = require("../utils/convertToSeconds");
 class AuthService {
     async register(data) {
         const existingUser = await client_1.prisma.user.findUnique({
@@ -82,23 +81,19 @@ class AuthService {
             id: user.id,
             role: user.role,
             branch_id: user.branch_id,
-        }, app_1.config.jwtSecret, {
-            expiresIn: typeof app_1.config.jwtExpiresIn === 'string'
-                ? (0, convertToSeconds_1.convertToSeconds)(app_1.config.jwtExpiresIn)
-                : app_1.config.jwtExpiresIn,
-        });
-        // Store session in Redis with proper expiration
-        const expiresInSeconds = (0, convertToSeconds_1.convertToSeconds)(app_1.config.jwtExpiresIn);
-        await redis_1.redis.set(`session:${user.id}`, token, 'EX', expiresInSeconds);
+        }, app_1.config.jwtSecret);
+        // Store session in Redis without expiration (token valid until logout)
+        await (0, redis_1.safeRedisOperation)(async (redis) => redis.set(`session:${user.id}`, token), null);
         // Omit password from returned user object
-        const { id: undefined, password: _, ...userWithoutPassword } = user;
+        const { id, password: _, ...userWithoutPassword } = user;
         return {
             user: userWithoutPassword,
             token,
         };
     }
     async logout(userId) {
-        // await redis.del(`session:${userId}`);
+        // Delete session from Redis to invalidate token
+        await (0, redis_1.safeRedisOperation)(async (redis) => redis.del(`session:${userId}`), 0);
     }
 }
 exports.AuthService = AuthService;

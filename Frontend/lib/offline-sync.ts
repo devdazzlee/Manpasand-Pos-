@@ -136,15 +136,28 @@ class OfflineSyncManager {
 
     for (const sale of unsyncedSales) {
       try {
-        // Post sale to server
-        const response = await apiClient.post('/sales', sale);
+        // Prepare sale payload for API
+        const salePayload = {
+          items: sale.products.map((item: any) => ({
+            productId: item.productId || item.id,
+            quantity: item.quantity,
+            price: item.price
+          })),
+          paymentMethod: sale.payment?.method || 'CASH',
+          branchId: sale.branchId,
+          customerId: sale.customer?.id
+        };
         
-        if (response) {
+        // Post sale to server
+        const response = await apiClient.post('/sale', salePayload);
+        
+        if (response?.data?.data) {
           console.log('✅ Synced sale:', sale.id);
           await offlineDB.markSaleSynced(sale.id);
         }
       } catch (error) {
         console.error('❌ Failed to sync sale:', error);
+        // Don't mark as synced if it failed
       }
     }
   }
@@ -156,16 +169,38 @@ class OfflineSyncManager {
     try {
       // Fetch products
       const products = await apiClient.get('/products');
+      let productsArray: any[] = [];
+      
+      // Handle different API response structures
       if (products?.data) {
-        await offlineDB.saveProducts(products.data);
-        console.log(`✅ Updated ${products.data.length} products`);
+        if (Array.isArray(products.data)) {
+          productsArray = products.data;
+        } else if (Array.isArray(products.data.data)) {
+          productsArray = products.data.data;
+        } else if (products.data.data && Array.isArray(products.data.data)) {
+          productsArray = products.data.data;
+        }
+      }
+      
+      if (productsArray.length > 0) {
+        await offlineDB.saveProducts(productsArray);
+        console.log(`✅ Updated ${productsArray.length} products`);
+      } else {
+        console.warn('No products array found in response:', products);
       }
 
-      // Fetch customers
-      const customers = await apiClient.get('/customers');
-      if (customers?.data) {
-        await offlineDB.saveCustomers(customers.data);
-        console.log(`✅ Updated ${customers.data.length} customers`);
+      // Fetch customers (use /customer endpoint, not /customers)
+      const customers = await apiClient.get('/customer');
+      const customersArray = Array.isArray(customers?.data?.data) 
+        ? customers.data.data 
+        : Array.isArray(customers?.data) 
+        ? customers.data 
+        : [];
+      if (customersArray.length > 0) {
+        await offlineDB.saveCustomers(customersArray);
+        console.log(`✅ Updated ${customersArray.length} customers`);
+      } else {
+        console.warn('No customers array found in response:', customers);
       }
 
       // Clear expired cache

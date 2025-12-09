@@ -12,6 +12,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageLoader } from "@/components/ui/page-loader";
+import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { DollarSign, CheckCircle2, XCircle, Users } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
@@ -38,13 +40,11 @@ const months = [
     "July", "August", "September", "October", "November", "December"
 ];
 
-const currentYear = new Date().getFullYear();
-const years = Array.from({ length: (currentYear + 2) - 2020 + 1 }, (_, i) => 2020 + i);
-
 export function Salaries() {
     const [salaries, setSalaries] = useState<Salary[]>([]);
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [isInitialLoading, setIsInitialLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
     const [form, setForm] = useState<Partial<Salary>>({});
@@ -52,6 +52,10 @@ export function Salaries() {
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [deleteId, setDeleteId] = useState<string | null>(null);
+    
+    // Calculate years inside component to avoid hydration issues
+    const [currentYear] = useState(() => new Date().getFullYear());
+    const years = Array.from({ length: (currentYear + 2) - 2020 + 1 }, (_, i) => 2020 + i);
 
     // Fetch employees for dropdown
     useEffect(() => {
@@ -70,6 +74,7 @@ export function Salaries() {
             setSalaries([]);
         } finally {
             setIsLoading(false);
+            setIsInitialLoading(false);
         }
     };
     useEffect(() => { fetchSalaries(); }, []);
@@ -172,6 +177,10 @@ export function Salaries() {
     const totalUnpaid = salaries
         .filter(s => !s.is_paid)
         .reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
+
+    if (isInitialLoading) {
+        return <PageLoader message="Loading salaries data..." />
+    }
 
     return (
         <div className="p-4 md:p-6 space-y-4 md:space-y-6">
@@ -299,33 +308,43 @@ export function Salaries() {
 
             {/* Stats Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Salaries</CardTitle>
-                        <Users className="h-4 w-4 text-muted-foreground" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold">{totalSalaries}</div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Paid</CardTitle>
-                        <CheckCircle2 className="h-4 w-4 text-green-600" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-green-600">Rs {totalPaid.toLocaleString()}</div>
-                    </CardContent>
-                </Card>
-                <Card>
-                    <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                        <CardTitle className="text-sm font-medium">Total Unpaid</CardTitle>
-                        <XCircle className="h-4 w-4 text-red-600" />
-                    </CardHeader>
-                    <CardContent>
-                        <div className="text-2xl font-bold text-red-600">Rs {totalUnpaid.toLocaleString()}</div>
-                    </CardContent>
-                </Card>
+                {isLoading ? (
+                    <>
+                        <StatCardSkeleton />
+                        <StatCardSkeleton />
+                        <StatCardSkeleton />
+                    </>
+                ) : (
+                    <>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Total Salaries</CardTitle>
+                                <Users className="h-4 w-4 text-muted-foreground" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold">{totalSalaries}</div>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Total Paid</CardTitle>
+                                <CheckCircle2 className="h-4 w-4 text-green-600" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold text-green-600">Rs {totalPaid.toLocaleString()}</div>
+                            </CardContent>
+                        </Card>
+                        <Card>
+                            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                                <CardTitle className="text-sm font-medium">Total Unpaid</CardTitle>
+                                <XCircle className="h-4 w-4 text-red-600" />
+                            </CardHeader>
+                            <CardContent>
+                                <div className="text-2xl font-bold text-red-600">Rs {totalUnpaid.toLocaleString()}</div>
+                            </CardContent>
+                        </Card>
+                    </>
+                )}
             </div>
 
             {/* Table with Loader */}
@@ -335,12 +354,7 @@ export function Salaries() {
                 </CardHeader>
                 <CardContent>
                     {isLoading ? (
-                        <div className="flex justify-center py-10">
-                            <div className="text-center">
-                                <Loader2 className="animate-spin h-8 w-8 text-gray-500 mx-auto mb-2" />
-                                <p className="text-gray-600">Loading salaries...</p>
-                            </div>
-                        </div>
+                        <PageLoader message="Loading salaries..." />
                     ) : salaries.length === 0 ? (
                         <div className="text-center py-10">
                             <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />

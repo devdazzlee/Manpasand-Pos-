@@ -210,4 +210,23 @@ export class CategoryService {
     }
   }
 
+  async deleteAllCategories(): Promise<{ 
+    deletedCount: number; 
+    deletedImages: number;
+  }> {
+    // Delete all categories and their related records in a transaction
+    return await prisma.$transaction(async (tx) => {
+      // 1. Delete CategoryImages records first (ON DELETE RESTRICT constraint)
+      const deletedImages = await tx.categoryImages.deleteMany({});
+      
+      // 2. Delete all Categories
+      const deletedCategories = await tx.category.deleteMany({});
+      
+      return {
+        deletedCount: deletedCategories.count,
+        deletedImages: deletedImages.count,
+      };
+    });
+  }
+
 }

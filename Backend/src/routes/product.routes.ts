@@ -8,6 +8,7 @@ import {
   getFeaturedProducts,
   getBestSellingProducts,
   bulkUploadProducts,
+  deleteAllProducts,
 } from '../controllers/product.controller';
 import {
   createProductSchema,
@@ -33,6 +34,7 @@ router.post(
   createProduct,
 );
 router.post('/bulk-upload', uploadBulk.single('file'), bulkUploadProducts);
+router.delete('/all', deleteAllProducts);
 router.get('/', validate(listProductsSchema), listProducts);
 router.get('/featured', getFeaturedProducts);
 router.get('/best-selling', getBestSellingProducts);

@@ -19,6 +19,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Plus, Search, Clock, Users,  DollarSign, Eye, StopCircle, Edit, Trash2, Loader2, Calendar as CalendarIcon } from "lucide-react"
+import { PageLoader } from "@/components/ui/page-loader"
 import apiClient from "@/lib/apiClient"
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -71,6 +72,7 @@ export function Shifts() {
 
   // Add loading state
   const [loading, setLoading] = useState(false)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
 
   const [newShift, setNewShift] = useState<NewShiftForm>({
     employee: "",
@@ -123,8 +125,15 @@ export function Shifts() {
   };
 
   useEffect(() => {
-    getEmployees()
-    getAllShifts()
+    const loadData = async () => {
+      setIsInitialLoading(true)
+      try {
+        await Promise.all([getEmployees(), getAllShifts()])
+      } finally {
+        setIsInitialLoading(false)
+      }
+    }
+    loadData()
   }, [])
 
   const getStatusColor = (status: string) => "bg-gray-100 text-gray-800";
@@ -339,6 +348,10 @@ export function Shifts() {
     return shift.date === tomorrow.toISOString().split("T")[0] && shift.status === "scheduled"
   }).length
   const todayLaborCost = todayShifts.reduce((sum, shift) => sum + shift.totalHours * shift.hourlyRate, 0)
+
+  if (isInitialLoading) {
+    return <PageLoader message="Loading shifts..." />
+  }
 
   const ShiftTable = ({ shiftData }: { shiftData: Shift[] }) => (
     <div className="overflow-x-auto -mx-4 md:mx-0">

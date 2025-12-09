@@ -171,3 +171,12 @@ export const bulkUploadProducts = asyncHandler(async (req: Request, res: Respons
 
     new ApiResponse(results, 'Bulk upload completed').send(res);
 });
+
+export const deleteAllProducts = asyncHandler(async (req: Request, res: Response) => {
+    const result = await productService.deleteAllProducts();
+    new ApiResponse(
+        result, 
+        `Successfully deleted ${result.deletedCount} products, ${result.deletedImages} product images, ${result.deletedStocks} stock records, ${result.deletedStockMovements} stock movements, ${result.deletedSaleItems} sale items, ${result.deletedPurchaseOrderItems} purchase order items, and ${result.deletedOrderItems} order items`,
+        200
+    ).send(res);
+});

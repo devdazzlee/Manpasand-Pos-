@@ -2,7 +2,6 @@ import type React from "react"
 import type { Metadata, Viewport } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
-import { Toaster } from "@/components/ui/toaster"
 import { DataProvider } from "@/components/data-provider"
 import { PWABanner } from "@/components/pwa-banner"
 
@@ -49,7 +48,6 @@ export default function RootLayout({
           {children}
         </DataProvider>
         <PWABanner />
-        <Toaster />
       </body>
     </html>
   )

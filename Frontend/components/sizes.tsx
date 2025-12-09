@@ -13,6 +13,7 @@ import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { PageLoader } from "@/components/ui/page-loader";
 
 interface Size {
   id: string;
@@ -27,6 +28,7 @@ const Sizes: React.FC = () => {
   const [sizes, setSizes] = useState<Size[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -50,6 +52,7 @@ const Sizes: React.FC = () => {
       console.log(err);
     } finally {
       setLoading(false);
+      setIsInitialLoading(false);
     }
   };
 
@@ -120,6 +123,10 @@ const Sizes: React.FC = () => {
     s.name.toLowerCase().includes(search.toLowerCase()) || s.code.includes(search)
   );
 
+  if (isInitialLoading) {
+    return <PageLoader message="Loading sizes..." />
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -151,10 +158,7 @@ const Sizes: React.FC = () => {
         <CardHeader><CardTitle>Size List</CardTitle></CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-10">
-              <LoadingSpinner size="lg" />
-              <p className="text-gray-600 mt-2">Loading sizes...</p>
-            </div>
+            <PageLoader message="Loading sizes..." />
           ) : filtered.length === 0 ? (
             <div className="text-center py-10">
               <p className="text-gray-600">No sizes found</p>

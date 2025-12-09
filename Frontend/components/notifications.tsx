@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useState, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
@@ -8,8 +8,10 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
-import { Bell, AlertTriangle, Info, CheckCircle, X, Check } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
+import { Bell, AlertTriangle, Info, CheckCircle, X, Check, RefreshCw } from "lucide-react"
+import { PageLoader } from "@/components/ui/page-loader"
+import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
+import apiClient from "@/lib/apiClient"
 
 interface Notification {
   id: string
@@ -18,8 +20,12 @@ interface Notification {
   type: "warning" | "success" | "info" | "error"
   timestamp: string
   read: boolean
-  priority: "high" | "medium" | "low"
-  category: "system" | "sales" | "inventory" | "update"
+  priority: "high" | "medium" | "low" | "critical"
+  category: string
+  notificationType?: string
+  is_read?: boolean
+  created_at?: string
+  metadata?: Record<string, any>
 }
 
 interface NotificationSettings {
@@ -32,90 +38,14 @@ interface NotificationSettings {
 }
 
 export function Notifications() {
-  const { toast } = useToast()
-
-  const [notifications, setNotifications] = useState<Notification[]>([
-    {
-      id: "NOT-001",
-      title: "Low Stock Alert",
-      message: "iPhone 15 Pro stock is running low (5 units remaining)",
-      type: "warning",
-      timestamp: "2024-01-15 14:30:00",
-      read: false,
-      priority: "high",
-      category: "inventory",
-    },
-    {
-      id: "NOT-002",
-      title: "Daily Sales Report",
-      message: "Today's sales target achieved: Rs 50,000",
-      type: "success",
-      timestamp: "2024-01-15 18:00:00",
-      read: true,
-      priority: "medium",
-      category: "sales",
-    },
-    {
-      id: "NOT-003",
-      title: "System Update",
-      message: "New POS system update available",
-      type: "info",
-      timestamp: "2024-01-15 10:00:00",
-      read: false,
-      priority: "low",
-      category: "update",
-    },
-    {
-      id: "NOT-004",
-      title: "Payment Failed",
-      message: "Credit card payment failed for order #12345",
-      type: "error",
-      timestamp: "2024-01-15 16:45:00",
-      read: false,
-      priority: "high",
-      category: "system",
-    },
-    {
-      id: "NOT-005",
-      title: "Weekly Sales Summary",
-      message: "Weekly sales report is ready for review",
-      type: "info",
-      timestamp: "2024-01-14 09:00:00",
-      read: true,
-      priority: "medium",
-      category: "sales",
-    },
-    {
-      id: "NOT-006",
-      title: "Critical Stock Alert",
-      message: "Samsung Galaxy S24 is out of stock",
-      type: "error",
-      timestamp: "2024-01-15 12:15:00",
-      read: false,
-      priority: "high",
-      category: "inventory",
-    },
-    {
-      id: "NOT-007",
-      title: "Backup Completed",
-      message: "Daily data backup completed successfully",
-      type: "success",
-      timestamp: "2024-01-15 02:00:00",
-      read: true,
-      priority: "low",
-      category: "system",
-    },
-    {
-      id: "NOT-008",
-      title: "New Customer Registration",
-      message: "5 new customers registered today",
-      type: "info",
-      timestamp: "2024-01-15 17:30:00",
-      read: false,
-      priority: "medium",
-      category: "sales",
-    },
-  ])
+  const [notifications, setNotifications] = useState<Notification[]>([])
+  const [loading, setLoading] = useState(true)
+  const [stats, setStats] = useState({
+    total: 0,
+    unread: 0,
+    highPriority: 0,
+    today: 0,
+  })
 
   const [settings, setSettings] = useState<NotificationSettings>({
     lowStockAlerts: true,
@@ -128,6 +58,82 @@ export function Notifications() {
 
   const [selectedNotification, setSelectedNotification] = useState<Notification | null>(null)
   const [isViewDialogOpen, setIsViewDialogOpen] = useState(false)
+
+  // Fetch notifications from backend
+  const fetchNotifications = async () => {
+    try {
+      setLoading(true)
+      const [notificationsRes, statsRes] = await Promise.all([
+        apiClient.get('/notifications', {
+          params: {
+            fetch_all: true,
+            offset: 0,
+          },
+        }),
+        apiClient.get('/notifications/stats'),
+      ])
+
+      const notificationsData = notificationsRes.data?.data?.notifications || []
+      const statsData = statsRes.data?.data || {}
+
+      // Transform backend data to frontend format
+      const transformedNotifications = notificationsData.map((n: any) => ({
+        id: n.id,
+        title: n.title,
+        message: n.message,
+        type: mapNotificationType(n.type, n.priority),
+        timestamp: new Date(n.created_at).toLocaleString('en-US', {
+          year: 'numeric',
+          month: '2-digit',
+          day: '2-digit',
+          hour: '2-digit',
+          minute: '2-digit',
+          second: '2-digit',
+        }),
+        read: n.is_read,
+        priority: n.priority?.toLowerCase() || 'medium',
+        category: n.category || 'system',
+        notificationType: n.type,
+        metadata: n.metadata,
+      }))
+
+      setNotifications(transformedNotifications)
+      setStats({
+        total: statsData.total || 0,
+        unread: statsData.unread || 0,
+        highPriority: statsData.highPriority || 0,
+        today: statsData.today || 0,
+      })
+    } catch (error) {
+      console.error('Failed to fetch notifications:', error)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  // Map backend notification type to frontend type
+  const mapNotificationType = (type: string, priority: string): "warning" | "success" | "info" | "error" => {
+    const typeMap: Record<string, "warning" | "success" | "info" | "error"> = {
+      SALE: 'success',
+      STOCK: priority === 'CRITICAL' ? 'error' : 'warning',
+      RETURN: 'info',
+      EXCHANGE: 'info',
+      ORDER: 'info',
+      PURCHASE_ORDER: 'info',
+      SYSTEM: 'info',
+      PAYMENT: 'error',
+      CUSTOMER: 'info',
+      INVENTORY: 'warning',
+    }
+    return typeMap[type] || 'info'
+  }
+
+  useEffect(() => {
+    fetchNotifications()
+    // Refresh every 30 seconds
+    const interval = setInterval(fetchNotifications, 30000)
+    return () => clearInterval(interval)
+  }, [])
 
   const getTypeIcon = (type: string) => {
     switch (type) {
@@ -172,22 +178,28 @@ export function Notifications() {
     }
   }
 
-  const markAsRead = (id: string) => {
-    setNotifications((prev) =>
-      prev.map((notification) => (notification.id === id ? { ...notification, read: true } : notification)),
-    )
-    toast({
-      title: "Notification marked as read",
-      description: "The notification has been marked as read.",
-    })
+  const markAsRead = async (id: string) => {
+    try {
+      await apiClient.patch(`/notifications/${id}/read`)
+      setNotifications((prev) =>
+        prev.map((notification) => (notification.id === id ? { ...notification, read: true } : notification)),
+      )
+      // Refresh stats
+      fetchNotifications()
+    } catch (error) {
+      console.error('Failed to mark notification as read:', error)
+    }
   }
 
-  const markAllAsRead = () => {
-    setNotifications((prev) => prev.map((notification) => ({ ...notification, read: true })))
-    toast({
-      title: "All notifications marked as read",
-      description: "All notifications have been marked as read.",
-    })
+  const markAllAsRead = async () => {
+    try {
+      await apiClient.patch('/notifications/read-all')
+      setNotifications((prev) => prev.map((notification) => ({ ...notification, read: true })))
+      // Refresh stats
+      fetchNotifications()
+    } catch (error) {
+      console.error('Failed to mark all notifications as read:', error)
+    }
   }
 
   const viewNotification = (notification: Notification) => {
@@ -203,19 +215,13 @@ export function Notifications() {
   }
 
   const saveSettings = () => {
-    toast({
-      title: "Settings saved",
-      description: "Your notification preferences have been updated.",
-    })
+    // Settings saved (no toast in POS system)
   }
 
-  // Calculate stats
-  const unreadCount = notifications.filter((n) => !n.read).length
-  const highPriorityCount = notifications.filter((n) => n.priority === "high").length
-  const todayCount = notifications.filter((n) => {
-    const today = new Date().toISOString().split("T")[0]
-    return n.timestamp.startsWith(today.replace(/-/g, "-"))
-  }).length
+  // Use stats from backend
+  const unreadCount = stats.unread
+  const highPriorityCount = stats.highPriority
+  const todayCount = stats.today
   const alertsCount = notifications.filter((n) => n.category === "system").length
 
   // Filter functions
@@ -304,6 +310,10 @@ export function Notifications() {
           <Button variant="outline" onClick={markAllAsRead} disabled={unreadCount === 0}>
             Mark All Read
           </Button>
+          <Button variant="outline" onClick={fetchNotifications} disabled={loading}>
+            <RefreshCw className={`w-4 h-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+            Refresh
+          </Button>
           <Button>
             <Bell className="w-4 h-4 mr-2" />
             Settings
@@ -312,46 +322,57 @@ export function Notifications() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Unread</CardTitle>
-            <Bell className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{unreadCount}</div>
-            <p className="text-xs text-muted-foreground">New notifications</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">High Priority</CardTitle>
-            <AlertTriangle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{highPriorityCount}</div>
-            <p className="text-xs text-muted-foreground">Require attention</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Today</CardTitle>
-            <Info className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{todayCount}</div>
-            <p className="text-xs text-muted-foreground">Notifications today</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">System Alerts</CardTitle>
-            <Check className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{alertsCount}</div>
-            <p className="text-xs text-muted-foreground">System notifications</p>
-          </CardContent>
-        </Card>
+        {loading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Unread</CardTitle>
+                <Bell className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{unreadCount}</div>
+                <p className="text-xs text-muted-foreground">New notifications</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">High Priority</CardTitle>
+                <AlertTriangle className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{highPriorityCount}</div>
+                <p className="text-xs text-muted-foreground">Require attention</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Today</CardTitle>
+                <Info className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{todayCount}</div>
+                <p className="text-xs text-muted-foreground">Notifications today</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">System Alerts</CardTitle>
+                <Check className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{alertsCount}</div>
+                <p className="text-xs text-muted-foreground">System notifications</p>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       <Tabs defaultValue="all" className="space-y-4">
@@ -368,7 +389,13 @@ export function Notifications() {
               <CardTitle>All Notifications</CardTitle>
               <CardDescription>View and manage all system notifications</CardDescription>
             </CardHeader>
-            <CardContent>{renderNotificationsTable(getFilteredNotifications("all"))}</CardContent>
+            <CardContent>
+              {loading ? (
+                <PageLoader message="Loading notifications..." />
+              ) : (
+                renderNotificationsTable(getFilteredNotifications("all"))
+              )}
+            </CardContent>
           </Card>
         </TabsContent>
 
@@ -378,7 +405,13 @@ export function Notifications() {
               <CardTitle>Unread Notifications</CardTitle>
               <CardDescription>View all unread notifications that require your attention</CardDescription>
             </CardHeader>
-            <CardContent>{renderNotificationsTable(getFilteredNotifications("unread"))}</CardContent>
+            <CardContent>
+              {loading ? (
+                <PageLoader message="Loading notifications..." />
+              ) : (
+                renderNotificationsTable(getFilteredNotifications("unread"))
+              )}
+            </CardContent>
           </Card>
         </TabsContent>
 
@@ -388,7 +421,13 @@ export function Notifications() {
               <CardTitle>System Alerts</CardTitle>
               <CardDescription>Critical system notifications and alerts</CardDescription>
             </CardHeader>
-            <CardContent>{renderNotificationsTable(getFilteredNotifications("alerts"))}</CardContent>
+            <CardContent>
+              {loading ? (
+                <PageLoader message="Loading notifications..." />
+              ) : (
+                renderNotificationsTable(getFilteredNotifications("alerts"))
+              )}
+            </CardContent>
           </Card>
         </TabsContent>
 

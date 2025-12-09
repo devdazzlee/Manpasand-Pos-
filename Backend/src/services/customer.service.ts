@@ -2,9 +2,8 @@ import { Customer } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import jwt from 'jsonwebtoken';
-import { convertToSeconds } from '../utils/convertToSeconds';
 import { config } from '../config/app';
-import { redis } from '../config/redis';
+import { safeRedisOperation } from '../config/redis';
 import bcrypt from 'bcryptjs';
 
 class CustomerService {
@@ -15,12 +14,7 @@ class CustomerService {
                 id: cusId
             },
             config.jwtSecret,
-            {
-                expiresIn:
-                    typeof config.jwtExpiresIn === 'string'
-                        ? convertToSeconds(config.jwtExpiresIn)
-                        : config.jwtExpiresIn,
-            },
+            // No expiration - token remains valid until user logs out
         );
 
         return token;
@@ -54,9 +48,11 @@ class CustomerService {
 
         const token = this.generateToken(customer.id, customer.email!);
 
-        // Store session in Redis with proper expiration
-        const expiresInSeconds = convertToSeconds(config.jwtExpiresIn);
-        await redis.set(`session:customer:${customer.id}`, token, 'EX', expiresInSeconds);
+        // Store session in Redis without expiration (token valid until logout)
+        await safeRedisOperation(
+          async (redis) => redis.set(`session:customer:${customer.id}`, token),
+          null
+        );
 
         return {
             email: customer.email,
@@ -95,9 +91,11 @@ class CustomerService {
 
         const token = this.generateToken(customer.id, customer.email!);
 
-        // Save session to Redis
-        const expiresInSeconds = convertToSeconds(config.jwtExpiresIn);
-        await redis.set(`session:customer:${customer.id}`, token, 'EX', expiresInSeconds);
+        // Save session to Redis without expiration (token valid until logout)
+        await safeRedisOperation(
+          async (redis) => redis.set(`session:customer:${customer.id}`, token),
+          null
+        );
 
         return {
             email: customer.email,
@@ -171,13 +169,19 @@ class CustomerService {
         });
 
         // Remove session from Redis if exists
-        await redis.del(`session:customer:${customerId}`);
+        await safeRedisOperation(
+          async (redis) => redis.del(`session:customer:${customerId}`),
+          0
+        );
 
         return { message: 'Customer deleted successfully' };
     }
 
     public async logoutCustomer(customerId: Customer['id']) {
-        await redis.del(`session:customer:${customerId}`);
+        await safeRedisOperation(
+          async (redis) => redis.del(`session:customer:${customerId}`),
+          0
+        );
         return { message: 'Logged out successfully' };
     }
 }

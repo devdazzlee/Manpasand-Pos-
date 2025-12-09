@@ -146,7 +146,7 @@ export function StockManagement() {
     const loadMeta = async () => {
       setIsInitialLoading(true);
       try {
-        const bRes = await apiClient.get(`${API_BASE}/branches?limit=100`);
+        const bRes = await apiClient.get(`${API_BASE}/branches?fetch_all=true`);
         setBranches(bRes.data.data);
       } catch (e: any) {
         console.log(e);
@@ -225,12 +225,7 @@ export function StockManagement() {
   const fetchProductsFromAPI = useCallback(async (searchTerm: string = "") => {
     setLoadingProducts(true);
     try {
-      // Check if user is ADMIN - admins should see all products
-      const userRole = localStorage.getItem("role");
-      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
-      
       const params: any = {
-        limit: isAdmin ? 10000 : 1000, // Get all products for admin
         fetch_all: true,
       };
       
@@ -1478,9 +1473,7 @@ export function StockManagement() {
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <div className="flex justify-center py-10">
-                  <Loader2 className="animate-spin h-8 w-8 text-gray-500" />
-                </div>
+                <PageLoader message="Loading stock data..." />
               ) : (
                 <>
                   <div className="overflow-x-auto -mx-4 md:mx-0">
@@ -1563,9 +1556,7 @@ export function StockManagement() {
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <div className="flex justify-center py-10">
-                  <Loader2 className="animate-spin h-8 w-8 text-gray-500" />
-                </div>
+                <PageLoader message="Loading stock data..." />
               ) : (
                 <div className="overflow-x-auto -mx-4 md:mx-0">
                   <div className="inline-block min-w-full align-middle">
@@ -1633,9 +1624,7 @@ export function StockManagement() {
             </CardHeader>
             <CardContent>
               {isLoading ? (
-                <div className="flex justify-center py-10">
-                  <Loader2 className="animate-spin h-8 w-8 text-gray-500" />
-                </div>
+                <PageLoader message="Loading stock data..." />
               ) : (
                 <div className="overflow-x-auto -mx-4 md:mx-0">
                   <div className="inline-block min-w-full align-middle">

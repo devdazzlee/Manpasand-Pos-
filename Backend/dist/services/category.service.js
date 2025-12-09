@@ -173,6 +173,19 @@ class CategoryService {
             throw error;
         }
     }
+    async deleteAllCategories() {
+        // Delete all categories and their related records in a transaction
+        return await client_1.prisma.$transaction(async (tx) => {
+            // 1. Delete CategoryImages records first (ON DELETE RESTRICT constraint)
+            const deletedImages = await tx.categoryImages.deleteMany({});
+            // 2. Delete all Categories
+            const deletedCategories = await tx.category.deleteMany({});
+            return {
+                deletedCount: deletedCategories.count,
+                deletedImages: deletedImages.count,
+            };
+        });
+    }
 }
 exports.CategoryService = CategoryService;
 //# sourceMappingURL=category.service.js.map

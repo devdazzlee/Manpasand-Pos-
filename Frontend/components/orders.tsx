@@ -11,6 +11,8 @@ import { Plus, Loader2, Trash2, Edit, Eye, RefreshCcw, Search, ShoppingBag, Doll
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
+import { PageLoader } from "@/components/ui/page-loader";
+import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
 
 interface Customer { id: string; email: string; name: string | null; }
 interface Product { id: string; name: string; }
@@ -47,14 +49,9 @@ const Orders: React.FC = () => {
   const fetchMetadata = async () => {
     setIsInitialLoading(true);
     try {
-      // Check if user is ADMIN - admins should see all products
-      const userRole = localStorage.getItem("role");
-      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
-      const productLimit = isAdmin ? 10000 : 100;
-      
       const [cRes, pRes] = await Promise.all([
         apiClient.get(`${API_BASE}/customer`),
-        apiClient.get(`${API_BASE}/products?limit=${productLimit}${isAdmin ? '&fetch_all=true' : ''}`),
+        apiClient.get(`${API_BASE}/products?fetch_all=true`),
       ]);
       setCustomers(cRes.data.data);
       setProducts(pRes.data.data);
@@ -246,16 +243,7 @@ const Orders: React.FC = () => {
   const pendingOrders = orders.filter(order => order.status === 'PENDING').length;
 
   if (isInitialLoading) {
-    return (
-      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <div className="text-center">
-            <Loader2 className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" />
-            <p className="text-sm md:text-base text-gray-600">Loading orders data...</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <PageLoader message="Loading orders data..." />
   }
 
   return (
@@ -366,33 +354,43 @@ const Orders: React.FC = () => {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-            <ShoppingBag className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalOrders}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-            <DollarSign className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">${(Number(totalRevenue) || 0).toFixed(2)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
-            <Clock className="h-4 w-4 text-orange-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-orange-600">{pendingOrders}</div>
-          </CardContent>
-        </Card>
+        {isLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
+                <ShoppingBag className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{totalOrders}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+                <DollarSign className="h-4 w-4 text-green-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">${(Number(totalRevenue) || 0).toFixed(2)}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
+                <Clock className="h-4 w-4 text-orange-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-orange-600">{pendingOrders}</div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* Filters */}
@@ -435,12 +433,7 @@ const Orders: React.FC = () => {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex justify-center py-10">
-              <div className="text-center">
-                <Loader2 className="animate-spin h-8 w-8 text-gray-500 mx-auto mb-2" />
-                <p className="text-gray-600">Loading orders...</p>
-              </div>
-            </div>
+            <PageLoader message="Loading orders..." />
           ) : filtered.length === 0 ? (
             <div className="text-center py-10">
               <ShoppingBag className="h-12 w-12 text-gray-400 mx-auto mb-4" />

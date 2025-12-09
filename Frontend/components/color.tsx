@@ -13,6 +13,7 @@ import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { PageLoader } from "@/components/ui/page-loader";
 
 interface Color {
   id: string;
@@ -27,6 +28,7 @@ const Colors: React.FC = () => {
   const [colors, setColors] = useState<Color[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -46,7 +48,10 @@ const Colors: React.FC = () => {
       setColors(res.data.data);
     } catch (err) {
       console.log(err);
-    } finally { setLoading(false); }
+    } finally { 
+      setLoading(false);
+      setIsInitialLoading(false);
+    }
   };
 
   const handleSearch = (v: string) => {
@@ -116,6 +121,10 @@ const Colors: React.FC = () => {
     c.name.toLowerCase().includes(search.toLowerCase()) || c.code.includes(search)
   );
 
+  if (isInitialLoading) {
+    return <PageLoader message="Loading colors..." />
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -147,10 +156,7 @@ const Colors: React.FC = () => {
         <CardHeader><CardTitle>Color List</CardTitle></CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-10">
-              <LoadingSpinner size="lg" />
-              <p className="text-gray-600 mt-2">Loading colors...</p>
-            </div>
+            <PageLoader message="Loading colors..." />
           ) : filtered.length === 0 ? (
             <div className="text-center py-10">
               <p className="text-gray-600">No colors found</p>

@@ -15,15 +15,23 @@ const authenticate = async (req, res, next) => {
             throw new apiError_1.AppError(401, 'Authentication required');
         }
         const decoded = jsonwebtoken_1.default.verify(token, app_1.config.jwtSecret);
-        // Verify token against Redis
-        const storedToken = await redis_1.redis.get(`session:${decoded.id}`);
-        if (!storedToken || storedToken !== token) {
-            throw new apiError_1.AppError(401, 'Invalid or expired session');
+        // Verify token against Redis if available, otherwise just verify JWT
+        if (redis_1.isRedisAvailable) {
+            const storedToken = await (0, redis_1.safeRedisOperation)(async (redis) => redis.get(`session:${decoded.id}`), null);
+            if (storedToken && storedToken !== token) {
+                throw new apiError_1.AppError(401, 'Invalid or expired session');
+            }
+            // If storedToken is null and Redis is available, session might have expired
+            // But if Redis is unavailable, we allow JWT verification to pass
         }
         req.user = decoded;
         next();
     }
     catch (error) {
+        // If it's a JWT error, pass it through
+        if (error instanceof jsonwebtoken_1.default.JsonWebTokenError || error instanceof jsonwebtoken_1.default.TokenExpiredError) {
+            throw new apiError_1.AppError(401, 'Invalid or expired token');
+        }
         next(error);
     }
 };

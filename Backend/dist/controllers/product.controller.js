@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.bulkUploadProducts = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.listProducts = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = void 0;
+exports.deleteAllProducts = exports.bulkUploadProducts = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.listProducts = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = void 0;
 const product_service_1 = require("../services/product.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -76,16 +76,22 @@ exports.bulkUploadProducts = (0, asyncHandler_1.default)(async (req, res) => {
     else {
         return new apiResponse_1.ApiResponse(null, 'Unsupported file type', 400).send(res);
     }
-    // Validate and create products
+    // Validate and create/update products
     const results = [];
     for (const prod of products) {
         try {
+            // Map XLSX column names to our data structure
+            // Handle both standard format and XLSX format (e.g., "Purchase Rate", "Selling Price")
+            const purchaseRate = prod.purchase_rate || prod['Purchase Rate'] || prod['Purchase Rate'] || 0;
+            const sellingPrice = prod.sales_rate_exc_dis_and_tax || prod.sales_rate_inc_dis_and_tax ||
+                prod['Selling Price'] || prod['selling_price'] || 0;
             // Enhanced product data that can include relation names
             const enhancedProd = {
-                name: prod.name,
-                purchase_rate: Number(prod.purchase_rate),
-                sales_rate_exc_dis_and_tax: Number(prod.sales_rate_exc_dis_and_tax),
-                sales_rate_inc_dis_and_tax: Number(prod.sales_rate_inc_dis_and_tax),
+                name: prod.name || prod.Name,
+                purchase_rate: Number(purchaseRate) || 0,
+                // Set both sales rates to the same value if only one is provided
+                sales_rate_exc_dis_and_tax: Number(prod.sales_rate_exc_dis_and_tax || sellingPrice) || 0,
+                sales_rate_inc_dis_and_tax: Number(prod.sales_rate_inc_dis_and_tax || sellingPrice) || 0,
                 min_qty: Number(prod.min_qty) || 10,
                 max_qty: Number(prod.max_qty) || 10,
                 is_active: prod.is_active !== undefined ? Boolean(prod.is_active) : true,
@@ -97,21 +103,27 @@ exports.bulkUploadProducts = (0, asyncHandler_1.default)(async (req, res) => {
                 is_featured: prod.is_featured !== undefined ? Boolean(prod.is_featured) : false,
                 description: prod.description,
                 pct_or_hs_code: prod.pct_or_hs_code,
-                sku: prod.sku,
+                sku: prod.sku || prod.SKU,
                 discount_amount: prod.discount_amount ? Number(prod.discount_amount) : 0,
                 // Relation names from sheet (will be converted to IDs)
-                unit_name: prod.unit_name || prod.unit,
-                category_name: prod.category_name || prod.category,
-                subcategory_name: prod.subcategory_name || prod.subcategory,
-                tax_name: prod.tax_name || prod.tax,
-                supplier_name: prod.supplier_name || prod.supplier,
-                brand_name: prod.brand_name || prod.brand,
-                color_name: prod.color_name || prod.color,
-                size_name: prod.size_name || prod.size,
+                // Handle both standard format and XLSX format
+                unit_name: prod.unit_name || prod.unit || prod.Unit,
+                category_name: prod.category_name || prod.category || prod.Category,
+                subcategory_name: prod.subcategory_name || prod.subcategory || prod.Subcategory,
+                tax_name: prod.tax_name || prod.tax || prod.Tax,
+                supplier_name: prod.supplier_name || prod.supplier || prod.Supplier,
+                brand_name: prod.brand_name || prod.brand || prod.Brand,
+                color_name: prod.color_name || prod.color || prod.Color,
+                size_name: prod.size_name || prod.size || prod.Size,
             };
-            // Validate required fields
-            if (!enhancedProd.name || isNaN(enhancedProd.purchase_rate) || isNaN(enhancedProd.sales_rate_exc_dis_and_tax) || isNaN(enhancedProd.sales_rate_inc_dis_and_tax)) {
-                throw new Error('Missing required fields: name, purchase_rate, sales_rate_exc_dis_and_tax, sales_rate_inc_dis_and_tax');
+            // Validate required fields (name and at least one price)
+            if (!enhancedProd.name) {
+                throw new Error('Missing required field: name');
+            }
+            // For updates, we can allow missing prices (they'll just not be updated)
+            // For new products, we need at least selling price
+            if (!enhancedProd.sales_rate_exc_dis_and_tax && !enhancedProd.sales_rate_inc_dis_and_tax) {
+                throw new Error('Missing required field: selling price');
             }
             const created = await productService.createProductFromBulkUpload(enhancedProd);
             results.push({
@@ -131,5 +143,9 @@ exports.bulkUploadProducts = (0, asyncHandler_1.default)(async (req, res) => {
         }
     }
     new apiResponse_1.ApiResponse(results, 'Bulk upload completed').send(res);
+});
+exports.deleteAllProducts = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await productService.deleteAllProducts();
+    new apiResponse_1.ApiResponse(result, `Successfully deleted ${result.deletedCount} products, ${result.deletedImages} product images, ${result.deletedStocks} stock records, ${result.deletedStockMovements} stock movements, ${result.deletedSaleItems} sale items, ${result.deletedPurchaseOrderItems} purchase order items, and ${result.deletedOrderItems} order items`, 200).send(res);
 });
 //# sourceMappingURL=product.controller.js.map

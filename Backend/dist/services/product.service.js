@@ -188,7 +188,8 @@ class ProductService {
         const updateData = {};
         if (data.name !== undefined)
             updateData.name = data.name;
-        if (data.sku !== undefined)
+        // Only update SKU if explicitly provided and not empty
+        if (data.sku !== undefined && data.sku !== null && data.sku !== '')
             updateData.sku = data.sku;
         if (data.pct_or_hs_code !== undefined)
             updateData.pct_or_hs_code = data.pct_or_hs_code;
@@ -832,53 +833,102 @@ class ProductService {
         return products;
     }
     async createProductFromBulkUpload(data) {
-        // Generate SKU if not provided
-        const sku = data.sku || await this.generateSKU(data.name);
-        // Check SKU uniqueness
-        const existingSku = await client_2.prisma.product.findUnique({
-            where: { sku },
-            select: { id: true }
-        });
-        if (existingSku) {
-            throw new apiError_1.AppError(400, 'Product with this SKU already exists');
+        // Check if product exists by SKU or name
+        let existingProduct = null;
+        if (data.sku) {
+            existingProduct = await client_2.prisma.product.findUnique({
+                where: { sku: data.sku },
+                select: { id: true, code: true, sku: true }
+            });
         }
-        // Get last product code
-        const lastProduct = await client_2.prisma.product.findFirst({
-            orderBy: { created_at: 'desc' },
-            select: { code: true }
-        });
-        const newCode = lastProduct ? (parseInt(lastProduct.code) + 1).toString() : '1000';
+        // If not found by SKU, try to find by name
+        if (!existingProduct && data.name) {
+            existingProduct = await client_2.prisma.product.findFirst({
+                where: {
+                    name: {
+                        equals: data.name,
+                        mode: 'insensitive'
+                    }
+                },
+                select: { id: true, code: true, sku: true }
+            });
+        }
+        // Generate SKU if not provided and product doesn't exist
+        let sku = data.sku;
+        if (!sku) {
+            if (existingProduct) {
+                sku = existingProduct.sku; // Use existing SKU
+            }
+            else {
+                sku = await this.generateSKU(data.name); // Generate new SKU
+            }
+        }
+        // Get product code
+        let productCode;
+        if (existingProduct) {
+            productCode = existingProduct.code;
+        }
+        else {
+            const lastProduct = await client_2.prisma.product.findFirst({
+                orderBy: { created_at: 'desc' },
+                select: { code: true }
+            });
+            productCode = lastProduct ? (parseInt(lastProduct.code) + 1).toString() : '1000';
+        }
         // Start transaction for atomic operations
         return await client_2.prisma.$transaction(async (tx) => {
-            console.log('🚀 Starting transaction for bulk product creation...');
+            console.log(existingProduct ? '🔄 Starting transaction for bulk product update...' : '🚀 Starting transaction for bulk product creation...');
             // Build product data
-            const productData = this.buildProductData(data, newCode);
+            const productData = existingProduct
+                ? this.buildUpdateProductData(data)
+                : this.buildProductData(data, productCode);
             // Build relations using names from the sheet
             const relations = await this.buildRelationsFromNames(data, tx);
             console.log('📦 Relations built from names:', JSON.stringify(relations, null, 2));
             // Combine all data
+            // For updates, don't include SKU if it's empty or not provided
+            // For creates, always include SKU and code
             const finalData = {
                 ...productData,
-                sku,
+                ...(existingProduct ? {} : { sku, code: productCode }),
                 ...relations
             };
+            // Remove empty SKU from update data to avoid conflicts
+            if (existingProduct && (!data.sku || data.sku === '')) {
+                delete finalData.sku;
+            }
             console.log('📤 Final data being sent to Prisma:');
             console.log(JSON.stringify(finalData, null, 2));
-            // Create the product
-            const product = await tx.product.create({
-                data: finalData,
-                include: {
-                    unit: true,
-                    category: true,
-                    subcategory: true,
-                    tax: true,
-                    supplier: true,
-                    brand: true,
-                    color: true,
-                    size: true,
-                }
-            });
-            console.log('✅ Product created successfully with ID:', product.id);
+            // Update or create the product
+            const product = existingProduct
+                ? await tx.product.update({
+                    where: { id: existingProduct.id },
+                    data: finalData,
+                    include: {
+                        unit: true,
+                        category: true,
+                        subcategory: true,
+                        tax: true,
+                        supplier: true,
+                        brand: true,
+                        color: true,
+                        size: true,
+                    }
+                })
+                : await tx.product.create({
+                    data: finalData,
+                    include: {
+                        unit: true,
+                        category: true,
+                        subcategory: true,
+                        tax: true,
+                        supplier: true,
+                        brand: true,
+                        color: true,
+                        size: true,
+                    }
+                });
+            console.log(existingProduct ? `✅ Product updated successfully with ID: ${product.id}` : `✅ Product created successfully with ID: ${product.id}`);
             return product;
         }, {
             maxWait: 20000, // 20 seconds
@@ -917,6 +967,35 @@ class ProductService {
         }
         console.log('📦 Final relations object from names:', JSON.stringify(relations, null, 2));
         return relations;
+    }
+    async deleteAllProducts() {
+        // Delete all products and their related records in a transaction
+        // Order matters due to foreign key constraints (ON DELETE RESTRICT)
+        return await client_2.prisma.$transaction(async (tx) => {
+            // 1. Delete ProductImage records (no FK constraint issues)
+            const deletedImages = await tx.productImage.deleteMany({});
+            // 2. Delete StockMovement records (references Product with ON DELETE RESTRICT)
+            const deletedStockMovements = await tx.stockMovement.deleteMany({});
+            // 3. Delete Stock records (references Product with ON DELETE RESTRICT)
+            const deletedStocks = await tx.stock.deleteMany({});
+            // 4. Delete SaleItem records (references Product with ON DELETE RESTRICT)
+            const deletedSaleItems = await tx.saleItem.deleteMany({});
+            // 5. Delete PurchaseOrderItem records (references Product with ON DELETE RESTRICT)
+            const deletedPurchaseOrderItems = await tx.purchaseOrderItem.deleteMany({});
+            // 6. Delete OrderItem records (references Product with ON DELETE RESTRICT)
+            const deletedOrderItems = await tx.orderItem.deleteMany({});
+            // 7. Finally, delete all Products
+            const deletedProducts = await tx.product.deleteMany({});
+            return {
+                deletedCount: deletedProducts.count,
+                deletedImages: deletedImages.count,
+                deletedStocks: deletedStocks.count,
+                deletedStockMovements: deletedStockMovements.count,
+                deletedSaleItems: deletedSaleItems.count,
+                deletedPurchaseOrderItems: deletedPurchaseOrderItems.count,
+                deletedOrderItems: deletedOrderItems.count,
+            };
+        });
     }
 }
 exports.ProductService = ProductService;

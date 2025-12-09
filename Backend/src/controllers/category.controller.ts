@@ -48,3 +48,12 @@ export const listCategories = asyncHandler(async (req: Request, res: Response) =
 
   new ApiResponse(result.data, 'Categories retrieved successfully', 200).send(res);
 });
+
+export const deleteAllCategories = asyncHandler(async (req: Request, res: Response) => {
+  const result = await categoryService.deleteAllCategories();
+  new ApiResponse(
+    result, 
+    `Successfully deleted ${result.deletedCount} categories and ${result.deletedImages} category images`,
+    200
+  ).send(res);
+});

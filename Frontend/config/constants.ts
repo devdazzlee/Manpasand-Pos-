@@ -1,9 +1,9 @@
 
 // For Production 
-export const API_BASE = "https://manpasand-pos-beta.vercel.app/api/v1";
+// export const API_BASE = "https://manpasand-pos-beta.vercel.app/api/v1";
 
 // For  Development
-// export const API_BASE = "http://localhost:7000/api/v1";
+export const API_BASE = "http://localhost:9000/api/v1";
 
 // Print API URL - Separate endpoint for printer operations
 // Tries local print server first (localhost:3001), then falls back to backend
@@ -15,7 +15,6 @@ export const PRINT_API_FALLBACK = `${API_BASE}/barcode-generator`;
 
 // API Endpoints
 export const API_ENDPOINTS = {
-  // Products
   PRODUCTS: `${API_BASE}/products`, // GET - Get all products (supports fetch_all)
   PRODUCTS_PUBLIC: `${API_BASE}/customer/app/products`, // GET - Search/get products (public/customer)
   PRODUCT_FEATURED: `${API_BASE}/products/featured`, // GET - Get featured products

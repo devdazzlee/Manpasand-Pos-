@@ -24,14 +24,17 @@ import {
   CreditCard,
   DollarSign,
   Scan,
-  RefreshCw,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
+import { offlineAPIClient } from "@/lib/offline-api-client";
+import { offlineDB } from "@/lib/offline-db";
+import { syncManager } from "@/lib/offline-sync";
 import { usePosData } from "@/hooks/use-pos-data";
 import { printReceiptViaServer, getPrinters, type ReceiptData } from "@/lib/print-server";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { useHoldSales } from "@/hooks/use-hold-sales";
 
 interface CartItem {
   id: string;
@@ -88,9 +91,10 @@ export function NewSale() {
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
-  const [holdSales, setHoldSales] = useState<CartItem[][]>([]);
+  const { holdSales, holdSale, retrieveHoldSale } = useHoldSales();
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [globalDiscountType, setGlobalDiscountType] = useState<'percentage' | 'amount'>('percentage');
+  const [discountInput, setDiscountInput] = useState<string>("");
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Refs for price and quantity inputs for keyboard navigation
   const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -164,7 +168,6 @@ export function NewSale() {
     categoriesLoading,
     customersLoading,
     isAnyLoading,
-    refreshAllData,
     fetchProducts,
     fetchCategories,
     fetchCustomers,
@@ -202,16 +205,18 @@ export function NewSale() {
     };
   }, []); // Empty dependency array since we only want to fetch once on mount
 
-  // Handle search and category updates
+  // Load all products once on mount and when category changes (no search term)
   useEffect(() => {
     const categoryFilter =
       selectedCategory !== "all" ? selectedCategory : undefined;
 
+    // Only fetch from API when category changes and no search term
+    // This ensures we have all products cached for client-side search
     if (!searchTerm) {
       const loadByCategory = async () => {
         try {
           await fetchProducts({
-            force: true,
+            force: false, // Use cache if available
             categoryId: categoryFilter,
           });
         } catch (error) {
@@ -220,32 +225,30 @@ export function NewSale() {
       };
 
       loadByCategory();
-      return;
     }
+  }, [selectedCategory]); // Only depend on category, not searchTerm
 
-    if (searchTerm.length < 2) return; // Don't search with less than 2 characters
-
-    const handleSearch = async () => {
-      try {
-        await fetchProducts({
-          force: true,
-          search: searchTerm,
-          categoryId: categoryFilter,
-        });
-      } catch (error) {
-        // Search failed - no toast shown
-      }
-    };
-
-    const debounceTimer = setTimeout(handleSearch, 300); // Debounce search
-    return () => clearTimeout(debounceTimer);
-  }, [searchTerm, selectedCategory]);
-
+  // Client-side filtering for instant search results
+  // This provides instant feedback without API calls
   const filteredProducts = products.filter((product) => {
-    // Only filter by category since search is now handled by the API
-    return (
-      selectedCategory === "all" || product.categoryId === selectedCategory
-    );
+    // Filter by category
+    const matchesCategory =
+      selectedCategory === "all" || product.categoryId === selectedCategory;
+
+    // Filter by search term (client-side)
+    const matchesSearch = !searchTerm || (() => {
+      const searchLower = searchTerm.toLowerCase().trim();
+      if (searchLower.length === 0) return true;
+      
+      // Search in name, barcode, SKU
+      const nameMatch = product.name?.toLowerCase().includes(searchLower);
+      const barcodeMatch = product.barcode?.toLowerCase().includes(searchLower);
+      const skuMatch = product.sku?.toLowerCase().includes(searchLower);
+      
+      return nameMatch || barcodeMatch || skuMatch;
+    })();
+
+    return matchesCategory && matchesSearch;
   });
 
   const addToCart = async (product: Product, quantity: number = 1) => {
@@ -413,20 +416,21 @@ export function NewSale() {
     if (cart.length === 0) {
       return;
     }
-    setHoldSales([...holdSales, [...cart]]);
+    holdSale(cart);
     setCart([]);
   };
 
-  const retrieveHoldSale = (index: number) => {
+  const handleRetrieveHoldSale = (index: number) => {
     if (cart.length > 0) {
       const shouldReplace = window.confirm(
         "Current cart will be replaced. Continue?"
       );
       if (!shouldReplace) return;
     }
-    const heldSale = holdSales[index];
-    setCart(heldSale);
-    setHoldSales(holdSales.filter((_, i) => i !== index));
+    const heldSale = retrieveHoldSale(index);
+    if (heldSale) {
+      setCart(heldSale);
+    }
   };
 
   const getBranchName = async () => {
@@ -665,12 +669,85 @@ export function NewSale() {
           payload.customerId = selectedCustomer;
         }
 
-        // Call create sale API and get the response
-        const saleResponse = await apiClient.post("/sale", payload);
-        const saleData = saleResponse.data.data;
-
-        // Use the sale_number from backend as transaction ID
-        const transactionId = saleData.sale_number || generateTransactionId();
+        // Check if online
+        const isOnline = syncManager.canMakeRequest();
+        
+        let saleData: any;
+        let transactionId: string;
+        
+        if (isOnline) {
+          // Online: Call create sale API
+          try {
+            const saleResponse = await apiClient.post("/sale", payload);
+            saleData = saleResponse.data.data;
+            transactionId = saleData.sale_number || generateTransactionId();
+          } catch (error: any) {
+            // If API call fails, fall back to offline mode
+            console.warn("API call failed, saving offline:", error);
+            transactionId = generateTransactionId();
+            saleData = {
+              sale_number: transactionId,
+              id: `offline_${transactionId}`,
+              _pending: true,
+              _offline: true
+            };
+            
+            // Save sale to IndexedDB for later sync
+            await offlineDB.saveSale({
+              id: transactionId,
+              products: saleItems,
+              total: total,
+              customer: selectedCustomer ? { id: selectedCustomer } : null,
+              payment: {
+                method: method === "Cash" ? "CASH" : "CARD",
+                amountPaid,
+                changeAmount
+              },
+              employeeId: localStorage.getItem("userId") || undefined,
+              branchId: branchId || undefined,
+              timestamp: Date.now(),
+              synced: false
+            });
+            
+            // Queue the API request for when online
+            await offlineAPIClient.post("/sale", payload, {
+              priority: 10 // High priority for sales
+            });
+          }
+        } else {
+          // Offline: Generate local sale ID and save to IndexedDB
+          transactionId = generateTransactionId();
+          saleData = {
+            sale_number: transactionId,
+            id: `offline_${transactionId}`,
+            _pending: true,
+            _offline: true
+          };
+          
+          // Save sale to IndexedDB for later sync
+          await offlineDB.saveSale({
+            id: transactionId,
+            products: saleItems,
+            total: total,
+            customer: selectedCustomer ? { id: selectedCustomer } : null,
+            payment: {
+              method: method === "Cash" ? "CASH" : "CARD",
+              amountPaid,
+              changeAmount
+            },
+            employeeId: localStorage.getItem("userId") || undefined,
+            branchId: branchId || undefined,
+            timestamp: Date.now(),
+            synced: false
+          });
+          
+          // Also queue the API request for when online
+          await offlineAPIClient.post("/sale", payload, {
+            priority: 10 // High priority for sales
+          });
+          
+          console.log("💾 Sale saved offline, will sync when connection restored");
+        }
         const receiptData = generateReceiptData(
           transactionId,
           method,
@@ -694,6 +771,7 @@ export function NewSale() {
         // Clear discount after sale
         setGlobalDiscount(0);
         setGlobalDiscountType('percentage');
+        setDiscountInput("");
 
         // Auto-print receipt
         try {
@@ -952,15 +1030,6 @@ export function NewSale() {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
-              <LoadingButton
-                variant="outline"
-                size="icon"
-                loading={isAnyLoading}
-                onClick={refreshAllData}
-                title="Refresh Data"
-              >
-                <RefreshCw className="h-4 w-4" />
-              </LoadingButton>
               {cart.length > 0 && (
                 <Button variant="outline" onClick={holdCurrentSale}>
                   Hold Sale
@@ -1247,7 +1316,7 @@ export function NewSale() {
                       <Button
                         key={index}
                         variant="outline"
-                        onClick={() => retrieveHoldSale(index)}
+                        onClick={() => handleRetrieveHoldSale(index)}
                         className="h-auto w-full justify-between border-gray-200 py-2"
                       >
                         <div className="flex flex-col items-start text-left">
@@ -1566,25 +1635,77 @@ export function NewSale() {
                     <select
                       className="h-8 rounded border border-gray-200 px-2 text-xs"
                       value={globalDiscountType}
-                      onChange={(e) =>
+                      onChange={(e) => {
                         setGlobalDiscountType(
                           e.target.value as "percentage" | "amount"
-                        )
-                      }
+                        );
+                        // Clear discount input when switching types
+                        setDiscountInput("");
+                        setGlobalDiscount(0);
+                      }}
                     >
                       <option value="percentage">%</option>
                       <option value="amount">Rs</option>
                     </select>
                     <Input
-                      type="number"
-                      value={globalDiscount}
-                      onChange={(e) =>
-                        setGlobalDiscount(parseFloat(e.target.value) || 0)
-                      }
-                      className="h-8 flex-1 text-xs"
-                      min="0"
-                      step={globalDiscountType === "percentage" ? "1" : "0.01"}
-                      max={globalDiscountType === "percentage" ? "100" : undefined}
+                      type="text"
+                      inputMode="decimal"
+                      value={discountInput}
+                      onChange={(e) => {
+                        const value = e.target.value;
+                        setDiscountInput(value);
+                        
+                        // Allow empty string - clear the value
+                        if (value === "") {
+                          setGlobalDiscount(0);
+                          return;
+                        }
+                        
+                        // Allow decimal point and numbers - validate format
+                        if (/^(\d*\.?\d*)$/.test(value)) {
+                          // If it's just a decimal point, don't update discount yet
+                          if (value === ".") {
+                            return;
+                          }
+                          
+                          const numValue = parseFloat(value);
+                          if (!isNaN(numValue) && numValue >= 0) {
+                            // Validate max for percentage
+                            if (globalDiscountType === "percentage" && numValue > 100) {
+                              return;
+                            }
+                            setGlobalDiscount(numValue);
+                          }
+                        }
+                      }}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim();
+                        
+                        // If empty or just a decimal point, clear discount
+                        if (value === "" || value === "." || value === "0") {
+                          setDiscountInput("");
+                          setGlobalDiscount(0);
+                        } else {
+                          // Ensure valid number on blur
+                          const numValue = parseFloat(value);
+                          if (!isNaN(numValue) && numValue >= 0) {
+                            // Validate max for percentage
+                            if (globalDiscountType === "percentage" && numValue > 100) {
+                              setDiscountInput("100");
+                              setGlobalDiscount(100);
+                            } else {
+                              setDiscountInput(value);
+                              setGlobalDiscount(numValue);
+                            }
+                          } else {
+                            // Invalid, clear
+                            setDiscountInput("");
+                            setGlobalDiscount(0);
+                          }
+                        }
+                      }}
+                      className="h-8 flex-1 text-xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                      placeholder="0"
                     />
                   </div>
                 </div>

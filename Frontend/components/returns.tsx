@@ -18,9 +18,10 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle, Loader2, Minus, X } from "lucide-react"
+import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle, Loader2, Minus, X, ChevronLeft, ChevronRight } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { PageLoader } from "@/components/ui/page-loader"
+import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import apiClient from "@/lib/apiClient"
@@ -144,6 +145,10 @@ export function Returns() {
   const [isViewOpen, setIsViewOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [saleSearch, setSaleSearch] = useState("")
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1)
+  const [pageSize, setPageSize] = useState<number>(25)
   const saleSearchInputRef = useRef<HTMLInputElement | null>(null)
   const saleDropdownRef = useRef<HTMLDivElement | null>(null)
   const [newReturn, setNewReturn] = useState<NewReturn>({
@@ -165,7 +170,6 @@ export function Returns() {
       
       const params: any = {
         fetch_all: true,
-        limit: isAdmin ? 10000 : 1000,
         is_active: true,
       }
       
@@ -342,13 +346,20 @@ export function Returns() {
     return filteredReturns.filter((returnItem) => returnItem.status === status)
   }
 
+  // Reset to page 1 when search term changes
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [searchTerm])
+
   // Calculate stats
   const today = new Date().toISOString().split('T')[0]
   const todayReturns = returns.filter((r) => r.sale_date.startsWith(today)).length
   // Use Math.abs to ensure return value is always positive (returns are stored as negative in some systems)
   const todayValue = returns.filter((r) => r.sale_date.startsWith(today)).reduce((sum, r) => sum + Math.abs(Number(r.total_amount)), 0)
   const pendingReturns = returns.filter((r) => r.status === "PENDING").length
-  const returnRate = returns.length > 0 ? ((returns.length / sales.length) * 100).toFixed(1) : "0.0"
+  const returnRate = sales.length > 0 
+    ? ((returns.length / sales.length) * 100).toFixed(1) 
+    : "0.0"
 
   // Handle exchange product selection
   const handleExchangeProductSelect = (productId: string) => {
@@ -434,7 +445,7 @@ export function Returns() {
 
   // Filter products for exchange
   const filteredExchangeProducts = useMemo(() => {
-    if (!exchangeProductSearch) return products.slice(0, 50)
+    if (!exchangeProductSearch) return products
     const searchLower = exchangeProductSearch.toLowerCase()
     return products
       .filter(
@@ -442,7 +453,6 @@ export function Returns() {
           product.name.toLowerCase().includes(searchLower) ||
           product.sku.toLowerCase().includes(searchLower)
       )
-      .slice(0, 50)
   }, [products, exchangeProductSearch])
 
   const handleProcessReturn = async () => {
@@ -678,30 +688,38 @@ export function Returns() {
     setIsViewOpen(true)
   }
 
-  const renderReturnsTable = (returnsData: ReturnItem[]) => (
-    <div className="overflow-x-auto -mx-4 md:mx-0">
-      <div className="inline-block min-w-full align-middle">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="min-w-[120px]">Sale ID</TableHead>
-              <TableHead className="min-w-[150px]">Customer</TableHead>
-              <TableHead className="min-w-[120px]">Date</TableHead>
-              <TableHead className="min-w-[100px]">Amount</TableHead>
-              <TableHead className="min-w-[130px]">Payment Method</TableHead>
-              <TableHead className="min-w-[100px]">Status</TableHead>
-              <TableHead className="min-w-[100px]">Actions</TableHead>
-            </TableRow>
-          </TableHeader>
-      <TableBody>
-        {returnsData.length === 0 ? (
-          <TableRow>
-            <TableCell colSpan={7} className="text-center py-8 text-gray-500">
-              No returns found
-            </TableCell>
-          </TableRow>
-        ) : (
-          returnsData.map((returnItem) => (
+  const renderReturnsTable = (returnsData: ReturnItem[]) => {
+    // Paginate the data
+    const totalPages = pageSize === 0 ? 1 : Math.ceil(returnsData.length / pageSize)
+    const startIndex = pageSize === 0 ? 0 : (currentPage - 1) * pageSize
+    const endIndex = pageSize === 0 ? returnsData.length : startIndex + pageSize
+    const paginatedData = returnsData.slice(startIndex, endIndex)
+    
+    return (
+      <>
+        <div className="overflow-x-auto -mx-4 md:mx-0">
+          <div className="inline-block min-w-full align-middle">
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="min-w-[120px]">Sale ID</TableHead>
+                  <TableHead className="min-w-[150px]">Customer</TableHead>
+                  <TableHead className="min-w-[120px]">Date</TableHead>
+                  <TableHead className="min-w-[100px]">Amount</TableHead>
+                  <TableHead className="min-w-[130px]">Payment Method</TableHead>
+                  <TableHead className="min-w-[100px]">Status</TableHead>
+                  <TableHead className="min-w-[100px]">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+          <TableBody>
+            {returnsData.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                  No returns found
+                </TableCell>
+              </TableRow>
+            ) : (
+              paginatedData.map((returnItem) => (
             <TableRow key={returnItem.id}>
               <TableCell className="font-medium">{returnItem.sale_number}</TableCell>
               <TableCell>{returnItem.customer?.name || returnItem.customer?.email || "N/A"}</TableCell>
@@ -721,11 +739,109 @@ export function Returns() {
             </TableRow>
           ))
         )}
-      </TableBody>
-    </Table>
+            </TableBody>
+          </Table>
+        </div>
       </div>
-    </div>
-  )
+      
+      {/* Pagination */}
+      {returnsData.length > 0 && (
+      <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+        <div className="flex items-center gap-2">
+          <Label htmlFor="returns-page-size" className="text-sm font-medium whitespace-nowrap">
+            Items per page:
+          </Label>
+          <Select 
+            value={String(pageSize)} 
+            onValueChange={value => { 
+              setPageSize(Number(value)); 
+              setCurrentPage(1); 
+            }}
+          >
+            <SelectTrigger className="w-32" id="returns-page-size">
+              <SelectValue placeholder="Page Size" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10</SelectItem>
+              <SelectItem value="25">25</SelectItem>
+              <SelectItem value="50">50</SelectItem>
+              <SelectItem value="100">100</SelectItem>
+              <SelectItem value="0">All</SelectItem>
+            </SelectContent>
+          </Select>
+          <span className="text-sm text-gray-600">
+            Showing {startIndex + 1} to {Math.min(endIndex, returnsData.length)} of {returnsData.length} returns
+          </span>
+        </div>
+
+        {pageSize !== 0 && totalPages > 1 && (
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(1)}
+              disabled={currentPage === 1}
+            >
+              First
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+              disabled={currentPage === 1}
+            >
+              <ChevronLeft className="h-4 w-4" />
+              Previous
+            </Button>
+            <div className="flex items-center gap-1">
+              {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                let page: number;
+                if (totalPages <= 5) {
+                  page = i + 1;
+                } else if (currentPage <= 3) {
+                  page = i + 1;
+                } else if (currentPage >= totalPages - 2) {
+                  page = totalPages - 4 + i;
+                } else {
+                  page = currentPage - 2 + i;
+                }
+                return (
+                  <Button
+                    key={page}
+                    variant={currentPage === page ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCurrentPage(page)}
+                    className="min-w-[40px]"
+                  >
+                    {page}
+                  </Button>
+                );
+              })}
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+              disabled={currentPage === totalPages}
+            >
+              Next
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setCurrentPage(totalPages)}
+              disabled={currentPage === totalPages}
+            >
+              Last
+            </Button>
+          </div>
+        )}
+      </div>
+    )}
+      </>
+    )
+  }
 
   if (loading) {
     return <PageLoader message="Loading returns..." />
@@ -1205,46 +1321,57 @@ export function Returns() {
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Today's Returns</CardTitle>
-            <RotateCcw className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{todayReturns}</div>
-            <p className="text-xs text-muted-foreground">+2 from yesterday</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Return Value</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">Rs {todayValue.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">Today's total</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Return Rate</CardTitle>
-            <RotateCcw className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{returnRate}%</div>
-            <p className="text-xs text-muted-foreground">Of total sales</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending</CardTitle>
-            <CreditCard className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{pendingReturns}</div>
-            <p className="text-xs text-muted-foreground">Awaiting approval</p>
-          </CardContent>
-        </Card>
+        {loading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Today's Returns</CardTitle>
+                <RotateCcw className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{todayReturns}</div>
+                <p className="text-xs text-muted-foreground">+2 from yesterday</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Return Value</CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">Rs {todayValue.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">Today's total</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Return Rate</CardTitle>
+                <RotateCcw className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{returnRate}%</div>
+                <p className="text-xs text-muted-foreground">Of total sales</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Pending</CardTitle>
+                <CreditCard className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{pendingReturns}</div>
+                <p className="text-xs text-muted-foreground">Awaiting approval</p>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       <Tabs defaultValue="all" className="space-y-4">

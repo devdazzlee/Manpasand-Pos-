@@ -25,6 +25,7 @@ import {
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import apiClient from "@/lib/apiClient"
+import { PageLoader } from "@/components/ui/page-loader"
 
 
 interface Branch {
@@ -291,11 +292,7 @@ export function Branches() {
   const inactiveBranches = branches?.filter((b) => !b.is_active).length || 0
 
   if (isLoading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <Loader2 className="h-8 w-8 animate-spin" />
-      </div>
-    )
+    return <PageLoader message="Loading branches..." />
   }
 
   return (

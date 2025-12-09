@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Plus, Search, Eye, CreditCard, Gift, DollarSign, Users, Printer } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { PageLoader } from "@/components/ui/page-loader"
 
 interface GiftCard {
   id: string
@@ -67,6 +68,7 @@ interface ReloadCard {
 export function GiftCards() {
   const { toast } = useToast()
   const today = new Date().toISOString().split("T")[0]
+  const [isLoading, setIsLoading] = useState(true)
 
   const [giftCards, setGiftCards] = useState<GiftCard[]>([
     {
@@ -260,6 +262,12 @@ export function GiftCards() {
     .filter((t) => t.type === "redeem" && t.date === today)
     .reduce((sum, t) => sum + t.amount, 0)
   const newCardsToday = giftCards.filter((c) => c.issueDate === today).length
+
+  // Simulate loading
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 500);
+    return () => clearTimeout(timer);
+  }, []);
 
   const generateCardId = () => {
     const nextId = giftCards.length + 1
@@ -598,6 +606,14 @@ export function GiftCards() {
       title: "Gift Card Printed",
       description: `Gift card ${card.code} has been generated for printing.`,
     })
+  }
+
+  if (isLoading) {
+    return <PageLoader message="Loading gift cards..." />
+  }
+
+  if (isLoading) {
+    return <PageLoader message="Loading gift cards..." />
   }
 
   const renderCardsTable = (cardsData: GiftCard[]) => (

@@ -6,7 +6,39 @@ import { ApiResponse } from "../utils/apiResponse";
 const saleService = new SaleService();
 
 const getSalesController = asyncHandler(async (req: Request, res: Response) => {
-    const sales = await saleService.getSales({ branchId: req.user?.branch_id as string as string });
+    // Priority: query parameter (branchId from localStorage) > JWT token branch_id
+    // If branchId is provided in query, use it to filter (even for admins)
+    // If no branchId in query and user is admin, return all sales
+    // If no branchId in query and user is not admin, use JWT token branch_id
+    
+    const isAdmin = req.user?.role === 'SUPER_ADMIN' || req.user?.role === 'ADMIN';
+    const queryBranchId = req.query.branchId as string;
+    const jwtBranchId = req.user?.branch_id as string;
+    
+    let branchId: string | undefined;
+    
+    // If branchId is provided in query parameter (from localStorage), use it to filter
+    if (queryBranchId && queryBranchId.trim() && queryBranchId.trim() !== "Not Found") {
+        branchId = queryBranchId.trim();
+        console.log("Filtering by branchId from query parameter (localStorage):", branchId);
+    } else if (!isAdmin) {
+        // Non-admin users: use JWT token branch_id if no query param
+        branchId = jwtBranchId?.trim();
+        console.log("Non-admin user - filtering by JWT branch_id:", branchId);
+        
+        // If still no branchId, return empty array
+        if (!branchId || branchId === "Not Found") {
+            console.warn("No valid branchId found for non-admin user");
+            return new ApiResponse([], "No branch ID found for user").send(res);
+        }
+    } else {
+        // Admin user with no branchId in query - return all sales
+        branchId = undefined;
+        console.log("Admin user - no branchId in query, returning all sales");
+    }
+    
+    const sales = await saleService.getSales({ branchId });
+    console.log(`Returning ${sales.length} sales for branchId: ${branchId || 'ALL'}`);
     new ApiResponse(sales, "Sales fetched successfully").send(res);
 });
 

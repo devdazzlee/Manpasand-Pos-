@@ -24,6 +24,8 @@ import { useToast } from "@/hooks/use-toast"
 import apiClient from "@/lib/apiClient"
 import { API_BASE } from "@/config/constants"
 import { usePosData } from "@/hooks/use-pos-data"
+import { PageLoader } from "@/components/ui/page-loader"
+import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 
 interface Product {
   id: string
@@ -83,6 +85,7 @@ export function PurchaseOrders() {
   const [products, setProducts] = useState<Product[]>([])
   const [totalProducts, setTotalProducts] = useState(0)
   const [loadingProducts, setLoadingProducts] = useState(false)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
 
   const [orders, setOrders] = useState<PurchaseOrder[]>([
     {
@@ -222,8 +225,7 @@ export function PurchaseOrders() {
       setLoadingProducts(true)
       try {
         const params: any = {
-          page: productPage,
-          limit: 100,
+          fetch_all: true,
           is_active: true,
         }
         
@@ -234,12 +236,9 @@ export function PurchaseOrders() {
         const response = await apiClient.get(`${API_BASE}/products`, { params })
         const data = response.data.data || response.data
         
-        if (productPage === 1) {
-          setProducts(data.products || data)
-        } else {
-          setProducts(prev => [...prev, ...(data.products || data)])
-        }
+        setProducts(data.products || data)
         setTotalProducts(data.meta?.total || (data.products || data).length)
+        setIsInitialLoading(false)
       } catch (e: any) {
         console.log(e)
         toast({
@@ -253,7 +252,7 @@ export function PurchaseOrders() {
     }
 
     fetchProducts()
-  }, [productPage, productSearch])
+  }, [productSearch])
 
   const getStatusColor = (status: string) => {
     switch (status) {
@@ -295,6 +294,10 @@ export function PurchaseOrders() {
   const pendingOrders = orders.filter((o) => o.status === "pending").length
   const totalValue = orders.reduce((sum, o) => sum + o.total, 0)
   const receivedOrders = orders.filter((o) => o.status === "received").length
+
+  if (isInitialLoading) {
+    return <PageLoader message="Loading purchase orders..." />
+  }
 
   const generateOrderId = () => {
     const nextId = orders.length + 1
@@ -919,46 +922,57 @@ export function PurchaseOrders() {
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalOrders}</div>
-            <p className="text-xs text-muted-foreground">All purchase orders</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{pendingOrders}</div>
-            <p className="text-xs text-muted-foreground">Awaiting processing</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-            <DollarSign className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">₹{totalValue.toLocaleString()}</div>
-            <p className="text-xs text-muted-foreground">All orders combined</p>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Received Orders</CardTitle>
-            <CheckCircle className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{receivedOrders}</div>
-            <p className="text-xs text-muted-foreground">Successfully delivered</p>
-          </CardContent>
-        </Card>
+        {isInitialLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
+                <Package className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{totalOrders}</div>
+                <p className="text-xs text-muted-foreground">All purchase orders</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
+                <Clock className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{pendingOrders}</div>
+                <p className="text-xs text-muted-foreground">Awaiting processing</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Value</CardTitle>
+                <DollarSign className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">₹{totalValue.toLocaleString()}</div>
+                <p className="text-xs text-muted-foreground">All orders combined</p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Received Orders</CardTitle>
+                <CheckCircle className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{receivedOrders}</div>
+                <p className="text-xs text-muted-foreground">Successfully delivered</p>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       <Tabs defaultValue="all" className="space-y-4">

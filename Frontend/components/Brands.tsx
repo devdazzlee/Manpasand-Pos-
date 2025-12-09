@@ -13,6 +13,7 @@ import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { PageLoader } from "@/components/ui/page-loader";
 
 
 interface Brand {
@@ -30,6 +31,7 @@ const Brands: React.FC = () => {
   const [brands, setBrands] = useState<Brand[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -57,6 +59,7 @@ const Brands: React.FC = () => {
       console.log(e);
     } finally {
       setLoading(false);
+      setIsInitialLoading(false);
     }
   };
 
@@ -137,6 +140,10 @@ const Brands: React.FC = () => {
     b.code.includes(search)
   );
 
+  if (isInitialLoading) {
+    return <PageLoader message="Loading brands..." />
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -168,10 +175,7 @@ const Brands: React.FC = () => {
         <CardHeader><CardTitle>Brand List</CardTitle></CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-10">
-              <LoadingSpinner size="lg" />
-              <p className="text-gray-600 mt-2">Loading brands...</p>
-            </div>
+            <PageLoader message="Loading brands..." />
           ) : filtered.length === 0 ? (
             <div className="text-center py-10">
               <p className="text-gray-600">No brands found</p>

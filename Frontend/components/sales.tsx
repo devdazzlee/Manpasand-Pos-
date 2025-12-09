@@ -28,6 +28,8 @@
     ShoppingCart,
     TrendingUp,
   } from "lucide-react";
+  import { PageLoader } from "@/components/ui/page-loader";
+  import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
   import apiClient from "@/lib/apiClient";
   import { API_BASE } from "@/config/constants";
   import { useToast } from "@/hooks/use-toast";
@@ -89,15 +91,10 @@ interface Sale {
       const loadMeta = async () => {
         setIsInitialLoading(true);
         try {
-          // Check if user is ADMIN - admins should see all products
-          const userRole = localStorage.getItem("role");
-          const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
-          const productLimit = isAdmin ? 10000 : 100;
-          
           const [bRes, cRes, pRes] = await Promise.all([
-            apiClient.get(`${API_BASE}/branches?limit=100`),
+            apiClient.get(`${API_BASE}/branches?fetch_all=true`),
             apiClient.get(`${API_BASE}/customer`),
-            apiClient.get(`${API_BASE}/products?limit=${productLimit}${isAdmin ? '&fetch_all=true' : ''}`),
+            apiClient.get(`${API_BASE}/products?fetch_all=true`),
           ]);
           setBranches(bRes.data.data);
           setCustomers(cRes.data.data);
@@ -263,16 +260,7 @@ interface Sale {
     const activeSales = sales.filter(sale => sale.status === 'COMPLETED').length;
 
     if (isInitialLoading) {
-      return (
-        <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-          <div className="flex items-center justify-center py-20">
-            <div className="text-center">
-              <Loader2 className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" />
-              <p className="text-gray-600">Loading sales data...</p>
-            </div>
-          </div>
-        </div>
-      );
+      return <PageLoader message="Loading sales data..." />
     }
 
     return (
@@ -471,33 +459,43 @@ interface Sale {
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Sales</CardTitle>
-              <ShoppingCart className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalSales}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-              <DollarSign className="h-4 w-4 text-green-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">${(Number(totalRevenue) || 0).toFixed(2)}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Completed Sales</CardTitle>
-              <TrendingUp className="h-4 w-4 text-blue-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-blue-600">{activeSales}</div>
-            </CardContent>
-          </Card>
+          {isInitialLoading ? (
+            <>
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+            </>
+          ) : (
+            <>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Sales</CardTitle>
+                  <ShoppingCart className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{totalSales}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
+                  <DollarSign className="h-4 w-4 text-green-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">${(Number(totalRevenue) || 0).toFixed(2)}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Completed Sales</CardTitle>
+                  <TrendingUp className="h-4 w-4 text-blue-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-blue-600">{activeSales}</div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
 
         {/* Filter & Search */}
@@ -535,12 +533,7 @@ interface Sale {
           </CardHeader>
           <CardContent>
             {isLoading ? (
-              <div className="flex justify-center py-10">
-                <div className="text-center">
-                  <Loader2 className="animate-spin h-8 w-8 text-gray-500 mx-auto mb-2" />
-                  <p className="text-gray-600">Loading sales...</p>
-                </div>
-              </div>
+              <PageLoader message="Loading sales..." />
             ) : filteredSales.length === 0 ? (
               <div className="text-center py-10">
                 <ShoppingCart className="h-12 w-12 text-gray-400 mx-auto mb-4" />

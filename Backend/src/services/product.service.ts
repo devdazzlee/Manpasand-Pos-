@@ -1117,4 +1117,49 @@ export class ProductService {
         console.log('📦 Final relations object from names:', JSON.stringify(relations, null, 2));
         return relations;
     }
+
+    async deleteAllProducts(): Promise<{ 
+        deletedCount: number; 
+        deletedImages: number; 
+        deletedStocks: number;
+        deletedStockMovements: number;
+        deletedSaleItems: number;
+        deletedPurchaseOrderItems: number;
+        deletedOrderItems: number;
+    }> {
+        // Delete all products and their related records in a transaction
+        // Order matters due to foreign key constraints (ON DELETE RESTRICT)
+        return await prisma.$transaction(async (tx) => {
+            // 1. Delete ProductImage records (no FK constraint issues)
+            const deletedImages = await tx.productImage.deleteMany({});
+            
+            // 2. Delete StockMovement records (references Product with ON DELETE RESTRICT)
+            const deletedStockMovements = await tx.stockMovement.deleteMany({});
+            
+            // 3. Delete Stock records (references Product with ON DELETE RESTRICT)
+            const deletedStocks = await tx.stock.deleteMany({});
+            
+            // 4. Delete SaleItem records (references Product with ON DELETE RESTRICT)
+            const deletedSaleItems = await tx.saleItem.deleteMany({});
+            
+            // 5. Delete PurchaseOrderItem records (references Product with ON DELETE RESTRICT)
+            const deletedPurchaseOrderItems = await tx.purchaseOrderItem.deleteMany({});
+            
+            // 6. Delete OrderItem records (references Product with ON DELETE RESTRICT)
+            const deletedOrderItems = await tx.orderItem.deleteMany({});
+            
+            // 7. Finally, delete all Products
+            const deletedProducts = await tx.product.deleteMany({});
+            
+            return {
+                deletedCount: deletedProducts.count,
+                deletedImages: deletedImages.count,
+                deletedStocks: deletedStocks.count,
+                deletedStockMovements: deletedStockMovements.count,
+                deletedSaleItems: deletedSaleItems.count,
+                deletedPurchaseOrderItems: deletedPurchaseOrderItems.count,
+                deletedOrderItems: deletedOrderItems.count,
+            };
+        });
+    }
 }

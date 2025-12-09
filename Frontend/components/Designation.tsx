@@ -10,6 +10,9 @@ import { LoadingButton } from "@/components/ui/loading-button"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card"
 import { Loader2, Users, CheckCircle2, XCircle } from "lucide-react"
+import { PageLoader } from "@/components/ui/page-loader"
+import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 
 interface EmployeeType {
   id: string
@@ -28,6 +31,8 @@ export function Designation() {
   const [formError, setFormError] = useState("")
   const [submitLoading, setSubmitLoading] = useState(false)
   const [deleteLoadingId, setDeleteLoadingId] = useState<string | null>(null)
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false)
+  const [typeToDelete, setTypeToDelete] = useState<string | null>(null)
 
   // Fetch all types
   const fetchTypes = async () => {
@@ -110,18 +115,26 @@ export function Designation() {
     }
   }
 
+  // Open delete confirmation dialog
+  const openDeleteDialog = (id: string) => {
+    setTypeToDelete(id)
+    setDeleteDialogOpen(true)
+  }
+
   // Delete type
-  const handleDelete = async (id: string) => {
-    if (!window.confirm("Are you sure you want to delete this type?")) return
-    setDeleteLoadingId(id)
+  const handleDelete = async () => {
+    if (!typeToDelete) return
+    setDeleteLoadingId(typeToDelete)
+    setDeleteDialogOpen(false)
     try {
-      await apiClient.delete(`/employee/type/${id}`)
+      await apiClient.delete(`/employee/type/${typeToDelete}`)
       toast({ title: "Deleted", description: "Employee type deleted successfully" })
       fetchTypes()
     } catch (e: any) {
       toast({ title: "Error", description: e?.response?.data?.message || "Failed to delete type", variant: "destructive" })
     } finally {
       setDeleteLoadingId(null)
+      setTypeToDelete(null)
     }
   }
 
@@ -131,16 +144,7 @@ export function Designation() {
   const inactive = total - active
 
   if (initialLoading) {
-    return (
-      <div className="p-6 space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <div className="text-center">
-            <Loader2 className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" />
-            <p className="text-gray-600">Loading designation data...</p>
-          </div>
-        </div>
-      </div>
-    )
+    return <PageLoader message="Loading designation data..." />
   }
 
 return (
@@ -187,33 +191,43 @@ return (
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Types</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{total}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Types</CardTitle>
-            <CheckCircle2 className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{active}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Inactive Types</CardTitle>
-            <XCircle className="h-4 w-4 text-red-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-red-600">{inactive}</div>
-          </CardContent>
-        </Card>
+        {loading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Total Types</CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">{total}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Active Types</CardTitle>
+                <CheckCircle2 className="h-4 w-4 text-green-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">{active}</div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">Inactive Types</CardTitle>
+                <XCircle className="h-4 w-4 text-red-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-600">{inactive}</div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* Table with Loader */}
@@ -223,12 +237,7 @@ return (
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex justify-center py-10">
-              <div className="text-center">
-                <Loader2 className="animate-spin h-8 w-8 text-gray-500 mx-auto mb-2" />
-                <p className="text-gray-600">Loading types...</p>
-              </div>
-            </div>
+            <PageLoader message="Loading types..." />
           ) : types.length === 0 ? (
             <div className="text-center py-10">
               <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
@@ -262,14 +271,14 @@ return (
                         <Button size="sm" variant="outline" onClick={() => openModal(type)}>
                           Edit
                         </Button>
-                        <LoadingButton
+                        <Button
                           size="sm"
                           variant="destructive"
-                          loading={deleteLoadingId === type.id}
-                          onClick={() => handleDelete(type.id)}
+                          disabled={deleteLoadingId === type.id}
+                          onClick={() => openDeleteDialog(type.id)}
                         >
-                          Delete
-                        </LoadingButton>
+                          {deleteLoadingId === type.id ? "Deleting..." : "Delete"}
+                        </Button>
                       </div>
                     </TableCell>
                   </TableRow>
@@ -281,6 +290,29 @@ return (
           )}
         </CardContent>
       </Card>
+
+      {/* Delete Confirmation Dialog */}
+      <AlertDialog open={deleteDialogOpen} onOpenChange={(open) => {
+        if (!open) {
+          setDeleteDialogOpen(false)
+          setTypeToDelete(null)
+        }
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the employee type "{types.find(t => t.id === typeToDelete)?.name}".
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleDelete} className="bg-red-600 hover:bg-red-700">
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
 )
 }

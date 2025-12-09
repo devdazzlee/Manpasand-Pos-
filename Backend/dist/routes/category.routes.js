@@ -13,6 +13,7 @@ const parse_formdata_middleware_1 = require("../middleware/parse-formdata.middle
 const router = express_1.default.Router();
 router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
 router.post('/', multer_1.default.array('images', 10), parse_formdata_middleware_1.parseFormData, (0, validation_middleware_1.validate)(category_validation_1.createCategorySchema), category_controller_1.createCategory);
+router.delete('/all', category_controller_1.deleteAllCategories);
 router.get('/', (0, validation_middleware_1.validate)(category_validation_1.listCategoriesSchema), category_controller_1.listCategories);
 router.get('/:id', (0, validation_middleware_1.validate)(category_validation_1.getCategorySchema), category_controller_1.getCategory);
 router.patch('/:id', (0, validation_middleware_1.validate)(category_validation_1.updateCategorySchema), category_controller_1.updateCategory);

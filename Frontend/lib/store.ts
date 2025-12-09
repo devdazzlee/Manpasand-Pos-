@@ -1,6 +1,8 @@
 import { create } from 'zustand'
 import { persist } from 'zustand/middleware'
 import apiClient from './apiClient'
+import { offlineDB } from './offline-db'
+import { syncManager } from './offline-sync'
 
 interface Product {
   id: string
@@ -172,6 +174,25 @@ export const useStore = create<StoreState>()(
         })
 
         try {
+          // Check if online
+          const isOnline = syncManager.canMakeRequest()
+          
+          // If offline, try to load from IndexedDB first
+          if (!isOnline) {
+            console.log('📡 Offline mode - loading products from IndexedDB')
+            const offlineProducts = await offlineDB.getProducts()
+            if (offlineProducts.length > 0) {
+              const mappedProducts = offlineProducts.map(p => mapProduct(p.data || p))
+              set({
+                products: mappedProducts,
+                productsLoading: false,
+                lastProductsFetch: now,
+              })
+              console.log(`Loaded ${mappedProducts.length} products from offline cache`)
+              return
+            }
+          }
+          
           // Check if user is ADMIN - admins should see all products
           const userRole = localStorage.getItem("role")
           const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN"
@@ -198,8 +219,6 @@ export const useStore = create<StoreState>()(
             // For admin users, don't filter by branch_id to get all products
             // For branch users, filter by their branch_id
             ...(branchId && !isAdmin ? { branch_id: branchId } : {}),
-            // Add limit for admin to get all products (increase if needed)
-            ...(isAdmin ? { limit: 10000 } : {}),
           }
 
           if (search) {
@@ -214,6 +233,11 @@ export const useStore = create<StoreState>()(
           const rawProducts = Array.isArray(res.data?.data) ? res.data.data : []
           const apiProducts = rawProducts.map(mapProduct)
 
+          // Save products to IndexedDB for offline use
+          if (apiProducts.length > 0) {
+            await offlineDB.saveProducts(rawProducts)
+          }
+
           set({
             products: apiProducts,
             productsLoading: false,
@@ -223,6 +247,26 @@ export const useStore = create<StoreState>()(
           console.log(`Loaded ${apiProducts.length} products${hasFilters ? ' (full search)' : ''}`)
         } catch (error) {
           console.log('Failed to fetch products:', error)
+          
+          // If online request failed, try offline cache
+          if (syncManager.canMakeRequest()) {
+            try {
+              const offlineProducts = await offlineDB.getProducts()
+              if (offlineProducts.length > 0) {
+                const mappedProducts = offlineProducts.map(p => mapProduct(p.data || p))
+                set({
+                  products: mappedProducts,
+                  productsLoading: false,
+                  lastProductsFetch: now,
+                })
+                console.log(`Using offline cache: ${mappedProducts.length} products`)
+                return
+              }
+            } catch (offlineError) {
+              console.error('Failed to load from offline cache:', offlineError)
+            }
+          }
+          
           set({ productsLoading: false })
           throw error
         }

@@ -42,6 +42,8 @@ import {
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
+import { PageLoader } from "@/components/ui/page-loader";
+import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
 
 interface Customer {
   id: string;
@@ -205,16 +207,7 @@ export function Customers() {
   );
 
   if (isInitialLoading) {
-    return (
-      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <div className="text-center">
-            <Loader2 className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" />
-            <p className="text-sm md:text-base text-gray-600">Loading customers data...</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <PageLoader message="Loading customers data..." />
   }
 
   return (
@@ -339,45 +332,55 @@ export function Customers() {
 
       {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total Customers
-            </CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">
-              {customers.length}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Active Customers
-            </CardTitle>
-            <UserCheck className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">
-              {activeCount}
-            </div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">
-              Total Revenue
-            </CardTitle>
-            {/* <DollarSign className="h-4 w-4 text-blue-600" /> */}
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-blue-600">
-              Rs {totalRevenue.toFixed(2)}
-            </div>
-          </CardContent>
-        </Card>
+        {isLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Total Customers
+                </CardTitle>
+                <Users className="h-4 w-4 text-muted-foreground" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold">
+                  {customers.length}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Active Customers
+                </CardTitle>
+                <UserCheck className="h-4 w-4 text-green-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-green-600">
+                  {activeCount}
+                </div>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  Total Revenue
+                </CardTitle>
+                {/* <DollarSign className="h-4 w-4 text-blue-600" /> */}
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-blue-600">
+                  Rs {totalRevenue.toFixed(2)}
+                </div>
+              </CardContent>
+            </Card>
+          </>
+        )}
       </div>
 
       {/* Search */}
@@ -398,12 +401,7 @@ export function Customers() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex justify-center py-10">
-              <div className="text-center">
-                <Loader2 className="animate-spin h-8 w-8 text-gray-500 mx-auto mb-2" />
-                <p className="text-gray-600">Loading customers...</p>
-              </div>
-            </div>
+            <PageLoader message="Loading customers..." />
           ) : filteredCustomers.length === 0 ? (
             <div className="text-center py-10">
               <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />

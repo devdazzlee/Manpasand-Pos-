@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
+import { PageLoader } from "@/components/ui/page-loader";
 
 interface Subcategory {
   id: string;
@@ -47,6 +48,7 @@ const Subcategories: React.FC = () => {
   const [list, setList] = useState<Subcategory[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
 
   const [addOpen, setAddOpen] = useState(false);
@@ -76,6 +78,7 @@ const Subcategories: React.FC = () => {
       console.log(e);
     } finally {
       setLoading(false);
+      setIsInitialLoading(false);
     }
   };
 
@@ -157,6 +160,10 @@ const Subcategories: React.FC = () => {
     fetchList(v);
   };
 
+  if (isInitialLoading) {
+    return <PageLoader message="Loading subcategories..." />
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
@@ -189,9 +196,7 @@ const Subcategories: React.FC = () => {
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex justify-center py-10">
-              <Loader2 className="animate-spin h-8 w-8 text-gray-500" />
-            </div>
+            <PageLoader message="Loading subcategories..." />
           ) : (
             <div className="overflow-x-auto -mx-4 md:mx-0">
               <div className="inline-block min-w-full align-middle">

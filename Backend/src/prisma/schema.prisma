@@ -24,6 +24,7 @@ model User {
   sales           Sale[]
   purchase_orders PurchaseOrder[]
   stock_movements StockMovement[]
+  notifications   Notification[]
 
   @@index([email])
 }
@@ -62,6 +63,7 @@ model Branch {
   Order           Order[]
   User            User[]
   employees       Employee[]
+  notifications   Notification[]
 
   @@index([code])
   @@index([is_active])
@@ -724,4 +726,49 @@ model Salary {
 
   @@unique([employee_id, month, year])
   @@index([employee_id])
+}
+
+// Notification System
+enum NotificationType {
+  SALE
+  STOCK
+  RETURN
+  EXCHANGE
+  ORDER
+  PURCHASE_ORDER
+  SYSTEM
+  PAYMENT
+  CUSTOMER
+  INVENTORY
+}
+
+enum NotificationPriority {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+model Notification {
+  id          String             @id @default(uuid())
+  type        NotificationType
+  priority    NotificationPriority @default(MEDIUM)
+  title       String
+  message     String
+  category    String?            // e.g., "sales", "inventory", "system"
+  is_read     Boolean            @default(false)
+  branch_id   String?
+  branch      Branch?            @relation(fields: [branch_id], references: [id])
+  user_id     String?            // Target user (null = all users)
+  user        User?              @relation(fields: [user_id], references: [id])
+  metadata    Json?              // Additional data (sale_id, product_id, etc.)
+  created_at  DateTime           @default(now())
+  read_at     DateTime?
+
+  @@index([branch_id])
+  @@index([user_id])
+  @@index([type])
+  @@index([is_read])
+  @@index([created_at])
+  @@index([priority])
 }

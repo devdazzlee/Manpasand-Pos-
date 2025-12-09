@@ -4,6 +4,8 @@ import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { PageLoader } from "@/components/ui/page-loader"
+import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
@@ -617,6 +619,7 @@ export default function Inventory() {
   // State for products and pagination
   const [products, setProducts] = useState<Product[]>([])
   const [loading, setLoading] = useState(false)
+  const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [totalProducts, setTotalProducts] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(10)
@@ -744,9 +747,16 @@ export default function Inventory() {
   // Load products when filters change or global products change
   useEffect(() => {
     if (globalProducts.length > 0) {
-    loadProducts()
+      loadProducts()
+    } else if (globalLoading) {
+      // Still loading from global store
+      setLoading(true)
+    } else {
+      // Global store finished loading but no products
+      setIsInitialLoading(false)
+      setLoading(false)
     }
-  }, [currentPage, searchTerm, selectedCategory, selectedSubcategory, pageSize, globalProducts])
+  }, [currentPage, searchTerm, selectedCategory, selectedSubcategory, pageSize, globalProducts, globalLoading])
 
   const loadDropdownData = async () => {
     try {
@@ -793,6 +803,11 @@ export default function Inventory() {
     try {
       // Use global products data instead of making API calls
       let filteredProducts = [...globalProducts]
+      
+      // Mark initial loading as complete once we have data
+      if (isInitialLoading && filteredProducts.length > 0) {
+        setIsInitialLoading(false)
+      }
 
       // Apply search filter
       if (searchTerm) {
@@ -1085,6 +1100,10 @@ export default function Inventory() {
 
   const totalPages = Math.ceil(totalProducts / pageSize)
 
+  if (isInitialLoading && globalLoading) {
+    return <PageLoader message="Loading inventory..." />
+  }
+
   return (
     <div className="min-h-screen bg-gray-50">
       <div className="p-4 md:p-6 space-y-4 md:space-y-6">
@@ -1227,9 +1246,7 @@ export default function Inventory() {
           </CardHeader>
           <CardContent>
             {loading ? (
-              <div className="flex items-center justify-center py-8">
-                <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-gray-900"></div>
-              </div>
+              <PageLoader message="Loading products..." />
             ) : (
               <>
                 <div className="overflow-x-auto -mx-4 md:mx-0">

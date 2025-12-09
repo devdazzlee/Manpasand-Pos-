@@ -270,7 +270,7 @@ export function Categories() {
   const fetchBranches = async () => {
     try {
       setBranchesLoading(true)
-      const response = await apiClient.get("/branches?is_active=true&limit=100")
+      const response = await apiClient.get("/branches?is_active=true&fetch_all=true")
       setBranches(response.data.data || [])
     } catch (error: any) {
       console.log("Error fetching branches:", error)
@@ -294,7 +294,6 @@ export function Categories() {
       
       const params: any = {
         fetch_all: true,
-        limit: isAdmin ? 10000 : 1000, // Higher limit for admin
       };
       
       const response = await apiClient.get("/categories", { params })
@@ -311,7 +310,6 @@ export function Categories() {
             const params: any = {
               category_id: category.id,
               fetch_all: true,
-              limit: isAdmin ? 10000 : 1000, // Higher limit for admin
             };
             
             // Don't filter by branch_id for admin users
@@ -367,7 +365,6 @@ export function Categories() {
       const params: any = {
         category_id: categoryId,
         fetch_all: true,
-        limit: isAdmin ? 10000 : 1000, // Higher limit for admin
       };
       
       // Don't filter by branch_id for admin users

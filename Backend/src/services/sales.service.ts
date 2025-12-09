@@ -1,6 +1,7 @@
 import { Prisma, SaleItemType, SaleStatus, StockMovementType } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
+import { NotificationService } from './notification.service';
 
 interface ReturnItem {
   productId: string;
@@ -14,14 +15,22 @@ interface ExchangeItem {
 }
 
 class SaleService {
+  private notificationService = new NotificationService();
   async getSales({ branchId }: { branchId?: string }) {
     return prisma.sale.findMany({
-      where: { branch_id: branchId },
+      where: branchId ? { branch_id: branchId } : undefined,
       include: {
         sale_items: {
           include: { product: true },
         },
         customer: true,
+        branch: {
+          select: {
+            id: true,
+            name: true,
+            address: true,
+          },
+        },
       },
       orderBy: { sale_date: 'desc' },
     });
@@ -202,7 +211,72 @@ class SaleService {
     }
   
     const [sale] = await prisma.$transaction(ops);
-    return sale as Prisma.SaleGetPayload<{ include: { sale_items: true } }>;
+    const saleResult = sale as Prisma.SaleGetPayload<{ include: { sale_items: true } }>;
+    
+    // Create notification for sale completion (after transaction succeeds)
+    try {
+      console.log('Creating sale notification for:', saleResult.sale_number);
+      const notification = await this.notificationService.notifySaleCreated({
+        saleId: saleResult.id,
+        saleNumber: saleResult.sale_number,
+        totalAmount: Number(saleResult.total_amount),
+        branchId,
+        userId: createdBy,
+      });
+      console.log('Sale notification created:', notification.id);
+
+      // Check for low stock after sale and create notifications
+      for (const m of movements) {
+        try {
+          // Get actual stock from database after sale
+          const stock = await prisma.stock.findUnique({
+            where: {
+              product_id_branch_id: {
+                product_id: m.product_id,
+                branch_id: branchId,
+              },
+            },
+          });
+
+          const product = await prisma.product.findUnique({
+            where: { id: m.product_id },
+            select: { id: true, name: true },
+          });
+
+          if (product && stock) {
+            const currentStock = Number(stock.current_quantity);
+            const minStock = Number(stock.minimum_quantity) || 0;
+            
+            // Create notification if stock is out (critical) or low
+            if (currentStock <= 0) {
+              await this.notificationService.notifyLowStock({
+                productId: product.id,
+                productName: product.name,
+                currentStock,
+                minStock,
+                branchId,
+              });
+            } else if (currentStock <= 5 || (minStock > 0 && currentStock <= minStock)) {
+              // Low stock alert if <= 5 units or below minimum
+              await this.notificationService.notifyLowStock({
+                productId: product.id,
+                productName: product.name,
+                currentStock,
+                minStock: minStock > 0 ? minStock : 5,
+                branchId,
+              });
+            }
+          }
+        } catch (error) {
+          console.error(`Failed to check stock for product ${m.product_id}:`, error);
+        }
+      }
+    } catch (error) {
+      // Don't fail the sale if notification fails - just log it
+      console.error('Failed to create sale notification:', error);
+    }
+    
+    return saleResult;
   }
   
 
@@ -629,6 +703,87 @@ class SaleService {
           sale_items: true,
         },
       });
+
+      return sale;
+    }).then(async (sale) => {
+      // Create notifications for return/exchange (after transaction completes)
+      try {
+        const hasReturn = returnedItems.length > 0;
+        const hasExchange = exchangedItems.length > 0;
+        
+        const originalSale = await prisma.sale.findUnique({
+          where: { id: originalSaleId },
+          select: { sale_number: true, sale_items: true },
+        });
+
+        if (hasReturn && originalSale) {
+          const returnAmount = returnedItems.reduce((sum, ret) => {
+            const originalItem = originalSale.sale_items.find((i) => i.product_id === ret.productId);
+            return sum + (originalItem ? Number(originalItem.unit_price) * ret.quantity : 0);
+          }, 0);
+
+          await this.notificationService.notifyReturnProcessed({
+            returnId: sale.id,
+            saleNumber: originalSale.sale_number,
+            returnAmount,
+            branchId,
+            userId: createdBy,
+          });
+        }
+
+        if (hasExchange && originalSale) {
+          await this.notificationService.notifyExchangeProcessed({
+            exchangeId: sale.id,
+            saleNumber: originalSale.sale_number,
+            branchId,
+            userId: createdBy,
+          });
+        }
+
+        // Check for low stock after return/exchange
+        for (const ret of returnedItems) {
+          const currentStock = await prisma.stock.findUnique({
+            where: {
+              product_id_branch_id: {
+                product_id: ret.productId,
+                branch_id: branchId,
+              },
+            },
+          });
+
+          if (currentStock) {
+            const product = await prisma.product.findUnique({
+              where: { id: ret.productId },
+              select: { id: true, name: true },
+            });
+
+            if (product) {
+              const stockQty = Number(currentStock.current_quantity);
+              const minStock = Number(currentStock.minimum_quantity) || 0;
+              
+              if (stockQty <= 0) {
+                await this.notificationService.notifyLowStock({
+                  productId: product.id,
+                  productName: product.name,
+                  currentStock: stockQty,
+                  minStock,
+                  branchId,
+                });
+              } else if (stockQty <= minStock && minStock > 0) {
+                await this.notificationService.notifyLowStock({
+                  productId: product.id,
+                  productName: product.name,
+                  currentStock: stockQty,
+                  minStock,
+                  branchId,
+                });
+              }
+            }
+          }
+        }
+      } catch (error) {
+        console.error('Failed to create return/exchange notification:', error);
+      }
 
       return sale;
     });

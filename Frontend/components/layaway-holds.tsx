@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -21,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Progress } from "@/components/ui/progress"
 import { Plus, Search, Clock, DollarSign, Package, Calendar, Eye, CreditCard, AlertCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
+import { PageLoader } from "@/components/ui/page-loader"
 import { addDays, addWeeks, addMonths, format, parseISO, isBefore, isAfter, differenceInDays } from "date-fns"
 
 interface Layaway {
@@ -61,6 +62,7 @@ interface NewLayaway {
 export function LayawayHolds() {
   const { toast } = useToast()
   const today = new Date().toISOString().split("T")[0]
+  const [isLoading, setIsLoading] = useState(true)
 
   const [layaways, setLayaways] = useState<Layaway[]>([
     {
@@ -528,6 +530,12 @@ export function LayawayHolds() {
     setIsPaymentOpen(true)
   }
 
+  // Simulate loading
+  useEffect(() => {
+    const timer = setTimeout(() => setIsLoading(false), 500);
+    return () => clearTimeout(timer);
+  }, []);
+
   const renderLayawaysTable = (layawaysData: Layaway[]) => (
     <Table>
       <TableHeader>
@@ -590,6 +598,14 @@ export function LayawayHolds() {
       </TableBody>
     </Table>
   )
+
+  if (isLoading) {
+    return <PageLoader message="Loading layaway holds..." />
+  }
+
+  if (isLoading) {
+    return <PageLoader message="Loading layaway holds..." />
+  }
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">

@@ -6,7 +6,6 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
-const convertToSeconds_1 = require("../utils/convertToSeconds");
 const app_1 = require("../config/app");
 const redis_1 = require("../config/redis");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
@@ -15,11 +14,7 @@ class CustomerService {
         const token = jsonwebtoken_1.default.sign({
             email: email,
             id: cusId
-        }, app_1.config.jwtSecret, {
-            expiresIn: typeof app_1.config.jwtExpiresIn === 'string'
-                ? (0, convertToSeconds_1.convertToSeconds)(app_1.config.jwtExpiresIn)
-                : app_1.config.jwtExpiresIn,
-        });
+        }, app_1.config.jwtSecret);
         return token;
     }
     async verifyCustomerExistance(email) {
@@ -46,9 +41,8 @@ class CustomerService {
             },
         });
         const token = this.generateToken(customer.id, customer.email);
-        // Store session in Redis with proper expiration
-        const expiresInSeconds = (0, convertToSeconds_1.convertToSeconds)(app_1.config.jwtExpiresIn);
-        await redis_1.redis.set(`session:customer:${customer.id}`, token, 'EX', expiresInSeconds);
+        // Store session in Redis without expiration (token valid until logout)
+        await (0, redis_1.safeRedisOperation)(async (redis) => redis.set(`session:customer:${customer.id}`, token), null);
         return {
             email: customer.email,
             token,
@@ -78,9 +72,8 @@ class CustomerService {
             throw new apiError_1.AppError(401, 'Invalid credentials');
         }
         const token = this.generateToken(customer.id, customer.email);
-        // Save session to Redis
-        const expiresInSeconds = (0, convertToSeconds_1.convertToSeconds)(app_1.config.jwtExpiresIn);
-        await redis_1.redis.set(`session:customer:${customer.id}`, token, 'EX', expiresInSeconds);
+        // Save session to Redis without expiration (token valid until logout)
+        await (0, redis_1.safeRedisOperation)(async (redis) => redis.set(`session:customer:${customer.id}`, token), null);
         return {
             email: customer.email,
             token,
@@ -137,11 +130,11 @@ class CustomerService {
             where: { id: customerId },
         });
         // Remove session from Redis if exists
-        await redis_1.redis.del(`session:customer:${customerId}`);
+        await (0, redis_1.safeRedisOperation)(async (redis) => redis.del(`session:customer:${customerId}`), 0);
         return { message: 'Customer deleted successfully' };
     }
     async logoutCustomer(customerId) {
-        await redis_1.redis.del(`session:customer:${customerId}`);
+        await (0, redis_1.safeRedisOperation)(async (redis) => redis.del(`session:customer:${customerId}`), 0);
         return { message: 'Logged out successfully' };
     }
 }

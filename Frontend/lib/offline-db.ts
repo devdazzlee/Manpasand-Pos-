@@ -84,6 +84,10 @@ export const db = new OfflineDatabase();
 export const offlineDB = {
   // Products
   async saveProducts(products: any[]) {
+    if (!Array.isArray(products)) {
+      console.warn('saveProducts: products is not an array', products);
+      return 0;
+    }
     const timestamp = Date.now();
     const productsToStore = products.map(p => ({
       id: p.id || p._id || String(p.product_id),

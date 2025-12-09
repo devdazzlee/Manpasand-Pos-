@@ -5,6 +5,7 @@ import {
   updateCategory,
   toggleCategoryStatus,
   listCategories,
+  deleteAllCategories,
 } from '../controllers/category.controller';
 import {
   createCategorySchema,
@@ -22,6 +23,7 @@ const router = express.Router();
 router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post('/', upload.array('images', 10), parseFormData, validate(createCategorySchema), createCategory);
+router.delete('/all', deleteAllCategories);
 router.get('/', validate(listCategoriesSchema), listCategories);
 router.get('/:id', validate(getCategorySchema), getCategory);
 router.patch('/:id', validate(updateCategorySchema), updateCategory);

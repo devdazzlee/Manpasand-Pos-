@@ -12,6 +12,7 @@ import { Search, Plus, Loader2, Edit, Eye } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { PageLoader } from "@/components/ui/page-loader";
 import { API_BASE } from "@/config/constants";
 
 
@@ -29,6 +30,7 @@ const Units: React.FC = () => {
   const [units, setUnits] = useState<Unit[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -56,6 +58,7 @@ const Units: React.FC = () => {
       });
     } finally {
       setLoading(false);
+      setIsInitialLoading(false);
     }
   };
 
@@ -127,6 +130,10 @@ const Units: React.FC = () => {
     u.code.includes(search)
   );
 
+  if (isInitialLoading) {
+    return <PageLoader message="Loading units..." />
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       {/* Header */}
@@ -164,10 +171,7 @@ const Units: React.FC = () => {
         <CardHeader><CardTitle>List of Units</CardTitle></CardHeader>
         <CardContent>
           {loading ? (
-            <div className="flex flex-col items-center justify-center py-10">
-              <LoadingSpinner size="lg" />
-              <p className="text-gray-600 mt-2">Loading units...</p>
-            </div>
+            <PageLoader message="Loading units..." />
           ) : filtered.length === 0 ? (
             <div className="text-center py-10">
               <p className="text-gray-600">No units found</p>

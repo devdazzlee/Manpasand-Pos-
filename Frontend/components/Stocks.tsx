@@ -38,6 +38,7 @@ import {
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
+import { PageLoader } from "@/components/ui/page-loader";
 import { usePosData } from "@/hooks/use-pos-data";
 
 interface Product {
@@ -121,7 +122,7 @@ export function Stocks() {
     const loadMeta = async () => {
       setIsInitialLoading(true);
       try {
-        const bRes = await apiClient.get(`${API_BASE}/branches?limit=100`);
+        const bRes = await apiClient.get(`${API_BASE}/branches?fetch_all=true`);
         setBranches(bRes.data.data);
         toast({
           title: "Success",
@@ -192,8 +193,7 @@ export function Stocks() {
       setLoadingProducts(true);
       try {
         const params: any = {
-          page: productPage,
-          limit: 100,
+          fetch_all: true,
           is_active: true,
         };
         
@@ -204,11 +204,7 @@ export function Stocks() {
         const response = await apiClient.get(`${API_BASE}/products`, { params });
         const data = response.data.data || response.data;
         
-        if (productPage === 1) {
-          setProducts(data.products || data);
-        } else {
-          setProducts(prev => [...prev, ...(data.products || data)]);
-        }
+        setProducts(data.products || data);
         setTotalProducts(data.meta?.total || (data.products || data).length);
       } catch (e: any) {
         console.log(e);
@@ -223,7 +219,7 @@ export function Stocks() {
     };
 
     fetchProducts();
-  }, [productPage, productSearch]);
+  }, [productSearch]);
 
   // Filter stocks by product name
   const filteredStocks = stocks.filter((s) =>
@@ -314,16 +310,7 @@ export function Stocks() {
   };
 
   if (isInitialLoading) {
-    return (
-      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-        <div className="flex items-center justify-center py-20">
-          <div className="text-center">
-            <Loader2 className="animate-spin h-12 w-12 text-gray-500 mx-auto mb-4" />
-            <p className="text-sm md:text-base text-gray-600">Loading stock data...</p>
-          </div>
-        </div>
-      </div>
-    );
+    return <PageLoader message="Loading stock data..." />
   }
 
   return (
@@ -640,9 +627,7 @@ export function Stocks() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex justify-center py-10">
-              <Loader2 className="animate-spin h-8 w-8 text-gray-500" />
-            </div>
+            <PageLoader message="Loading stock data..." />
           ) : (
             <div className="overflow-x-auto -mx-4 md:mx-0">
               <div className="inline-block min-w-full align-middle">
@@ -692,9 +677,7 @@ export function Stocks() {
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <div className="flex justify-center py-10">
-              <Loader2 className="animate-spin h-8 w-8 text-gray-500" />
-            </div>
+            <PageLoader message="Loading stock data..." />
           ) : (
             <div className="overflow-x-auto -mx-4 md:mx-0">
               <div className="inline-block min-w-full align-middle">

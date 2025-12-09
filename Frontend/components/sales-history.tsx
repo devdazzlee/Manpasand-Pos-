@@ -22,6 +22,7 @@ import {
 import { Calendar } from "@/components/ui/calendar";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import { PageLoader } from "@/components/ui/page-loader";
 import {
   Search,
   RefreshCw,
@@ -30,7 +31,10 @@ import {
   CalendarIcon,
   Eye,
   Loader2,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   format,
   parseISO,
@@ -70,6 +74,12 @@ interface Customer {
   email: string;
 }
 
+interface Branch {
+  id: string;
+  name: string;
+  address?: string;
+}
+
 interface Sale {
   id: string;
   sale_number: string;
@@ -85,6 +95,7 @@ interface Sale {
   sale_items: SaleItem[];
   notes?: string;
   created_at?: string;
+  branch?: Branch | null;
 }
 
 interface BranchInfo {
@@ -128,6 +139,10 @@ export function SalesHistory() {
   const [searchTerm, setSearchTerm] = useState("");
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
   const [endDate, setEndDate] = useState<Date | undefined>(undefined);
+  
+  // Pagination state
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState<number>(25);
 
   // Helper function to safely format currency
   const formatCurrency = (
@@ -166,7 +181,30 @@ export function SalesHistory() {
   const fetchSales = async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get<{ data: Sale[] }>("/sale");
+      // Get branch ID from localStorage - ALWAYS use it if available
+      // Backend will filter by this branchId regardless of admin status
+      const branchId = localStorage.getItem("branch");
+      const userRole = localStorage.getItem("role");
+      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+      
+      // Build query parameters
+      // ALWAYS send branchId from localStorage if it exists and is valid
+      // Backend will filter by this branchId (even for admins)
+      // If no branchId in localStorage, backend will show all for admins or use JWT branch_id for non-admins
+      const params: { branchId?: string } = {};
+      if (branchId && branchId !== "Not Found" && branchId.trim()) {
+        params.branchId = branchId.trim();
+      }
+      
+      // Debug logging
+      console.log("Fetching sales with params:", { 
+        branchId: params.branchId, 
+        isAdmin, 
+        userRole,
+        localStorageBranchId: branchId 
+      });
+      
+      const res = await apiClient.get<{ data: Sale[] }>("/sale", { params });
 
       // Filter out or handle invalid sales data
       const validSales = res.data.data.filter((sale) => {
@@ -284,6 +322,24 @@ export function SalesHistory() {
     });
   }, [sales, searchTerm, startDate, endDate]);
 
+  // Paginated data
+  const paginatedData = useMemo(() => {
+    if (pageSize === 0) return filtered;
+    const startIndex = (currentPage - 1) * pageSize;
+    const endIndex = startIndex + pageSize;
+    return filtered.slice(startIndex, endIndex);
+  }, [filtered, currentPage, pageSize]);
+
+  const totalPages = useMemo(() => {
+    if (pageSize === 0) return 1;
+    return Math.ceil(filtered.length / pageSize);
+  }, [filtered.length, pageSize]);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, startDate, endDate]);
+
   // Export CSV
   const exportCSV = () => {
     const header = [
@@ -378,294 +434,379 @@ export function SalesHistory() {
   const generateReceiptHtml = (data: ReceiptData) => {
     const subtotal = Number(data.subtotal || 0);
     const discount = Number(data.discount || 0);
-    const taxable = Math.max(0, subtotal - discount);
     const taxPercent = data.taxPercent || 0;
-    const tax = taxPercent > 0 ? (taxable * taxPercent) / 100 : 0;
-    const total = Number(data.total || subtotal - discount + tax);
+    const tax = taxPercent > 0 ? (subtotal - discount) * (taxPercent / 100) : 0;
+    const total = data.total ?? Math.max(0, subtotal - discount + tax);
     const paid = data.amountPaid ?? total;
     const change = data.changeAmount ?? 0;
     const timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
+    
+    // Format money like PrintServer (with commas, no currency symbol in number)
+    const money = (n: number) => {
+      return Number(n).toLocaleString('en-US', {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
+      });
+    };
+    
     const itemsHtml = (data.items || [])
       .map((item) => {
-        const name =
-          item.name.length > 20 ? `${item.name.substring(0, 17)}...` : item.name;
-        const unitLabel =
-          item.unitName ||
-          (typeof item.unit === "string" ? item.unit : "") ||
-          "";
-        const qty = unitLabel ? `${item.quantity} ${unitLabel}` : `${item.quantity}`;
-        const rate = `PKR ${((item.price || 0) * (item.quantity || 0)).toFixed(1)}`;
+        const name = String(item.name || '');
+        const qty = (item.quantity ?? 0).toString() + (item.unit ? ` ${item.unit}` : '');
+        const rate = money(Number(item.price || 0) * Number(item.quantity || 0));
         return `<div class="item-row">
   <div class="item-name">${name}</div>
   <div class="item-qty">${qty}</div>
   <div class="item-rate">${rate}</div>
-</div>
-${
-  item.name.length > 20
-    ? `<div class="item-sub-row"><div class="item-sub-name">${item.name}</div><div class="item-sub-qty"></div><div class="item-sub-rate"></div></div>`
-    : ""
-}`;
+</div>`;
       })
       .join("");
-    const promoHtml = data.promo ? `<div class="promo">${data.promo}</div>` : "";
+    
+    const promoHtml = data.promo ? `<div class="promo">Promo: ${data.promo}</div>` : "";
+    
+    // Footer lines matching PrintServer
+    const footerLines = [
+      'Branch: 021 34892110',
+      'Delivery Hotline WhatsApp: +92 342 3344040',
+      'Website: Manpasandstore.com'
+    ];
+    
+    const footerHtml = footerLines.map(line => `<div class="footer-line">${line}</div>`).join('');
+    
+    // Ace Studios section matching PrintServer
+    const aceHtml = `
+<div class="divider-thin"></div>
+<div class="powered-by">Powered by Ace Studios</div>
+<div class="ace-line">Website: acesoface.com</div>
+<div class="ace-line">Contact: +92 336 2500357</div>`;
+    
     return `
 <div class="receipt">
 <div class="logo">
 <img 
   src="${window.location.origin}/logo.png" 
   alt="Logo" 
-  style="max-width:140px;height:50px;display:block;margin:0 auto;
-         object-fit:contain;
-         filter: grayscale(100%) contrast(200%);
-         image-rendering: pixelated;
-         -webkit-print-color-adjust: exact; 
-         print-color-adjust: exact;" />
+  class="logo-img" />
 </div>
-<div class="store-header">${(data.storeName || "MANPASAND GENERAL STORE").toUpperCase()}</div>
-<div class="tagline">${data.tagline || "Quality • Service • Value"}</div>
-<div class="address">${data.address || "Karachi"}</div>
+<div class="store-name">${data.address || "Karachi"}</div>
+<div class="tagline">${data.tagline || "Quality - Service - Value"}</div>
+${data.strn ? `<div class="strn">${data.strn}</div>` : ''}
 
-<div class="divider">-------------------------------------</div>
+<div class="divider"></div>
 
-<div class="receipt-info">Receipt # <span class="receipt-number">${data.transactionId}</span></div>
-<div class="receipt-info">${timestamp.toLocaleDateString("en-US", {
-      month: "short",
-      day: "2-digit",
-      year: "numeric",
-    })} ${timestamp.toLocaleTimeString("en-US", {
-      hour: "2-digit",
-      minute: "2-digit",
-      hour12: true,
-    })}</div>
-<div class="flex-item-row-cs">
-<div class="receipt-info">Cashier: ${data.cashier || "Walk-in"}</div>
-<div class="receipt-info">${data.customerType || "Walk-in"}</div>  
+<div class="row-lr">
+  <span class="label">Receipt #</span>
+  <span class="value">${data.transactionId}</span>
+</div>
+<div class="row-lr">
+  <span class="label">Date</span>
+  <span class="value">${timestamp.toLocaleDateString()} ${timestamp.toLocaleTimeString()}</span>
+</div>
+<div class="row-lr">
+  <span class="label">Cashier</span>
+  <span class="value">${data.cashier || "Walk-in"}</span>
+</div>
+<div class="row-lr">
+  <span class="label">Customer</span>
+  <span class="value">${data.customerType || "Walk-in"}</span>
 </div>
 
-<div class="divider">-------------------------------------</div>
+<div class="divider"></div>
 
-<div class="items-section">
 <div class="items-header">
   <div class="item-col">ITEM</div>
   <div class="qty-col">QTY</div>
   <div class="rate-col">RATE</div>
 </div>
+<div class="items-divider"></div>
 
 ${itemsHtml}
-</div>
 
-<div class="divider">-------------------------------------</div>
+<div class="divider"></div>
 
-<div class="flex-item-row-cs">
-<div class="receipt-info">Subtotal</div>
-<div class="receipt-info">PKR ${subtotal.toFixed(2)}</div>
+<div class="row-lr">
+  <span class="label">Subtotal</span>
+  <span class="value">PKR ${money(subtotal)}</span>
 </div>
 ${discount > 0
-        ? `
-<div class="flex-item-row-cs">
-<div class="receipt-info">Discount</div>
-<div class="receipt-info">PKR ${discount.toFixed(2)}</div>
+        ? `<div class="row-lr">
+  <span class="label">Discount</span>
+  <span class="value">- PKR ${money(discount)}</span>
 </div>`
         : ""
       }
-${tax > 0
-        ? `
-<div class="flex-item-row-cs">
-<div class="receipt-info">Tax${taxPercent ? ` (${taxPercent.toFixed(0)}%)` : ""}</div>
-<div class="receipt-info">PKR ${tax.toFixed(2)}</div>
-</div>`
-        : ""
-      }
-<div class="flex-item-row-cs">
-<div class="receipt-info">Grand Total</div>
-<div class="receipt-info">PKR ${total.toFixed(2)}</div>
+<div class="row-lr total-row">
+  <span class="label">Grand Total</span>
+  <span class="value">PKR ${money(total)}</span>
 </div>
 
-<div class="divider">-------------------------------------</div>
-<div class="flex-item-row-cs">
-<div class="payment-info">Payment Method:</div>
-<div class="payment-method">${(data.paymentMethod || "CASH").toUpperCase()}</div>
+<div class="divider"></div>
+
+<div class="row-lr">
+  <span class="label">Payment</span>
+  <span class="value">${(data.paymentMethod || "CASH").toUpperCase()}</span>
 </div>
-<div class="flex-item-row-cs">
-<div class="payment-info">Amount Paid:</div>
-<div class="payment-method">PKR ${paid.toFixed(2)}</div> 
-</div>
-${change > 0
-        ? `
-<div class="flex-item-row-cs">
-<div class="payment-info">Change:</div>
-<div class="payment-method">PKR ${change.toFixed(2)}</div>
+${paid !== undefined && paid !== null
+        ? `<div class="row-lr">
+  <span class="label">Paid</span>
+  <span class="value">PKR ${money(paid)}</span>
 </div>`
         : ""
       }
-  
+${change > 0
+        ? `<div class="row-lr">
+  <span class="label">Change</span>
+  <span class="value">PKR ${money(change)}</span>
+</div>`
+        : ""
+      }
+
 ${promoHtml}
 
+<div class="divider"></div>
+
 <div class="barcode-section">
-<div class="barcode">
   <svg id="barcode-svg"></svg>
-</div>
-<div class="barcode-number" id="barcode-number">${data.transactionId}</div>
+  <div class="barcode-number" id="barcode-number">${data.transactionId}</div>
 </div>
 
-<div class="thank-you">${data.thankYouMessage || "Thank you for shopping with us!"
-      }</div>
-<div style="font-size: 15px; margin-top: 6px; font-weight: bold; color: #000000;">
-  ${data.footerMessage || "Visit us again soon!"}
-</div>
+<div class="thank-you">${data.thankYouMessage || "Thank you for shopping!"}</div>
+${footerHtml}
+${aceHtml}
 </div>
 `;
   };
 
   const receiptPageWrapper = (content: string) => `
+    <!DOCTYPE html>
     <html>
       <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
         <title>Receipt</title>
         <script src="https://cdnjs.cloudflare.com/ajax/libs/jsbarcode/3.11.5/JsBarcode.all.min.js"></script>
         <style>
+          * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+          }
           html, body {
             margin: 0;
             padding: 0;
             background: white;
-            height: auto;
-            min-height: auto;
+            height: 100%;
+            min-height: 100%;
+            overflow-x: hidden;
+            overflow-y: auto;
+            font-family: 'Helvetica', 'Arial', sans-serif;
+            width: 100%;
+            max-width: 100%;
           }
           body {
-            font-family: 'Courier New', monospace;
-            font-size: 12px;
-            line-height: 1.2;
-            color: #000000;
-            font-weight: bold;
             display: block;
+            width: 100%;
+            box-sizing: border-box;
             padding: 0;
           }
           .receipt {
-            width: 100mm;
-            max-width: 500px;
+            width: 100%;
+            max-width: 100%;
             background: #ffffff;
             color: #000000;
+            padding: 20px 16px 24px 16px;
+            margin: 0;
+            overflow: hidden;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
             font-weight: bold;
-            text-align: center;
-            padding: 1mm 2mm;
-            margin: 0 auto;
             box-sizing: border-box;
-            height: auto;
-            min-height: auto;
+            display: block;
           }
           .logo {
             text-align: center;
-            margin-bottom: 12px;
+            margin-bottom: 3mm;
           }
-          .logo img {
-            max-width: 180px;
-            height: 50px;
+          .logo-img {
+            max-width: 48mm;
+            max-height: 24mm;
+            width: auto;
+            height: auto;
             display: block;
-            margin: 0 auto;
+            margin: 0 auto 3mm auto;
             object-fit: contain;
+            filter: grayscale(100%) contrast(200%);
+            image-rendering: pixelated;
           }
-          .store-header {
-            font-weight: 900;
-            font-size: 24px;
-            margin-bottom: 6px;
+          .store-name {
+            font-weight: bold;
+            font-size: 11pt;
+            text-align: center;
+            margin-bottom: 2mm;
             color: #000000;
+            line-height: 1.2;
           }
-          .tagline, .address {
-            font-size: 16px;
-            margin-bottom: 4px;
+          .tagline {
+            font-size: 9.4pt;
+            text-align: center;
+            margin-bottom: 2mm;
             color: #000000;
             font-weight: bold;
+            line-height: 1.2;
           }
           .divider {
-            margin: 6px 0;
-            color: #000000;
-            font-weight: bold;
-            border: none;
-            text-align: center;
-            font-size: 16px;
+            border-top: 1px dotted #000;
+            margin: 3mm 0;
+            height: 0;
+            width: 100%;
           }
-          .receipt-info, .payment-info {
-            text-align: left;
-            font-size: 16px;
-            margin: 4px 0;
-            color: #000000;
-            font-weight: bold;
+          .divider-thin {
+            border-top: 0.5px dotted #000;
+            margin: 3mm 0;
+            height: 0;
+            width: 100%;
           }
-          .receipt-number, .payment-method {
-            font-weight: 900;
-            color: #000000;
-          }
-          .flex-item-row-cs {
+          .row-lr {
             display: flex;
             justify-content: space-between;
             align-items: center;
             width: 100%;
-            box-sizing: border-box;
-            white-space: nowrap;
+            margin: 2mm 0;
+            font-size: 9.4pt;
+            line-height: 1.3;
+            word-break: break-word;
           }
-          .items-section {
-            margin: 8px 0;
-            font-size: 16px;
-            line-height: 1.4;
+          .row-lr .label {
+            flex: 0 0 45%;
             text-align: left;
+            font-weight: bold;
+            color: #000000;
+          }
+          .row-lr .value {
+            flex: 1;
+            text-align: right;
+            font-weight: bold;
+            color: #000000;
+            word-break: break-all;
+          }
+          .total-row {
+            font-size: 11.2pt;
+            margin-top: 2mm;
+            font-weight: bold;
           }
           .items-header {
             display: flex;
             justify-content: space-between;
-            font-weight: 900;
-            font-size: 18px;
-            border-bottom: 1px solid #d1d5db;
-            padding-bottom: 3px;
-            margin-bottom: 4px;
+            align-items: center;
+            width: 100%;
+            font-weight: bold;
+            font-size: 11.2pt;
+            margin-bottom: 1mm;
+            color: #000000;
+          }
+          .items-divider {
+            border-top: 1px solid #000;
+            margin: 1mm 0 2mm 0;
+            height: 0;
+            width: 100%;
+          }
+          .item-col {
+            flex: 0 0 48%;
+            text-align: left;
+          }
+          .qty-col {
+            flex: 0 0 18%;
+            text-align: center;
+          }
+          .rate-col {
+            flex: 1;
+            text-align: right;
           }
           .item-row {
             display: flex;
             justify-content: space-between;
-            margin: 3px 0;
-            font-size: 14px;
+            align-items: flex-start;
+            width: 100%;
+            margin: 1.5mm 0;
+            font-size: 9.4pt;
+            line-height: 1.3;
+            word-break: break-word;
           }
           .item-name {
-            flex: 2;
-            padding-right: 8px;
+            flex: 0 0 48%;
+            text-align: left;
+            padding-right: 2mm;
+            word-break: break-word;
           }
           .item-qty {
-            flex: 1;
+            flex: 0 0 18%;
             text-align: center;
+            word-break: break-word;
           }
           .item-rate {
             flex: 1;
             text-align: right;
-          }
-          .item-sub-row {
-            display: flex;
-            margin: 2px 0 4px 0;
-            font-style: italic;
-            opacity: 0.7;
-            font-size: 12px;
+            word-break: break-all;
           }
           .barcode-section {
             text-align: center;
-            margin: 10px 0;
+            margin: 4mm 0;
           }
-          .barcode svg {
-            max-width: 100%;
-            height: 50px;
+          .barcode-section svg {
+            max-width: 48mm;
+            height: 14mm;
+            display: block;
+            margin: 0 auto;
           }
           .barcode-number {
-            font-size: 14px;
-            margin-top: 6px;
+            font-size: 9.8pt;
+            margin-top: 2mm;
             font-weight: bold;
-            letter-spacing: 2px;
+            letter-spacing: 1px;
+            color: #000000;
+            text-align: center;
           }
           .thank-you {
-            font-size: 17px;
-            margin-top: 10px;
-            font-weight: 900;
+            font-size: 10.6pt;
+            margin-top: 4mm;
+            margin-bottom: 2mm;
+            font-weight: bold;
+            text-align: center;
+            color: #000000;
+            line-height: 1.2;
+          }
+          .footer-line {
+            font-size: 9.8pt;
+            margin: 1mm 0;
+            font-weight: bold;
+            text-align: center;
+            color: #000000;
+            line-height: 1.2;
           }
           .promo {
-            padding: 6px;
-            margin: 8px 0;
-            font-size: 14px;
-            text-align: left;
+            font-size: 9.4pt;
+            text-align: center;
+            margin: 2mm 0;
+            color: #000000;
+            font-weight: bold;
+            line-height: 1.3;
+            word-break: break-word;
+          }
+          .powered-by {
+            font-size: 8.5pt;
+            text-align: center;
+            margin: 3mm 0 1mm 0;
+            color: #000000;
+            font-weight: bold;
+            line-height: 1.2;
+          }
+          .ace-line {
+            font-size: 8pt;
+            text-align: center;
+            margin: 1mm 0;
+            color: #000000;
+            font-weight: bold;
+            line-height: 1.2;
           }
         </style>
       </head>
@@ -734,22 +875,31 @@ ${promoHtml}
         if (!doc) return;
         const body = doc.body;
         const html = doc.documentElement;
-        const height = Math.max(
-          body?.scrollHeight ?? 0,
-          body?.offsetHeight ?? 0,
-          html?.clientHeight ?? 0,
-          html?.scrollHeight ?? 0,
-          html?.offsetHeight ?? 0
-        );
-        setIframeHeight(Math.max(420, height + 24));
+        
+        // Wait a bit for content to render
+        setTimeout(() => {
+          const height = Math.max(
+            body?.scrollHeight ?? 0,
+            body?.offsetHeight ?? 0,
+            html?.clientHeight ?? 0,
+            html?.scrollHeight ?? 0,
+            html?.offsetHeight ?? 0
+          );
+          // Limit height to prevent overflow, with max of 65vh for better modal fit
+          const maxHeight = Math.min(window.innerHeight * 0.65, height + 40);
+          setIframeHeight(Math.max(500, maxHeight));
+        }, 100);
       } catch (error) {
         console.warn("Failed to measure receipt height", error);
       }
     };
 
     iframe.addEventListener("load", handleLoad);
+    // Also check on window resize
+    window.addEventListener("resize", handleLoad);
     return () => {
       iframe.removeEventListener("load", handleLoad);
+      window.removeEventListener("resize", handleLoad);
     };
   }, [receiptHtml]);
 
@@ -895,7 +1045,7 @@ ${promoHtml}
       {/* Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Sales ({filtered.length})</CardTitle>
+          <CardTitle>Sales History ({filtered.length})</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto -mx-4 md:mx-0">
@@ -905,6 +1055,7 @@ ${promoHtml}
                   <TableRow>
                     <TableHead className="min-w-[120px]">Sale #</TableHead>
                     <TableHead className="min-w-[120px]">Date</TableHead>
+                    <TableHead className="min-w-[150px]">Branch</TableHead>
                     <TableHead className="min-w-[150px]">Customer</TableHead>
                     <TableHead className="min-w-[100px]">Payment</TableHead>
                     <TableHead className="min-w-[100px]">Total</TableHead>
@@ -916,21 +1067,21 @@ ${promoHtml}
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={8} className="text-center py-10">
-                      <Loader2 className="animate-spin h-6 w-6 text-gray-500 mx-auto" />
+                    <TableCell colSpan={9} className="text-center py-10">
+                      <PageLoader message="Loading sales..." />
                     </TableCell>
                   </TableRow>
                 ) : filtered.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={8}
+                      colSpan={9}
                       className="text-center py-10 text-gray-500"
                     >
                       No sales found
                     </TableCell>
                   </TableRow>
                 ) : (
-                  filtered.map((s) => {
+                  paginatedData.map((s) => {
                     const saleType = getSaleType(s.total_amount);
                     const isNegative = parseFloat(s.total_amount) < 0;
 
@@ -944,6 +1095,9 @@ ${promoHtml}
                         </TableCell>
                         <TableCell>
                           {format(parseISO(s.sale_date), "MM/dd/yyyy")}
+                        </TableCell>
+                        <TableCell>
+                          {s.branch?.name || "—"}
                         </TableCell>
                         <TableCell>{s.customer?.email || "—"}</TableCell>
                         <TableCell>{s.payment_method}</TableCell>
@@ -989,82 +1143,217 @@ ${promoHtml}
             </Table>
             </div>
           </div>
+          
+          {/* Pagination */}
+          {filtered.length > 0 && (
+            <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
+              <div className="flex items-center gap-2">
+                <Label htmlFor="page-size" className="text-sm font-medium whitespace-nowrap">
+                  Items per page:
+                </Label>
+                <Select 
+                  value={String(pageSize)} 
+                  onValueChange={value => { 
+                    setPageSize(Number(value)); 
+                    setCurrentPage(1); 
+                  }}
+                >
+                  <SelectTrigger className="w-32" id="page-size">
+                    <SelectValue placeholder="Page Size" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="10">10</SelectItem>
+                    <SelectItem value="25">25</SelectItem>
+                    <SelectItem value="50">50</SelectItem>
+                    <SelectItem value="100">100</SelectItem>
+                    <SelectItem value="0">All</SelectItem>
+                  </SelectContent>
+                </Select>
+                <span className="text-sm text-gray-600">
+                  Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} sales
+                </span>
+              </div>
+
+              {pageSize !== 0 && totalPages > 1 && (
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(1)}
+                    disabled={currentPage === 1}
+                  >
+                    First
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    <ChevronLeft className="h-4 w-4" />
+                    Previous
+                  </Button>
+                  <div className="flex items-center gap-1">
+                    {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                      let page: number;
+                      if (totalPages <= 5) {
+                        page = i + 1;
+                      } else if (currentPage <= 3) {
+                        page = i + 1;
+                      } else if (currentPage >= totalPages - 2) {
+                        page = totalPages - 4 + i;
+                      } else {
+                        page = currentPage - 2 + i;
+                      }
+                      return (
+                        <Button
+                          key={page}
+                          variant={currentPage === page ? "default" : "outline"}
+                          size="sm"
+                          onClick={() => setCurrentPage(page)}
+                          className="min-w-[40px]"
+                        >
+                          {page}
+                        </Button>
+                      );
+                    })}
+                  </div>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                    <ChevronRight className="h-4 w-4" />
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={currentPage === totalPages}
+                  >
+                    Last
+                  </Button>
+                </div>
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 
       {/* Sale Receipt Modal */}
       <Dialog open={!!viewSale || viewLoading} onOpenChange={closeViewModal}>
-        <DialogContent className="max-w-3xl">
+        <DialogContent className="max-w-3xl w-[90vw] max-h-[96vh] flex flex-col p-0 gap-0 overflow-hidden shadow-2xl">
           {viewLoading ? (
-            <div className="flex flex-col items-center justify-center py-10">
-              <Loader2 className="animate-spin h-8 w-8 text-gray-500 mb-4" />
-              <span>Loading sale details...</span>
+            <div className="p-8 flex items-center justify-center min-h-[400px]">
+              <PageLoader message="Loading sale details..." />
             </div>
           ) : viewSale ? (
             <>
-              <DialogHeader>
-                <DialogTitle>Sale Receipt</DialogTitle>
-                <DialogDescription>
-                  View and print the receipt exactly as it appears at checkout.
-                </DialogDescription>
+              <DialogHeader className="px-8 pt-8 pb-6 border-b border-gray-200 bg-gradient-to-r from-gray-50 to-white flex-shrink-0">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <DialogTitle className="text-2xl font-bold text-gray-900 mb-2">Sale Receipt</DialogTitle>
+                    <DialogDescription className="text-sm text-gray-600">
+                      View and print the receipt exactly as it appears at checkout.
+                    </DialogDescription>
+                  </div>
+                  <div className="text-xs text-gray-500 bg-gray-100 px-3 py-1.5 rounded-md font-medium">
+                    {viewSale.sale_number}
+                  </div>
+                </div>
               </DialogHeader>
-              <div className="bg-gray-50 border border-gray-200 rounded-lg p-4 max-h-[75vh] overflow-auto">
-                {receiptHtml ? (
-                  <iframe
-                    ref={receiptIframeRef}
-                    title="Receipt Preview"
-                    srcDoc={receiptHtml}
-                    className="block mx-auto rounded-xl border border-gray-200 shadow-inner bg-white"
-                    style={{
-                      width: "100%",
-                      maxWidth: "100mm",
-                      height: `${iframeHeight}px`,
-                    }}
-                  />
-                ) : (
-                  <div className="text-center text-gray-500 py-10">
-                    Receipt preview unavailable.
-                  </div>
-                )}
-              </div>
-              <DialogFooter className="flex flex-col md:flex-row md:items-center md:justify-between gap-3">
-                <div className="flex flex-col md:flex-row md:items-center gap-3 w-full md:w-auto">
-                  <div className="text-sm text-gray-500">
-                    Sale #{viewSale.sale_number} • {format(parseISO(viewSale.sale_date), "PPpp")}
-                  </div>
-                  {printers.length > 0 && (
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                        Printer
-                      </span>
-                      <select
-                        className="h-9 rounded border border-gray-300 bg-white px-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        value={selectedPrinter}
-                        onChange={(e) => setSelectedPrinter(e.target.value)}
-                      >
-                        <option value="">Choose printer</option>
-                        {printers.map((printer) => (
-                          <option key={printer.name} value={printer.name}>
-                            {printer.name} {printer.isDefault ? "(Default)" : ""}
-                          </option>
-                        ))}
-                      </select>
+              
+              <div className="flex-1 overflow-hidden bg-gray-50">
+                <div className="h-full overflow-auto p-3 sm:p-4 flex justify-center items-start">
+                  {receiptHtml ? (
+                    <div className="w-full max-w-5xl mx-auto">
+                      <div className="bg-white rounded-xl shadow-xl border border-gray-200 p-3 sm:p-4 overflow-hidden">
+                        <iframe
+                          ref={receiptIframeRef}
+                          title="Receipt Preview"
+                          srcDoc={receiptHtml}
+                          className="block w-full bg-white"
+                          style={{
+                            width: "100%",
+                            minHeight: "400px",
+                            height: `${Math.min(iframeHeight, window.innerHeight * 0.65)}px`,
+                            border: "none",
+                          }}
+                        />
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="text-center text-gray-500 py-20 w-full">
+                      <div className="text-lg font-medium mb-2">Receipt preview unavailable</div>
+                      <div className="text-sm">Unable to load receipt data</div>
                     </div>
                   )}
                 </div>
-                <div className="flex flex-col sm:flex-row items-center gap-2">
-                  {(printers.length > 0 || kioskMode) && (
-                    <Button onClick={handleServerPrint} disabled={!selectedPrinter && !kioskMode}>
-                      <Printer className="h-4 w-4 mr-2" />
-                      Print to Printer
+              </div>
+              
+              <DialogFooter className="px-6 py-4 border-t border-gray-200 bg-white flex-shrink-0">
+                <div className="w-full space-y-3">
+                  {/* First line: Sale info and Printer */}
+                  <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 w-full">
+                    <div className="text-sm text-gray-700 flex items-center">
+                      <span className="font-semibold text-gray-900">Sale #{viewSale.sale_number}</span>
+                      <span className="mx-2 text-gray-400">•</span>
+                      <span className="text-gray-600">{format(parseISO(viewSale.sale_date), "PPpp")}</span>
+                    </div>
+                    {printers.length > 0 && (
+                      <div className="flex items-center gap-2.5">
+                        <label className="text-xs font-semibold uppercase tracking-wide text-gray-600 whitespace-nowrap">
+                          Printer:
+                        </label>
+                        <select
+                          className="h-9 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all min-w-[200px] shadow-sm hover:border-gray-400"
+                          value={selectedPrinter}
+                          onChange={(e) => setSelectedPrinter(e.target.value)}
+                        >
+                          <option value="">Choose printer</option>
+                          {printers.map((printer) => (
+                            <option key={printer.name} value={printer.name}>
+                              {printer.name} {printer.isDefault ? "(Default)" : ""}
+                            </option>
+                          ))}
+                        </select>
+                      </div>
+                    )}
+                  </div>
+                  {/* Second line: Action buttons */}
+                  <div className="flex items-center justify-between gap-2.5 w-full">
+                    <div className="flex items-center gap-2.5">
+                      {(printers.length > 0 || kioskMode) && (
+                        <Button 
+                          onClick={handleServerPrint} 
+                          disabled={!selectedPrinter && !kioskMode}
+                          className="whitespace-nowrap shadow-sm hover:shadow-md transition-all"
+                          size="default"
+                        >
+                          <Printer className="h-4 w-4 mr-2" />
+                          Print to Printer
+                        </Button>
+                      )}
+                      <Button 
+                        variant="outline" 
+                        onClick={handleBrowserPrintReceipt}
+                        className="whitespace-nowrap shadow-sm hover:shadow-md transition-all"
+                        size="default"
+                      >
+                        Browser Print
+                      </Button>
+                    </div>
+                    <Button 
+                      variant="default" 
+                      onClick={closeViewModal}
+                      className="whitespace-nowrap bg-black hover:bg-gray-800 text-white h-9"
+                      size="default"
+                    >
+                      Close
                     </Button>
-                  )}
-                  <Button variant="outline" onClick={handleBrowserPrintReceipt}>
-                    Browser Print
-                  </Button>
-                  <Button variant="ghost" onClick={closeViewModal}>
-                    Close
-                  </Button>
+                  </div>
                 </div>
               </DialogFooter>
             </>

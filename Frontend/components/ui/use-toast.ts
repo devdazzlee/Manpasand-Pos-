@@ -142,52 +142,22 @@ function dispatch(action: Action) {
 
 type Toast = Omit<ToasterToast, "id">
 
+// No-op toast function - POS system doesn't show toasts
 function toast({ ...props }: Toast) {
-  const id = genId()
-
-  const update = (props: ToasterToast) =>
-    dispatch({
-      type: "UPDATE_TOAST",
-      toast: { ...props, id },
-    })
-  const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id })
-
-  dispatch({
-    type: "ADD_TOAST",
-    toast: {
-      ...props,
-      id,
-      open: true,
-      onOpenChange: (open) => {
-        if (!open) dismiss()
-      },
-    },
-  })
-
+  // Do nothing - POS system doesn't display toasts
   return {
-    id: id,
-    dismiss,
-    update,
+    id: '',
+    dismiss: () => {},
+    update: () => {},
   }
 }
 
 function useToast() {
-  const [state, setState] = React.useState<State>(memoryState)
-
-  React.useEffect(() => {
-    listeners.push(setState)
-    return () => {
-      const index = listeners.indexOf(setState)
-      if (index > -1) {
-        listeners.splice(index, 1)
-      }
-    }
-  }, [state])
-
+  // Return empty state - POS system doesn't show toasts
   return {
-    ...state,
+    toasts: [],
     toast,
-    dismiss: (toastId?: string) => dispatch({ type: "DISMISS_TOAST", toastId }),
+    dismiss: () => {},
   }
 }
 

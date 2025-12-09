@@ -1,11 +1,10 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../prisma/client';
-import { redis } from '../config/redis';
+import { safeRedisOperation } from '../config/redis';
 import { config } from '../config/app';
 import { AppError } from '../utils/apiError';
 import { Role, Branch } from '@prisma/client'; 
-import { convertToSeconds } from '../utils/convertToSeconds';
 
 class AuthService {
   async register(data: { email: string; password: string; role?: Role }) {
@@ -91,20 +90,17 @@ class AuthService {
         branch_id: user.branch_id,
       },
       config.jwtSecret,
-      {
-        expiresIn:
-          typeof config.jwtExpiresIn === 'string'
-            ? convertToSeconds(config.jwtExpiresIn)
-            : config.jwtExpiresIn,
-      },
+      // No expiration - token remains valid until user logs out
     );
 
-    // Store session in Redis with proper expiration
-    const expiresInSeconds = convertToSeconds(config.jwtExpiresIn);
-    await redis.set(`session:${user.id}`, token, 'EX', expiresInSeconds);
+    // Store session in Redis without expiration (token valid until logout)
+    await safeRedisOperation(
+      async (redis) => redis.set(`session:${user.id}`, token),
+      null
+    );
 
     // Omit password from returned user object
-    const { id: undefined, password: _, ...userWithoutPassword } = user;
+    const { id, password: _, ...userWithoutPassword } = user;
 
     return {
       user: userWithoutPassword,
@@ -113,7 +109,11 @@ class AuthService {
   }
 
   async logout(userId: string) {
-    // await redis.del(`session:${userId}`);
+    // Delete session from Redis to invalidate token
+    await safeRedisOperation(
+      async (redis) => redis.del(`session:${userId}`),
+      0
+    );
   }
 }
 
