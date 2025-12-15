@@ -30,6 +30,7 @@
     "seed:nimco": "ts-node seeders/seed-nimco.ts",
     "seed:essential-oils-shampoo": "ts-node seeders/seed-essential-oils-shampoo.ts",
     "seed:scent-perfumes": "ts-node seeders/seed-scent-perfumes.ts",
+    "seed:general": "ts-node seeders/seed-general.ts",
     "lint": "eslint . --ext .ts",
     "lint:fix": "eslint . --ext .ts --fix",
     "test": "jest --coverage",

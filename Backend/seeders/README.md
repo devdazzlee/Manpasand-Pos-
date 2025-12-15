@@ -186,6 +186,21 @@ Creates 7 SCENT & PERFUMES products including:
 - Fancy Burner
 - Bakhoor
 
+### `seed-general.ts`
+Creates 65 General products including:
+- Betel Nut varieties (2 Piece, Flavoured Silli/Sunny, Red Anmol, Silli, Sunny, Sliced)
+- Sweeteners (Brown Sugar, Jaggery varieties, Misri, Dhala Misri, Glass Gurr, Ginger Gurr)
+- Seeds & Nuts (Sunflower seeds varieties, Fennel Seeds, Saghu Dana, khushboo dana)
+- Paan Masala (Roasted, Sweet)
+- China Grass (Whole, Large/Small Grounded)
+- Essences (Essence, Vanilla Essence, Zafrani Essence)
+- Food Colors (Food Colour, Zarda food colour)
+- Kewra Water (Key Kewra, Zafrani Kewra)
+- Vinegars (Key Synthetic Vinegar - 300ml & 750ml)
+- Specialty items (Saffron, Shilajit, Green Cardamom, Desi Ghee, Fine Coal, Silver Ball, Silver Warq)
+- Snacks (Batashay, Popcorn, Puffed Rice, Kaccha Chewra, Laccha, Mango Slice, Naqqul, Siwayyan, Star & Polo Mix)
+- Others (Baryan, Dahi Mirch, Dhanya giri, MP Chat Hazam Chooran, Rita Tamarind, Sweet Soda Powder, Empty Murabba bottles, EMPTY FOOD COLOR DIBYA, CHANNA CHIKKI, Murmuray Chikki, Fried Onion)
+
 ## Running Seeders
 
 ### Run seeders:
@@ -237,6 +252,9 @@ npm run seed:essential-oils-shampoo
 
 # Seed SCENT & PERFUMES products (Fast Mode)
 npm run seed:scent-perfumes
+
+# Seed General products (Fast Mode)
+npm run seed:general
 ```
 
 ### Run individual seeder directly:
@@ -257,6 +275,7 @@ npx ts-node seeders/seed-indian-products.ts
 npx ts-node seeders/seed-nimco.ts
 npx ts-node seeders/seed-essential-oils-shampoo.ts
 npx ts-node seeders/seed-scent-perfumes.ts
+npx ts-node seeders/seed-general.ts
 ```
 
 ## Notes
