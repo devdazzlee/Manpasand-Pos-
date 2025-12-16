@@ -110,10 +110,10 @@ export const useStore = create<StoreState>()(
         const now = Date.now()
         const hasFilters = Boolean(search) || Boolean(categoryId)
 
-        // Use cached data when no filters applied
-        if (!hasFilters) {
+        // Use cached data when no filters applied AND we're not forcing a refresh
+        // Skip cache when force is true to ensure fresh data
+        if (!hasFilters && !force) {
           if (
-            !force &&
             state.products.length > 0 &&
             state.lastProductsFetch &&
             now - state.lastProductsFetch < CACHE_DURATION

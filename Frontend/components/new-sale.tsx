@@ -205,29 +205,6 @@ export function NewSale() {
     };
   }, []); // Empty dependency array since we only want to fetch once on mount
 
-  // Load all products once on mount and when category changes (no search term)
-  useEffect(() => {
-    const categoryFilter =
-      selectedCategory !== "all" ? selectedCategory : undefined;
-
-    // Only fetch from API when category changes and no search term
-    // This ensures we have all products cached for client-side search
-    if (!searchTerm) {
-      const loadByCategory = async () => {
-        try {
-          await fetchProducts({
-            force: false, // Use cache if available
-            categoryId: categoryFilter,
-          });
-        } catch (error) {
-          // Error loading products - no toast shown
-        }
-      };
-
-      loadByCategory();
-    }
-  }, [selectedCategory]); // Only depend on category, not searchTerm
-
   // Client-side filtering for instant search results
   // This provides instant feedback without API calls
   const filteredProducts = products.filter((product) => {
