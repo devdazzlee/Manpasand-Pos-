@@ -59,7 +59,8 @@ app.use((0, cors_1.default)({
             'https://manpasand-pos-beta.vercel.app',
             'http://localhost:3000',
             'http://localhost:5173',
-            'https://manpasandstore.com'
+            'https://manpasandstore.com',
+            'https://www.manpasandstore.com'
         ];
         // Check if origin matches (with or without trailing slash)
         const originMatch = allowedOrigins.some(allowed => origin === allowed || origin === `${allowed}/`);
