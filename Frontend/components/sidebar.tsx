@@ -30,6 +30,7 @@ import {
   Barcode,
   X,
   Warehouse,
+  Globe,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 import apiClient from "@/lib/apiClient";
@@ -79,6 +80,7 @@ const menuSections: SidebarMenuSection[] = [
       { id: "new-sale", label: "Sales", icon: ShoppingCart },
       { id: "sales-history", label: "Sales History", icon: History },
       { id: "orders", label: "Orders", icon: ListOrdered },
+      { id: "website-orders", label: "Website Orders", icon: Globe },
       { id: "suppliers", label: "Suppliers", icon: Truck },
       { id: "returns", label: "Returns & Refunds", icon: RotateCcw },
       { id: "barcode-generater", label: "Barcode Generater", icon: Barcode },
@@ -186,10 +188,32 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
     "sales-history",
     // "inventory",
     "orders",
+    "website-orders",
     "returns",
     // "units",
     "customers",
     "expenses",
+  ];
+
+  // Tabs to show for BRANCH
+  const branchTabIds = [
+    "dashboard",
+    "cash-register",
+    "notifications",
+    "new-sale",
+    "sales-history",
+    "orders",
+    "website-orders",
+    "returns",
+    "customers",
+    "inventory",
+    "stock-management",
+    "categories",
+    "sub-categories",
+    "units",
+    "brand",
+    "colors",
+    "sizes",
   ];
 
   // Filter menuSections based on role
@@ -200,6 +224,15 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
             ...section,
             items: section.items.filter((item) =>
               adminTabIds.includes(item.id)
+            ),
+          }))
+          .filter((section) => section.items.length > 0)
+      : role === "BRANCH"
+      ? menuSections
+          .map((section) => ({
+            ...section,
+            items: section.items.filter((item) =>
+              branchTabIds.includes(item.id)
             ),
           }))
           .filter((section) => section.items.length > 0)

@@ -35,6 +35,7 @@ import { Stocks } from "./Stocks";
 import { StockManagement } from "./StockManagement";
 import { Sales } from "./sales";
 import Orders from "./orders";
+import WebsiteOrders from "./website-orders";
 import Subcategories from "./sub-categories";
 import Units from "./Units";
 import Suppliers from "./suppliers";
@@ -65,6 +66,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <NewSale />;
       case "orders":
         return <Orders />;
+      case "website-orders":
+        return <WebsiteOrders />;
       case "units":
         return <Units />;
       case "sales-history":

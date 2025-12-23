@@ -41,6 +41,7 @@ const shift_route_1 = __importDefault(require("./routes/shift.route"));
 const shiftAssignment_routes_1 = __importDefault(require("./routes/shiftAssignment.routes"));
 const barcode_routes_1 = __importDefault(require("./routes/barcode.routes"));
 const notification_routes_1 = __importDefault(require("./routes/notification.routes"));
+const guestOrder_routes_1 = __importDefault(require("./routes/guestOrder.routes"));
 const node_cron_1 = __importDefault(require("node-cron"));
 const vAPI = process.env.vAPI || '/api/v1';
 const app = (0, express_1.default)();
@@ -57,7 +58,8 @@ app.use((0, cors_1.default)({
             'https://manpasand-pos-t623.vercel.app',
             'https://manpasand-pos-beta.vercel.app',
             'http://localhost:3000',
-            'http://localhost:5173'
+            'http://localhost:5173',
+            'https://manpasandstore.com'
         ];
         // Check if origin matches (with or without trailing slash)
         const originMatch = allowedOrigins.some(allowed => origin === allowed || origin === `${allowed}/`);
@@ -109,6 +111,7 @@ app.use(`${vAPI}/customer/app`, app_routes_1.default);
 app.use(`${vAPI}/customer`, customer_routes_1.default);
 app.use(`${vAPI}/app/customer/order`, customerOrder_routes_1.default);
 app.use(`${vAPI}/customer/device-identity`, device_identity_routes_1.default);
+app.use(`${vAPI}/guest/order`, guestOrder_routes_1.default); // Guest checkout route
 // Health check
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'OK - Server is working fine' });

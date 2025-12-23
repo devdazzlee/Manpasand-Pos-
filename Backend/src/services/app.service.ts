@@ -28,9 +28,14 @@ class AppService {
         };
     };
 
-    public async searchProducts(query: string) {
-        const products = await this.productService.getProductByNameSearch(query);
+    public async searchProducts(query: string, limit?: number) {
+        const products = await this.productService.getProductByNameSearch(query, limit);
         return products;
+    }
+
+    public async getProductById(id: string) {
+        const product = await this.productService.getProductById(id);
+        return product;
     }
 }
 

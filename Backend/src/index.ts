@@ -36,6 +36,7 @@ import shiftRoutes  from './routes/shift.route';
 import shiftAssignmentRoutes  from './routes/shiftAssignment.routes';
 import barcodeRoutes from './routes/barcode.routes';
 import notificationRoutes from './routes/notification.routes';
+import guestOrderRoutes from './routes/guestOrder.routes';
 import cron from 'node-cron';
 
 const vAPI = process.env.vAPI || '/api/v1';
@@ -55,7 +56,8 @@ app.use(cors({
       'https://manpasand-pos-t623.vercel.app',
       'https://manpasand-pos-beta.vercel.app',
       'http://localhost:3000',
-      'http://localhost:5173'
+      'http://localhost:5173',
+      'https://manpasandstore.com'
     ];
     
     // Check if origin matches (with or without trailing slash)
@@ -112,6 +114,7 @@ app.use(`${vAPI}/customer/app`, appRoutes);
 app.use(`${vAPI}/customer`, customerRoutes);
 app.use(`${vAPI}/app/customer/order`, customerOrderRoutes);
 app.use(`${vAPI}/customer/device-identity`, deviceIdentityRoutes);
+app.use(`${vAPI}/guest/order`, guestOrderRoutes); // Guest checkout route
 
 // Health check
 app.get('/health', (req, res) => {

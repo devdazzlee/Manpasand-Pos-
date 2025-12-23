@@ -530,15 +530,59 @@ export class ProductService {
         const product = await prisma.product.findUnique({
             where: { id },
             include: {
-                unit: true,
-                category: true,
-                subcategory: true,
-                tax: true,
-                supplier: true,
-                brand: true,
-                color: true,
-                size: true,
-                order_items: true,
+                unit: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                subcategory: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                ProductImage: {
+                    select: {
+                        image: true,
+                    },
+                },
+                tax: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                supplier: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                brand: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                color: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                size: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
             },
         });
 
@@ -725,6 +769,11 @@ export class ProductService {
                     name: true,
                 },
             },
+            ProductImage: {
+                select: {
+                    image: true,
+                },
+            },
             stock: branch_id
                 ? {
                       where: { branch_id },
@@ -862,7 +911,7 @@ export class ProductService {
 
     async getFeaturedProducts() {
         // Fetch featured products from the database
-        return await prisma.product.findMany({
+        let featuredProducts = await prisma.product.findMany({
             where: {
                 is_featured: true,
                 is_active: true,
@@ -885,6 +934,35 @@ export class ProductService {
                 },
             },
         });
+
+        // If no featured products, return some active products as fallback
+        if (featuredProducts.length === 0) {
+            featuredProducts = await prisma.product.findMany({
+                where: {
+                    is_active: true,
+                    display_on_pos: true,
+                },
+                orderBy: {
+                    created_at: "desc",
+                },
+                take: 10,
+                include: {
+                    ProductImage: {
+                        select: {
+                            image: true,
+                        },
+                    },
+                    category: {
+                        select: { name: true }
+                    },
+                    subcategory: {
+                        select: { name: true }
+                    },
+                },
+            });
+        }
+
+        return featuredProducts;
     }
 
     async getBestSellingProducts(limit = 10) {
@@ -928,7 +1006,7 @@ export class ProductService {
         return bestSellingActiveProductsThisMonth;
     }
 
-    async getProductByNameSearch(name: string) {
+    async getProductByNameSearch(name: string, limit?: number) {
         const products = await prisma.product.findMany({
             where: {
                 name: {
@@ -938,12 +1016,28 @@ export class ProductService {
                 is_active: true,
             },
             include: {
-                category: true,
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                unit: {
+                    select: {
+                        id: true,
+                        name: true,
+                    },
+                },
+                ProductImage: {
+                    select: {
+                        image: true,
+                    },
+                },
             },
             orderBy: {
                 created_at: "desc",
             },
-            take: 10,
+            take: limit || 10,
         });
 
         return products;
