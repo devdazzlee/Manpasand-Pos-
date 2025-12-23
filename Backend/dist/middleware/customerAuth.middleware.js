@@ -10,28 +10,46 @@ const app_1 = require("../config/app");
 const apiError_1 = require("../utils/apiError");
 const authenticateCustomer = async (req, res, next) => {
     try {
-        const token = req.headers.authorization?.split(' ')[1];
+        const authHeader = req.headers.authorization;
+        if (!authHeader || !authHeader.startsWith('Bearer ')) {
+            throw new apiError_1.AppError(401, 'Authentication required. Please provide a valid token.');
+        }
+        const token = authHeader.split(' ')[1];
         if (!token) {
             throw new apiError_1.AppError(401, 'Authentication required');
         }
         const decoded = jsonwebtoken_1.default.verify(token, app_1.config.jwtSecret);
+        if (!decoded.id || !decoded.email) {
+            throw new apiError_1.AppError(401, 'Invalid token structure');
+        }
         // Verify token against Redis if available, otherwise just verify JWT
         if (redis_1.isRedisAvailable) {
             const storedToken = await (0, redis_1.safeRedisOperation)(async (redis) => redis.get(`session:customer:${decoded.id}`), null);
+            // If Redis is available and storedToken is null, session doesn't exist
+            if (storedToken === null) {
+                throw new apiError_1.AppError(401, 'Session expired or invalid. Please login again.');
+            }
+            // If storedToken exists but doesn't match, token is invalid
             if (storedToken && storedToken !== token) {
                 throw new apiError_1.AppError(401, 'Invalid or expired session');
             }
-            // If storedToken is null and Redis is available, session might have expired
-            // But if Redis is unavailable, we allow JWT verification to pass
         }
-        req.customer = decoded;
+        req.customer = {
+            id: decoded.id,
+            email: decoded.email,
+        };
         next();
     }
     catch (error) {
-        // If it's a JWT error, pass it through
-        if (error instanceof jsonwebtoken_1.default.JsonWebTokenError || error instanceof jsonwebtoken_1.default.TokenExpiredError) {
-            throw new apiError_1.AppError(401, 'Invalid or expired token');
+        // If it's already an AppError, pass it through
+        if (error instanceof apiError_1.AppError) {
+            return next(error);
         }
+        // If it's a JWT error, convert it to AppError
+        if (error instanceof jsonwebtoken_1.default.JsonWebTokenError || error instanceof jsonwebtoken_1.default.TokenExpiredError) {
+            return next(new apiError_1.AppError(401, 'Invalid or expired token'));
+        }
+        // For any other error, pass it through
         next(error);
     }
 };

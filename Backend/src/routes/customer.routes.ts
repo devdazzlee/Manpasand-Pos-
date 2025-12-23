@@ -11,15 +11,28 @@ import CustomerService from '../services/customer.service';
 const customerService = new CustomerService();
 const router = express.Router();
 
+// Public routes (no auth required)
 router.post('/register', validate(customerLoginSchema), createCustomer);
 router.post('/login', validate(customerLoginSchema), loginCustomer);
+
+// Customer authenticated routes (must be before admin routes)
+// IMPORTANT: These routes must be defined BEFORE the admin middleware below
 router.put('/', authenticateCustomer, validate(customerUpdateSchema), updateCustomer);
 router.post('/logout', authenticateCustomer, logoutCustomer);
+
+// Explicit /me route - must be before /:customerId to avoid route conflict
 router.get('/me', authenticateCustomer, asyncHandler(async (req: Request, res: Response) => {
-  const customer = await customerService.getCustomerById(req.customer?.id!);
+  if (!req.customer || !req.customer.id) {
+    return res.status(401).json({
+      success: false,
+      message: 'Customer authentication required',
+    });
+  }
+  const customer = await customerService.getCustomerById(req.customer.id);
   new ApiResponse(customer, 'Customer fetched').send(res);
 }));
 
+// Admin routes (protected by admin auth - MUST come after customer routes)
 router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 router.post('/', validate(cusRegisterationSchema), createShopCustomer);
 router.get('/', getCustomers);

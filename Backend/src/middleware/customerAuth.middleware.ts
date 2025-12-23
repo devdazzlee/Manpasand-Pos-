@@ -18,9 +18,11 @@ declare global {
 
 const authenticateCustomer = async (req: Request, res: Response, next: NextFunction) => {
   try {
+    console.log('[authenticateCustomer] Middleware called for path:', req.path);
     const authHeader = req.headers.authorization;
     
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      console.log('[authenticateCustomer] No valid auth header');
       throw new AppError(401, 'Authentication required. Please provide a valid token.');
     }
 
@@ -58,8 +60,10 @@ const authenticateCustomer = async (req: Request, res: Response, next: NextFunct
       id: decoded.id,
       email: decoded.email,
     };
+    console.log('[authenticateCustomer] Authentication successful for customer:', decoded.id);
     next();
   } catch (error) {
+    console.log('[authenticateCustomer] Error:', error);
     // If it's already an AppError, pass it through
     if (error instanceof AppError) {
       return next(error);
