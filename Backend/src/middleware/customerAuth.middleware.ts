@@ -18,13 +18,23 @@ declare global {
 
 const authenticateCustomer = async (req: Request, res: Response, next: NextFunction) => {
   try {
-    const token = req.headers.authorization?.split(' ')[1];
+    const authHeader = req.headers.authorization;
+    
+    if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      throw new AppError(401, 'Authentication required. Please provide a valid token.');
+    }
+
+    const token = authHeader.split(' ')[1];
 
     if (!token) {
       throw new AppError(401, 'Authentication required');
     }
 
     const decoded = jwt.verify(token, config.jwtSecret) as { id: Customer['id']; email: Customer['email'] };
+
+    if (!decoded.id || !decoded.email) {
+      throw new AppError(401, 'Invalid token structure');
+    }
 
     // Verify token against Redis if available, otherwise just verify JWT
     if (isRedisAvailable) {
@@ -33,20 +43,34 @@ const authenticateCustomer = async (req: Request, res: Response, next: NextFunct
         null
       );
       
+      // If Redis is available and storedToken is null, session doesn't exist
+      if (storedToken === null) {
+        throw new AppError(401, 'Session expired or invalid. Please login again.');
+      }
+      
+      // If storedToken exists but doesn't match, token is invalid
       if (storedToken && storedToken !== token) {
         throw new AppError(401, 'Invalid or expired session');
       }
-      // If storedToken is null and Redis is available, session might have expired
-      // But if Redis is unavailable, we allow JWT verification to pass
     }
 
-    req.customer = decoded;
+    req.customer = {
+      id: decoded.id,
+      email: decoded.email,
+    };
     next();
   } catch (error) {
-    // If it's a JWT error, pass it through
-    if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError) {
-      throw new AppError(401, 'Invalid or expired token');
+    // If it's already an AppError, pass it through
+    if (error instanceof AppError) {
+      return next(error);
     }
+    
+    // If it's a JWT error, convert it to AppError
+    if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError) {
+      return next(new AppError(401, 'Invalid or expired token'));
+    }
+    
+    // For any other error, pass it through
     next(error);
   }
 };
