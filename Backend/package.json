@@ -15,6 +15,7 @@
     "prisma:reset": "prisma migrate reset --force --schema=src/prisma/schema.prisma",
     "prisma:validate": "prisma validate --schema=src/prisma/schema.prisma",
     "seed:users": "ts-node seeders/seed-users.ts",
+    "seed:customers": "ts-node seeders/seed-customers.ts",
     "seed:dried-fruits-nuts": "ts-node seeders/seed-dried-fruits-nuts.ts",
     "seed:spices": "ts-node seeders/seed-spices.ts",
     "seed:dates": "ts-node seeders/seed-dates.ts",
