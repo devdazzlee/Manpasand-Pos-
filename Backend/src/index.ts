@@ -57,7 +57,8 @@ app.use(cors({
       'https://manpasand-pos-beta.vercel.app',
       'http://localhost:3000',
       'http://localhost:5173',
-      'https://manpasandstore.com'
+      'https://manpasandstore.com',
+      'https://www.manpasandstore.com'
     ];
     
     // Check if origin matches (with or without trailing slash)
