@@ -619,11 +619,14 @@ export default function BarcodeGenerator() {
       format: [widthPt, heightPt]
     });
     
-    // Font sizes - improved for better readability
-    const titleFontSize = 9; // pt - slightly larger
-    const labelFontSize = 7; // pt - bold labels (NET WT, PKG, EXP)
-    const valueFontSize = 7; // pt - normal values
-    const priceFontSize = 8; // pt - price in bold
+    // Set default text color to pure black for darker text
+    doc.setTextColor(0, 0, 0);
+    
+    // Font sizes - larger and darker for better visibility
+    const titleFontSize = 10; // pt - larger for better visibility
+    const labelFontSize = 8; // pt - bold labels (NET WT, PKG, EXP) - larger
+    const valueFontSize = 8; // pt - bold values - larger
+    const priceFontSize = 9; // pt - price in bold - larger
     
     // Process each product
     for (const sp of selectedProducts) {
@@ -632,82 +635,91 @@ export default function BarcodeGenerator() {
         doc.addPage([widthPt, heightPt], 'landscape');
       }
       
-      let y = marginPt + 2; // Start a bit lower for better spacing
+      // Start lower from top - use more of the label space
+      let y = marginPt + mmToPt(3); // Start 3mm from top margin (pushed down)
       const leftMargin = marginPt;
       
-      // Title (Product Name) - centered, bold, larger
+      // Title (Product Name) - centered, bold, larger, dark
       const title = (sp.product.name || '').toUpperCase().trim();
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(titleFontSize);
+      doc.setTextColor(0, 0, 0); // Pure black for darker text
       
       // Calculate text width and wrap if needed (max 2 lines)
       const titleLines = doc.splitTextToSize(title, contentWidth * 0.95);
-      const titleHeight = Math.min(titleLines.length, 2) * titleFontSize * 1.3;
+      const titleHeight = Math.min(titleLines.length, 2) * titleFontSize * 1.4;
       
       // Center the title
       titleLines.slice(0, 2).forEach((line: string, index: number) => {
         const lineWidth = doc.getTextWidth(line);
         const lineX = leftMargin + (contentWidth - lineWidth) / 2;
-        doc.text(line, lineX, y + titleFontSize + (index * titleFontSize * 1.3));
+        doc.text(line, lineX, y + titleFontSize + (index * titleFontSize * 1.4));
       });
       
-      y += titleHeight + mmToPt(0.5);
+      y += titleHeight + mmToPt(0.8); // More spacing
       
-      // Meta row (Weight & Price) - formatted with bold labels
+      // Meta row (Weight & Price) - ALL BOLD AND DARK
       const netWeightValue = sp.netWeight ? formatWeightDisplay(sp.netWeight) : '';
       const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
       const priceText = `RS ${price}`;
       
       if (netWeightValue) {
-        // NET WT label in bold
+        // NET WT - ALL BOLD
         doc.setFont('helvetica', 'bold');
         doc.setFontSize(labelFontSize);
+        doc.setTextColor(0, 0, 0); // Pure black
         doc.text('NET WT:', leftMargin, y + labelFontSize);
         
-        // Weight value in normal
+        // Weight value - ALSO BOLD
         const labelWidth = doc.getTextWidth('NET WT: ');
-        doc.setFont('helvetica', 'normal');
+        doc.setFont('helvetica', 'bold'); // Changed to bold
         doc.setFontSize(valueFontSize);
+        doc.setTextColor(0, 0, 0);
         doc.text(netWeightValue, leftMargin + labelWidth, y + labelFontSize);
         
         // Price on the right side in bold
         if (priceText) {
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(priceFontSize);
+          doc.setTextColor(0, 0, 0);
           const priceWidth = doc.getTextWidth(priceText);
           doc.text(priceText, leftMargin + contentWidth - priceWidth, y + priceFontSize);
         }
         
-        y += labelFontSize * 1.4 + mmToPt(0.3);
+        y += labelFontSize * 1.5 + mmToPt(0.5); // More spacing
       }
       
-      // Dates row (PKG & EXP) - formatted with bold labels
+      // Dates row (PKG & EXP) - ALL BOLD AND DARK
       const pkgDate = formatDate(sp.packageDate);
       const expDate = formatDate(sp.expiryDate);
       
-      // PKG label and value
+      // PKG label and value - ALL BOLD
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(labelFontSize);
+      doc.setTextColor(0, 0, 0);
       doc.text('PKG:', leftMargin, y + labelFontSize);
       const pkgLabelWidth = doc.getTextWidth('PKG: ');
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('helvetica', 'bold'); // Changed to bold
       doc.setFontSize(valueFontSize);
+      doc.setTextColor(0, 0, 0);
       doc.text(pkgDate, leftMargin + pkgLabelWidth, y + labelFontSize);
       
-      // EXP label and value (right side or next line)
+      // EXP label and value - ALL BOLD (right side)
       const expLabel = 'EXP:';
       const expFullText = `${expLabel} ${expDate}`;
       doc.setFont('helvetica', 'bold');
       doc.setFontSize(labelFontSize);
+      doc.setTextColor(0, 0, 0);
       const expLabelWidth = doc.getTextWidth(expLabel);
       const expFullWidth = doc.getTextWidth(expFullText);
       const expX = leftMargin + contentWidth - expFullWidth;
       doc.text(expLabel, expX, y + labelFontSize);
-      doc.setFont('helvetica', 'normal');
+      doc.setFont('helvetica', 'bold'); // Changed to bold
       doc.setFontSize(valueFontSize);
+      doc.setTextColor(0, 0, 0);
       doc.text(expDate, expX + expLabelWidth, y + labelFontSize);
       
-      y += labelFontSize * 1.4 + mmToPt(0.4);
+      y += labelFontSize * 1.5 + mmToPt(0.6); // More spacing before barcode
       
       // Barcode - larger and better quality for scanning
       const barcodeValue = `${sp.product.sku || sp.product.code || 'PROD'}-${price}`;
@@ -737,29 +749,33 @@ export default function BarcodeGenerator() {
         const actualBarcodeWidth = canvas.width;
         const actualBarcodeHeight = canvas.height;
         
-        // Target barcode height in points (8-9mm for good scanning)
-        const targetBarcodeHeightPt = mmToPt(8.5);
+        // Target barcode height in points (larger for better scanning)
+        const targetBarcodeHeightPt = mmToPt(9);
         const barcodeWidthPt = (actualBarcodeWidth / actualBarcodeHeight) * targetBarcodeHeightPt;
         
-        // Center barcode horizontally
-        const remainingHeight = contentHeight - (y - marginPt);
+        // Calculate remaining space and position barcode lower (use bottom space)
+        const remainingHeight = heightPt - marginPt - y;
         const barcodeX = leftMargin + (contentWidth - barcodeWidthPt) / 2;
-        const barcodeY = y;
         
-        // Ensure barcode fits but keep it large enough to scan
+        // Position barcode to use more of the bottom space - center it in remaining space
         let finalBarcodeHeightPt = targetBarcodeHeightPt;
         let finalBarcodeWidthPt = barcodeWidthPt;
         
-        if (finalBarcodeHeightPt > remainingHeight * 0.75) {
-          finalBarcodeHeightPt = remainingHeight * 0.75;
+        // Ensure barcode fits but use available space
+        if (finalBarcodeHeightPt > remainingHeight * 0.85) {
+          finalBarcodeHeightPt = remainingHeight * 0.85;
           finalBarcodeWidthPt = (barcodeWidthPt / targetBarcodeHeightPt) * finalBarcodeHeightPt;
         }
+        
+        // Position barcode in the center of remaining vertical space (pushes it down)
+        const availableSpaceForBarcode = remainingHeight;
+        const barcodeY = y + (availableSpaceForBarcode - finalBarcodeHeightPt) / 2;
         
         // Add barcode to PDF
         doc.addImage(
           barcodeDataURL, 
           'PNG', 
-          leftMargin + (contentWidth - finalBarcodeWidthPt) / 2, 
+          barcodeX, 
           barcodeY, 
           finalBarcodeWidthPt, 
           finalBarcodeHeightPt
