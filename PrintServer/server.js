@@ -709,6 +709,691 @@ app.post('/print-receipt', async (req, res) => {
   }
 });
 
+// ZPL helper functions
+function escapeZPL(text) {
+  if (!text) return '';
+  return String(text)
+    .replace(/\\/g, '\\\\')
+    .replace(/\^/g, '\\^')
+    .replace(/~/g, '\\~')
+    .replace(/`/g, '\\`');
+}
+
+function formatDateZPL(iso) {
+  if (!iso) return '__/__/____';
+  const d = new Date(iso);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = d.getFullYear();
+  return `${day}/${month}/${year}`;
+}
+
+// Generate ZPL for 58mm x 40mm labels (landscape, horizontal barcode)
+function generateZPLForLabel(item, options) {
+  const { dpi, humanReadable } = options;
+  
+  // CORRECT DIMENSIONS: 58mm wide x 40mm tall (horizontal/landscape) - SAME AS PDF/BROWSER PRINT
+  // 58mm x 40mm at 203 DPI: 58*203/25.4 = 464 dots wide, 40*203/25.4 = 320 dots tall
+  // 58mm x 40mm at 300 DPI: 58*300/25.4 = 685 dots wide, 40*300/25.4 = 472 dots tall
+  const width = Math.round((58 * dpi) / 25.4);   // 58mm wide (horizontal/landscape)
+  const height = Math.round((40 * dpi) / 25.4);  // 40mm tall (horizontal/landscape)
+  
+  // Margins to prevent cutting
+  const marginX = dpi === 300 ? 35 : 30;  // Left/Right margin
+  const marginY = dpi === 300 ? 25 : 20;  // Top/Bottom margin (compact for 40mm height)
+  const contentWidth = width - (marginX * 2);
+  const startX = marginX;
+  
+  // Font sizes for horizontal layout
+  const fontSizeLarge = dpi === 300 ? 18 : 16;   // Product name
+  const fontSizeMedium = dpi === 300 ? 14 : 12;  // Weight/Price
+  const fontSizeSmall = dpi === 300 ? 11 : 9;    // Dates
+  
+  // Y positions - horizontal layout
+  let yPos = marginY;
+  const lineHeight = dpi === 300 ? 18 : 15;
+  const lineSpacing = dpi === 300 ? 2 : 1;
+  
+  // Product name
+  const productName = escapeZPL((item.name || '').trim().toUpperCase());
+  const titleY = yPos;
+  
+  // Barcode settings - horizontal layout
+  const barcodeHeight = dpi === 300 ? 45 : 35;   // Barcode height
+  const barcodeBarWidth = dpi === 300 ? 3 : 2;   // Module width
+  
+  // Use 95% of content width for text to prevent edge cutting
+  const textWidth = Math.floor(contentWidth * 0.95);
+  const textStartX = startX + Math.floor((contentWidth - textWidth) / 2);
+  
+  // Build ZPL - FINAL SOLUTION: Match browser print behavior
+  // Browser print uses 58mm x 40mm and prints horizontally correctly
+  // For ZPL: Use correct dimensions AND rotate 270° counter-clockwise (same as 90° clockwise)
+  // This should achieve the same horizontal orientation as browser print
+  let zpl = '^XA\n';  // Start label
+  zpl += `^PW${width}\n`;  // Print width (58mm - same as PDF/browser print)
+  zpl += `^LL${height}\n`; // Label length (40mm - same as PDF/browser print)
+  zpl += `^LH0,0\n`;       // Label home position (0,0)
+  zpl += `^CI28\n`;        // UTF-8 character set
+  zpl += `^POB\n`;         // Print orientation: Rotate 270° counter-clockwise (makes it horizontal like browser print)
+  
+  // Product name - centered, allow 2 lines max for long names
+  if (productName) {
+    zpl += `^CF0,${fontSizeLarge}\n`;
+    // ^FB: Field Block - wraps text, 2 lines max, centered
+    zpl += `^FO${textStartX},${titleY}^FB${textWidth},2,0,C,0^FD${productName}^FS\n`;
+  }
+  
+  // Calculate Y position after product name (account for possible 2-line wrap)
+  let currentY = titleY + lineHeight + (lineSpacing * 2); // Space for product name
+  
+  // Meta row - Weight and Price (stacked vertically, compact)
+  const netWeightText = item.netWeight ? `NET WT: ${escapeZPL(item.netWeight)}` : '';
+  const priceText = (item.price !== undefined && item.price !== null) ? `RS ${Math.round(Number(item.price))}` : '';
+  
+  if (netWeightText || priceText) {
+    zpl += `^CF0,${fontSizeMedium}\n`;
+    if (netWeightText) {
+      zpl += `^FO${textStartX},${currentY}^FD${escapeZPL(netWeightText)}^FS\n`;
+      currentY += lineHeight + lineSpacing;
+    }
+    if (priceText) {
+      zpl += `^FO${textStartX},${currentY}^FD${escapeZPL(priceText)}^FS\n`;
+      currentY += lineHeight + lineSpacing;
+    }
+  }
+  
+  // Dates row - PKG and EXP (stacked vertically, compact)
+  const pkgText = `PKG: ${formatDateZPL(item.packageDateISO)}`;
+  const expText = `EXP: ${formatDateZPL(item.expiryDateISO)}`;
+  
+  zpl += `^CF0,${fontSizeSmall}\n`;
+  zpl += `^FO${textStartX},${currentY}^FD${escapeZPL(pkgText)}^FS\n`;
+  currentY += lineHeight + lineSpacing;
+  zpl += `^FO${textStartX},${currentY}^FD${escapeZPL(expText)}^FS\n`;
+  currentY += lineHeight + lineSpacing; // Spacing before barcode
+  
+  // Barcode - Code 128, adjusted for 40mm width constraint
+  if (item.barcode) {
+    // Set module width (bar width) - narrower for 40mm width
+    zpl += `^BY${barcodeBarWidth}\n`;
+    const hri = humanReadable ? 'Y' : 'N';
+    
+    // Calculate barcode area - use 90% of content width (40mm is narrow, need most of it)
+    // Center it horizontally
+    const barcodeAreaWidth = Math.floor(contentWidth * 0.90);
+    const barcodeCenterX = startX + Math.floor((contentWidth - barcodeAreaWidth) / 2);
+    
+    // ^BCN: Code 128 barcode, Normal orientation
+    // With swapped dimensions, barcode will print correctly (bars vertical, scannable)
+    zpl += `^FO${barcodeCenterX},${currentY}^BCN,${barcodeHeight},${hri},N,N\n`;
+    zpl += `^FD${escapeZPL(String(item.barcode))}^FS\n`;
+  }
+  
+  zpl += '^XZ\n';  // End label
+  return zpl;
+}
+
+// Send ZPL to printer using proper RAW printing (like backend)
+async function sendZPLToPrinter(printerName, zpl) {
+  const { exec, execFile } = require('child_process');
+  const { promisify } = require('util');
+  const execAsync = promisify(exec);
+  const execFileAsync = promisify(execFile);
+  
+  const tmpFile = path.join(os.tmpdir(), `zpl_${Date.now()}_${Math.random().toString(36).slice(2)}.zpl`);
+  
+  // Write ZPL to file
+  fs.writeFileSync(tmpFile, zpl, 'utf8');
+  console.log(`[ZPL] ZPL file saved to: ${tmpFile}`);
+  console.log(`[ZPL] ZPL content (first 500 chars):\n${zpl.substring(0, 500)}...`);
+  console.log(`[ZPL] ZPL content (last 200 chars):\n...${zpl.substring(zpl.length - 200)}`);
+  
+  // Try multiple printer name variations (in case one fails)
+  const printerNameVariations = [
+    printerName,  // Original name
+    printerName.replace(/\s*\(EPL\)\s*/i, ''),  // Without (EPL)
+    printerName.replace(/\s*\(ZPL\)\s*/i, ''),  // Without (ZPL)
+  ].filter((name, index, self) => self.indexOf(name) === index); // Remove duplicates
+  
+  console.log(`[ZPL] Will try printer names: ${printerNameVariations.join(', ')}`);
+  
+  let success = false;
+  let lastError = null;
+  
+  // Get printer port information using PowerShell (wmic is deprecated)
+  let printerPort = null;
+  let shareName = null;
+  let workingPrinterName = null;
+  
+  // Try to get printer info for each variation
+  for (const nameToTry of printerNameVariations) {
+    try {
+      // Use PowerShell to get printer info - use single quotes to avoid parsing issues
+      const escapedName = nameToTry.replace(/'/g, "''");
+      const psCommand = `Get-Printer -Name '${escapedName}' | Select-Object PortName,ShareName | ConvertTo-Json`;
+      const { stdout } = await execAsync(`powershell -Command "${psCommand}"`, { windowsHide: true, timeout: 5000 });
+      
+      try {
+        const printerInfo = JSON.parse(stdout);
+        printerPort = printerInfo.PortName || printerInfo.portName || null;
+        shareName = printerInfo.ShareName || printerInfo.shareName || null;
+        if (printerPort === 'NULL' || !printerPort) printerPort = null;
+        if (shareName === 'NULL' || !shareName) shareName = null;
+        if (printerPort || shareName) {
+          workingPrinterName = nameToTry;
+          break; // Found working printer name
+        }
+      } catch (parseError) {
+        // Try parsing as separate lines
+        const lines = stdout.split(/\r?\n/).filter(Boolean);
+        for (const line of lines) {
+          if (line.includes('PortName')) {
+            const match = line.match(/PortName["\s:]+([^",\s]+)/i);
+            if (match) {
+              printerPort = match[1];
+              workingPrinterName = nameToTry;
+            }
+          }
+          if (line.includes('ShareName')) {
+            const match = line.match(/ShareName["\s:]+([^",\s]+)/i);
+            if (match) {
+              shareName = match[1];
+              workingPrinterName = nameToTry;
+            }
+          }
+        }
+        if (workingPrinterName) break;
+      }
+    } catch (error) {
+      console.log(`[ZPL] Failed to get printer info for "${nameToTry}":`, error.message);
+      continue; // Try next variation
+    }
+  }
+  
+  if (!workingPrinterName) {
+    console.log('[ZPL] Could not find printer info, will try all name variations');
+    workingPrinterName = printerName; // Fallback to original
+  }
+  
+  console.log(`[ZPL] Using printer name: "${workingPrinterName}"`);
+  console.log(`[ZPL] Printer Port: ${printerPort || 'Not found'}, Share: ${shareName || 'Not found'}`);
+  
+  if (!shareName) {
+    // Try alternative: use printer name as share name
+    shareName = workingPrinterName;
+  }
+  
+  // Method 1: Direct port write (ONLY for COM/LPT - USB ports CANNOT use direct write)
+  // Note: USB ports like USB001 are virtual and don't support direct file copy
+  if (printerPort && !printerPort.startsWith('USB') && (printerPort.startsWith('COM') || printerPort.startsWith('LPT'))) {
+    try {
+      console.log(`[ZPL] Attempting direct write to port: ${printerPort}`);
+      const { stdout } = await execAsync(`copy /b "${tmpFile}" "${printerPort}"`, { windowsHide: true, timeout: 10000 });
+      if (stdout && stdout.includes('file(s) copied') && !stdout.includes('0 file')) {
+        success = true;
+        console.log(`[ZPL] ✅ Sent via direct port ${printerPort}`);
+      } else {
+        console.log(`[ZPL] Direct port write returned: ${stdout || 'no output'}`);
+      }
+    } catch (error) {
+      console.log(`[ZPL] Direct port write failed:`, error.message);
+      lastError = error;
+    }
+  } else if (printerPort && printerPort.startsWith('USB')) {
+    console.log(`[ZPL] USB port detected (${printerPort}) - skipping direct write, will use .NET RawPrinterHelper`);
+  }
+  
+  // Method 2: Use .NET RawPrinterHelper via PowerShell (BEST for USB and ZPL printers - try early)
+  if (!success) {
+    // Try each printer name variation
+    for (const nameToTry of printerNameVariations) {
+      if (success) break; // Already succeeded
+      
+      try {
+        console.log(`[ZPL] Attempting .NET RawPrinterHelper with printer: "${nameToTry}"`);
+        const psScriptFile = path.join(os.tmpdir(), `print_raw_${Date.now()}_${Math.random().toString(36).slice(2)}.ps1`);
+        const psScript = `
+$printerName = '${nameToTry.replace(/'/g, "''")}'
+$filePath = '${tmpFile.replace(/\\/g, '\\\\').replace(/'/g, "''")}'
+
+if (-not (Test-Path $filePath)) {
+    Write-Host "ERROR: File not found: $filePath"
+    exit 1
+}
+
+$fileContent = [System.IO.File]::ReadAllBytes($filePath)
+Write-Host "Read $($fileContent.Length) bytes from file"
+
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+
+public class RawPrinterHelper {
+    [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]
+    public static extern bool OpenPrinter([MarshalAs(UnmanagedType.LPStr)] string printerName, out IntPtr hPrinter, IntPtr printerDefaults);
+    
+    [DllImport("winspool.drv", SetLastError = true, ExactSpelling = true)]
+    public static extern bool ClosePrinter(IntPtr hPrinter);
+    
+    [DllImport("winspool.drv", SetLastError = true)]
+    public static extern bool StartDocPrinter(IntPtr hPrinter, [MarshalAs(UnmanagedType.LPStr)] string jobName, int level, IntPtr docInfo);
+    
+    [DllImport("winspool.drv", SetLastError = true)]
+    public static extern bool EndDocPrinter(IntPtr hPrinter);
+    
+    [DllImport("winspool.drv", SetLastError = true)]
+    public static extern bool StartPagePrinter(IntPtr hPrinter);
+    
+    [DllImport("winspool.drv", SetLastError = true)]
+    public static extern bool EndPagePrinter(IntPtr hPrinter);
+    
+    [DllImport("winspool.drv", SetLastError = true)]
+    public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, int dwCount, out int dwWritten);
+}
+
+public static class PrinterHelper {
+    public static bool SendRawData(string printerName, byte[] data) {
+        IntPtr hPrinter = IntPtr.Zero;
+        try {
+            if (!RawPrinterHelper.OpenPrinter(printerName, out hPrinter, IntPtr.Zero)) {
+                return false;
+            }
+            
+            string jobName = "ZPL Print Job";
+            int level = 1;
+            
+            if (!RawPrinterHelper.StartDocPrinter(hPrinter, jobName, level, IntPtr.Zero)) {
+                return false;
+            }
+            
+            if (!RawPrinterHelper.StartPagePrinter(hPrinter)) {
+                return false;
+            }
+            
+            IntPtr pBytes = Marshal.AllocHGlobal(data.Length);
+            Marshal.Copy(data, 0, pBytes, data.Length);
+            int dwWritten = 0;
+            
+            bool success = RawPrinterHelper.WritePrinter(hPrinter, pBytes, data.Length, out dwWritten);
+            
+            Marshal.FreeHGlobal(pBytes);
+            RawPrinterHelper.EndPagePrinter(hPrinter);
+            RawPrinterHelper.EndDocPrinter(hPrinter);
+            
+            return success;
+        } finally {
+            if (hPrinter != IntPtr.Zero) {
+                RawPrinterHelper.ClosePrinter(hPrinter);
+            }
+        }
+    }
+}
+"@
+
+try {
+    $result = [PrinterHelper]::SendRawData($printerName, $fileContent)
+    if ($result) {
+        Write-Host "SUCCESS"
+        exit 0
+    } else {
+        $errorCode = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
+        Write-Host "FAILED: OpenPrinter or WritePrinter returned false. Error code: $errorCode"
+        Write-Error "Print failed with error code: $errorCode"
+        exit 1
+    }
+} catch {
+    Write-Host "EXCEPTION: $($_.Exception.Message)"
+    Write-Error $_.Exception.Message
+    exit 1
+}
+      `;
+      
+        fs.writeFileSync(psScriptFile, psScript, 'utf8');
+        console.log(`[ZPL] PowerShell script saved to: ${psScriptFile}`);
+        
+        const { stdout, stderr } = await execAsync(`powershell -ExecutionPolicy Bypass -File "${psScriptFile}"`, { windowsHide: true, timeout: 20000 });
+        
+        console.log(`[ZPL] PowerShell stdout: ${stdout || '(empty)'}`);
+        if (stderr) console.log(`[ZPL] PowerShell stderr: ${stderr}`);
+        
+        // Clean up script file
+        setTimeout(() => fs.unlink(psScriptFile, () => {}), 1000);
+        
+        if (stdout && stdout.includes('SUCCESS')) {
+          success = true;
+          console.log(`[ZPL] ✅ Sent via .NET RawPrinterHelper using printer: "${nameToTry}"`);
+          break; // Success, exit loop
+        } else {
+          const errorMsg = stderr || stdout || 'Failed to send via .NET';
+          console.log(`[ZPL] .NET method failed for "${nameToTry}": ${errorMsg}`);
+          lastError = new Error(errorMsg);
+          // Continue to next printer name variation
+        }
+      } catch (error) {
+        console.log(`[ZPL] .NET RawPrinterHelper failed for "${nameToTry}":`, error.message);
+        if (error.stdout) console.log('[ZPL] Error stdout:', error.stdout);
+        if (error.stderr) console.log('[ZPL] Error stderr:', error.stderr);
+        lastError = error;
+        // Continue to next printer name variation
+      }
+    }
+  }
+  
+  // Method 3: COPY to printer share (UNC path) - fallback only
+  if (!success && shareName) {
+    try {
+      const hostname = os.hostname();
+      const uncPaths = [
+        `\\\\localhost\\${shareName}`,
+        `\\\\${hostname}\\${shareName}`,
+        `\\\\127.0.0.1\\${shareName}`,
+      ];
+      
+      for (const uncPath of uncPaths) {
+        try {
+          console.log(`[ZPL] Attempting COPY to UNC: ${uncPath}`);
+          await execAsync(`copy /b "${tmpFile}" "${uncPath}"`, { windowsHide: true, timeout: 10000 });
+          success = true;
+          console.log(`[ZPL] ✅ Sent via UNC path`);
+          break;
+        } catch (error) {
+          console.log(`[ZPL] UNC path ${uncPath} failed`);
+          lastError = error;
+        }
+      }
+    } catch (error) {
+      console.log('[ZPL] COPY to UNC failed:', error.message);
+      lastError = error;
+    }
+  }
+  
+  // Method 4: Use cmd /c copy to printer name (better escaping) - try all variations
+  if (!success) {
+    for (const nameToTry of printerNameVariations) {
+      if (success) break;
+      try {
+        console.log(`[ZPL] Attempting cmd copy to printer: ${nameToTry}`);
+        const { stdout } = await execAsync(`cmd /c copy /b "${tmpFile}" "\\\\localhost\\${nameToTry}"`, { windowsHide: true, timeout: 10000 });
+        if (stdout && stdout.includes('file(s) copied') && !stdout.includes('0 file')) {
+          success = true;
+          console.log(`[ZPL] ✅ Sent via cmd copy using printer: "${nameToTry}"`);
+          break;
+        } else {
+          throw new Error(`Copy returned: ${stdout || 'no output'}`);
+        }
+      } catch (error) {
+        console.log(`[ZPL] cmd copy failed for "${nameToTry}":`, error.message);
+        lastError = error;
+        // Continue to next variation
+      }
+    }
+  }
+  
+  // Cleanup
+  setTimeout(() => fs.unlink(tmpFile, () => {}), 2000);
+  
+  if (!success) {
+    throw new Error(`Failed to send ZPL to printer. Port: ${printerPort || 'N/A'}, Share: ${shareName || 'N/A'}. Error: ${lastError?.message || 'Unknown'}`);
+  }
+}
+
+app.post('/print-barcode-labels', async (req, res) => {
+  let tmp; // Declare outside try block for cleanup in catch
+  try {
+    const { printerName, items, paperSize, copies, dpi, humanReadable } = req.body || {};
+
+    if (!printerName || !Array.isArray(items) || items.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'printerName and items[] are required'
+      });
+    }
+
+    const paper = paperSize || '3x2inch';
+    const copiesCount = Math.max(1, copies || 1);
+    const human = !!humanReadable;  // Show human-readable text below barcode
+
+    function pageSize(p) {
+      if (p === '50x30mm') return { w: mm(50), h: mm(30) };
+      if (p === '60x40mm') return { w: mm(60), h: mm(40) };
+      // User's actual label size: 5.8cm x 4cm = 58mm x 40mm
+      return { w: mm(58), h: mm(40) }; // 5.8cm x 4cm (landscape) 
+    }
+
+    function shortDate(iso) {
+      if (!iso) return '__/__/____';
+      const d = new Date(iso);
+      const day = String(d.getDate()).padStart(2, '0');
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const year = d.getFullYear();
+      return `${day}/${month}/${year}`;
+    }
+
+    // Get dimensions
+    const { w: labelWidth, h: labelHeight } = pageSize(paper);
+    
+    tmp = path.join(os.tmpdir(), `labels_${Date.now()}.pdf`);
+    
+    // Create landscape PDF matching user's actual label size: 58mm x 40mm
+    // This produces horizontal barcode in PDF viewer - exactly like boxhero.io
+    const doc = new PDFDocument({
+      size: [labelWidth, labelHeight], // LANDSCAPE: 58mm wide × 40mm tall (same as boxhero.io)
+      margins: { left: 0, right: 0, top: 0, bottom: 0 },
+      autoFirstPage: false
+    });
+    
+    console.log(`[PDF] Page size: ${labelWidth.toFixed(2)}pt × ${labelHeight.toFixed(2)}pt (${(labelWidth/2.83464567).toFixed(1)}mm × ${(labelHeight/2.83464567).toFixed(1)}mm)`);
+    
+    // Minimal margins like boxhero.io - ensure all content fits on one page
+    const M = { 
+      left: mm(1.5),    
+      right: mm(1.5), 
+      top: mm(1.5),     
+      bottom: mm(1.5)   
+    };
+    
+    // Content area (landscape dimensions)
+    const CW = labelWidth - M.left - M.right;   // 58 - 1.5 - 1.5 = 55mm
+    const CH = labelHeight - M.top - M.bottom;  // 40 - 1.5 - 1.5 = 37mm
+    
+    const stream = fs.createWriteStream(tmp);
+    doc.pipe(stream);
+
+    // Compact font sizes like boxhero.io - ensure fits on one page
+    const TITLE = paper === '3x2inch' ? 9 : 8;  // Compact like boxhero.io
+    const META = paper === '3x2inch' ? 6 : 6;     // Very compact
+    
+    // Barcode dimensions - compact like boxhero.io
+    const BAR_W_MAX = CW * 0.70;  // Slightly smaller to ensure fit
+    const BAR_H_MM = paper === '3x2inch' ? 7 : 7;  // Smaller barcode height
+    const SCALE = 2;  // Small scale
+
+    for (const it of items) {
+      for (let c = 0; c < copiesCount; c++) {
+        doc.addPage();
+
+        // Start drawing from top-left with margins (EXACT match to backend)
+        let y = M.top;
+        const leftMargin = M.left;
+        const contentWidth = CW;
+
+        // ---- TITLE (Product Name) ----
+        doc.font('Helvetica-Bold').fontSize(TITLE);
+        let title = (it.name || '').toUpperCase().trim();
+        let fontSize = TITLE;
+        
+        // Auto-shrink title if too wide (EXACT match to backend)
+        while (fontSize > 7 && doc.widthOfString(title) > contentWidth * 0.98) {
+          fontSize -= 0.3;
+          doc.fontSize(fontSize);
+        }
+        
+        const titleWidth = doc.widthOfString(title);
+        const titleX = leftMargin + (contentWidth - titleWidth) / 2;
+        doc.text(title, titleX, y, { width: contentWidth, align: 'center', lineBreak: false });
+        y += doc.heightOfString(title, { width: contentWidth }) + mm(0.2); // Very minimal spacing
+
+        // ---- META ROW (Weight & Price) ----
+        doc.font('Helvetica').fontSize(META);
+        const leftText = it.netWeight ? `NET WT: ${it.netWeight}` : '';
+        const rightText = (it.price !== undefined && it.price !== null) ? `RS ${Math.round(Number(it.price))}` : '';
+        
+        if (leftText || rightText) {
+          const gap = mm(3);
+          const leftW = doc.widthOfString(leftText);
+          const rightW = doc.widthOfString(rightText);
+          const totalW = leftW + (leftText && rightText ? gap : 0) + rightW;
+          const startX = leftMargin + (contentWidth - totalW) / 2;
+          
+          if (leftText) doc.text(leftText, startX, y, { lineBreak: false });
+          if (rightText) doc.text(rightText, startX + leftW + (leftText ? gap : 0), y, { lineBreak: false });
+          y += doc.heightOfString('Ag') + mm(0.2); // Very minimal spacing
+        }
+
+        // ---- DATES ROW (PKG & EXP) ----
+        const pkgText = `PKG: ${shortDate(it.packageDateISO)}`;
+        const expText = `EXP: ${shortDate(it.expiryDateISO)}`;
+        const pkgW = doc.widthOfString(pkgText);
+        const expW = doc.widthOfString(expText);
+        const datesGap = mm(4);
+        const datesTotal = pkgW + datesGap + expW;
+        const datesX = leftMargin + (contentWidth - datesTotal) / 2;
+        
+        doc.text(pkgText, datesX, y, { lineBreak: false });
+        doc.text(expText, datesX + pkgW + datesGap, y, { lineBreak: false });
+        y += doc.heightOfString('Ag') + mm(0.3); // Minimal spacing before barcode
+
+        // ---- BARCODE ----
+        try {
+          const png = await new Promise((resolve, reject) => {
+            bwipjs.toBuffer({
+              bcid: 'code128',
+              text: String(it.barcode),
+              scale: SCALE,
+              height: BAR_H_MM,
+              includetext: human,
+              textxalign: 'center',
+              backgroundcolor: 'FFFFFF'
+            }, (err, buf) => {
+              if (err) reject(typeof err === 'string' ? new Error(err) : err);
+              else resolve(buf);
+            });
+          });
+
+          // Read PNG dimensions (EXACT match to backend)
+          let pngWidth = 1, pngHeight = 1;
+          try {
+            if (png.length > 24) {
+              pngWidth = png.readUInt32BE(16);
+              pngHeight = png.readUInt32BE(20);
+            }
+          } catch {}
+          
+          const aspectRatio = pngHeight / pngWidth;
+
+          // Calculate barcode size to fit remaining space (EXACT match to backend)
+          const remainingHeight = (M.top + CH) - y;
+          
+          let barcodeWidth = BAR_W_MAX;
+          let barcodeHeight = barcodeWidth * aspectRatio;
+
+          // Ensure barcode fits vertically - use 85% of remaining height to prevent overflow
+          if (barcodeHeight > remainingHeight * 0.85) {
+            barcodeHeight = remainingHeight * 0.85;
+            barcodeWidth = barcodeHeight / aspectRatio;
+          }
+
+          // Center barcode horizontally and vertically in remaining space
+          const barcodeX = leftMargin + (contentWidth - barcodeWidth) / 2;
+          let barcodeY = y + (remainingHeight - barcodeHeight) / 2;
+          
+          // Final safety check: ensure barcode doesn't exceed page bounds
+          const maxY = labelHeight - M.bottom - barcodeHeight;
+          if (barcodeY > maxY) {
+            barcodeY = maxY;
+          }
+
+          doc.image(png, barcodeX, barcodeY, {
+            width: barcodeWidth,
+            height: barcodeHeight
+          });
+        } catch (err) {
+          console.error('Barcode generation error:', err);
+        }
+      }
+    }
+
+    doc.end();
+    
+    // Wait for PDF to be fully written
+    await new Promise((resolve, reject) => {
+      stream.once('finish', resolve);
+      stream.once('error', reject);
+    });
+
+    console.log(`[PDF] Created: ${tmp} (${fs.statSync(tmp).size} bytes)`);
+    
+    // Send PDF to frontend for browser print (instead of printing from backend)
+    // Frontend will open browser print dialog - exactly like boxhero.io
+    const filename = `barcode-labels-${Date.now()}.pdf`;
+    
+    // Set proper headers for PDF response (like boxhero.io)
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `inline; filename="${filename}"`); // inline = open in browser
+    res.setHeader('Content-Length', fs.statSync(tmp).size); // Set content length for proper streaming
+    
+    // Stream the PDF file to response
+    const fileStream = fs.createReadStream(tmp);
+    
+    fileStream.on('error', (err) => {
+      console.error(`[STREAM ERROR] Failed to stream PDF:`, err);
+      if (!res.headersSent) {
+        res.status(500).json({
+          success: false,
+          error: 'Failed to stream PDF file'
+        });
+      }
+      // Cleanup on error
+      setTimeout(() => fs.unlink(tmp, () => {}), 1000);
+    });
+    
+    // Pipe PDF to response
+    fileStream.pipe(res);
+    
+    // Cleanup after streaming completes
+    fileStream.on('end', () => {
+      console.log(`[PDF] Streamed successfully to frontend`);
+      setTimeout(() => {
+        fs.unlink(tmp, (err) => {
+          if (err && err.code !== 'ENOENT') {
+            console.error(`[CLEANUP] Failed to delete temp file:`, err);
+          }
+        });
+      }, 2000); // Give frontend time to download
+    });
+  } catch (error) {
+    console.error('PDF generation error:', error);
+    
+    // Cleanup temp file if it exists
+    if (typeof tmp !== 'undefined') {
+      setTimeout(() => {
+        fs.unlink(tmp, (err) => {
+          if (err && err.code !== 'ENOENT') console.error(`[CLEANUP] Failed to delete temp file:`, err);
+        });
+      }, 1000);
+    }
+    
+    // Only send error response if headers haven't been sent (i.e., streaming hasn't started)
+    if (!res.headersSent) {
+      res.status(500).json({
+        success: false,
+        error: error.message
+      });
+    }
+  }
+});
+
 // Start server
 app.listen(PORT, () => {
   console.log(`🖨️  Print Server running on http://localhost:${PORT}`);

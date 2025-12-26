@@ -1,7 +1,6 @@
 "use client";
 
 import { useState, useRef, useEffect, useMemo } from "react";
-import { CancelTokenSource } from "axios";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -28,8 +27,8 @@ import { PageLoader } from "./ui/page-loader";
 import { usePosData } from "@/hooks/use-pos-data";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/apiClient";
-import axios from "axios";
 import { isKioskMode, silentPrint, enableKioskMode } from "@/utils/kiosk-printing";
+import { getPrinters, printBarcodeLabelsViaServer } from "@/lib/print-server";
 
 interface Product {
   id: string;
@@ -71,7 +70,6 @@ export default function BarcodeGenerator() {
   const [isLoadingPrinters, setIsLoadingPrinters] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
-  const printerRequestRef = useRef<CancelTokenSource | null>(null);
   const { toast } = useToast();
   const [kioskMode, setKioskMode] = useState(false);
 
@@ -199,22 +197,9 @@ export default function BarcodeGenerator() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch printers on component mount with delay to avoid conflicts
+  // Fetch printers on component mount
   useEffect(() => {
-    console.log('🖨️ useEffect for printers triggered');
-    const timer = setTimeout(() => {
-      console.log('🖨️ Timer fired, calling fetchPrinters');
-      fetchPrinters();
-    }, 2000); // 2 second delay to avoid conflicts with products API
-    
-    return () => {
-      console.log('🖨️ useEffect cleanup');
-      clearTimeout(timer);
-      // Cancel any pending printer request on unmount
-      if (printerRequestRef.current) {
-        printerRequestRef.current.cancel('Component unmounted');
-      }
-    };
+    fetchPrinters();
   }, []);
 
   const parseWeightToGrams = (weightInput: any) => {
@@ -431,133 +416,50 @@ export default function BarcodeGenerator() {
     });
   };
 
-  // Client-side printer detection using browser APIs
-  const detectClientPrinters = async (): Promise<any[]> => {
-    const printers: any[] = [];
-    
-    // Method 1: Try Web Print API (Chrome/Edge - experimental)
-    try {
-      // @ts-ignore - Experimental API
-      if ('printer' in navigator && navigator.printer) {
-        // @ts-ignore
-        const printerList = await navigator.printer.getPrinters();
-        if (printerList && printerList.length > 0) {
-          return printerList.map((p: any) => ({
-            name: p.name || p.printerName,
-            id: `client-${Date.now()}-${Math.random()}`,
-            isDefault: p.isDefault || false,
-            status: 'available'
-          }));
-        }
-      }
-    } catch (e) {
-      console.log('Web Print API not available:', e);
-    }
-
-    // Method 2: Try getting default printer via print dialog workaround
-    // Note: This doesn't actually open the dialog, just detects default
-    try {
-      // Check if browser supports print preview
-      const defaultPrinter = localStorage.getItem('last_used_printer');
-      if (defaultPrinter) {
-        printers.push({
-          name: defaultPrinter,
-          id: `client-default-${Date.now()}`,
-          isDefault: true,
-          status: 'available'
-        });
-      }
-    } catch (e) {
-      console.log('Default printer detection failed:', e);
-    }
-
-    return printers;
-  };
-
-  // Fetch available printers - Client-side detection first, then backend, then manual
+  // Fetch available printers - Use print server API (tries local server first, then backend)
   const fetchPrinters = async () => {
-    console.log('🖨️ fetchPrinters called - attempting client-side detection');
-    
     setIsLoadingPrinters(true);
     try {
-      // Step 1: Try client-side browser detection
-      const clientPrinters = await detectClientPrinters();
-      if (clientPrinters.length > 0) {
-        console.log('🖨️ Found printers from client device:', clientPrinters);
-        setAvailablePrinters(clientPrinters);
-        const defaultPrinter = clientPrinters.find((p: any) => p.isDefault) || clientPrinters[0];
-        setSelectedPrinter(defaultPrinter.name);
-        localStorage.setItem('saved_printers', JSON.stringify(clientPrinters));
-        setIsLoadingPrinters(false);
-        return;
-      }
-
-      // Step 2: Try to get printers from localStorage
-      const savedPrinters = localStorage.getItem('saved_printers');
-      if (savedPrinters) {
-        try {
-          const parsedPrinters = JSON.parse(savedPrinters);
-          if (Array.isArray(parsedPrinters) && parsedPrinters.length > 0) {
-            console.log('🖨️ Loaded printers from localStorage:', parsedPrinters);
-            setAvailablePrinters(parsedPrinters);
-            setSelectedPrinter(parsedPrinters[0].name);
-            setIsLoadingPrinters(false);
-            return;
-          }
-        } catch (e) {
-          console.error('Failed to parse saved printers:', e);
-        }
-      }
-
-      // Step 3: Try backend API (works for local development, not Vercel)
-      try {
-        const cancelToken = axios.CancelToken.source();
-        printerRequestRef.current = cancelToken;
-        
-        console.log('🖨️ Making API call to /barcode-generator/printers');
-        const response = await apiClient.get('/barcode-generator/printers', {
-          cancelToken: cancelToken.token,
-          timeout: 5000 // Shorter timeout since Vercel returns empty
-        });
-        
-        console.log('🖨️ API response:', response.data);
-        const printers = response.data.data || [];
-        
-        if (printers.length > 0) {
-          setAvailablePrinters(printers);
-          localStorage.setItem('saved_printers', JSON.stringify(printers));
-          const defaultPrinter = printers.find((p: any) => p.isDefault);
-          if (defaultPrinter) {
-            setSelectedPrinter(defaultPrinter.name);
-          } else {
-            setSelectedPrinter(printers[0].name);
-          }
-          setIsLoadingPrinters(false);
-          return;
-        }
-      } catch (apiError: any) {
-        console.log('🖨️ Backend API not available or returned empty (expected on Vercel):', apiError.message);
-        // This is expected on Vercel, continue to manual entry
-      }
-
-      // Step 4: No printers found - show manual entry option
-      console.log('🖨️ No printers detected automatically - user can add manually');
-      setAvailablePrinters([]);
-      setSelectedPrinter('');
+      // Use print server function - tries local server first, then backend
+      const result = await getPrinters();
       
-      toast({
-        title: "Printer Detection",
-        description: "No printers detected automatically. Please add your printer manually.",
-        variant: "default"
-      });
-      
-    } catch (error: any) {
-      console.error("Failed to fetch printers:", error);
+      if (result.success && result.data) {
+        const printerList = result.data;
+        setAvailablePrinters(printerList);
+
+        // Try to restore saved printer from localStorage first
+        const savedPrinterStr = localStorage.getItem('savedPrinter');
+        if (savedPrinterStr) {
+          try {
+            const savedPrinter = JSON.parse(savedPrinterStr);
+            // Check if saved printer still exists in the list
+            const foundPrinter = printerList.find((p: any) => p.name === savedPrinter.name);
+            if (foundPrinter) {
+              setSelectedPrinter(foundPrinter.name);
+              setIsLoadingPrinters(false);
+              return;
+            }
+          } catch (e) {
+            console.error("Failed to parse saved printer:", e);
+          }
+        }
+        
+        // No saved printer or saved printer not found, use default
+        const defaultPrinter = printerList.find((p: any) => p.isDefault);
+        if (defaultPrinter) {
+          setSelectedPrinter(defaultPrinter.name);
+        } else if (printerList.length > 0) {
+          setSelectedPrinter(printerList[0].name);
+        }
+      } else {
+        throw new Error(result.error || 'Failed to get printers');
+      }
+    } catch (err: any) {
+      console.error("Failed to load printers:", err);
       setAvailablePrinters([]);
       setSelectedPrinter('');
     } finally {
       setIsLoadingPrinters(false);
-      printerRequestRef.current = null;
     }
   };
 
@@ -671,89 +573,222 @@ export default function BarcodeGenerator() {
 
     setIsPrinting(true);
     
-    // In kiosk mode: Direct browser print (silent, uses default printer)
-    if (kioskMode) {
-      try {
-        await printWithBrowser();
-        toast({
-          title: "Printing",
-          description: "Labels sent to default printer",
-        });
-      } catch (error: any) {
-        toast({
-          variant: "destructive",
-          title: "Print Error",
-          description: error.message || "Failed to print labels",
-        });
-      } finally {
-        setIsPrinting(false);
-      }
-      return;
-    }
-
-    // Normal mode: Try backend API first, then fallback
-    if (!selectedPrinter && !kioskMode) {
-      toast({
-        variant: "destructive",
-        title: "No Printer Selected",
-        description: "Please select a printer before printing.",
-      });
-      setIsPrinting(false);
-      return;
-    }
-
     try {
-      // Try backend API first (for non-kiosk mode with selected printer)
-      try {
-        const requestData = {
-          printerName: selectedPrinter,
-          copies: 1,
-          paperSize: selectedPaperSize,
-          dpi: 203,
-          humanReadable: false,
-          lines: { 
-            showTitle: true, 
-            showMeta: true, 
-            showDates: true 
-          },
-          items: selectedProducts.map((sp) => ({
-            id: sp.product.id,
-            name: sp.product.name,
-            sku: sp.product.sku,
-            code: sp.product.code,
-            barcode: `${sp.product.sku || sp.product.code || 'PROD'}-${Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)))}`,
-            netWeight: sp.netWeight,
-            price: Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax))),
-            packageDateISO: sp.packageDate.toISOString(),
-            expiryDateISO: sp.expiryDate?.toISOString(),
-          }))
-        };
-        
-        const response = await apiClient.post('/barcode-generator/print-zebra', requestData);
-
-        if (response.data.success) {
-          toast({
-            title: "Print Success",
-            description: response.data.message || "Barcodes sent to printer successfully",
-          });
-          setIsPrinting(false);
-          return;
-        } else {
-          throw new Error(response.data.message || "Print failed");
-        }
-      } catch (backendError: any) {
-        console.log('Backend print failed, falling back to browser print:', backendError);
-        await printWithBrowser();
-      }
+      // Generate PDF in frontend and open browser print dialog (like boxhero.io)
+      await generatePDFAndPrint();
+      toast({
+        title: "Print Dialog Opened",
+        description: "Select your printer from the print dialog",
+      });
     } catch (error: any) {
       console.error('Printing error:', error);
       toast({
         variant: "destructive",
         title: "Print Error",
-        description: error.message || "Failed to print labels",
+        description: error.message || "Failed to generate PDF. Please install jspdf: npm install jspdf",
       });
+    } finally {
       setIsPrinting(false);
     }
+  };
+
+  // Generate PDF in frontend and open for browser print (like boxhero.io)
+  const generatePDFAndPrint = async () => {
+    // Dynamic import of jsPDF (install: npm install jspdf)
+    const { jsPDF } = await import('jspdf');
+    
+    // Paper size: 58mm x 40mm (landscape/horizontal) - same as boxhero.io
+    const labelWidth = 58; // mm
+    const labelHeight = 40; // mm
+    
+    // Convert mm to points (1mm = 2.83464567 points)
+    const mmToPt = (mm: number) => mm * 2.83464567;
+    const widthPt = mmToPt(labelWidth);
+    const heightPt = mmToPt(labelHeight);
+    
+    // Margins (1.5mm on all sides like boxhero.io)
+    const margin = 1.5;
+    const marginPt = mmToPt(margin);
+    const contentWidth = widthPt - (marginPt * 2);
+    const contentHeight = heightPt - (marginPt * 2);
+    
+    // Create PDF document (landscape: width > height)
+    const doc = new jsPDF({
+      orientation: 'landscape',
+      unit: 'pt',
+      format: [widthPt, heightPt]
+    });
+    
+    // Font sizes - improved for better readability
+    const titleFontSize = 9; // pt - slightly larger
+    const labelFontSize = 7; // pt - bold labels (NET WT, PKG, EXP)
+    const valueFontSize = 7; // pt - normal values
+    const priceFontSize = 8; // pt - price in bold
+    
+    // Process each product
+    for (const sp of selectedProducts) {
+      // Add new page for each label
+      if (selectedProducts.indexOf(sp) > 0) {
+        doc.addPage([widthPt, heightPt], 'landscape');
+      }
+      
+      let y = marginPt + 2; // Start a bit lower for better spacing
+      const leftMargin = marginPt;
+      
+      // Title (Product Name) - centered, bold, larger
+      const title = (sp.product.name || '').toUpperCase().trim();
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(titleFontSize);
+      
+      // Calculate text width and wrap if needed (max 2 lines)
+      const titleLines = doc.splitTextToSize(title, contentWidth * 0.95);
+      const titleHeight = Math.min(titleLines.length, 2) * titleFontSize * 1.3;
+      
+      // Center the title
+      titleLines.slice(0, 2).forEach((line: string, index: number) => {
+        const lineWidth = doc.getTextWidth(line);
+        const lineX = leftMargin + (contentWidth - lineWidth) / 2;
+        doc.text(line, lineX, y + titleFontSize + (index * titleFontSize * 1.3));
+      });
+      
+      y += titleHeight + mmToPt(0.5);
+      
+      // Meta row (Weight & Price) - formatted with bold labels
+      const netWeightValue = sp.netWeight ? formatWeightDisplay(sp.netWeight) : '';
+      const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
+      const priceText = `RS ${price}`;
+      
+      if (netWeightValue) {
+        // NET WT label in bold
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(labelFontSize);
+        doc.text('NET WT:', leftMargin, y + labelFontSize);
+        
+        // Weight value in normal
+        const labelWidth = doc.getTextWidth('NET WT: ');
+        doc.setFont('helvetica', 'normal');
+        doc.setFontSize(valueFontSize);
+        doc.text(netWeightValue, leftMargin + labelWidth, y + labelFontSize);
+        
+        // Price on the right side in bold
+        if (priceText) {
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(priceFontSize);
+          const priceWidth = doc.getTextWidth(priceText);
+          doc.text(priceText, leftMargin + contentWidth - priceWidth, y + priceFontSize);
+        }
+        
+        y += labelFontSize * 1.4 + mmToPt(0.3);
+      }
+      
+      // Dates row (PKG & EXP) - formatted with bold labels
+      const pkgDate = formatDate(sp.packageDate);
+      const expDate = formatDate(sp.expiryDate);
+      
+      // PKG label and value
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(labelFontSize);
+      doc.text('PKG:', leftMargin, y + labelFontSize);
+      const pkgLabelWidth = doc.getTextWidth('PKG: ');
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(valueFontSize);
+      doc.text(pkgDate, leftMargin + pkgLabelWidth, y + labelFontSize);
+      
+      // EXP label and value (right side or next line)
+      const expLabel = 'EXP:';
+      const expFullText = `${expLabel} ${expDate}`;
+      doc.setFont('helvetica', 'bold');
+      doc.setFontSize(labelFontSize);
+      const expLabelWidth = doc.getTextWidth(expLabel);
+      const expFullWidth = doc.getTextWidth(expFullText);
+      const expX = leftMargin + contentWidth - expFullWidth;
+      doc.text(expLabel, expX, y + labelFontSize);
+      doc.setFont('helvetica', 'normal');
+      doc.setFontSize(valueFontSize);
+      doc.text(expDate, expX + expLabelWidth, y + labelFontSize);
+      
+      y += labelFontSize * 1.4 + mmToPt(0.4);
+      
+      // Barcode - larger and better quality for scanning
+      const barcodeValue = `${sp.product.sku || sp.product.code || 'PROD'}-${price}`;
+      
+      try {
+        // Generate barcode with better quality
+        const canvas = document.createElement('canvas');
+        
+        // Set canvas size - jsbarcode will resize, so we set initial size
+        const barcodeHeightPx = 60; // Higher resolution for better quality
+        canvas.height = barcodeHeightPx;
+        
+        // Generate barcode
+        JsBarcode(canvas, barcodeValue, {
+          format: "CODE128",
+          width: 2.5, // Wider bars for better scanning
+          height: barcodeHeightPx,
+          displayValue: false,
+          margin: 8, // Quiet zones for better scanning
+          background: "#FFFFFF",
+          lineColor: "#000000"
+        });
+        
+        const barcodeDataURL = canvas.toDataURL('image/png', 1.0); // High quality
+        
+        // Use actual canvas dimensions after barcode generation
+        const actualBarcodeWidth = canvas.width;
+        const actualBarcodeHeight = canvas.height;
+        
+        // Target barcode height in points (8-9mm for good scanning)
+        const targetBarcodeHeightPt = mmToPt(8.5);
+        const barcodeWidthPt = (actualBarcodeWidth / actualBarcodeHeight) * targetBarcodeHeightPt;
+        
+        // Center barcode horizontally
+        const remainingHeight = contentHeight - (y - marginPt);
+        const barcodeX = leftMargin + (contentWidth - barcodeWidthPt) / 2;
+        const barcodeY = y;
+        
+        // Ensure barcode fits but keep it large enough to scan
+        let finalBarcodeHeightPt = targetBarcodeHeightPt;
+        let finalBarcodeWidthPt = barcodeWidthPt;
+        
+        if (finalBarcodeHeightPt > remainingHeight * 0.75) {
+          finalBarcodeHeightPt = remainingHeight * 0.75;
+          finalBarcodeWidthPt = (barcodeWidthPt / targetBarcodeHeightPt) * finalBarcodeHeightPt;
+        }
+        
+        // Add barcode to PDF
+        doc.addImage(
+          barcodeDataURL, 
+          'PNG', 
+          leftMargin + (contentWidth - finalBarcodeWidthPt) / 2, 
+          barcodeY, 
+          finalBarcodeWidthPt, 
+          finalBarcodeHeightPt
+        );
+      } catch (err) {
+        console.error('Barcode generation error:', err);
+      }
+    }
+    
+    // Generate PDF blob and open in new window for printing
+    const pdfBlob = doc.output('blob');
+    const pdfUrl = URL.createObjectURL(pdfBlob);
+    
+    // Open PDF in new window and trigger print
+    const printWindow = window.open(pdfUrl, '_blank');
+    if (printWindow) {
+      printWindow.onload = () => {
+        setTimeout(() => {
+          printWindow.print();
+        }, 250);
+      };
+    } else {
+      throw new Error('Could not open print window. Please allow pop-ups.');
+    }
+    
+    // Clean up URL after a delay
+    setTimeout(() => {
+      URL.revokeObjectURL(pdfUrl);
+    }, 10000);
   };
 
   // Browser-based printing - optimized for kiosk mode
@@ -1195,26 +1230,6 @@ export default function BarcodeGenerator() {
               </div>
             ) : null}
 
-            {/* Paper Size Selection */}
-            <div className="space-y-2 border-t pt-4">
-              <Label htmlFor="paperSize">Paper Size</Label>
-              <Select
-                onValueChange={setSelectedPaperSize}
-                value={selectedPaperSize}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Select paper size" />
-                </SelectTrigger>
-                <SelectContent>
-                  {paperSizes.map((size) => (
-                    <SelectItem key={size.value} value={size.value}>
-                      {size.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
             {/* Global Dates */}
             <div className="space-y-2 border-t pt-4">
               <Label>Global Expiry (Apply to All)</Label>
@@ -1253,7 +1268,7 @@ export default function BarcodeGenerator() {
               <Button
                 onClick={handlePrintAll}
                 className="w-full"
-                disabled={!isFormValid || isPrinting || (!kioskMode && !selectedPrinter)}
+                disabled={!isFormValid || isPrinting}
               >
                 {isPrinting ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />

@@ -275,3 +275,61 @@ export async function printReceipt(
   fallbackToBrowser();
   return false;
 }
+
+export interface BarcodeLabelItem {
+  id: string;
+  name: string;
+  barcode: string;
+  netWeight?: string;
+  price?: number;
+  packageDateISO?: string;
+  expiryDateISO?: string;
+}
+
+export interface PrintBarcodeLabelsInput {
+  printerName: string;
+  items: BarcodeLabelItem[];
+  paperSize?: '3x2inch' | '50x30mm' | '60x40mm';
+  copies?: number;
+  dpi?: 203 | 300;
+  humanReadable?: boolean;
+}
+
+/**
+ * Print barcode labels - uses print server with user-selected printer
+ */
+export async function printBarcodeLabelsViaServer(
+  input: PrintBarcodeLabelsInput
+): Promise<{
+  success: boolean;
+  error?: string;
+  message?: string;
+}> {
+  try {
+    const response = await fetch(`${getPrintServerUrl()}/print-barcode-labels`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(input),
+    });
+
+    const result = await response.json();
+
+    if (!response.ok) {
+      throw new Error(result.message || result.error || 'Print failed');
+    }
+
+    console.log('✅ Barcode labels printed via print server');
+    return {
+      success: true,
+      message: result.message || 'Barcode labels printed successfully',
+    };
+  } catch (error: any) {
+    console.error('Print barcode labels failed:', error);
+    return {
+      success: false,
+      error: error.message || 'Failed to connect to print server',
+    };
+  }
+}
