@@ -37,7 +37,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useHoldSales } from "@/hooks/use-hold-sales";
 
 interface CartItem {
-  id: string;
+  id: string; // Unique cart item ID (product.id + timestamp for separate entries)
+  productId?: string; // Original product ID for reference (optional for backward compatibility)
   name: string;
   price: number;
   originalPrice: number;
@@ -105,6 +106,10 @@ export function NewSale() {
   const cartScrollContainerRef = useRef<HTMLDivElement | null>(null);
   // Ref to track scan timeout for rapid scanning
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  // Ref to prevent duplicate processing of the same scan
+  const lastProcessedScanRef = useRef<string>('');
+  const isProcessingScanRef = useRef<boolean>(false);
+  const enterKeyPressedRef = useRef<boolean>(false);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(
     null
   );
@@ -251,98 +256,105 @@ export function NewSale() {
     }
     */
 
-    // When custom price is provided, it represents the scanned price from barcode
-    // The scanned price is the total amount, so we calculate quantity: scanned_price / original_price
-    // We use the original product price as the unit price
+    // When custom price is provided, it represents the UNIT PRICE from barcode
+    // The scanned price (e.g., 500) should be used as the unit price for this cart item
+    // Quantity is always 1 (or the passed quantity) - NOT calculated from price
     const originalProductPrice = product.price;
-    const itemPrice = originalProductPrice;
-    const originalPrice = originalProductPrice;
+    
+    // If custom price is provided from barcode, use it as the unit price
+    // Otherwise use the original product price
+    const itemPrice = customPrice !== undefined ? customPrice : originalProductPrice;
+    const originalPrice = customPrice !== undefined ? customPrice : originalProductPrice;
+    
+    // Quantity is always 1 (or the passed quantity) - NOT calculated from price
+    // Ensure minimum quantity of 1
+    const finalQuantity = Math.max(1, quantity);
+    
+    console.log('addToCart - Custom price:', customPrice, 'Original product price:', originalProductPrice, 'Final item price:', itemPrice, 'Quantity:', finalQuantity);
+
+    // Always create a NEW separate line item for each scan (don't increment existing)
+    // Generate unique ID for each scan to allow multiple separate entries
+    const uniqueCartItemId = `${product.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
 
     // Use functional state update to avoid stale closure issues
-    setCart((prevCart) => {
-      const existingItem = prevCart.find((item) => item.id === product.id);
-      
-      if (existingItem) {
-        // If custom price is provided, calculate additional quantity based on scanned price
-        let quantityToAdd = quantity;
-        if (customPrice !== undefined && originalProductPrice > 0) {
-          // Calculate quantity from scanned price: scanned_price / original_price
-          // The scanned price represents a total amount, so quantity = total / unit_price
-          quantityToAdd = customPrice / originalProductPrice;
-          quantityToAdd = Math.max(0.01, quantityToAdd); // Ensure minimum quantity
-        }
-        
-        // Update existing item
-        return prevCart.map((item) =>
-          item.id === product.id
-            ? { 
-                ...item, 
-                quantity: item.quantity + quantityToAdd,
-                // Keep original product price as unit price (scanned price was used for quantity calculation)
-                price: item.price, // Keep existing price
-                originalPrice: item.originalPrice, // Keep original price
-              }
-            : item
-        );
-      } else {
-        // Calculate quantity from scanned price if custom price is provided
-        let finalQuantity = quantity;
-        if (customPrice !== undefined && originalProductPrice > 0) {
-          // Calculate quantity from scanned price: scanned_price / original_price
-          // The scanned price represents a total amount, so quantity = total / unit_price
-          finalQuantity = customPrice / originalProductPrice;
-          finalQuantity = Math.max(0.01, finalQuantity); // Ensure minimum quantity
-        }
-        
-        // Add new item
-        return [
-          ...prevCart,
-          {
-            id: product.id,
-            name: product.name,
-            price: itemPrice, // Use original product price as unit price
-            originalPrice: originalPrice, // Store original product price
-            quantity: finalQuantity, // Calculated quantity from scanned price
-            category: product.category,
-            discount: 0,
-            unitId: product.unitId,
-            unitName: product.unitName,
-            unit: product.unitName,
-          },
-        ];
-      }
-    });
+    setCart((prevCart) => [
+      ...prevCart,
+      {
+        id: uniqueCartItemId, // Unique ID for this cart entry (each scan = new entry)
+        productId: product.id, // Store original product ID for reference
+        name: product.name,
+        price: itemPrice, // Use scanned price from barcode (or original price if not scanned)
+        originalPrice: originalPrice, // Store price
+        quantity: finalQuantity, // Always 1 (or passed quantity)
+        category: product.category,
+        discount: 0,
+        unitId: product.unitId,
+        unitName: product.unitName,
+        unit: product.unitName,
+      },
+    ]);
 
-    lastAddedProductId.current = product.id;
+    lastAddedProductId.current = uniqueCartItemId;
     
     // Use startTransition for non-urgent UI updates (scroll, focus) - doesn't block main thread
     startTransition(() => {
-      // Instant scroll (non-blocking)
-      const cartItem = cartItemRefs.current[product.id];
-      if (cartItem && cartScrollContainerRef.current) {
-        cartItem.scrollIntoView({ 
-          behavior: 'auto', // Instant scroll
-          block: 'nearest',
-          inline: 'nearest'
-        });
-      }
-
-      // Auto-focus on price input after adding product (only if not using custom price)
-      if (customPrice === undefined) {
-        const priceInput = priceInputRefs.current[product.id];
-        if (priceInput) {
-          priceInput.focus();
-          priceInput.select();
+      // Instant scroll to newly added item (use unique cart item ID)
+      setTimeout(() => {
+        const cartItem = cartItemRefs.current[uniqueCartItemId];
+        if (cartItem && cartScrollContainerRef.current) {
+          cartItem.scrollIntoView({ 
+            behavior: 'auto', // Instant scroll
+            block: 'nearest',
+            inline: 'nearest'
+          });
         }
+      }, 0);
+
+      // DISABLED: Auto-focus on price input - removed to prevent interference with scanning
+      // Keep focus on search input for rapid scanning
+      /*
+      if (customPrice === undefined) {
+        setTimeout(() => {
+          const priceInput = priceInputRefs.current[uniqueCartItemId];
+          if (priceInput) {
+            priceInput.focus();
+            priceInput.select();
+          }
+        }, 0);
       }
+      */
     });
 
     // Toast removed as per user request - no toast when selecting products
   };
 
+  // Helper function to get quantity increment based on unit
+  const getQuantityIncrement = (unitName?: string): number => {
+    if (!unitName) return 1;
+    const unitLower = unitName.toLowerCase();
+    
+    // For weight units (kgs, kg, kilograms, gram, grams, g)
+    if (unitLower.includes('kg') || unitLower.includes('kilogram') || 
+        unitLower.includes('gram') || unitLower === 'g') {
+      // Increment by 0.1 (100 grams) for weight units
+      return 0.1;
+    }
+    
+    // For piece units (pcs, pieces, piece)
+    if (unitLower.includes('pc') || unitLower.includes('piece')) {
+      return 1;
+    }
+    
+    // Default increment
+    return 1;
+  };
+
   const updateQuantity = (id: string, change: number) => {
     const item = cart.find((item) => item.id === id);
-    const product = products.find((p) => p.id === id);
+    // Find product by productId if item has it, otherwise fallback to id (for backward compatibility)
+    const product = item && (item as any).productId 
+      ? products.find((p) => p.id === (item as any).productId)
+      : products.find((p) => p.id === id);
 
     // For testing: Allow negative sales (stock can go below 0)
     // Comment out stock validation for testing purposes
@@ -362,10 +374,15 @@ export function NewSale() {
     }
     */
 
+    // Get unit-aware increment
+    const unitName = item?.unitName || item?.unit || product?.unitName;
+    const increment = getQuantityIncrement(unitName);
+    const actualChange = change > 0 ? increment : -increment;
+
     setCart(
       cart.map((item) => {
         if (item.id === id) {
-          const newQuantity = Number(item.quantity) + Number(change);
+          const newQuantity = Number(item.quantity) + actualChange;
           return { ...item, quantity: Math.max(0.01, newQuantity) };
         }
         return item;
@@ -959,23 +976,41 @@ export function NewSale() {
   };
 
   const handleScannerInput = (scannedValue: string) => {
+    // Prevent duplicate processing of the same scan
+    const trimmedValue = scannedValue.trim();
+    
+    // Skip if already processing or if this is the same value we just processed
+    if (isProcessingScanRef.current || lastProcessedScanRef.current === trimmedValue) {
+      return;
+    }
+    
+    // Mark as processing and store the value
+    isProcessingScanRef.current = true;
+    lastProcessedScanRef.current = trimmedValue;
+    
     // Process immediately - zero delays, zero async operations
     
     // Ultra-fast parsing - single pass extraction
-    const dashIndex = scannedValue.indexOf('-');
+    const dashIndex = trimmedValue.indexOf('-');
     let productCode: string;
     let customPrice: number | undefined = undefined;
     
     if (dashIndex > 0) {
       // Extract code and price in one operation
-      productCode = scannedValue.substring(0, dashIndex).trim();
-      const priceStr = scannedValue.substring(dashIndex + 1).trim();
-      const parsedPrice = +priceStr; // Fastest number conversion
-      if (parsedPrice > 0 && isFinite(parsedPrice)) {
+      productCode = trimmedValue.substring(0, dashIndex).trim();
+      const priceStr = trimmedValue.substring(dashIndex + 1).trim();
+      // Parse price - handle both integer and decimal values
+      // Remove any non-numeric characters except decimal point
+      const cleanPriceStr = priceStr.replace(/[^\d.]/g, '');
+      const parsedPrice = parseFloat(cleanPriceStr);
+      if (!isNaN(parsedPrice) && parsedPrice >= 0 && isFinite(parsedPrice)) {
         customPrice = parsedPrice;
+        console.log('Barcode scan - Code:', productCode, 'Raw price string:', priceStr, 'Parsed price:', customPrice);
+      } else {
+        console.error('Failed to parse price from:', priceStr, 'Cleaned:', cleanPriceStr, 'Parsed:', parsedPrice);
       }
     } else {
-      productCode = scannedValue.trim();
+      productCode = trimmedValue.trim();
     }
 
     // Ultra-fast product lookup - optimized order
@@ -985,16 +1020,22 @@ export function NewSale() {
     // Try most specific matches first (O(1) map lookups)
     if (codeLower.length >= 5) {
       product = findProductByBarcode(codeLower.substring(0, 5));
+      console.log('Trying 5 chars:', codeLower.substring(0, 5), 'Found:', product?.name);
     }
     if (!product && codeLower.length >= 4) {
       product = findProductByBarcode(codeLower.substring(0, 4));
+      console.log('Trying 4 chars:', codeLower.substring(0, 4), 'Found:', product?.name);
     }
     if (!product) {
       product = findProductByBarcode(codeLower);
+      console.log('Trying full code:', codeLower, 'Found:', product?.name);
     }
     // Add to cart immediately if found (synchronous, no delays)
     if (product) {
+      console.log('Adding to cart - Product:', product.name, 'Original price:', product.price, 'Custom price:', customPrice);
       addToCart(product, 1, customPrice);
+    } else {
+      console.error('Product not found for code:', productCode);
     }
     
     // Clear input instantly via direct DOM manipulation (fastest method)
@@ -1012,7 +1053,14 @@ export function NewSale() {
     
     // Brief loading indicator (50ms - just enough for visual feedback)
     setIsScanning(true);
-    setTimeout(() => setIsScanning(false), 50);
+    setTimeout(() => {
+      setIsScanning(false);
+      // Reset processing flag after a short delay to allow next scan
+      setTimeout(() => {
+        isProcessingScanRef.current = false;
+        lastProcessedScanRef.current = '';
+      }, 100);
+    }, 50);
   };
 
   const handleProductClick = (product: Product) => {
@@ -1024,9 +1072,14 @@ export function NewSale() {
     // No need to set loading state as we're using cached data
   };
 
-  // Global keyboard shortcuts
+  // Global keyboard shortcuts - DISABLED during scanning to prevent interference
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      // Disable all shortcuts when scanning is active
+      if (isScanning) {
+        return;
+      }
+      
       // Don't handle shortcuts when typing in inputs or dialogs
       const target = e.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
@@ -1092,7 +1145,9 @@ export function NewSale() {
         return;
       }
 
-      // Any alphabet key (a-z, A-Z) focuses search input
+      // Any alphabet key (a-z, A-Z) focuses search input - DISABLED to prevent interference with scanning
+      // Commented out to prevent focus issues during scanning
+      /*
       if (/^[a-zA-Z]$/.test(e.key) && !e.ctrlKey && !e.metaKey && !e.altKey) {
         if (searchInputRef.current) {
           e.preventDefault();
@@ -1100,13 +1155,14 @@ export function NewSale() {
           searchInputRef.current.select();
         }
       }
+      */
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, [cart, total, paymentDialogOpen, paymentMethodPending, startPayment]);
+  }, [cart, total, paymentDialogOpen, paymentMethodPending, startPayment, isScanning]);
 
   return (
     <div className="flex flex-col lg:flex-row h-screen">
@@ -1174,20 +1230,36 @@ export function NewSale() {
                   
                   // Auto-detect barcode scan format (CODE-PRICE) even without Enter
                   // This handles scanners that send data quickly
-                  if (value.includes('-') && value.length > 3) {
+                  // Only process if the price part looks complete (at least 3 digits to avoid premature processing)
+                  if (value.includes('-') && value.length > 6) {
                     // Check if it looks like CODE-PRICE format
                     const parts = value.split('-');
                     if (parts.length >= 2) {
                       const codePart = parts[0].trim();
                       const pricePart = parts.slice(1).join('-').trim();
-                      // If code part exists and price part is numeric, treat as barcode scan
-                      if (codePart.length > 0 && /^\d+(\.\d+)?$/.test(pricePart)) {
-                        // Process immediately - zero delay, instant execution
-                        // Use immediate execution for maximum speed
-                        const currentValue = searchInputRef.current?.value || '';
-                        if (currentValue === value) {
-                          handleScannerInput(value);
+                      // If code part exists and price part is numeric with at least 3 digits, treat as barcode scan
+                      // This prevents processing when user is still typing (e.g., "CODE-8" vs "CODE-8000")
+                      if (codePart.length > 0 && /^\d{3,}(\.\d+)?$/.test(pricePart)) {
+                        // Skip if Enter key was just pressed (onKeyDown will handle it)
+                        if (enterKeyPressedRef.current) {
+                          enterKeyPressedRef.current = false;
+                          return;
                         }
+                        // Small delay to ensure scanner finished sending all data
+                        if (scanTimeoutRef.current) {
+                          clearTimeout(scanTimeoutRef.current);
+                        }
+                        scanTimeoutRef.current = setTimeout(() => {
+                          const currentValue = searchInputRef.current?.value || '';
+                          if (currentValue === value && value.includes('-')) {
+                            // Double-check we have a complete price value
+                            const finalParts = currentValue.split('-');
+                            if (finalParts.length >= 2 && finalParts[1].trim().length > 0) {
+                              handleScannerInput(currentValue);
+                            }
+                          }
+                          scanTimeoutRef.current = null;
+                        }, 300); // Wait 300ms to ensure scanner finished sending all digits (8000, not just 8)
                       }
                     }
                   }
@@ -1197,6 +1269,9 @@ export function NewSale() {
                   if (e.key === 'Enter' && searchTerm.trim()) {
                     e.preventDefault();
                     const trimmedValue = searchTerm.trim();
+                    
+                    // Mark that Enter was pressed to prevent onChange from processing
+                    enterKeyPressedRef.current = true;
                     
                     // Check if it's a barcode format (numeric barcode or CODE-PRICE format)
                     const isNumericBarcode = /^\d{8,}$/.test(trimmedValue) ||
@@ -1209,6 +1284,11 @@ export function NewSale() {
                     if (isNumericBarcode || isCodePriceFormat) {
                       handleScannerInput(trimmedValue);
                     }
+                    
+                    // Reset flag after processing
+                    setTimeout(() => {
+                      enterKeyPressedRef.current = false;
+                    }, 100);
                   }
                 }}
                 className={`pl-10 ${isScanning ? 'border-blue-500 bg-blue-50/50' : ''}`}
@@ -1337,7 +1417,11 @@ export function NewSale() {
         ) : (
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
             {filteredProducts.map((product) => {
-              const cartItem = cart.find((item) => item.id === product.id);
+              // Find cart items by productId (for separate entries) or id (backward compatibility)
+              const cartItems = cart.filter((item) => 
+                (item as any).productId === product.id || item.id === product.id
+              );
+              const totalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
               return (
                 <Card
                   key={product.id}
@@ -1351,9 +1435,9 @@ export function NewSale() {
                         {product.price.toFixed(2)}
                       </span>
                     </h3>
-                    {cartItem && (
+                    {totalQuantity > 0 && (
                       <Badge className="bg-blue-600 text-[10px] px-1.5 py-0.5">
-                        {cartItem.quantity.toFixed(2)}
+                        {totalQuantity.toFixed(2)}
                       </Badge>
                     )}
                   </CardContent>

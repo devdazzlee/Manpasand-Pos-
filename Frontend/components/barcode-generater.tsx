@@ -38,6 +38,7 @@ interface Product {
   barcode?: string;
   sales_rate_exc_dis_and_tax?: number;
   unitName?: string;
+  unitId?: string;
   category?: string;
   brandName?: string;
   weight?: string;
@@ -72,6 +73,7 @@ export default function BarcodeGenerator() {
   const printRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const [kioskMode, setKioskMode] = useState(false);
+  const [customNetWeightMode, setCustomNetWeightMode] = useState<Record<string, boolean>>({});
 
   // Detect kiosk mode on mount
   useEffect(() => {
@@ -307,6 +309,63 @@ export default function BarcodeGenerator() {
     if (input.includes("dozen")) return `${number} dozen`;
 
     return `${number}g`;
+  };
+
+  // Helper function to determine if unit is weight-based (kg, g, etc.) or piece-based (pc, pcs, etc.)
+  const isWeightUnit = (unitName?: string): boolean => {
+    if (!unitName) return true; // Default to weight if no unit specified
+    const unit = unitName.toLowerCase().trim();
+    return (
+      unit.includes("kg") ||
+      unit.includes("kilo") ||
+      unit.includes("gram") ||
+      unit.includes("g") ||
+      unit.includes("mg") ||
+      unit.includes("lb") ||
+      unit.includes("pound") ||
+      unit.includes("oz") ||
+      unit.includes("ounce") ||
+      unit.includes("l") ||
+      unit.includes("liter") ||
+      unit.includes("ml") ||
+      unit.includes("milliliter") ||
+      unit.includes("ser") ||
+      unit.includes("seer") ||
+      unit.includes("maund")
+    );
+  };
+
+  // Generate dropdown options based on unit type
+  const getNetWeightOptions = (unitName?: string): Array<{ value: string; label: string }> => {
+    const isWeight = isWeightUnit(unitName);
+    
+    if (isWeight) {
+      // Weight-based options (grams and kg)
+      return [
+        { value: "100g", label: "100g" },
+        { value: "200g", label: "200g" },
+        { value: "300g", label: "300g" },
+        { value: "500g", label: "500g" },
+        { value: "600g", label: "600g" },
+        { value: "700g", label: "700g" },
+        { value: "1000g", label: "1000g" },
+        { value: "1kg", label: "1kg" },
+        { value: "custom", label: "Custom" },
+      ];
+    } else {
+      // Piece-based options - store with "pc" suffix for proper formatting
+      return [
+        { value: "1 pc", label: "1 pc" },
+        { value: "2 pcs", label: "2 pcs" },
+        { value: "3 pcs", label: "3 pcs" },
+        { value: "4 pcs", label: "4 pcs" },
+        { value: "5 pcs", label: "5 pcs" },
+        { value: "6 pcs", label: "6 pcs" },
+        { value: "10 pcs", label: "10 pcs" },
+        { value: "12 pcs", label: "12 pcs" },
+        { value: "custom", label: "Custom" },
+      ];
+    }
   };
 
   const filteredProducts = useMemo(() => {
@@ -1156,6 +1215,7 @@ export default function BarcodeGenerator() {
                             <span className="text-xs text-gray-500">
                               SKU: {product.sku || "N/A"} | Rs{" "}
                               {product.sales_rate_exc_dis_and_tax || 0}
+                              {product.unitName && ` | Unit: ${product.unitName}`}
                             </span>
                           </div>
                         </button>
@@ -1399,18 +1459,87 @@ export default function BarcodeGenerator() {
                         <Label htmlFor={`weight-${item.id}`}>
                           Net Weight *
                         </Label>
-                        <Input
-                          id={`weight-${item.id}`}
-                          value={item.netWeight}
-                          onChange={(e) =>
-                            updateProductData(
-                              item.id,
-                              "netWeight",
-                              e.target.value
-                            )
-                          }
-                          placeholder="e.g., 500g, 1kg"
-                        />
+                        {(() => {
+                          const options = getNetWeightOptions(item.product.unitName);
+                          const optionValues = options.map((opt) => opt.value);
+                          const isCustomValue =
+                            item.netWeight &&
+                            !optionValues.includes(item.netWeight);
+                          const showCustomInput =
+                            customNetWeightMode[item.id] || isCustomValue;
+
+                          return showCustomInput ? (
+                            <div className="space-y-2">
+                              <Input
+                                id={`weight-${item.id}`}
+                                value={item.netWeight}
+                                onChange={(e) =>
+                                  updateProductData(
+                                    item.id,
+                                    "netWeight",
+                                    e.target.value
+                                  )
+                                }
+                                placeholder={
+                                  isWeightUnit(item.product.unitName)
+                                    ? "e.g., 500g, 1kg"
+                                    : "e.g., 1, 2, 3"
+                                }
+                              />
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={() => {
+                                  setCustomNetWeightMode((prev) => ({
+                                    ...prev,
+                                    [item.id]: false,
+                                  }));
+                                  // Reset to empty or first option if value doesn't match
+                                  if (isCustomValue) {
+                                    updateProductData(
+                                      item.id,
+                                      "netWeight",
+                                      ""
+                                    );
+                                  }
+                                }}
+                                className="w-full"
+                              >
+                                Use Dropdown
+                              </Button>
+                            </div>
+                          ) : (
+                            <Select
+                              value={item.netWeight || ""}
+                              onValueChange={(value) => {
+                                if (value === "custom") {
+                                  setCustomNetWeightMode((prev) => ({
+                                    ...prev,
+                                    [item.id]: true,
+                                  }));
+                                  updateProductData(item.id, "netWeight", "");
+                                } else {
+                                  updateProductData(item.id, "netWeight", value);
+                                }
+                              }}
+                            >
+                              <SelectTrigger id={`weight-${item.id}`}>
+                                <SelectValue placeholder="Select net weight" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {options.map((option) => (
+                                  <SelectItem
+                                    key={option.value}
+                                    value={option.value}
+                                  >
+                                    {option.label}
+                                  </SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
+                          );
+                        })()}
                       </div>
                       <div>
                         <Label>Package Date</Label>
