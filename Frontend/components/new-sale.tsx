@@ -40,8 +40,9 @@ interface CartItem {
   id: string; // Unique cart item ID (product.id + timestamp for separate entries)
   productId?: string; // Original product ID for reference (optional for backward compatibility)
   name: string;
-  price: number;
-  originalPrice: number;
+  price: number; // Display price (barcode price if scanned, otherwise original price)
+  originalPrice: number; // Original product price (used for line total calculations)
+  actualUnitPrice: number; // Actual unit price for calculations (always original product price)
   quantity: number;
   category: string;
   discount: number;
@@ -110,6 +111,9 @@ export function NewSale() {
   const lastProcessedScanRef = useRef<string>('');
   const isProcessingScanRef = useRef<boolean>(false);
   const enterKeyPressedRef = useRef<boolean>(false);
+  // Track when user is actively interacting with other inputs (prevent auto-refocus)
+  const userInteractionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const isUserInteractingRef = useRef<boolean>(false);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(
     null
   );
@@ -217,6 +221,165 @@ export function NewSale() {
     };
   }, []); // Empty dependency array since we only want to fetch once on mount
 
+  // Keep search input always focused (professional POS behavior)
+  // Uses intelligent focus management: only refocuses when user is idle
+  useEffect(() => {
+    const IDLE_TIMEOUT = 2000; // 2 seconds of inactivity before refocusing search
+    const INTERACTION_TIMEOUT = 500; // 500ms to detect if user is still interacting
+
+    const markUserInteracting = () => {
+      isUserInteractingRef.current = true;
+      // Clear any pending refocus
+      if (userInteractionTimeoutRef.current) {
+        clearTimeout(userInteractionTimeoutRef.current);
+        userInteractionTimeoutRef.current = null;
+      }
+      // Reset interaction flag after a short delay
+      setTimeout(() => {
+        isUserInteractingRef.current = false;
+      }, INTERACTION_TIMEOUT);
+    };
+
+    const isInteractiveElement = (element: HTMLElement | null): boolean => {
+      if (!element) return false;
+      
+      // Check data attributes for special inputs
+      if (element.getAttribute('data-price-input') === 'true' ||
+          element.getAttribute('data-quantity-input') === 'true' ||
+          element.getAttribute('data-discount-input') === 'true' ||
+          element.getAttribute('data-discount-select') === 'true') {
+        return true;
+      }
+      
+      // Check element types
+      const tagName = element.tagName;
+      if (tagName === 'INPUT' || tagName === 'TEXTAREA' || tagName === 'SELECT') {
+        return true;
+      }
+      
+      // Check if it's inside a select dropdown (for Radix UI or custom selects)
+      if (element.closest('[role="listbox"]') || 
+          element.closest('[role="combobox"]') ||
+          element.closest('[data-radix-select-content]') ||
+          element.closest('select')) {
+        return true;
+      }
+      
+      // Check if it's a button (but allow clicking buttons)
+      if (tagName === 'BUTTON' || element.closest('button')) {
+        return true;
+      }
+      
+      return false;
+    };
+
+    const scheduleRefocus = () => {
+      // Clear any existing timeout
+      if (userInteractionTimeoutRef.current) {
+        clearTimeout(userInteractionTimeoutRef.current);
+      }
+      
+      // Only refocus if user is not actively interacting
+      if (!isUserInteractingRef.current && searchInputRef.current && !paymentDialogOpen) {
+        userInteractionTimeoutRef.current = setTimeout(() => {
+          const activeElement = document.activeElement as HTMLElement;
+          
+          // Don't refocus if user is still on an interactive element
+          if (!isInteractiveElement(activeElement) && activeElement !== searchInputRef.current) {
+            if (searchInputRef.current && !paymentDialogOpen) {
+              searchInputRef.current.focus();
+            }
+          }
+        }, IDLE_TIMEOUT);
+      }
+    };
+
+    // Refocus on click anywhere (but respect interactive elements)
+    const handleClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement;
+      
+      // If clicking on interactive element, mark as interacting
+      if (isInteractiveElement(target)) {
+        markUserInteracting();
+        return;
+      }
+      
+      // Schedule refocus after idle period
+      scheduleRefocus();
+    };
+
+    // Refocus when window regains focus (tab switching back)
+    const handleFocus = () => {
+      scheduleRefocus();
+    };
+
+    // Global keyboard listener to capture barcode scans even when search is not focused
+    const handleGlobalKeyDown = (e: KeyboardEvent) => {
+      // Skip if in payment dialog
+      if (paymentDialogOpen) {
+        return;
+      }
+
+      const activeElement = document.activeElement as HTMLElement;
+      
+      // If typing in any interactive input (price/quantity/discount), allow it
+      if (isInteractiveElement(activeElement)) {
+        markUserInteracting();
+        return;
+      }
+      
+      // If typing anywhere else (or search is not focused), focus search and capture the key
+      if (searchInputRef.current) {
+        // If it's a printable character (not a control key)
+        if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey) {
+          // If search is not focused, focus it and append the character
+          if (activeElement !== searchInputRef.current) {
+            e.preventDefault();
+            e.stopPropagation();
+            searchInputRef.current.focus();
+            // Append the character to the input value
+            const currentValue = searchInputRef.current.value || '';
+            searchInputRef.current.value = currentValue + e.key;
+            // Trigger onChange manually to update state
+            const event = new Event('input', { bubbles: true });
+            searchInputRef.current.dispatchEvent(event);
+            // Also update state directly
+            setSearchTerm(currentValue + e.key);
+          }
+        }
+        // Handle Enter key - process the scan
+        else if (e.key === 'Enter' && activeElement !== searchInputRef.current) {
+          const currentValue = searchInputRef.current.value || '';
+          if (currentValue.trim().length > 0) {
+            e.preventDefault();
+            e.stopPropagation();
+            searchInputRef.current.focus();
+            handleScannerInput(currentValue);
+          }
+        }
+      }
+    };
+
+    window.addEventListener('click', handleClick);
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('keydown', handleGlobalKeyDown);
+    
+    // Initial focus
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+
+    return () => {
+      window.removeEventListener('click', handleClick);
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('keydown', handleGlobalKeyDown);
+      // Clear timeout on unmount
+      if (userInteractionTimeoutRef.current) {
+        clearTimeout(userInteractionTimeoutRef.current);
+      }
+    };
+  }, [paymentDialogOpen]);
+
   // Client-side filtering for instant search results
   // This provides instant feedback without API calls
   const filteredProducts = products.filter((product) => {
@@ -256,21 +419,32 @@ export function NewSale() {
     }
     */
 
-    // When custom price is provided, it represents the UNIT PRICE from barcode
-    // The scanned price (e.g., 500) should be used as the unit price for this cart item
-    // Quantity is always 1 (or the passed quantity) - NOT calculated from price
+    // When custom price is provided, it represents the TOTAL PRICE from barcode
+    // Calculate quantity: barcodePrice / originalPrice
+    // Original price is the price of 1 unit
+    // Barcode price is the total price
     const originalProductPrice = product.price;
     
-    // If custom price is provided from barcode, use it as the unit price
-    // Otherwise use the original product price
-    const itemPrice = customPrice !== undefined ? customPrice : originalProductPrice;
-    const originalPrice = customPrice !== undefined ? customPrice : originalProductPrice;
+    // Calculate quantity from scanned price if custom price is provided
+    let finalQuantity = quantity;
+    let displayPrice = originalProductPrice; // Price to display in price field
+    let actualUnitPrice = originalProductPrice; // Actual unit price for line total calculations (always original)
     
-    // Quantity is always 1 (or the passed quantity) - NOT calculated from price
-    // Ensure minimum quantity of 1
-    const finalQuantity = Math.max(1, quantity);
+    if (customPrice !== undefined && originalProductPrice > 0) {
+      // Calculate quantity: barcodePrice / originalPrice
+      finalQuantity = customPrice / originalProductPrice;
+      finalQuantity = Math.max(0.01, finalQuantity); // Ensure minimum quantity
+      
+      // Show the scanned price (barcode value) in the price field for display
+      displayPrice = customPrice; // Display barcode price in price field
+      // But keep actualUnitPrice as original for calculations
+      actualUnitPrice = originalProductPrice; // Always use original price for line total
+    } else {
+      // If no custom price, ensure minimum quantity of 1
+      finalQuantity = Math.max(1, quantity);
+    }
     
-    console.log('addToCart - Custom price:', customPrice, 'Original product price:', originalProductPrice, 'Final item price:', itemPrice, 'Quantity:', finalQuantity);
+    console.log('addToCart - Barcode price:', customPrice, 'Original price:', originalProductPrice, 'Calculated quantity:', finalQuantity, 'Display price:', displayPrice, 'Actual unit price:', actualUnitPrice);
 
     // Always create a NEW separate line item for each scan (don't increment existing)
     // Generate unique ID for each scan to allow multiple separate entries
@@ -283,9 +457,10 @@ export function NewSale() {
         id: uniqueCartItemId, // Unique ID for this cart entry (each scan = new entry)
         productId: product.id, // Store original product ID for reference
         name: product.name,
-        price: itemPrice, // Use scanned price from barcode (or original price if not scanned)
-        originalPrice: originalPrice, // Store price
-        quantity: finalQuantity, // Always 1 (or passed quantity)
+        price: displayPrice, // Display price (barcode price if scanned, otherwise original)
+        originalPrice: originalProductPrice, // Store original product price
+        actualUnitPrice: actualUnitPrice, // Actual unit price for line total calculations
+        quantity: finalQuantity, // Calculated quantity (barcodePrice / originalPrice)
         category: product.category,
         discount: 0,
         unitId: product.unitId,
@@ -326,6 +501,43 @@ export function NewSale() {
     });
 
     // Toast removed as per user request - no toast when selecting products
+  };
+
+  // Helper function to format quantity with unit
+  const formatQuantityWithUnit = (quantity: number, unitName?: string): string => {
+    if (!unitName) return quantity.toFixed(2);
+    
+    const unitLower = unitName.toLowerCase();
+    const qty = quantity;
+    
+    // For weight units (kgs, kg, kilograms)
+    if (unitLower.includes('kg') || unitLower.includes('kilogram')) {
+      if (qty >= 1) {
+        return `${qty.toFixed(2)} kg`;
+      } else {
+        // Convert to grams for values less than 1kg
+        const grams = qty * 1000;
+        return `${grams.toFixed(0)} g`;
+      }
+    }
+    
+    // For gram units
+    if (unitLower.includes('gram') || unitLower === 'g') {
+      if (qty >= 1000) {
+        const kg = qty / 1000;
+        return `${kg.toFixed(2)} kg`;
+      } else {
+        return `${qty.toFixed(0)} g`;
+      }
+    }
+    
+    // For piece units (pcs, pieces, piece)
+    if (unitLower.includes('pc') || unitLower.includes('piece')) {
+      return `${qty.toFixed(0)} pcs`;
+    }
+    
+    // For other units, show with unit name
+    return `${qty.toFixed(2)} ${unitName}`;
   };
 
   // Helper function to get quantity increment based on unit
@@ -538,7 +750,7 @@ export function NewSale() {
   };
 
   const subtotal = cart.reduce(
-    (sum, item) => sum + item.price * item.quantity,
+    (sum, item) => sum + (item.actualUnitPrice || item.price) * item.quantity,
     0
   );
 
@@ -1042,7 +1254,14 @@ export function NewSale() {
     const input = searchInputRef.current;
     if (input) {
       input.value = '';
-      input.focus();
+      // Reset interaction flag and refocus search input after processing scan
+      isUserInteractingRef.current = false;
+      setTimeout(() => {
+        if (input && !paymentDialogOpen) {
+          input.focus();
+          input.select();
+        }
+      }, 10);
       // Use startTransition for non-urgent state update
       startTransition(() => {
         setSearchTerm("");
@@ -1218,6 +1437,22 @@ export function NewSale() {
                 ref={searchInputRef}
                 placeholder={isScanning ? "Processing scan..." : "Scan barcode or search products..."}
                 value={searchTerm}
+                onBlur={(e) => {
+                  // Don't blur if clicking on interactive elements
+                  const relatedTarget = e.relatedTarget as HTMLElement;
+                  if (relatedTarget && (
+                    relatedTarget.getAttribute('data-price-input') === 'true' ||
+                    relatedTarget.getAttribute('data-quantity-input') === 'true' ||
+                    relatedTarget.getAttribute('data-discount-input') === 'true' ||
+                    relatedTarget.getAttribute('data-discount-select') === 'true' ||
+                    relatedTarget.tagName === 'SELECT' ||
+                    relatedTarget.closest('select')
+                  )) {
+                    return;
+                  }
+                  // Schedule refocus after idle period (not immediate)
+                  // This allows user to interact with other elements
+                }}
                 onChange={(e) => {
                   const value = e.target.value;
                   setSearchTerm(value);
@@ -1523,7 +1758,7 @@ export function NewSale() {
                 <div className="space-y-2 pr-2">
                   {holdSales.map((sale, index) => {
                     const saleTotal = sale.reduce(
-                      (sum, item) => sum + item.price * item.quantity,
+                      (sum, item) => sum + (item.actualUnitPrice || item.price) * item.quantity,
                       0
                     );
                     return (
@@ -1571,7 +1806,7 @@ export function NewSale() {
                       <div className="space-y-1">
                         <h4 className="text-sm font-semibold text-gray-900 leading-snug">{item.name}</h4>
                         <p className="text-xs text-gray-500">
-                          Unit: Rs {item.price.toFixed(2)} • Line Total: Rs {(item.price * item.quantity).toFixed(2)}
+                          Unit: Rs {(item.actualUnitPrice || item.price).toFixed(2)} • Line Total: Rs {((item.actualUnitPrice || item.price) * item.quantity).toFixed(2)}
                         </p>
                       </div>
                       <Button
@@ -1589,13 +1824,25 @@ export function NewSale() {
                         <label className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
                           Price (Rs)
                         </label>
-                        <Input
-                          ref={(el) => {
-                            priceInputRefs.current[item.id] = el;
-                          }}
-                          type="text"
-                          inputMode="decimal"
-                          value={priceInputs[item.id] !== undefined ? priceInputs[item.id] : (item.price === 0 ? "" : String(item.price))}
+                          <Input
+                            ref={(el) => {
+                              priceInputRefs.current[item.id] = el;
+                              if (el) {
+                                el.setAttribute('data-price-input', 'true');
+                              }
+                            }}
+                            type="text"
+                            inputMode="decimal"
+                            value={priceInputs[item.id] !== undefined ? priceInputs[item.id] : (item.price === 0 ? "" : String(item.price))}
+                            onFocus={() => {
+                              isUserInteractingRef.current = true;
+                            }}
+                            onBlur={() => {
+                              // Allow a moment before allowing refocus
+                              setTimeout(() => {
+                                isUserInteractingRef.current = false;
+                              }, 300);
+                            }}
                           onKeyDown={(e) => {
                             // Enter or Tab: Move to quantity input
                             if (e.key === "Enter" || e.key === "Tab") {
@@ -1681,7 +1928,7 @@ export function NewSale() {
                       </div>
                       <div>
                         <label className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                          Quantity
+                          Quantity {item.unitName ? `(${item.unitName})` : ''}
                         </label>
                         <div className="mt-1 flex items-center gap-1">
                           <Button
@@ -1701,10 +1948,27 @@ export function NewSale() {
                           <Input
                             ref={(el) => {
                               quantityInputRefs.current[item.id] = el;
+                              if (el) {
+                                el.setAttribute('data-quantity-input', 'true');
+                              }
                             }}
                             type="text"
                             inputMode="decimal"
-                            value={quantityInputs[item.id] !== undefined ? quantityInputs[item.id] : (item.quantity === 0 || item.quantity === 0.01 ? "" : String(item.quantity))}
+                            onFocus={() => {
+                              isUserInteractingRef.current = true;
+                            }}
+                            onBlur={() => {
+                              // Allow a moment before allowing refocus
+                              setTimeout(() => {
+                                isUserInteractingRef.current = false;
+                              }, 300);
+                            }}
+                            placeholder={item.unitName ? `0 ${item.unitName}` : "0"}
+                            value={quantityInputs[item.id] !== undefined 
+                              ? quantityInputs[item.id] 
+                              : (item.quantity === 0 || item.quantity === 0.01 
+                                  ? "" 
+                                  : formatQuantityWithUnit(item.quantity, item.unitName))}
                             onKeyDown={(e) => {
                               // Enter: Move to payment (open payment dialog)
                               if (e.key === "Enter") {
@@ -1733,11 +1997,14 @@ export function NewSale() {
                             onChange={(e) => {
                               const value = e.target.value;
                               
+                              // Remove unit from value if present (e.g., "2.5 kg" -> "2.5", "250 g" -> "250")
+                              const cleanValue = value.replace(/\s*(kg|g|pcs|ml|l|gram|grams|piece|pieces|pc)\s*$/i, '').trim();
+                              
                               // Update local input state
-                              setQuantityInputs(prev => ({ ...prev, [item.id]: value }));
+                              setQuantityInputs(prev => ({ ...prev, [item.id]: cleanValue }));
                               
                               // Allow empty string - clear the value
-                              if (value === "") {
+                              if (cleanValue === "") {
                                 setCart(
                                   cart.map((cartItem) => {
                                     if (cartItem.id === item.id) {
@@ -1750,13 +2017,13 @@ export function NewSale() {
                               }
                               
                               // Allow decimal point and numbers - validate format
-                              if (/^(\d*\.?\d*)$/.test(value)) {
+                              if (/^(\d*\.?\d*)$/.test(cleanValue)) {
                                 // If it's just a decimal point, don't update cart yet
-                                if (value === ".") {
+                                if (cleanValue === ".") {
                                   return;
                                 }
                                 
-                                const numValue = parseFloat(value);
+                                const numValue = parseFloat(cleanValue);
                                 if (!isNaN(numValue) && numValue >= 0) {
                                   updateQuantityManual(item.id, numValue);
                                 }
@@ -1847,8 +2114,18 @@ export function NewSale() {
                   </label>
                   <div className="mt-1 flex items-center gap-1.5">
                     <select
+                      data-discount-select="true"
                       className="h-8 rounded border border-gray-200 px-2 text-xs"
                       value={globalDiscountType}
+                      onFocus={() => {
+                        isUserInteractingRef.current = true;
+                      }}
+                      onBlur={() => {
+                        // Allow a moment for user to continue interacting
+                        setTimeout(() => {
+                          isUserInteractingRef.current = false;
+                        }, 300);
+                      }}
                       onChange={(e) => {
                         setGlobalDiscountType(
                           e.target.value as "percentage" | "amount"
@@ -1862,9 +2139,44 @@ export function NewSale() {
                       <option value="amount">Rs</option>
                     </select>
                     <Input
+                      data-discount-input="true"
                       type="text"
                       inputMode="decimal"
                       value={discountInput}
+                      onFocus={() => {
+                        isUserInteractingRef.current = true;
+                      }}
+                      onBlur={(e) => {
+                        const value = e.target.value.trim();
+                        
+                        // If empty or just a decimal point, clear discount
+                        if (value === "" || value === "." || value === "0") {
+                          setDiscountInput("");
+                          setGlobalDiscount(0);
+                        } else {
+                          // Ensure valid number on blur
+                          const numValue = parseFloat(value);
+                          if (!isNaN(numValue) && numValue >= 0) {
+                            // Validate max for percentage
+                            if (globalDiscountType === "percentage" && numValue > 100) {
+                              setDiscountInput("100");
+                              setGlobalDiscount(100);
+                            } else {
+                              setDiscountInput(value);
+                              setGlobalDiscount(numValue);
+                            }
+                          } else {
+                            // Invalid, clear
+                            setDiscountInput("");
+                            setGlobalDiscount(0);
+                          }
+                        }
+                        
+                        // Allow a moment before allowing refocus
+                        setTimeout(() => {
+                          isUserInteractingRef.current = false;
+                        }, 300);
+                      }}
                       onChange={(e) => {
                         const value = e.target.value;
                         setDiscountInput(value);
@@ -1917,6 +2229,11 @@ export function NewSale() {
                             setGlobalDiscount(0);
                           }
                         }
+                        
+                        // Allow a moment before allowing refocus
+                        setTimeout(() => {
+                          isUserInteractingRef.current = false;
+                        }, 300);
                       }}
                       className="h-8 flex-1 text-xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       placeholder="0"
