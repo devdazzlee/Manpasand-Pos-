@@ -46,6 +46,7 @@ import { Salaries } from "./Salaries";
 import { Designation } from "./Designation";
 import BarcodeGenerater from "./barcode-generater";
 import { NewSale } from "./new-sale";
+import { ManualSale } from "./manual-sale";
 
 
 interface DashboardProps {
@@ -64,6 +65,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <BarcodeGenerater />;
       case "new-sale":
         return <NewSale />;
+      case "manual-sale":
+        return <ManualSale />;
       case "orders":
         return <Orders />;
       case "website-orders":
