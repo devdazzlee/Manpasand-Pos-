@@ -14,14 +14,25 @@ const apiResponse_1 = require("../utils/apiResponse");
 const customer_service_1 = __importDefault(require("../services/customer.service"));
 const customerService = new customer_service_1.default();
 const router = express_1.default.Router();
+// Public routes (no auth required)
 router.post('/register', (0, validation_middleware_1.validate)(customer_validation_1.customerLoginSchema), customer_controller_1.createCustomer);
 router.post('/login', (0, validation_middleware_1.validate)(customer_validation_1.customerLoginSchema), customer_controller_1.loginCustomer);
+// Customer authenticated routes (must be before admin routes)
+// IMPORTANT: These routes must be defined BEFORE the admin middleware below
 router.put('/', customerAuth_middleware_1.authenticateCustomer, (0, validation_middleware_1.validate)(customer_validation_1.customerUpdateSchema), customer_controller_1.updateCustomer);
 router.post('/logout', customerAuth_middleware_1.authenticateCustomer, customer_controller_1.logoutCustomer);
+// Explicit /me route - must be before /:customerId to avoid route conflict
 router.get('/me', customerAuth_middleware_1.authenticateCustomer, (0, asyncHandler_1.default)(async (req, res) => {
-    const customer = await customerService.getCustomerById(req.customer?.id);
+    if (!req.customer || !req.customer.id) {
+        return res.status(401).json({
+            success: false,
+            message: 'Customer authentication required',
+        });
+    }
+    const customer = await customerService.getCustomerById(req.customer.id);
     new apiResponse_1.ApiResponse(customer, 'Customer fetched').send(res);
 }));
+// Admin routes (protected by admin auth - MUST come after customer routes)
 router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
 router.post('/', (0, validation_middleware_1.validate)(customer_validation_1.cusRegisterationSchema), customer_controller_1.createShopCustomer);
 router.get('/', customer_controller_1.getCustomers);

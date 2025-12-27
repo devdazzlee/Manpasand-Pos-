@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useMemo, startTransition } from "react";
 import { Button } from "@/components/ui/button";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { Input } from "@/components/ui/input";
@@ -235,7 +235,7 @@ export function NewSale() {
     return matchesCategory && matchesSearch;
   });
 
-  const addToCart = async (product: Product, quantity: number = 1, customPrice?: number) => {
+  const addToCart = (product: Product, quantity: number = 1, customPrice?: number) => {
     // For testing: Allow negative sales (stock can go below 0)
     // Comment out stock validation for testing purposes
     /*
@@ -251,29 +251,29 @@ export function NewSale() {
     }
     */
 
-    // Simulate API call delay
-    await new Promise((resolve) => setTimeout(resolve, 300));
-
     // When custom price is provided, it represents the scanned price from barcode
     // The scanned price is the total amount, so we calculate quantity: scanned_price / original_price
     // We use the original product price as the unit price
     const originalProductPrice = product.price;
-    const itemPrice = customPrice !== undefined ? originalProductPrice : originalProductPrice;
+    const itemPrice = originalProductPrice;
     const originalPrice = originalProductPrice;
 
-    const existingItem = cart.find((item) => item.id === product.id);
-    if (existingItem) {
-      // If custom price is provided, calculate additional quantity based on scanned price
-      let quantityToAdd = quantity;
-      if (customPrice !== undefined && originalProductPrice > 0) {
-        // Calculate quantity from scanned price: scanned_price / original_price
-        // The scanned price represents a total amount, so quantity = total / unit_price
-        quantityToAdd = customPrice / originalProductPrice;
-        quantityToAdd = Math.max(0.01, quantityToAdd); // Ensure minimum quantity
-      }
+    // Use functional state update to avoid stale closure issues
+    setCart((prevCart) => {
+      const existingItem = prevCart.find((item) => item.id === product.id);
       
-      setCart(
-        cart.map((item) =>
+      if (existingItem) {
+        // If custom price is provided, calculate additional quantity based on scanned price
+        let quantityToAdd = quantity;
+        if (customPrice !== undefined && originalProductPrice > 0) {
+          // Calculate quantity from scanned price: scanned_price / original_price
+          // The scanned price represents a total amount, so quantity = total / unit_price
+          quantityToAdd = customPrice / originalProductPrice;
+          quantityToAdd = Math.max(0.01, quantityToAdd); // Ensure minimum quantity
+        }
+        
+        // Update existing item
+        return prevCart.map((item) =>
           item.id === product.id
             ? { 
                 ...item, 
@@ -283,71 +283,59 @@ export function NewSale() {
                 originalPrice: item.originalPrice, // Keep original price
               }
             : item
-        )
-      );
-      lastAddedProductId.current = product.id;
-      
-      // Auto-scroll to existing item when quantity is updated
-      setTimeout(() => {
-        const cartItem = cartItemRefs.current[product.id];
-        if (cartItem && cartScrollContainerRef.current) {
-          cartItem.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'nearest',
-            inline: 'nearest'
-          });
+        );
+      } else {
+        // Calculate quantity from scanned price if custom price is provided
+        let finalQuantity = quantity;
+        if (customPrice !== undefined && originalProductPrice > 0) {
+          // Calculate quantity from scanned price: scanned_price / original_price
+          // The scanned price represents a total amount, so quantity = total / unit_price
+          finalQuantity = customPrice / originalProductPrice;
+          finalQuantity = Math.max(0.01, finalQuantity); // Ensure minimum quantity
         }
-      }, 100);
-    } else {
-      // Calculate quantity from scanned price if custom price is provided
-      let finalQuantity = quantity;
-      if (customPrice !== undefined && originalProductPrice > 0) {
-        // Calculate quantity from scanned price: scanned_price / original_price
-        // The scanned price represents a total amount, so quantity = total / unit_price
-        finalQuantity = customPrice / originalProductPrice;
-        finalQuantity = Math.max(0.01, finalQuantity); // Ensure minimum quantity
+        
+        // Add new item
+        return [
+          ...prevCart,
+          {
+            id: product.id,
+            name: product.name,
+            price: itemPrice, // Use original product price as unit price
+            originalPrice: originalPrice, // Store original product price
+            quantity: finalQuantity, // Calculated quantity from scanned price
+            category: product.category,
+            discount: 0,
+            unitId: product.unitId,
+            unitName: product.unitName,
+            unit: product.unitName,
+          },
+        ];
       }
-      
-      setCart([
-        ...cart,
-        {
-          id: product.id,
-          name: product.name,
-          price: itemPrice, // Use original product price as unit price
-          originalPrice: originalPrice, // Store original product price
-          quantity: finalQuantity, // Calculated quantity from scanned price
-          category: product.category,
-          discount: 0,
-          unitId: product.unitId,
-          unitName: product.unitName,
-          unit: product.unitName,
-        },
-      ]);
-      lastAddedProductId.current = product.id;
-      
-      // Auto-scroll to newly added item
-      setTimeout(() => {
-        const cartItem = cartItemRefs.current[product.id];
-        if (cartItem && cartScrollContainerRef.current) {
-          cartItem.scrollIntoView({ 
-            behavior: 'smooth', 
-            block: 'nearest',
-            inline: 'nearest'
-          });
-        }
-      }, 150);
-    }
+    });
 
-    // Auto-focus on price input after adding product (only if not using custom price)
-    if (customPrice === undefined) {
-      setTimeout(() => {
+    lastAddedProductId.current = product.id;
+    
+    // Use startTransition for non-urgent UI updates (scroll, focus) - doesn't block main thread
+    startTransition(() => {
+      // Instant scroll (non-blocking)
+      const cartItem = cartItemRefs.current[product.id];
+      if (cartItem && cartScrollContainerRef.current) {
+        cartItem.scrollIntoView({ 
+          behavior: 'auto', // Instant scroll
+          block: 'nearest',
+          inline: 'nearest'
+        });
+      }
+
+      // Auto-focus on price input after adding product (only if not using custom price)
+      if (customPrice === undefined) {
         const priceInput = priceInputRefs.current[product.id];
         if (priceInput) {
           priceInput.focus();
           priceInput.select();
         }
-      }, 100);
-    }
+      }
+    });
 
     // Toast removed as per user request - no toast when selecting products
   };
@@ -898,22 +886,59 @@ export function NewSale() {
     });
   };
 
+  // Create optimized lookup maps for O(1) product access
+  const barcodeMap = useMemo(() => {
+    const map = new Map<string, Product>();
+    products.forEach(product => {
+      if (product.barcode) {
+        const barcodeLower = product.barcode.toLowerCase();
+        // Store exact barcode
+        map.set(barcodeLower, product);
+        // Also store prefixes for partial matching (up to 5 chars)
+        for (let i = 1; i <= Math.min(5, barcodeLower.length); i++) {
+          const prefix = barcodeLower.substring(0, i);
+          if (!map.has(prefix)) {
+            map.set(prefix, product);
+          }
+        }
+      }
+    });
+    return map;
+  }, [products]);
+
   const findProductByBarcode = (barcode: string): Product | null => {
-    // First try exact match
-    const exactMatch = products.find(product => product.barcode === barcode);
-    if (exactMatch) return exactMatch;
+    if (!barcode) return null;
     
-    // Then try partial match (barcode starts with the search term)
-    const partialMatch = products.find(product => 
-      product.barcode && product.barcode.startsWith(barcode)
-    );
-    if (partialMatch) return partialMatch;
+    const searchKey = barcode.toLowerCase();
     
-    // Also try if product barcode contains the search term
-    const containsMatch = products.find(product => 
-      product.barcode && product.barcode.includes(barcode)
-    );
-    return containsMatch || null;
+    // Try exact match first (fastest - O(1))
+    const exactMatch = barcodeMap.get(searchKey);
+    if (exactMatch) {
+      // Quick validation - if it's in the map, it's likely correct
+      return exactMatch;
+    }
+    
+    // Try prefix matches (for partial codes like "FO(EB" from "FO(EBA0")
+    // Check progressively shorter prefixes (O(1) lookup)
+    const maxLen = Math.min(searchKey.length, 5);
+    for (let len = maxLen; len >= 4; len--) {
+      const prefix = searchKey.substring(0, len);
+      const match = barcodeMap.get(prefix);
+      if (match) {
+        return match;
+      }
+    }
+    
+    // Fallback: linear search for contains match (rare case - only if not found in map)
+    // This is optimized to break early
+    for (let i = 0; i < products.length; i++) {
+      const product = products[i];
+      if (product.barcode?.toLowerCase().includes(searchKey)) {
+        return product;
+      }
+    }
+    
+    return null;
   };
 
   const handleBarcodeScan = async () => {
@@ -933,73 +958,61 @@ export function NewSale() {
     }
   };
 
-  const handleScannerInput = async (scannedValue: string) => {
-    setIsScanning(true);
-
-    try {
-      let productCode = scannedValue.trim();
-      let customPrice: number | undefined = undefined;
-
-      // Check if the scanned value contains a dash (format: CODE-PRICE)
-      if (productCode.includes('-')) {
-        const parts = productCode.split('-');
-        if (parts.length >= 2) {
-          // Extract code (before first dash) and price (after first dash)
-          productCode = parts[0].trim();
-          const priceStr = parts.slice(1).join('-').trim(); // Handle multiple dashes in price
-          
-          // Parse price
-          const parsedPrice = parseFloat(priceStr);
-          if (!isNaN(parsedPrice) && parsedPrice >= 0) {
-            customPrice = parsedPrice;
-          }
-        }
+  const handleScannerInput = (scannedValue: string) => {
+    // Process immediately - zero delays, zero async operations
+    
+    // Ultra-fast parsing - single pass extraction
+    const dashIndex = scannedValue.indexOf('-');
+    let productCode: string;
+    let customPrice: number | undefined = undefined;
+    
+    if (dashIndex > 0) {
+      // Extract code and price in one operation
+      productCode = scannedValue.substring(0, dashIndex).trim();
+      const priceStr = scannedValue.substring(dashIndex + 1).trim();
+      const parsedPrice = +priceStr; // Fastest number conversion
+      if (parsedPrice > 0 && isFinite(parsedPrice)) {
+        customPrice = parsedPrice;
       }
-
-      // Try to find product by code (exact or partial match)
-      // Try shorter codes first for better matching (e.g., "FO(EB" from "FO(EBA0")
-      let product: Product | null = null;
-      
-      // Try progressively shorter codes to find the best match
-      // Start with shorter codes first (more specific)
-      if (productCode.length >= 5) {
-        product = findProductByBarcode(productCode.substring(0, 5)); // Try "FO(EB" from "FO(EBA0"
-      }
-      if (!product && productCode.length >= 4) {
-        product = findProductByBarcode(productCode.substring(0, 4));
-      }
-      if (!product) {
-        // Try full code as last resort
-        product = findProductByBarcode(productCode);
-      }
-
-      if (product) {
-        // Add product to cart with custom price
-        // The addToCart function will automatically calculate quantity based on scanned price
-        await addToCart(product, 1, customPrice);
-        
-        // Clear search input after successful scan for smooth rapid scanning
-        // Use setTimeout to ensure state update happens after current execution
-        setTimeout(() => {
-          setSearchTerm("");
-          // Refocus input for next scan
-          if (searchInputRef.current) {
-            searchInputRef.current.focus();
-          }
-        }, 50);
-      } else {
-        // Product not found - clear input anyway for next scan
-        setTimeout(() => {
-          setSearchTerm("");
-          if (searchInputRef.current) {
-            searchInputRef.current.focus();
-          }
-        }, 50);
-      }
-      // Product not found - no toast shown
-    } finally {
-      setIsScanning(false);
+    } else {
+      productCode = scannedValue.trim();
     }
+
+    // Ultra-fast product lookup - optimized order
+    const codeLower = productCode.toLowerCase();
+    let product: Product | null = null;
+    
+    // Try most specific matches first (O(1) map lookups)
+    if (codeLower.length >= 5) {
+      product = findProductByBarcode(codeLower.substring(0, 5));
+    }
+    if (!product && codeLower.length >= 4) {
+      product = findProductByBarcode(codeLower.substring(0, 4));
+    }
+    if (!product) {
+      product = findProductByBarcode(codeLower);
+    }
+    // Add to cart immediately if found (synchronous, no delays)
+    if (product) {
+      addToCart(product, 1, customPrice);
+    }
+    
+    // Clear input instantly via direct DOM manipulation (fastest method)
+    const input = searchInputRef.current;
+    if (input) {
+      input.value = '';
+      input.focus();
+      // Use startTransition for non-urgent state update
+      startTransition(() => {
+        setSearchTerm("");
+      });
+    } else {
+      setSearchTerm("");
+    }
+    
+    // Brief loading indicator (50ms - just enough for visual feedback)
+    setIsScanning(true);
+    setTimeout(() => setIsScanning(false), 50);
   };
 
   const handleProductClick = (product: Product) => {
@@ -1141,10 +1154,13 @@ export function NewSale() {
           </div>
           <div className="flex items-center space-x-4">
             <div className="relative flex-1 max-w-md">
-              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500' : 'text-gray-400'}`} />
+              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
+              {isScanning && (
+                <LoadingSpinner size="sm" className="absolute right-3 top-1/2 transform -translate-y-1/2" />
+              )}
               <Input
                 ref={searchInputRef}
-                placeholder={isScanning ? "Scanning..." : "Scan barcode or search products..."}
+                placeholder={isScanning ? "Processing scan..." : "Scan barcode or search products..."}
                 value={searchTerm}
                 onChange={(e) => {
                   const value = e.target.value;
@@ -1166,15 +1182,12 @@ export function NewSale() {
                       const pricePart = parts.slice(1).join('-').trim();
                       // If code part exists and price part is numeric, treat as barcode scan
                       if (codePart.length > 0 && /^\d+(\.\d+)?$/.test(pricePart)) {
-                        // Small delay to ensure scanner finished sending data
-                        // This allows rapid scanning without clearing input manually
-                        scanTimeoutRef.current = setTimeout(() => {
-                          const currentValue = searchInputRef.current?.value || '';
-                          if (currentValue === value && !isScanning) {
-                            handleScannerInput(value);
-                          }
-                          scanTimeoutRef.current = null;
-                        }, 150);
+                        // Process immediately - zero delay, instant execution
+                        // Use immediate execution for maximum speed
+                        const currentValue = searchInputRef.current?.value || '';
+                        if (currentValue === value) {
+                          handleScannerInput(value);
+                        }
                       }
                     }
                   }
@@ -1198,9 +1211,8 @@ export function NewSale() {
                     }
                   }
                 }}
-                className={`pl-10 ${isScanning ? 'border-blue-500 bg-blue-50' : ''}`}
+                className={`pl-10 ${isScanning ? 'border-blue-500 bg-blue-50/50' : ''}`}
                 autoFocus
-                disabled={isScanning}
               />
             </div>
           </div>

@@ -719,59 +719,100 @@ export default function BarcodeGenerator() {
       doc.setTextColor(0, 0, 0);
       doc.text(expDate, expX + expLabelWidth, y + labelFontSize);
       
-      y += labelFontSize * 1.5 + mmToPt(0.6); // More spacing before barcode
+      y += labelFontSize * 1.5 + mmToPt(0.3); // Less spacing - barcode will be positioned at bottom
       
-      // Barcode - larger and better quality for scanning
+      // Barcode - MUCH LARGER to use bottom space and better scanning
       const barcodeValue = `${sp.product.sku || sp.product.code || 'PROD'}-${price}`;
       
       try {
-        // Generate barcode with better quality
+        // Generate barcode - LARGER width and height, VERY DARK, with LARGER number
         const canvas = document.createElement('canvas');
         
-        // Set canvas size - jsbarcode will resize, so we set initial size
-        const barcodeHeightPx = 60; // Higher resolution for better quality
+        // Much higher resolution for better quality and darker rendering
+        const barcodeHeightPx = 120; // Increased from 100 for larger barcode
         canvas.height = barcodeHeightPx;
+        canvas.width = 600; // Wider canvas for better quality
         
-        // Generate barcode
-        JsBarcode(canvas, barcodeValue, {
-          format: "CODE128",
-          width: 2.5, // Wider bars for better scanning
-          height: barcodeHeightPx,
-          displayValue: false,
-          margin: 8, // Quiet zones for better scanning
-          background: "#FFFFFF",
-          lineColor: "#000000"
-        });
-        
-        const barcodeDataURL = canvas.toDataURL('image/png', 1.0); // High quality
-        
-        // Use actual canvas dimensions after barcode generation
-        const actualBarcodeWidth = canvas.width;
-        const actualBarcodeHeight = canvas.height;
-        
-        // Target barcode height in points (larger for better scanning)
-        const targetBarcodeHeightPt = mmToPt(9);
-        const barcodeWidthPt = (actualBarcodeWidth / actualBarcodeHeight) * targetBarcodeHeightPt;
-        
-        // Calculate remaining space and position barcode lower (use bottom space)
-        const remainingHeight = heightPt - marginPt - y;
-        const barcodeX = leftMargin + (contentWidth - barcodeWidthPt) / 2;
-        
-        // Position barcode to use more of the bottom space - center it in remaining space
-        let finalBarcodeHeightPt = targetBarcodeHeightPt;
-        let finalBarcodeWidthPt = barcodeWidthPt;
-        
-        // Ensure barcode fits but use available space
-        if (finalBarcodeHeightPt > remainingHeight * 0.85) {
-          finalBarcodeHeightPt = remainingHeight * 0.85;
-          finalBarcodeWidthPt = (barcodeWidthPt / targetBarcodeHeightPt) * finalBarcodeHeightPt;
+        // Set canvas context for VERY DARK rendering
+        const ctx = canvas.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#000000'; // Pure black
+          ctx.strokeStyle = '#000000'; // Pure black
+          ctx.lineWidth = 2; // Thicker lines for darker appearance
         }
         
-        // Position barcode in the center of remaining vertical space (pushes it down)
-        const availableSpaceForBarcode = remainingHeight;
-        const barcodeY = y + (availableSpaceForBarcode - finalBarcodeHeightPt) / 2;
+        // Generate barcode with VERY DARK bars - NO number in image (we'll add large text separately)
+        JsBarcode(canvas, barcodeValue, {
+          format: "CODE128",
+          width: 4.5, // MUCH wider bars for VERY DARK appearance
+          height: barcodeHeightPx,
+          displayValue: false, // NO number in barcode image - we'll add large text separately below
+          margin: 10, // Quiet zones for better scanning
+          background: "#FFFFFF",
+          lineColor: "#000000" // Pure black - VERY DARK
+        });
         
-        // Add barcode to PDF
+        // Ensure barcode is rendered VERY DARK
+        if (ctx) {
+          ctx.globalCompositeOperation = 'source-over';
+          // Enhance contrast for darker appearance
+          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+          const data = imageData.data;
+          for (let i = 0; i < data.length; i += 4) {
+            // Make black pixels even darker (ensure pure black)
+            if (data[i] < 128) { // If it's dark
+              data[i] = 0;     // R
+              data[i + 1] = 0; // G
+              data[i + 2] = 0; // B
+            }
+          }
+          ctx.putImageData(imageData, 0, 0);
+        }
+        
+        const barcodeDataURL = canvas.toDataURL('image/png', 1.0); // High quality, no compression
+        
+        // Calculate remaining space from current Y to bottom
+        const remainingHeight = heightPt - marginPt - y;
+        
+        // Target barcode height - INCREASED SIZE (17mm) to use more space
+        const targetBarcodeHeightPt = mmToPt(17); // Increased from 15mm
+        
+        // Set barcode width to 90% of content width (increased from 80%)
+        const targetBarcodeWidthPt = contentWidth * 0.90;
+        
+        // Calculate actual barcode height based on aspect ratio
+        const actualBarcodeWidth = canvas.width;
+        const actualBarcodeHeight = canvas.height;
+        const barcodeAspectRatio = actualBarcodeWidth / actualBarcodeHeight;
+        
+        // Calculate height based on 90% width constraint
+        let finalBarcodeHeightPt = targetBarcodeWidthPt / barcodeAspectRatio;
+        let finalBarcodeWidthPt = targetBarcodeWidthPt;
+        
+        // Use maximum available space - ensure barcode is as large as possible
+        if (finalBarcodeHeightPt > remainingHeight * 0.95) {
+          finalBarcodeHeightPt = remainingHeight * 0.95;
+          finalBarcodeWidthPt = finalBarcodeHeightPt * barcodeAspectRatio;
+        } else {
+          // If we have space, use the target height
+          finalBarcodeHeightPt = Math.min(targetBarcodeHeightPt, remainingHeight * 0.95);
+          finalBarcodeWidthPt = finalBarcodeHeightPt * barcodeAspectRatio;
+          // Ensure width doesn't exceed 90% of content
+          if (finalBarcodeWidthPt > contentWidth * 0.90) {
+            finalBarcodeWidthPt = contentWidth * 0.90;
+            finalBarcodeHeightPt = finalBarcodeWidthPt / barcodeAspectRatio;
+          }
+        }
+        
+          // Position barcode - leave MORE space for large barcode number text below
+        const barcodeX = leftMargin + (contentWidth - finalBarcodeWidthPt) / 2;
+        
+        // Calculate space needed for text (10pt font + MORE spacing)
+        const textHeight = 10 + mmToPt(2); // Font size + more spacing
+        // Position barcode higher to leave MORE room for large barcode number text below
+        const barcodeY = heightPt - marginPt - finalBarcodeHeightPt - textHeight - mmToPt(4); // More space (4mm gap + text height)
+        
+        // Add barcode image to PDF - larger, DARK
         doc.addImage(
           barcodeDataURL, 
           'PNG', 
@@ -780,6 +821,15 @@ export default function BarcodeGenerator() {
           finalBarcodeWidthPt, 
           finalBarcodeHeightPt
         );
+        
+        // Add LARGE barcode number text below barcode with MUCH MORE spacing to avoid collision
+        const barcodeTextY = barcodeY + finalBarcodeHeightPt + mmToPt(4.5); // Increased spacing from 2.5mm to 4.5mm for clear separation
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(10); // LARGE font size (10pt) for barcode number
+        doc.setTextColor(0, 0, 0); // Pure black
+        const barcodeTextWidth = doc.getTextWidth(barcodeValue);
+        const barcodeTextX = leftMargin + (contentWidth - barcodeTextWidth) / 2; // Center the text
+        doc.text(barcodeValue, barcodeTextX, barcodeTextY);
       } catch (err) {
         console.error('Barcode generation error:', err);
       }
