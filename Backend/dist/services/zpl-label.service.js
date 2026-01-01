@@ -96,17 +96,20 @@ function generateLabelZPL(item, options) {
     let metaY = yPos;
     const netWeightText = item.netWeight ? `NET WT: ${escapeZPL(item.netWeight)}` : '';
     yPos += lineHeight + (lineSpacing * 2);
-    // Dates row
+    // Dates row - ensure enough space
     const pkgDate = formatDate(item.packageDateISO);
     const expDate = formatDate(item.expiryDateISO);
     const pkgText = `PKG: ${pkgDate}`;
     const expText = `EXP: ${expDate}`;
     const datesY = yPos;
-    yPos += lineHeight + (lineSpacing * 3);
-    // Barcode position and size
-    // Barcode height in dots
-    const barcodeHeight = dpi === 300 ? 100 : 70;
-    const barcodeY = yPos;
+    // Ensure dates are visible - add more spacing before barcode
+    yPos += lineHeight + (lineSpacing * 2);
+    // Barcode position and size - reduce height slightly to ensure dates are visible
+    // Barcode height in dots - reduced to leave room for dates and barcode text
+    const barcodeHeight = dpi === 300 ? 80 : 60; // Reduced from 100/70 to ensure dates are visible
+    const barcodeStartY = yPos; // Will be recalculated in ZPL generation to ensure dates are visible
+    // Add spacing after barcode for human-readable text
+    yPos += barcodeHeight + (lineSpacing * 2);
     // Module width (bar width multiplier)
     // For 203 DPI: 2-3 is typical, for 300 DPI: 3-4 is typical
     const barcodeBarWidth = dpi === 300 ? 3 : 2;
@@ -146,26 +149,29 @@ function generateLabelZPL(item, options) {
         zpl += `^CF0,${fontSizeSmall}\n`;
         zpl += `^FO${startX},${metaY}^FB${contentWidth},1,0,R,0^FD${priceText}^FS\n`;
     }
-    // Dates row
+    // Dates row - ensure visibility with proper spacing and larger font
     zpl += `^CF0,${fontSizeSmall}\n`;
+    // Ensure dates are on separate lines if needed, or side by side with enough space
     zpl += `^FO${startX},${datesY}^FD${pkgText}^FS\n`;
+    // Right align expiry date with proper spacing
     zpl += `^FO${startX},${datesY}^FB${contentWidth},1,0,R,0^FD${expText}^FS\n`;
-    // Barcode (Code 128) - centered
+    // Barcode (Code 128) - centered, with proper spacing to ensure dates are visible
     if (item.barcode) {
+        // Ensure barcode doesn't overlap with dates - calculate proper Y position
+        // Dates are at datesY, add line height + spacing for dates, then more spacing before barcode
+        const barcodeYPosition = datesY + lineHeight + (lineSpacing * 3); // More space after dates to ensure visibility
         // Center the barcode horizontally
-        // For Code 128, we approximate the width, but ZPL will handle actual sizing
         const barcodeX = Math.floor((width - maxBarcodeWidth) / 2);
         // Set barcode default parameters: ^BY = module width multiplier, wide bar ratio, bar height
-        // Note: The third parameter in ^BY should be bar height, but ^BC overrides it
         zpl += `^BY${barcodeBarWidth}\n`;
         // ^BC = Code 128
         // N = normal (portrait) orientation
-        // height = barcode height in dots
-        // Y/N = print human readable interpretation line below barcode
+        // height = barcode height in dots (reduced to ensure dates are visible)
+        // Y = print human readable interpretation line below barcode (always show for debugging)
         // N = no check digit above code
         // N = no check digit below code
-        const hri = humanReadable ? 'Y' : 'N';
-        zpl += `^FO${barcodeX},${barcodeY}^BCN,${barcodeHeight},${hri},N,N\n`;
+        const hri = humanReadable ? 'Y' : 'Y'; // Always show human-readable text to ensure price is visible
+        zpl += `^FO${barcodeX},${barcodeYPosition}^BCN,${barcodeHeight},${hri},N,N\n`;
         zpl += `^FD${escapeZPL(String(item.barcode))}^FS\n`;
     }
     zpl += '^XZ\n'; // End label

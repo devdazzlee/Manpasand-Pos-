@@ -77,7 +77,7 @@ const menuSections: SidebarMenuSection[] = [
     label: "Sales & Transactions",
     expandable: true,
     items: [
-      { id: "new-sale", label: "Sales (Scanner)", icon: ShoppingCart },
+      { id: "new-sale", label: "Sales", icon: ShoppingCart },
       { id: "sales-history", label: "Sales History", icon: History },
       { id: "orders", label: "Orders", icon: ListOrdered },
       { id: "website-orders", label: "Website Orders", icon: Globe },

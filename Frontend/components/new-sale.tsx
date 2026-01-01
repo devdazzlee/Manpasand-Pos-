@@ -59,6 +59,8 @@ interface Product {
   stock: number;
   categoryId: string;
   barcode?: string;
+  code?: string; // Product code for barcode matching
+  sku?: string; // SKU for barcode matching
   available_stock?: number;
   current_stock?: number;
   reserved_stock?: number;
@@ -1124,57 +1126,126 @@ export function NewSale() {
   };
 
   // Create optimized lookup maps for O(1) product access
+  // Build comprehensive barcode map indexing by barcode, code, and SKU
+  // This ensures products can be found by any identifier
   const barcodeMap = useMemo(() => {
     const map = new Map<string, Product>();
+    const exactMatches = new Map<string, Product>(); // Track exact matches separately
+    
     products.forEach(product => {
+      // Index by barcode (if exists)
       if (product.barcode) {
-        const barcodeLower = product.barcode.toLowerCase();
-        // Store exact barcode
-        map.set(barcodeLower, product);
-        // Also store prefixes for partial matching (up to 5 chars)
-        for (let i = 1; i <= Math.min(5, barcodeLower.length); i++) {
-          const prefix = barcodeLower.substring(0, i);
-          if (!map.has(prefix)) {
-            map.set(prefix, product);
-          }
+        const barcodeLower = product.barcode.toLowerCase().trim();
+        if (barcodeLower) {
+          exactMatches.set(barcodeLower, product);
+          map.set(barcodeLower, product);
+        }
+      }
+      
+      // Index by code (if exists) - this is critical for CODE-PRICE format scanning
+      if (product.code) {
+        const codeLower = product.code.toLowerCase().trim();
+        if (codeLower) {
+          exactMatches.set(codeLower, product);
+          map.set(codeLower, product);
+        }
+      }
+      
+      // Index by SKU (if exists)
+      if (product.sku) {
+        const skuLower = product.sku.toLowerCase().trim();
+        if (skuLower) {
+          exactMatches.set(skuLower, product);
+          map.set(skuLower, product);
         }
       }
     });
+    
+    // Store exact matches map for priority lookup
+    (map as any).exactMatches = exactMatches;
+    
     return map;
   }, [products]);
 
   const findProductByBarcode = (barcode: string): Product | null => {
     if (!barcode) return null;
     
-    const searchKey = barcode.toLowerCase();
+    const searchKey = barcode.toLowerCase().trim();
+    if (!searchKey) return null;
     
-    // Try exact match first (fastest - O(1))
+    const exactMatches = (barcodeMap as any).exactMatches as Map<string, Product>;
+    
+    // CRITICAL: Try exact match FIRST - this prevents wrong product matches
+    // Exact match has highest priority to avoid prefix matching issues
+    if (exactMatches) {
+      const exactMatch = exactMatches.get(searchKey);
+      if (exactMatch) {
+        console.log('Exact match found:', searchKey, '->', exactMatch.name);
+        return exactMatch;
+      }
+    }
+    
+    // Try exact match from main map
     const exactMatch = barcodeMap.get(searchKey);
     if (exactMatch) {
-      // Quick validation - if it's in the map, it's likely correct
+      console.log('Exact match found (main map):', searchKey, '->', exactMatch.name);
       return exactMatch;
     }
     
-    // Try prefix matches (for partial codes like "FO(EB" from "FO(EBA0")
-    // Check progressively shorter prefixes (O(1) lookup)
-    const maxLen = Math.min(searchKey.length, 5);
-    for (let len = maxLen; len >= 4; len--) {
-      const prefix = searchKey.substring(0, len);
-      const match = barcodeMap.get(prefix);
-      if (match) {
-        return match;
-      }
-    }
+    // Only if no exact match, try linear search for startsWith matches
+    // This ensures we find the most specific match first
+    let bestMatch: Product | null = null;
+    let bestMatchLength = 0;
     
-    // Fallback: linear search for contains match (rare case - only if not found in map)
-    // This is optimized to break early
     for (let i = 0; i < products.length; i++) {
       const product = products[i];
-      if (product.barcode?.toLowerCase().includes(searchKey)) {
-        return product;
+      
+      // Check barcode field
+      if (product.barcode) {
+        const barcodeLower = product.barcode.toLowerCase().trim();
+        if (barcodeLower === searchKey) {
+          // Exact match - return immediately
+          return product;
+        }
+        if (barcodeLower.startsWith(searchKey) && barcodeLower.length > bestMatchLength) {
+          bestMatch = product;
+          bestMatchLength = barcodeLower.length;
+        }
+      }
+      
+      // Check code field
+      if (product.code) {
+        const codeLower = product.code.toLowerCase().trim();
+        if (codeLower === searchKey) {
+          // Exact match - return immediately
+          return product;
+        }
+        if (codeLower.startsWith(searchKey) && codeLower.length > bestMatchLength) {
+          bestMatch = product;
+          bestMatchLength = codeLower.length;
+        }
+      }
+      
+      // Check SKU field
+      if (product.sku) {
+        const skuLower = product.sku.toLowerCase().trim();
+        if (skuLower === searchKey) {
+          // Exact match - return immediately
+          return product;
+        }
+        if (skuLower.startsWith(searchKey) && skuLower.length > bestMatchLength) {
+          bestMatch = product;
+          bestMatchLength = skuLower.length;
+        }
       }
     }
     
+    if (bestMatch) {
+      console.log('Best match found:', searchKey, '->', bestMatch.name);
+      return bestMatch;
+    }
+    
+    console.warn('No product found for barcode:', searchKey);
     return null;
   };
 
@@ -1233,26 +1304,79 @@ export function NewSale() {
       productCode = trimmedValue.trim();
     }
 
-    // Ultra-fast product lookup - optimized order
-    const codeLower = productCode.toLowerCase();
+    // Product lookup - use exact code first, then fallback to best match
+    const codeLower = productCode.toLowerCase().trim();
     let product: Product | null = null;
     
-    // Try most specific matches first (O(1) map lookups)
-    if (codeLower.length >= 5) {
-      product = findProductByBarcode(codeLower.substring(0, 5));
-      console.log('Trying 5 chars:', codeLower.substring(0, 5), 'Found:', product?.name);
+    // CRITICAL: Try multiple matching strategies to find the correct product
+    // 1. First try exact match on the full code (highest priority)
+    product = findProductByBarcode(codeLower);
+    console.log('Step 1 - Exact code match:', codeLower, 'Found:', product?.name || 'NOT FOUND');
+    
+    // 2. If not found and we have a price, try matching by price number in product name
+    // This handles cases like "ROA432910-180" where "180" is in product name "Roasted Cashew Nuts (180)"
+    if (!product && customPrice !== undefined) {
+      const priceNumber = Math.round(customPrice).toString();
+      // Look for products where name contains the price number in parentheses or as suffix
+      const priceMatch = products.find(p => {
+        const nameLower = p.name.toLowerCase();
+        // Match patterns like "(180)", " 180", or ending with "180"
+        return nameLower.includes(`(${priceNumber})`) || 
+               nameLower.includes(` ${priceNumber} `) || 
+               nameLower.endsWith(` ${priceNumber}`) ||
+               nameLower.match(new RegExp(`[^0-9]${priceNumber}[^0-9]`));
+      });
+      if (priceMatch) {
+        product = priceMatch;
+        console.log('Step 2 - Price number match:', priceNumber, 'Found:', product.name);
+      }
     }
-    if (!product && codeLower.length >= 4) {
-      product = findProductByBarcode(codeLower.substring(0, 4));
-      console.log('Trying 4 chars:', codeLower.substring(0, 4), 'Found:', product?.name);
+    
+    // 3. If not found and code contains numbers, try matching by extracting numeric part
+    if (!product && /\d/.test(codeLower)) {
+      const numericMatch = codeLower.match(/\d+/);
+      if (numericMatch) {
+        const numericPart = numericMatch[0];
+        product = findProductByBarcode(numericPart);
+        console.log('Step 3 - Numeric part match:', numericPart, 'Found:', product?.name || 'NOT FOUND');
+      }
     }
+    
+    // 4. If still not found, try matching product name contains the code
     if (!product) {
-      product = findProductByBarcode(codeLower);
-      console.log('Trying full code:', codeLower, 'Found:', product?.name);
+      const codeInName = products.find(p => {
+        const nameLower = p.name.toLowerCase();
+        return nameLower.includes(`(${codeLower})`) || 
+               nameLower.includes(` ${codeLower} `) || 
+               nameLower.endsWith(` ${codeLower}`);
+      });
+      if (codeInName) {
+        product = codeInName;
+        console.log('Step 4 - Name pattern match:', codeLower, 'Found:', product.name);
+      }
+    }
+    
+    console.log('FINAL RESULT - Code:', codeLower, 'Price:', customPrice, 'Found Product:', product?.name || 'NOT FOUND', 'ID:', product?.id);
+    
+    if (!product) {
+      console.error('❌ Product not found for scanned code:', productCode, 'Price:', customPrice);
+      // Reset processing flag to allow next scan
+      isProcessingScanRef.current = false;
+      lastProcessedScanRef.current = '';
+      return; // Exit early - don't add to cart
     }
     // Add to cart immediately if found (synchronous, no delays)
     if (product) {
-      console.log('Adding to cart - Product:', product.name, 'Original price:', product.price, 'Custom price:', customPrice);
+      console.log('✅ SUCCESS - Adding to cart:', {
+        scannedCode: productCode,
+        scannedPrice: customPrice,
+        matchedProduct: product.name,
+        productId: product.id,
+        productCode: product.code,
+        productSKU: product.sku,
+        productBarcode: product.barcode,
+        productPrice: product.price
+      });
       addToCart(product, 1, customPrice);
     } else {
       console.error('Product not found for code:', productCode);

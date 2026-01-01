@@ -12,6 +12,7 @@ interface Product {
   stock: number
   categoryId: string
   barcode?: string //TODO
+  code?: string // Product code for barcode matching
   current_stock?: number
   available_stock?: number
   reserved_stock?: number
@@ -131,7 +132,8 @@ export const useStore = create<StoreState>()(
           price: Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? item.purchase_rate ?? 0),
           category: item.category?.name,
           categoryId: item.category?.id,
-          barcode: item.barcode || item.sku,
+          barcode: item.barcode || item.sku || item.code, // Include code as fallback for barcode
+          code: item.code, // Explicitly include code field for barcode matching
           stock: item.available_stock ?? item.current_stock ?? 0,
           current_stock: item.current_stock ?? 0,
           available_stock: item.available_stock ?? 0,

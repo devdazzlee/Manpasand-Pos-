@@ -289,26 +289,44 @@ export default function BarcodeGenerator() {
   const formatWeightDisplay = (netWeightInput: any) => {
     if (!netWeightInput) return "Not specified";
 
-    const input = netWeightInput.toLowerCase().trim();
+    // CRITICAL: Preserve the exact input string to avoid any conversion errors
+    // Only format if it's a valid weight string, otherwise return as-is
+    const input = String(netWeightInput).toLowerCase().trim();
+    
+    // If input is already a formatted string like "200g", preserve it exactly
+    if (input.match(/^\d+\.?\d*\s*(kg|g|mg|lb|oz|l|ml|ser|maund|pc|pcs|piece|dozen)$/i)) {
+      // Extract number and unit, but preserve exact format
+      const numberMatch = input.match(/(\d+\.?\d*)/);
+      const unitMatch = input.match(/(kg|g|mg|lb|oz|l|ml|ser|maund|pc|pcs|piece|dozen)/i);
+      
+      if (numberMatch && unitMatch) {
+        const number = Number.parseFloat(numberMatch[1]);
+        const unit = unitMatch[1].toLowerCase();
+        
+        // Return formatted but preserve the exact number (no rounding)
+        if (unit === "kg") return `${number}kg`;
+        if (unit === "g") return `${number}g`;
+        if (unit === "mg") return `${number}mg`;
+        if (unit === "lb") return `${number}lb`;
+        if (unit === "oz") return `${number}oz`;
+        if (unit === "l") return `${number}L`;
+        if (unit === "ml") return `${number}ml`;
+        if (unit === "ser" || unit === "seer") return `${number} seer`;
+        if (unit === "maund") return `${number} maund`;
+        if (unit === "pc" || unit === "pcs" || unit === "piece") return `${number} pcs`;
+        if (unit === "dozen") return `${number} dozen`;
+      }
+    }
+    
+    // If it's just a number, assume grams
     const numberMatch = input.match(/(\d+\.?\d*)/);
-    if (!numberMatch) return netWeightInput;
+    if (numberMatch) {
+      const number = Number.parseFloat(numberMatch[1]);
+      return `${number}g`; // Default to grams
+    }
 
-    const number = Number.parseFloat(numberMatch[1]);
-
-    if (input.includes("kg")) return `${number}kg`;
-    if (input.includes("g") && !input.includes("kg") && !input.includes("mg"))
-      return `${number}g`;
-    if (input.includes("mg")) return `${number}mg`;
-    if (input.includes("lb")) return `${number}lb`;
-    if (input.includes("oz") && !input.includes("fl")) return `${number}oz`;
-    if (input.includes("l") && !input.includes("ml")) return `${number}L`;
-    if (input.includes("ml")) return `${number}ml`;
-    if (input.includes("ser")) return `${number} seer`;
-    if (input.includes("maund")) return `${number} maund`;
-    if (input.includes("pc") || input.includes("piece")) return `${number} pcs`;
-    if (input.includes("dozen")) return `${number} dozen`;
-
-    return `${number}g`;
+    // Return original if can't parse
+    return String(netWeightInput);
   };
 
   // Helper function to determine if unit is weight-based (kg, g, etc.) or piece-based (pc, pcs, etc.)
