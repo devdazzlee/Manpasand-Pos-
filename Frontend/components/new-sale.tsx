@@ -875,11 +875,19 @@ export function NewSale() {
     return await withPaymentLoading(async () => {
       try {
         // Prepare items for API
-        const saleItems = cartSnapshot.map((item) => ({
-          productId: item.id,
-          quantity: item.quantity,
-          price: item.price,
-        }));
+        const saleItems = cartSnapshot.map((item) => {
+          // Use productId if available, otherwise fallback to extracting from id
+          // (for backward compatibility, though productId should always be set)
+          const productId = item.productId || item.id.split('_')[0];
+          if (!productId) {
+            throw new Error(`Missing product ID for item: ${item.name}`);
+          }
+          return {
+            productId,
+            quantity: item.quantity,
+            price: item.price,
+          };
+        });
 
         // Get branchId from localStorage (key: 'branch')
         let branchId = "";

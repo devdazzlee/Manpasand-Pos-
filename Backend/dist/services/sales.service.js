@@ -67,13 +67,24 @@ class SaleService {
             throw new apiError_1.AppError(400, 'Invalid branch');
         if (!items.length)
             throw new apiError_1.AppError(400, 'No items provided');
-        // 2) Pre-fetch stock snapshot once
+        // 2) Validate that all products exist
         const productIds = items.map(i => i.productId);
+        const uniqueProductIds = [...new Set(productIds)]; // Remove duplicates
+        const products = await client_2.prisma.product.findMany({
+            where: { id: { in: uniqueProductIds } },
+            select: { id: true },
+        });
+        const foundProductIds = new Set(products.map(p => p.id));
+        const missingProductIds = uniqueProductIds.filter(id => !foundProductIds.has(id));
+        if (missingProductIds.length > 0) {
+            throw new apiError_1.AppError(400, `Products not found: ${missingProductIds.join(', ')}`);
+        }
+        // 3) Pre-fetch stock snapshot once
         const stocks = await client_2.prisma.stock.findMany({
             where: { product_id: { in: productIds }, branch_id: branchId },
         });
         const stockMap = new Map(stocks.map(s => [s.product_id, s]));
-        // 3) Group same product lines and compute movements in memory
+        // 4) Group same product lines and compute movements in memory
         const grouped = items.reduce((acc, it) => {
             const key = it.productId;
             if (!acc[key])
@@ -101,7 +112,7 @@ class SaleService {
                 current_quantity: next,
             });
         }
-        // 4) Prepare all writes as a single non-interactive transaction (prevents P2028)
+        // 5) Prepare all writes as a single non-interactive transaction (prevents P2028)
         const total = items.reduce((s, it) => s + it.price * it.quantity, 0);
         const ops = [];
         // (a) Sale + items

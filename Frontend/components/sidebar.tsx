@@ -78,7 +78,6 @@ const menuSections: SidebarMenuSection[] = [
     expandable: true,
     items: [
       { id: "new-sale", label: "Sales (Scanner)", icon: ShoppingCart },
-      { id: "manual-sale", label: "Sales (Manual)", icon: ShoppingCart },
       { id: "sales-history", label: "Sales History", icon: History },
       { id: "orders", label: "Orders", icon: ListOrdered },
       { id: "website-orders", label: "Website Orders", icon: Globe },
@@ -186,7 +185,6 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
     "cash-register",
     "notifications",
     "new-sale",
-    "manual-sale",
     "sales-history",
     // "inventory",
     "orders",
@@ -203,7 +201,6 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
     "cash-register",
     "notifications",
     "new-sale",
-    "manual-sale",
     "sales-history",
     "orders",
     "website-orders",

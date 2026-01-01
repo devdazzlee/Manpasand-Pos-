@@ -781,7 +781,10 @@ export default function BarcodeGenerator() {
       y += labelFontSize * 1.5 + mmToPt(0.3); // Less spacing - barcode will be positioned at bottom
       
       // Barcode - MUCH LARGER to use bottom space and better scanning
-      const barcodeValue = `${sp.product.sku || sp.product.code || 'PROD'}-${price}`;
+      // Sanitize SKU/code to remove special characters that might cause scanning issues
+      const rawCode = sp.product.sku || sp.product.code || 'PROD';
+      const sanitizedCode = rawCode.replace(/[^A-Za-z0-9]/g, ''); // Remove all non-alphanumeric characters
+      const barcodeValue = `${sanitizedCode}-${price}`;
       
       try {
         // Generate barcode - LARGER width and height, VERY DARK, with LARGER number
@@ -981,7 +984,10 @@ export default function BarcodeGenerator() {
         </head>
         <body>
           ${selectedProducts.map((sp) => {
-            const barcodeValue = `${sp.product.sku || sp.product.code || 'PROD'}-${Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)))}`;
+            // Sanitize SKU/code to remove special characters
+            const rawCode = sp.product.sku || sp.product.code || 'PROD';
+            const sanitizedCode = rawCode.replace(/[^A-Za-z0-9]/g, ''); // Remove all non-alphanumeric characters
+            const barcodeValue = `${sanitizedCode}-${Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)))}`;
             const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
             const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
             
