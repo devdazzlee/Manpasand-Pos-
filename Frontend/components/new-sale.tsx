@@ -1963,7 +1963,7 @@ export function NewSale() {
                       <div className="space-y-1">
                         <h4 className="text-sm font-semibold text-gray-900 leading-snug">{item.name}</h4>
                         <p className="text-xs text-gray-500">
-                          Unit: Rs {(item.actualUnitPrice || item.price).toFixed(2)} • Line Total: Rs {((item.actualUnitPrice || item.price) * item.quantity).toFixed(2)}
+                          Unit: Rs {(item.actualUnitPrice || item.price).toFixed(2)}
                         </p>
                       </div>
                       <Button
@@ -1976,8 +1976,8 @@ export function NewSale() {
                       </Button>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-2 gap-3">
-                      <div>
+                    <div className="mt-3 flex items-end gap-6">
+                      <div className="min-w-0">
                         <label className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
                           Price (Rs)
                         </label>
@@ -2080,10 +2080,10 @@ export function NewSale() {
                               }
                             }
                           }}
-                          className="mt-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          className="mt-1 h-8 w-20 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
                       </div>
-                      <div>
+                      <div className="min-w-0">
                         <label className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
                           Quantity {item.unitName ? `(${item.unitName})` : ''}
                         </label>
@@ -2223,7 +2223,7 @@ export function NewSale() {
                                 }
                               }
                             }}
-                            className="h-8 w-16 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            className="h-8 w-20 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                           />
                           <Button
                             size="sm"
@@ -2252,6 +2252,14 @@ export function NewSale() {
                             ×
                           </Button>
                         </div>
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <label className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                          Total
+                        </label>
+                        <p className="mt-1 block truncate text-sm font-semibold text-gray-900">
+                          Rs {((item.actualUnitPrice || item.price) * item.quantity).toFixed(2)}
+                        </p>
                       </div>
                     </div>
                   </div>
