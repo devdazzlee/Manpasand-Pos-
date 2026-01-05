@@ -118,25 +118,59 @@ export default function BarcodeGenerator() {
 
   // Generate proper barcode using JsBarcode
   const generateBarcodeDataURL = (value: string): string => {
+    // Validate and sanitize barcode value
+    if (!value || typeof value !== 'string') {
+      console.error("Invalid barcode value:", value);
+      return "";
+    }
+
+    // Remove any invalid characters for CODE128 (keep alphanumeric, dash, underscore)
+    const sanitizedValue = value.replace(/[^A-Za-z0-9\-_]/g, '');
+    
+    if (!sanitizedValue || sanitizedValue.length === 0) {
+      console.error("Barcode value is empty after sanitization:", value);
+      return "";
+    }
+
+    // Create canvas with adequate size for barcode
     const canvas = document.createElement("canvas");
-    canvas.width = 300;
-    canvas.height = 80;
+    // Much larger canvas for better barcode quality and visibility
+    canvas.width = 600;
+    canvas.height = 200;
 
     try {
-      JsBarcode(canvas, value, {
+      // Generate barcode with proper settings for optimal scannability
+      // CODE128 requires proper quiet zones (margins) and adequate bar width
+      JsBarcode(canvas, sanitizedValue, {
         format: "CODE128",
-        width: 2,
-        height: 60,
-        displayValue: false,
-        margin: 10,
+        width: 2.5, // Optimal bar width for scanning (not too thin, not too thick)
+        height: 100, // Adequate height for scanning (reduced slightly to prevent overlap)
+        displayValue: true, // Show the value below barcode for verification
+        margin: 25, // Increased quiet zone (required for proper scanning)
         background: "#ffffff",
         lineColor: "#000000",
+        fontSize: 14, // Readable font size
+        textAlign: "center",
+        textPosition: "bottom",
+        textMargin: 10, // Adequate spacing between barcode and text
+        valid: function(valid) {
+          if (!valid) {
+            console.error("Invalid barcode value for CODE128:", sanitizedValue);
+          }
+        }
       });
-      return canvas.toDataURL("image/png");
+      
+      // Verify barcode was generated
+      const dataURL = canvas.toDataURL("image/png");
+      if (!dataURL || dataURL === "data:,") {
+        throw new Error("Failed to generate barcode image");
+      }
+      
+      return dataURL;
     } catch (error) {
-      console.error("Error generating barcode:", error);
-      // Fallback: return empty data URL
-      return "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==";
+      console.error("Error generating barcode:", error, "Value:", sanitizedValue);
+      // Return empty string instead of placeholder to show error state
+      return "";
     }
   };
 
@@ -978,25 +1012,42 @@ export default function BarcodeGenerator() {
             .title {
               font-weight: bold;
               font-size: 13pt;
-              margin-bottom: 2mm;
+              margin-bottom: 3mm;
               text-transform: uppercase;
+              word-wrap: break-word;
+              overflow-wrap: break-word;
+              line-height: 1.2;
             }
             .meta {
               font-size: 9pt;
-              margin-bottom: 2mm;
+              margin-bottom: 4mm;
+              word-wrap: break-word;
+              overflow-wrap: break-word;
+              white-space: nowrap;
+              overflow: hidden;
+              text-overflow: ellipsis;
             }
             .barcode-container {
-              margin: 5mm 0;
+              margin: 4mm 0;
+              min-height: 20mm;
+              display: flex;
+              align-items: center;
+              justify-content: center;
             }
             .barcode {
-              max-width: 100%;
+              max-width: 85%;
               height: auto;
+              display: block;
+              margin: 0 auto;
             }
             .dates {
               font-size: 9pt;
-              border-top: 1px solid #ccc;
+              margin-top: 4mm;
               padding-top: 2mm;
-              margin-top: 5mm;
+              border-top: 1px solid #ccc;
+              word-wrap: break-word;
+              overflow-wrap: break-word;
+              white-space: nowrap;
             }
           </style>
         </head>
@@ -1077,25 +1128,42 @@ export default function BarcodeGenerator() {
           .title {
             font-weight: bold;
             font-size: 13pt;
-            margin-bottom: 2mm;
+            margin-bottom: 3mm;
             text-transform: uppercase;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            line-height: 1.2;
           }
           .meta {
             font-size: 9pt;
-            margin-bottom: 2mm;
+            margin-bottom: 4mm;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
           }
           .barcode-container {
-            margin: 5mm 0;
+            margin: 4mm 0;
+            min-height: 20mm;
+            display: flex;
+            align-items: center;
+            justify-content: center;
           }
           .barcode {
-            max-width: 100%;
+            max-width: 85%;
             height: auto;
+            display: block;
+            margin: 0 auto;
           }
           .dates {
             font-size: 9pt;
-            border-top: 1px solid #ccc;
+            margin-top: 4mm;
             padding-top: 2mm;
-            margin-top: 5mm;
+            border-top: 1px solid #ccc;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            white-space: nowrap;
           }
         </style>
       </head>
@@ -1617,23 +1685,39 @@ export default function BarcodeGenerator() {
                             )}
                           </span>
                         </div>
-                        <div className="flex justify-center bg-white p-2 rounded">
-                          <img
-                            src={generateBarcodeDataURL(
-                              `${
-                                item.product.sku || item.product.code || "PROD"
-                              }-${Math.round(
-                                Number(
-                                  calculatePriceByWeight(
-                                    item.netWeight,
-                                    item.product.sales_rate_exc_dis_and_tax
-                                  )
+                        <div className="flex justify-center bg-white p-4 rounded min-h-[180px] items-center">
+                          {(() => {
+                            const barcodeValue = `${
+                              item.product.sku || item.product.code || "PROD"
+                            }-${Math.round(
+                              Number(
+                                calculatePriceByWeight(
+                                  item.netWeight,
+                                  item.product.sales_rate_exc_dis_and_tax
                                 )
-                              )}`
-                            )}
-                            alt="Barcode Preview"
-                            className="max-w-full h-10 object-contain"
-                          />
+                              )
+                            )}`;
+                            const barcodeImage = generateBarcodeDataURL(barcodeValue);
+                            
+                            return barcodeImage ? (
+                              <img
+                                src={barcodeImage}
+                                alt={`Barcode: ${barcodeValue}`}
+                                className="w-full max-w-md h-auto object-contain"
+                                style={{ minHeight: '140px', maxHeight: '160px' }}
+                                onError={(e) => {
+                                  console.error("Barcode image failed to load:", barcodeValue);
+                                  e.currentTarget.style.display = 'none';
+                                }}
+                              />
+                            ) : (
+                              <div className="text-xs text-red-500 p-2 text-center">
+                                Failed to generate barcode
+                                <br />
+                                <span className="text-gray-500 text-[10px]">{barcodeValue}</span>
+                              </div>
+                            );
+                          })()}
                         </div>
                         <div className="flex justify-between text-xs border-t pt-2">
                           <span>PKG: {formatDate(item.packageDate)}</span>

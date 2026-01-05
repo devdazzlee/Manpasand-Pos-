@@ -66,3 +66,7 @@ echo ""
 echo "🚀 If both connections work, run: npx ts-node scripts/migrate-data.ts"
 
 
+
+
+
+

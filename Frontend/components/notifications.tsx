@@ -76,34 +76,64 @@ export function Notifications() {
       const notificationsData = notificationsRes.data?.data?.notifications || []
       const statsData = statsRes.data?.data || {}
 
+      // Get user role to filter admin-only notifications
+      const userRole = localStorage.getItem("role");
+      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
+
       // Transform backend data to frontend format
-      const transformedNotifications = notificationsData.map((n: any) => ({
-        id: n.id,
-        title: n.title,
-        message: n.message,
-        type: mapNotificationType(n.type, n.priority),
-        timestamp: new Date(n.created_at).toLocaleString('en-US', {
-          year: 'numeric',
-          month: '2-digit',
-          day: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit',
-        }),
-        read: n.is_read,
-        priority: n.priority?.toLowerCase() || 'medium',
-        category: n.category || 'system',
-        notificationType: n.type,
-        metadata: n.metadata,
-      }))
+      // Filter out SALE notifications and only show:
+      // - STOCK (inventory low)
+      // - ORDER (website orders)
+      // - INVENTORY (unfinished goods - admin only)
+      const transformedNotifications = notificationsData
+        .filter((n: any) => {
+          // Exclude SALE notifications
+          if (n.type === 'SALE') return false;
+          
+          // Only show STOCK, ORDER, and INVENTORY
+          if (n.type === 'STOCK' || n.type === 'ORDER') return true;
+          
+          // INVENTORY (unfinished goods) - only for admin
+          if (n.type === 'INVENTORY') return isAdmin;
+          
+          // Exclude all other types
+          return false;
+        })
+        .map((n: any) => ({
+          id: n.id,
+          title: n.title,
+          message: n.message,
+          type: mapNotificationType(n.type, n.priority),
+          timestamp: new Date(n.created_at).toLocaleString('en-US', {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+          }),
+          read: n.is_read,
+          priority: n.priority?.toLowerCase() || 'medium',
+          category: n.category || 'system',
+          notificationType: n.type,
+          metadata: n.metadata,
+        }))
 
       setNotifications(transformedNotifications)
-      setStats({
-        total: statsData.total || 0,
-        unread: statsData.unread || 0,
-        highPriority: statsData.highPriority || 0,
-        today: statsData.today || 0,
-      })
+      
+      // Recalculate stats based on filtered notifications (excluding SALE)
+      const filteredStats = {
+        total: transformedNotifications.length,
+        unread: transformedNotifications.filter((n) => !n.read).length,
+        highPriority: transformedNotifications.filter((n) => n.priority === 'high' || n.priority === 'critical').length,
+        today: transformedNotifications.filter((n) => {
+          const notifDate = new Date(n.timestamp);
+          const today = new Date();
+          return notifDate.toDateString() === today.toDateString();
+        }).length,
+      }
+      
+      setStats(filteredStats)
     } catch (error) {
       console.error('Failed to fetch notifications:', error)
     } finally {

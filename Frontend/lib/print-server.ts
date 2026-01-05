@@ -1,22 +1,10 @@
 /**
  * Print Server API Client
- * Sends print requests to local print server running on client machine
- * Uses same API format as backend (printer, job, receiptData)
- * Falls back to backend API if local server is not available
+ * Uses connection manager for proper state management
+ * No retries, no timeouts - proper connection lifecycle management
  */
 
-import { PRINT_API_BASE, PRINT_API_FALLBACK } from '@/config/constants';
-
-// Determine which print server to use based on availability
-const getPrintServerUrl = (): string => {
-  // Try local print server first
-  return PRINT_API_BASE;
-};
-
-// Fallback to backend API if local server fails
-const getFallbackUrl = (): string => {
-  return PRINT_API_FALLBACK;
-};
+import { printServerConnectionManager } from './print-server-connection-manager';
 
 export interface ReceiptItem {
   name: string;
@@ -64,109 +52,91 @@ export interface PrintJob {
 }
 
 /**
- * Check if local print server is available
+ * Make HTTP request using connection manager
  */
-export async function checkPrintServer(): Promise<boolean> {
-  try {
-    // Create timeout controller for compatibility
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 2000);
-    
-    const response = await fetch(`${getPrintServerUrl()}/health`, {
-      method: 'GET',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      signal: controller.signal,
-    });
-    
-    clearTimeout(timeoutId);
-    const data = await response.json();
-    return data.status === 'ok';
-  } catch (error) {
-    console.log('Local print server not available, will use backend API');
-    return false;
-  }
+async function makeRequest(
+  url: string,
+  options: RequestInit = {}
+): Promise<Response> {
+  // Generate unique connection ID to prevent connection reuse
+  const connectionId = `req_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+  
+  const response = await fetch(url, {
+    ...options,
+    // Force new connection - prevent connection reuse
+    cache: 'no-store',
+    headers: {
+      ...options.headers,
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0',
+      'X-Request-ID': connectionId,
+    },
+  });
+
+  return response;
 }
 
 /**
- * Get available printers - tries local server first, then backend
+ * Check if local print server is available
+ * Uses connection manager for proper state validation
+ */
+export async function checkPrintServer(): Promise<boolean> {
+  const connection = await printServerConnectionManager.ensureConnection();
+  return connection.available;
+}
+
+/**
+ * Get available printers - uses connection manager
+ * Only uses local print server - no fallback
  */
 export async function getPrinters(): Promise<{
   success: boolean;
   data?: Array<{ name: string; isDefault?: boolean; status?: string }>;
   error?: string;
 }> {
-  // Try local print server first
-  console.log('🔍 Checking for local print server...');
-  const isLocalAvailable = await checkPrintServer();
+  // Ensure connection is valid before operation
+  const connection = await printServerConnectionManager.ensureConnection();
   
-  if (isLocalAvailable) {
-    console.log('✅ Local print server available, using:', getPrintServerUrl());
-    try {
-      const response = await fetch(`${getPrintServerUrl()}/printers`, {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      });
-      const result = await response.json();
-      if (result.success) {
-        console.log('✅ Got printers from local print server');
-        return result;
-      }
-    } catch (error: any) {
-      console.warn('⚠️ Local print server failed, trying backend:', error.message);
-    }
-  } else {
-    console.log('⚠️ Local print server not available, using backend');
+  if (!connection.available) {
+    return {
+      success: false,
+      error: 'Local print server is not available',
+    };
   }
 
-  // Fallback to backend API
   try {
-    console.log('📡 Using backend API for printers:', `${getFallbackUrl()}/printers`);
-    const response = await fetch(`${getFallbackUrl()}/printers`, {
+    const response = await makeRequest(`${connection.url}/printers`, {
       method: 'GET',
       headers: {
         'Content-Type': 'application/json',
       },
     });
-    
-    if (!response.ok) {
-      throw new Error(`Backend API returned ${response.status}`);
-    }
-    
+
     const result = await response.json();
     
-    // Backend returns { success: true, data: [...] } or { data: [...] }
-    if (result.success && result.data) {
-      return {
-        success: true,
-        data: result.data,
-      };
-    } else if (result.data) {
-      return {
-        success: true,
-        data: result.data,
-      };
-    } else {
-      return {
-        success: true,
-        data: result,
-      };
+    if (result.success) {
+      return result;
     }
-  } catch (error: any) {
-    console.error('Error getting printers from backend:', error);
+
     return {
       success: false,
-      error: error.message || 'Failed to get printers',
+      error: result.error || 'Failed to get printers',
+    };
+  } catch (error: any) {
+    // Connection failed - reset state
+    printServerConnectionManager.resetConnection();
+    return {
+      success: false,
+      error: error.message || 'Failed to connect to print server',
     };
   }
 }
 
 /**
- * Print receipt - tries local server first, then backend API
- * Uses same API format (printer, job, receiptData)
+ * Print receipt - uses connection manager for proper state management
+ * No retries, no timeouts, no fallback - proper connection validation
+ * Only uses local print server
  */
 export async function printReceiptViaServer(
   printer: Printer,
@@ -177,44 +147,19 @@ export async function printReceiptViaServer(
   error?: string;
   message?: string;
 }> {
-  // Try local print server first
-  const isLocalAvailable = await checkPrintServer();
+  // Always ensure connection is valid before printing
+  // This is the key - validates connection state before every operation
+  const connection = await printServerConnectionManager.ensureConnection();
   
-  if (isLocalAvailable) {
-    try {
-      const response = await fetch(`${getPrintServerUrl()}/print-receipt`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          printer,
-          job: job ?? { copies: 1, cut: true, openDrawer: false },
-          receiptData,
-        }),
-      });
-
-      const result = await response.json();
-
-      if (!response.ok) {
-        throw new Error(result.message || result.error || 'Print failed');
-      }
-
-      console.log('✅ Receipt printed via local print server');
-      return {
-        success: true,
-        message: result.message || 'Receipt printed successfully',
-      };
-    } catch (error: any) {
-      console.warn('Local print server failed, trying backend:', error.message);
-      // Continue to fallback below
-    }
+  if (!connection.available) {
+    return {
+      success: false,
+      error: 'Local print server is not available',
+    };
   }
 
-  // Fallback to backend API
   try {
-    console.log('📡 Using backend API for printing');
-    const response = await fetch(`${getFallbackUrl()}/print-receipt`, {
+    const response = await makeRequest(`${connection.url}/print-receipt`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -232,13 +177,13 @@ export async function printReceiptViaServer(
       throw new Error(result.message || result.error || 'Print failed');
     }
 
-    console.log('✅ Receipt printed via backend API');
     return {
       success: true,
       message: result.message || 'Receipt printed successfully',
     };
   } catch (error: any) {
-    console.error('Print failed (both local and backend):', error);
+    // Connection failed - reset state so next attempt validates fresh
+    printServerConnectionManager.resetConnection();
     return {
       success: false,
       error: error.message || 'Failed to connect to print server',
@@ -248,7 +193,6 @@ export async function printReceiptViaServer(
 
 /**
  * Try to print via local server, fallback to browser print
- * (Helper function - use printReceiptViaServer directly for more control)
  */
 export async function printReceipt(
   printer: Printer,
@@ -256,21 +200,12 @@ export async function printReceipt(
   job?: PrintJob,
   fallbackToBrowser: () => void = () => {}
 ): Promise<boolean> {
-  // Check if print server is available
-  const isAvailable = await checkPrintServer();
-
-  if (isAvailable) {
-    // Use local print server (same format as backend)
-    const result = await printReceiptViaServer(printer, receiptData, job);
-    if (result.success) {
-      return true;
-    }
-    // If print server fails, fallback to browser
-    console.warn('Print server failed, falling back to browser print:', result.error);
-  } else {
-    console.warn('Print server not available, falling back to browser print');
+  const result = await printReceiptViaServer(printer, receiptData, job);
+  
+  if (result.success) {
+    return true;
   }
-
+  
   // Fallback to browser print
   fallbackToBrowser();
   return false;

@@ -252,9 +252,16 @@ export function SalesHistory() {
           name: branchStr,
         }));
         const branchRes = await apiClient.get(`/branches/${branchStr}`);
+        const branchName = branchRes.data.data.name || branchStr;
+        const branchAddress = branchRes.data.data.address || "Karachi";
+        
+        // Update localStorage with fresh branch name and address (same as login)
+        localStorage.setItem("branchName", branchName);
+        localStorage.setItem("branchAddress", branchAddress);
+        
         setBranchInfo({
-          name: branchRes.data.data.name || branchStr,
-          address: branchRes.data.data.address || "Karachi",
+          name: branchName,
+          address: branchAddress,
         });
       } catch (error) {
         console.warn("Failed to load branch info", error);
@@ -373,7 +380,7 @@ export function SalesHistory() {
   // Print
   const printTable = () => window.print();
 
-  const prepareReceiptDataFromSale = (sale: Sale, branch: BranchInfo): ReceiptData => {
+  const prepareReceiptDataFromSale = async (sale: Sale, branch: BranchInfo): Promise<ReceiptData> => {
     const subtotalFromApi = sale.subtotal ? parseFloat(sale.subtotal) : NaN;
     const subtotal =
       !isNaN(subtotalFromApi) && subtotalFromApi > 0
@@ -409,10 +416,14 @@ export function SalesHistory() {
       };
     });
 
+    // Hardcoded branch name and address as requested
+    const finalBranchName = "Bahadurabad";
+    const finalAddress = "Bahadurabad, Karachi";
+
     return {
-      storeName: branch.name || "MANPASAND GENERAL STORE",
+      storeName: "Bahadurabad, Karachi",
       tagline: "Quality • Service • Value",
-      address: branch.address ? `${branch.address}, Karachi` : "Karachi",
+      address: "Bahadurabad, Karachi",
       transactionId: sale.sale_number,
       timestamp: sale.created_at || sale.sale_date,
       cashier: "Walk-in",
@@ -464,11 +475,9 @@ export function SalesHistory() {
     
     const promoHtml = data.promo ? `<div class="promo">Promo: ${data.promo}</div>` : "";
     
-    // Footer lines matching PrintServer
+    // Footer lines - Website and Contact on same line
     const footerLines = [
-      'Branch: 021 34892110',
-      'Delivery Hotline WhatsApp: +92 342 3344040',
-      'Website: Manpasandstore.com'
+      'Website: Manpasandstore.com | Contact: +92 336 2500357'
     ];
     
     const footerHtml = footerLines.map(line => `<div class="footer-line">${line}</div>`).join('');
@@ -488,8 +497,9 @@ export function SalesHistory() {
   alt="Logo" 
   class="logo-img" />
 </div>
-<div class="store-name">${data.address || "Karachi"}</div>
+<div class="store-name">${data.storeName || "MANPASAND GENERAL STORE"}</div>
 <div class="tagline">${data.tagline || "Quality - Service - Value"}</div>
+<!-- <div class="address">${data.address || "Karachi"}</div> -->
 ${data.strn ? `<div class="strn">${data.strn}</div>` : ''}
 
 <div class="divider"></div>
@@ -571,6 +581,7 @@ ${promoHtml}
 </div>
 
 <div class="thank-you">${data.thankYouMessage || "Thank you for shopping!"}</div>
+<div class="footer-line">Branch: 021 34892110</div>
 ${footerHtml}
 ${aceHtml}
 </div>
@@ -854,15 +865,43 @@ ${aceHtml}
   };
 
   useEffect(() => {
-    if (viewSale) {
-      const data = prepareReceiptDataFromSale(viewSale, branchInfo);
-      const content = generateReceiptHtml(data);
-      setReceiptData(data);
-      setReceiptHtml(receiptPageWrapper(content));
-    } else {
-      setReceiptHtml("");
-      setReceiptData(null);
-    }
+    const loadReceiptData = async () => {
+      if (viewSale) {
+        try {
+          const data = await prepareReceiptDataFromSale(viewSale, branchInfo);
+          const content = generateReceiptHtml(data);
+          setReceiptData(data);
+          setReceiptHtml(receiptPageWrapper(content));
+        } catch (error) {
+          console.error("Failed to prepare receipt data:", error);
+          // Fallback to basic receipt data
+          const fallbackData: ReceiptData = {
+            storeName: branchInfo.name || "MANPASAND GENERAL STORE",
+            tagline: "Quality • Service • Value",
+            address: branchInfo.address || "Karachi",
+            transactionId: viewSale.sale_number,
+            timestamp: viewSale.created_at || viewSale.sale_date,
+            cashier: "Walk-in",
+            customerType: viewSale.customer?.email || "Walk-in",
+            items: [],
+            subtotal: 0,
+            total: parseFloat(viewSale.total_amount),
+            paymentMethod: viewSale.payment_method,
+            amountPaid: parseFloat(viewSale.total_amount),
+            changeAmount: 0,
+            thankYouMessage: "Thank you for shopping!",
+            footerMessage: "Visit us again soon!",
+          };
+          const content = generateReceiptHtml(fallbackData);
+          setReceiptData(fallbackData);
+          setReceiptHtml(receiptPageWrapper(content));
+        }
+      } else {
+        setReceiptHtml("");
+        setReceiptData(null);
+      }
+    };
+    loadReceiptData();
   }, [viewSale, branchInfo]);
 
   useEffect(() => {

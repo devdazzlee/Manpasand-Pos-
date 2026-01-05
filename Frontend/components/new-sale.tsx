@@ -26,6 +26,11 @@ import {
   Scan,
   ChevronDown,
   ChevronUp,
+  Receipt,
+  Loader2,
+  Save,
+  RotateCcw,
+  X,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { offlineAPIClient } from "@/lib/offline-api-client";
@@ -35,6 +40,8 @@ import { usePosData } from "@/hooks/use-pos-data";
 import { printReceiptViaServer, getPrinters, type ReceiptData } from "@/lib/print-server";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useHoldSales } from "@/hooks/use-hold-sales";
+import { useToast } from "@/hooks/use-toast";
+import { Label } from "@/components/ui/label";
 
 interface CartItem {
   id: string; // Unique cart item ID (product.id + timestamp for separate entries)
@@ -84,6 +91,7 @@ interface Printer {
 
 
 export function NewSale() {
+  const { toast } = useToast();
   const [cart, setCart] = useState<CartItem[]>([]);
   // Track input values as strings to allow decimal point typing
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
@@ -95,7 +103,23 @@ export function NewSale() {
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
-  const { holdSales, holdSale, retrieveHoldSale } = useHoldSales();
+  const { holdSales, holdSale, retrieveHoldSale, deleteHoldSale } = useHoldSales();
+  
+  // Cash Register state
+  const [cashDrawer, setCashDrawer] = useState<{
+    id: string;
+    isOpen: boolean;
+    openingAmount: number;
+    currentAmount: number;
+    totalSales: number;
+  } | null>(null);
+  const [isOpenDrawerDialogOpen, setIsOpenDrawerDialogOpen] = useState(false);
+  const [isCloseDrawerDialogOpen, setIsCloseDrawerDialogOpen] = useState(false);
+  const [openingAmount, setOpeningAmount] = useState("");
+  const [totalCashInDrawer, setTotalCashInDrawer] = useState(0);
+  const [openDrawerLoading, setOpenDrawerLoading] = useState(false);
+  const [closeDrawerLoading, setCloseDrawerLoading] = useState(false);
+  
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [globalDiscountType, setGlobalDiscountType] = useState<'percentage' | 'amount'>('percentage');
   const [discountInput, setDiscountInput] = useState<string>("");
@@ -140,30 +164,13 @@ export function NewSale() {
     }
     return null;
   });
-  const [selectedPrinter, setSelectedPrinter] = useState<string>(() => {
-    // Load saved printer name for dropdown
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('savedPrinter');
-      if (saved) {
-        try {
-          const printer = JSON.parse(saved);
-          return printer.name || "";
-        } catch (e) {
-          return "";
-        }
-      }
-    }
-    return "";
-  });
-  const [showPrinterSettings, setShowPrinterSettings] = useState(false);
+  // Removed selectedPrinter state - always use default printer
   const [showHeldSales, setShowHeldSales] = useState(false);
 
-  // Save selected printer object to localStorage whenever it changes
+  // Save default printer object to localStorage whenever it changes
   useEffect(() => {
     if (savedPrinterObj) {
       localStorage.setItem('savedPrinter', JSON.stringify(savedPrinterObj));
-      // Also update selectedPrinter name for the dropdown
-      setSelectedPrinter(savedPrinterObj.name);
     }
   }, [savedPrinterObj]);
 
@@ -206,6 +213,33 @@ export function NewSale() {
     };
 
     fetchData();
+    
+    // Fetch cash drawer status
+    const fetchCashDrawer = async () => {
+      try {
+        const today = new Date();
+        const year = today.getFullYear();
+        const month = String(today.getMonth() + 1).padStart(2, "0");
+        const day = String(today.getDate()).padStart(2, "0");
+        const dateString = `${year}-${month}-${day}`;
+        
+        const response = await apiClient.get(`/cashflows/by-date?date=${dateString}`);
+        if (response.data.success && response.data.data?.exists && response.data.data?.data) {
+          const cashFlowData = response.data.data.data;
+          setCashDrawer({
+            id: cashFlowData.id,
+            isOpen: cashFlowData.status === "OPEN",
+            openingAmount: Number(cashFlowData.opening),
+            currentAmount: cashFlowData.closing ? Number(cashFlowData.closing) : Number(cashFlowData.opening),
+            totalSales: Number(cashFlowData.sales),
+          });
+        }
+      } catch (error) {
+        // Error loading cash drawer - no toast shown
+      }
+    };
+    
+    fetchCashDrawer();
 
     // Focus the search input
     if (searchInputRef.current) {
@@ -458,18 +492,18 @@ export function NewSale() {
       {
         id: uniqueCartItemId, // Unique ID for this cart entry (each scan = new entry)
         productId: product.id, // Store original product ID for reference
-        name: product.name,
+          name: product.name,
         price: displayPrice, // Display price (barcode price if scanned, otherwise original)
         originalPrice: originalProductPrice, // Store original product price
         actualUnitPrice: actualUnitPrice, // Actual unit price for line total calculations
         quantity: finalQuantity, // Calculated quantity (barcodePrice / originalPrice)
-        category: product.category,
-        discount: 0,
-        unitId: product.unitId,
-        unitName: product.unitName,
-        unit: product.unitName,
-      },
-    ]);
+          category: product.category,
+          discount: 0,
+          unitId: product.unitId,
+          unitName: product.unitName,
+          unit: product.unitName,
+        },
+      ]);
 
     lastAddedProductId.current = uniqueCartItemId;
     
@@ -491,12 +525,12 @@ export function NewSale() {
       // Keep focus on search input for rapid scanning
       /*
       if (customPrice === undefined) {
-        setTimeout(() => {
+    setTimeout(() => {
           const priceInput = priceInputRefs.current[uniqueCartItemId];
-          if (priceInput) {
-            priceInput.focus();
-            priceInput.select();
-          }
+      if (priceInput) {
+        priceInput.focus();
+        priceInput.select();
+      }
         }, 0);
       }
       */
@@ -707,32 +741,10 @@ export function NewSale() {
         const printerList = result.data;
         setPrinters(printerList);
 
-        // Try to restore saved printer object from localStorage first
-        const savedPrinterStr = localStorage.getItem('savedPrinter');
-        if (savedPrinterStr) {
-          try {
-            const savedPrinter: Printer = JSON.parse(savedPrinterStr);
-            // Check if saved printer still exists in the list
-            const foundPrinter = printerList.find((p: Printer) => p.name === savedPrinter.name);
-            if (foundPrinter) {
-              // Use the current printer data from API (in case it was updated)
-              setSavedPrinterObj(foundPrinter);
-              setSelectedPrinter(foundPrinter.name);
-              return;
-            }
-          } catch (e) {
-            console.error("Failed to parse saved printer:", e);
-          }
-        }
-        
-        // No saved printer or saved printer not found, use default
-        const defaultPrinter = printerList.find((p: Printer) => p.isDefault);
+        // Always use default printer - no user selection allowed
+        const defaultPrinter = printerList.find((p: Printer) => p.isDefault) || printerList[0];
         if (defaultPrinter) {
           setSavedPrinterObj(defaultPrinter);
-          setSelectedPrinter(defaultPrinter.name);
-        } else if (printerList.length > 0) {
-          setSavedPrinterObj(printerList[0]);
-          setSelectedPrinter(printerList[0].name);
         }
       } else {
         throw new Error(result.error || 'Failed to get printers');
@@ -886,8 +898,8 @@ export function NewSale() {
           }
           return {
             productId,
-            quantity: item.quantity,
-            price: item.price,
+          quantity: item.quantity,
+          price: item.price,
           };
         });
 
@@ -1085,7 +1097,7 @@ export function NewSale() {
 
           // If still no printer, show error
           if (!printerToUse) {
-            throw new Error("No printer selected. Please select a printer in settings.");
+            throw new Error("No default printer available. Please configure a default printer.");
           }
 
           // Send full printer object from localStorage to API
@@ -1366,7 +1378,7 @@ export function NewSale() {
       return; // Exit early - don't add to cart
     }
     // Add to cart immediately if found (synchronous, no delays)
-    if (product) {
+      if (product) {
       console.log('✅ SUCCESS - Adding to cart:', {
         scannedCode: productCode,
         scannedPrice: customPrice,
@@ -1530,6 +1542,48 @@ export function NewSale() {
               )}
             </div>
             <div className="flex flex-wrap items-center gap-2">
+              {/* Cash Register Open/Close */}
+              <div className="flex items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className={`${
+                    cashDrawer?.isOpen
+                      ? "bg-green-50 text-green-700 border-green-200"
+                      : "bg-red-50 text-red-700 border-red-200"
+                  }`}
+                >
+                  {cashDrawer?.isOpen ? "Drawer Open" : "Drawer Closed"}
+                </Badge>
+                {!cashDrawer?.isOpen ? (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsOpenDrawerDialogOpen(true)}
+                    disabled={openDrawerLoading}
+                  >
+                    {openDrawerLoading ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <DollarSign className="h-4 w-4 mr-2" />
+                    )}
+                    Open Drawer
+                  </Button>
+                ) : (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setIsCloseDrawerDialogOpen(true)}
+                    disabled={closeDrawerLoading}
+                  >
+                    {closeDrawerLoading ? (
+                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    ) : (
+                      <Receipt className="h-4 w-4 mr-2" />
+                    )}
+                    Close Drawer
+                  </Button>
+                )}
+              </div>
               {cart.length > 0 && (
                 <Button variant="outline" onClick={holdCurrentSale}>
                   Hold Sale
@@ -1665,58 +1719,6 @@ export function NewSale() {
           </div>
         </div>
 
-          <div className="mb-4">
-            <div className="rounded-2xl border border-dashed border-blue-200 bg-white shadow-sm">
-              <button
-                type="button"
-                onClick={() => setShowPrinterSettings((prev) => !prev)}
-                className="flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-blue-50/40"
-              >
-                <div>
-                  <p className="text-sm font-semibold text-gray-900">Printer Settings</p>
-                  <p className="text-xs text-gray-500">
-                    Choose the receipt printer before completing a sale.
-                  </p>
-                </div>
-                <div className="rounded-full bg-blue-100 p-1 text-blue-600">
-                  {showPrinterSettings ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                </div>
-              </button>
-              {showPrinterSettings && (
-                <div className="space-y-3 border-t border-blue-100 px-4 py-4">
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Select printer
-                  </label>
-                  <select
-                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={selectedPrinter}
-                    onChange={(e) => {
-                      const printerName = e.target.value;
-                      setSelectedPrinter(printerName);
-                      // Find and save the full printer object
-                      const selectedPrinterObj = printers.find((p) => p.name === printerName);
-                      if (selectedPrinterObj) {
-                        setSavedPrinterObj(selectedPrinterObj);
-                      }
-                    }}
-                  >
-                    <option value="">Choose a printer</option>
-                    {printers.map((printer) => (
-                      <option key={printer.name} value={printer.name}>
-                        {printer.name} {printer.isDefault ? "(Default)" : ""}
-                      </option>
-                    ))}
-                  </select>
-                  {printers.length === 0 && (
-                    <p className="text-xs text-gray-500">Loading available printers...</p>
-                  )}
-                  <p className="text-xs text-gray-500">
-                    A printer must be selected to enable payments and automatic receipt printing.
-                  </p>
-                </div>
-              )}
-            </div>
-          </div>
 
         {/* Categories */}
         <div className="flex space-x-2 mb-6 overflow-x-auto">
@@ -1850,68 +1852,91 @@ export function NewSale() {
           )}
 
           {cart.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={clearCart}
-                className="flex-1 min-w-[120px] border-dashed"
-              >
-                Clear Cart
-              </Button>
               <Button
                 variant="default"
-                size="sm"
+              size="lg"
                 onClick={holdCurrentSale}
-                className="flex-1 min-w-[120px]"
+              className="w-full bg-orange-500 hover:bg-orange-600 text-white font-bold py-3 text-base"
               >
-                Hold Sale
+              <Save className="mr-2 h-5 w-5" />
+              SAVE SALE
               </Button>
-            </div>
           )}
-
           {holdSales.length > 0 && (
-            <Button
-              variant="ghost"
-              size="sm"
+            <div className="mt-4 rounded-lg border border-yellow-300 bg-yellow-50 p-3 shadow-sm">
+              <button
+                type="button"
               onClick={() => setShowHeldSales((prev) => !prev)}
-              className="mt-3 w-full justify-between border border-gray-200 bg-white hover:bg-white"
-            >
-              <span className="text-sm font-medium text-gray-700">
-                Held Sales ({holdSales.length})
+                className="flex w-full items-center justify-between gap-2 text-left transition hover:bg-yellow-100/40 rounded-md p-2 -m-2"
+              >
+                <div className="flex items-center gap-2">
+                  <Badge className="bg-yellow-600 text-white font-bold text-xs px-2 py-0.5">
+                    {holdSales.length} SAVED
+                  </Badge>
+                  <span className="text-sm font-semibold text-yellow-800">
+                    Saved Sales
               </span>
-              {showHeldSales ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-            </Button>
-          )}
-
-          {holdSales.length > 0 && showHeldSales && (
-            <div id="held-sales-list" className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3">
-              <ScrollArea className="max-h-32">
-                <div className="space-y-2 pr-2">
+                </div>
+                {showHeldSales ? <ChevronUp className="h-4 w-4 text-yellow-700" /> : <ChevronDown className="h-4 w-4 text-yellow-700" />}
+              </button>
+              {showHeldSales && (
+                <div id="held-sales-list" className="mt-3 space-y-2">
                   {holdSales.map((sale, index) => {
                     const saleTotal = sale.reduce(
                       (sum, item) => sum + (item.actualUnitPrice || item.price) * item.quantity,
                       0
                     );
+                    const itemCount = sale.reduce(
+                      (sum, item) => sum + item.quantity,
+                      0
+                    );
                     return (
-                      <Button
+                      <div
                         key={index}
-                        variant="outline"
-                        onClick={() => handleRetrieveHoldSale(index)}
-                        className="h-auto w-full justify-between border-gray-200 py-2"
+                        className="flex flex-col gap-2 rounded-lg border border-blue-200 bg-blue-50 p-3 shadow-sm"
                       >
-                        <div className="flex flex-col items-start text-left">
-                          <span className="font-medium text-gray-900">Sale #{index + 1}</span>
-                          <span className="text-xs text-gray-500">
-                            {sale.length} items • Rs {saleTotal.toFixed(2)}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className="flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <Badge className="bg-blue-600 text-white font-bold text-xs px-2 py-0.5">
+                                #{index + 1}
+                              </Badge>
+                              <span className="font-bold text-blue-900 text-sm">
+                                SAVED SALE
                           </span>
                         </div>
-                        <span className="text-xs font-semibold text-blue-600">Resume</span>
+                            <div className="text-xs text-blue-700 space-y-0.5">
+                              <p className="font-semibold">{itemCount} Items</p>
+                              <p className="font-bold text-base">Rs {saleTotal.toFixed(2)}</p>
+                            </div>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              deleteHoldSale(index);
+                            }}
+                            className="h-6 w-6 p-0 text-red-500 hover:text-red-700 hover:bg-red-100"
+                            title="Delete"
+                          >
+                            <X className="h-4 w-4" />
                       </Button>
+                        </div>
+                        <Button
+                          variant="default"
+                          onClick={() => handleRetrieveHoldSale(index)}
+                          className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2"
+                          size="sm"
+                        >
+                          <RotateCcw className="mr-2 h-4 w-4" />
+                          LOAD THIS SALE
+                        </Button>
+                      </div>
                     );
                   })}
                 </div>
-              </ScrollArea>
+              )}
             </div>
           )}
 
@@ -1956,16 +1981,16 @@ export function NewSale() {
                         <label className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
                           Price (Rs)
                         </label>
-                          <Input
-                            ref={(el) => {
-                              priceInputRefs.current[item.id] = el;
+                        <Input
+                          ref={(el) => {
+                            priceInputRefs.current[item.id] = el;
                               if (el) {
                                 el.setAttribute('data-price-input', 'true');
                               }
-                            }}
-                            type="text"
-                            inputMode="decimal"
-                            value={priceInputs[item.id] !== undefined ? priceInputs[item.id] : (item.price === 0 ? "" : String(item.price))}
+                          }}
+                          type="text"
+                          inputMode="decimal"
+                          value={priceInputs[item.id] !== undefined ? priceInputs[item.id] : (item.price === 0 ? "" : String(item.price))}
                             onFocus={() => {
                               isUserInteractingRef.current = true;
                             }}
@@ -2489,6 +2514,194 @@ export function NewSale() {
                 : `Confirm ${paymentMethodPending ?? "Payment"}`}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cash Register Open Dialog */}
+      <Dialog open={isOpenDrawerDialogOpen} onOpenChange={setIsOpenDrawerDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Open Cash Drawer</DialogTitle>
+            <DialogDescription>
+              Enter the opening amount for the cash drawer to start a new shift.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div>
+              <Label htmlFor="opening-amount">Opening Amount</Label>
+              <Input
+                id="opening-amount"
+                type="number"
+                step="0.01"
+                value={openingAmount}
+                onChange={(e) => setOpeningAmount(e.target.value)}
+                placeholder="200.00"
+              />
+            </div>
+            <div className="flex space-x-2">
+              <Button
+                onClick={async () => {
+                  if (!openingAmount || Number.parseFloat(openingAmount) < 0) {
+                    toast({
+                      title: "Invalid Amount",
+                      description: "Please enter a valid opening amount.",
+                      variant: "destructive",
+                    });
+                    return;
+                  }
+                  setOpenDrawerLoading(true);
+                  try {
+                    const openingValue = Number.parseFloat(openingAmount);
+                    await apiClient.post("/cashflows/opening", {
+                      opening: openingValue,
+                      sales: 0,
+                    });
+                    toast({
+                      title: "Cash Drawer Opened",
+                      description: `Drawer opened with Rs ${openingValue.toFixed(2)} opening amount.`,
+                    });
+                    setIsOpenDrawerDialogOpen(false);
+                    setOpeningAmount("");
+                    // Refresh cash drawer status
+                    const today = new Date();
+                    const year = today.getFullYear();
+                    const month = String(today.getMonth() + 1).padStart(2, "0");
+                    const day = String(today.getDate()).padStart(2, "0");
+                    const dateString = `${year}-${month}-${day}`;
+                    const response = await apiClient.get(`/cashflows/by-date?date=${dateString}`);
+                    if (response.data.success && response.data.data?.exists && response.data.data?.data) {
+                      const cashFlowData = response.data.data.data;
+                      setCashDrawer({
+                        id: cashFlowData.id,
+                        isOpen: cashFlowData.status === "OPEN",
+                        openingAmount: Number(cashFlowData.opening),
+                        currentAmount: cashFlowData.closing ? Number(cashFlowData.closing) : Number(cashFlowData.opening),
+                        totalSales: Number(cashFlowData.sales),
+                      });
+                    }
+                  } catch (err: any) {
+                    toast({
+                      title: "Error",
+                      description: err.message || err.response?.data?.message || "Failed to open drawer",
+                      variant: "destructive",
+                    });
+                  } finally {
+                    setOpenDrawerLoading(false);
+                  }
+                }}
+                disabled={openDrawerLoading}
+                className="flex-1"
+              >
+                {openDrawerLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {openDrawerLoading ? "Opening..." : "Open Drawer"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setIsOpenDrawerDialogOpen(false)}
+                disabled={openDrawerLoading}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Cash Register Close Dialog */}
+      <Dialog open={isCloseDrawerDialogOpen} onOpenChange={setIsCloseDrawerDialogOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Close Cash Drawer</DialogTitle>
+            <DialogDescription>
+              This will close the cash drawer and generate an end-of-day report. Make sure all transactions are complete.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="bg-gray-50 p-4 rounded-lg space-y-2">
+              <div className="flex justify-between">
+                <span>Opening Amount:</span>
+                <span>Rs {cashDrawer?.openingAmount.toFixed(2) || "0.00"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Total Sales:</span>
+                <span>Rs {cashDrawer?.totalSales.toFixed(2) || "0.00"}</span>
+              </div>
+              <div className="flex justify-between">
+                <span>Expected Amount:</span>
+                <span>Rs {cashDrawer?.currentAmount.toFixed(2) || "0.00"}</span>
+              </div>
+            </div>
+            <div>
+              <Label htmlFor="actual-amount">Actual Cash Count</Label>
+              <Input
+                id="actual-amount"
+                type="number"
+                step="0.01"
+                value={totalCashInDrawer || ""}
+                onChange={(e) => setTotalCashInDrawer(Number.parseFloat(e.target.value) || 0)}
+                placeholder="Enter actual cash count"
+              />
+            </div>
+            <div className="flex space-x-2">
+              <Button
+                onClick={async () => {
+                  if (!cashDrawer) return;
+                  setCloseDrawerLoading(true);
+                  try {
+                    await apiClient.post("/cashflows/closing", {
+                      cashflow_id: cashDrawer.id,
+                      closing: totalCashInDrawer || cashDrawer.currentAmount,
+                    });
+                    toast({
+                      title: "Cash Drawer Closed",
+                      description: `Drawer closed successfully.`,
+                    });
+                    setIsCloseDrawerDialogOpen(false);
+                    setTotalCashInDrawer(0);
+                    // Refresh cash drawer status
+                    const today = new Date();
+                    const year = today.getFullYear();
+                    const month = String(today.getMonth() + 1).padStart(2, "0");
+                    const day = String(today.getDate()).padStart(2, "0");
+                    const dateString = `${year}-${month}-${day}`;
+                    const response = await apiClient.get(`/cashflows/by-date?date=${dateString}`);
+                    if (response.data.success && response.data.data?.exists && response.data.data?.data) {
+                      const cashFlowData = response.data.data.data;
+                      setCashDrawer({
+                        id: cashFlowData.id,
+                        isOpen: cashFlowData.status === "OPEN",
+                        openingAmount: Number(cashFlowData.opening),
+                        currentAmount: cashFlowData.closing ? Number(cashFlowData.closing) : Number(cashFlowData.opening),
+                        totalSales: Number(cashFlowData.sales),
+                      });
+                    }
+                  } catch (err: any) {
+                    toast({
+                      title: "Error",
+                      description: err.message || err.response?.data?.message || "Failed to close drawer",
+                      variant: "destructive",
+                    });
+                  } finally {
+                    setCloseDrawerLoading(false);
+                  }
+                }}
+                disabled={closeDrawerLoading}
+                className="flex-1"
+              >
+                {closeDrawerLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+                {closeDrawerLoading ? "Closing..." : "Close Drawer"}
+              </Button>
+              <Button
+                variant="outline"
+                onClick={() => setIsCloseDrawerDialogOpen(false)}
+                disabled={closeDrawerLoading}
+                className="flex-1"
+              >
+                Cancel
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

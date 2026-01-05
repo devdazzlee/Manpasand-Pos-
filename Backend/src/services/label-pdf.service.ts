@@ -74,10 +74,10 @@ export async function printBarcodeLabels(input: PrintLabelsInput) {
   const TITLE = paper === '3x2inch' ? 13 : 10;
   const META  = paper === '3x2inch' ? 9  : 8;
 
-  // Barcode dimensions
-  const BAR_W_MAX = CW * 0.88;
-  const BAR_H_MM  = paper === '3x2inch' ? 14 : 11;
-  const SCALE     = dpi === 300 ? 6 : 5;
+  // Barcode dimensions - optimized for scannability
+  const BAR_W_MAX = CW * 0.85; // Reduced from 0.88 to prevent cutting and ensure quiet zones
+  const BAR_H_MM  = paper === '3x2inch' ? 12 : 10; // Slightly reduced to ensure proper spacing
+  const SCALE     = dpi === 300 ? 5 : 4; // Adjusted for better bar width consistency
 
   for (const it of input.items) {
     for (let c = 0; c < copies; c++) {
@@ -93,16 +93,16 @@ export async function printBarcodeLabels(input: PrintLabelsInput) {
       let title = (it.name || '').toUpperCase().trim();
       let fontSize = TITLE;
       
-      // Auto-shrink title if too wide
-      while (fontSize > 7 && doc.widthOfString(title) > contentWidth * 0.98) { 
+      // Auto-shrink title if too wide - ensure it fits with margin
+      while (fontSize > 7 && doc.widthOfString(title) > contentWidth * 0.95) { 
         fontSize -= 0.3; 
         doc.fontSize(fontSize); 
       }
       
-      const titleWidth = doc.widthOfString(title);
-      const titleX = leftMargin + (contentWidth - titleWidth) / 2;
+      const titleHeight = doc.heightOfString(title, { width: contentWidth });
+      const titleX = leftMargin + (contentWidth - doc.widthOfString(title)) / 2;
       doc.text(title, titleX, y, { width: contentWidth, align: 'center', lineBreak: false });
-      y += doc.heightOfString(title, { width: contentWidth }) + mm(1);
+      y += titleHeight + mm(2); // Increased spacing after title
 
       // ---- META ROW (Weight & Price) ----
       doc.font('Helvetica').fontSize(META);
@@ -110,18 +110,31 @@ export async function printBarcodeLabels(input: PrintLabelsInput) {
       const rightText = Number.isFinite(it.price) ? `RS ${Math.round(Number(it.price))}` : '';
       
       if (leftText || rightText) {
+        // Ensure text doesn't overflow - truncate if needed
+        const maxMetaWidth = contentWidth * 0.95;
         const gap = mm(5);
-        const leftW = doc.widthOfString(leftText);
-        const rightW = doc.widthOfString(rightText);
+        let leftW = doc.widthOfString(leftText);
+        let rightW = doc.widthOfString(rightText);
         const totalW = leftW + (leftText && rightText ? gap : 0) + rightW;
-        const startX = leftMargin + (contentWidth - totalW) / 2;
         
-        if (leftText) doc.text(leftText, startX, y, { lineBreak: false });
-        if (rightText) doc.text(rightText, startX + leftW + (leftText ? gap : 0), y, { lineBreak: false });
-        y += doc.heightOfString('Ag') + mm(1);
+        // If total width exceeds available space, reduce font or truncate
+        if (totalW > maxMetaWidth && leftText && rightText) {
+          // Try reducing font size slightly
+          doc.fontSize(META * 0.9);
+          leftW = doc.widthOfString(leftText);
+          rightW = doc.widthOfString(rightText);
+        }
+        
+        const startX = leftMargin + (contentWidth - (leftW + (leftText && rightText ? gap : 0) + rightW)) / 2;
+        
+        if (leftText) doc.text(leftText, startX, y, { lineBreak: false, width: maxMetaWidth });
+        if (rightText) doc.text(rightText, startX + leftW + (leftText ? gap : 0), y, { lineBreak: false, width: maxMetaWidth });
+        doc.fontSize(META); // Reset font size
+        y += doc.heightOfString('Ag') + mm(2); // Increased spacing after meta
       }
 
       // ---- DATES ROW (PKG & EXP) ----
+      doc.font('Helvetica').fontSize(META);
       const pkgText = `PKG: ${shortDate(it.packageDateISO)}`;
       const expText = `EXP: ${shortDate(it.expiryDateISO)}`;
       const pkgW = doc.widthOfString(pkgText);
@@ -132,7 +145,8 @@ export async function printBarcodeLabels(input: PrintLabelsInput) {
       
       doc.text(pkgText, datesX, y, { lineBreak: false });
       doc.text(expText, datesX + pkgW + datesGap, y, { lineBreak: false });
-      y += doc.heightOfString('Ag') + mm(1.5);
+      const datesHeight = doc.heightOfString('Ag');
+      y += datesHeight + mm(3); // Increased spacing before barcode - critical to prevent overlap
 
       // ---- BARCODE ----
       try {
@@ -162,21 +176,27 @@ export async function printBarcodeLabels(input: PrintLabelsInput) {
         
         const aspectRatio = pngHeight / pngWidth;
 
-        // Calculate barcode size to fit remaining space
-        const remainingHeight = (M.top + CH) - y;
+        // Calculate remaining space AFTER dates row with proper margin
+        const remainingHeight = (M.top + CH) - y - M.bottom;
         
-        let barcodeWidth = BAR_W_MAX;
+        // Ensure minimum spacing - barcode should not overlap with dates
+        const minBarcodeSpacing = mm(2);
+        const availableHeight = Math.max(remainingHeight - minBarcodeSpacing, mm(10));
+        
+        // Calculate barcode dimensions - use 85% of width for better scannability
+        let barcodeWidth = Math.min(BAR_W_MAX * 0.85, contentWidth * 0.85);
         let barcodeHeight = barcodeWidth * aspectRatio;
 
-        // Ensure barcode fits vertically
-        if (barcodeHeight > remainingHeight * 0.92) { 
-          barcodeHeight = remainingHeight * 0.92; 
+        // Ensure barcode fits vertically with proper margins
+        if (barcodeHeight > availableHeight * 0.9) { 
+          barcodeHeight = availableHeight * 0.9; 
           barcodeWidth = barcodeHeight / aspectRatio; 
         }
 
-        // Center barcode horizontally and vertically in remaining space
+        // Center barcode horizontally
         const barcodeX = leftMargin + (contentWidth - barcodeWidth) / 2;
-        const barcodeY = y + (remainingHeight - barcodeHeight) / 2;
+        // Position barcode with proper spacing from dates, centered in remaining space
+        const barcodeY = y + (availableHeight - barcodeHeight) / 2;
 
         doc.image(png, barcodeX, barcodeY, { 
           width: barcodeWidth, 

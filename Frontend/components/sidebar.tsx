@@ -63,12 +63,6 @@ const menuSections: SidebarMenuSection[] = [
     label: "Main",
     items: [
       { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-      {
-        id: "cash-register",
-        label: "Cash Register",
-        icon: CashRegisterIcon,
-        badge: "Live",
-      },
       { id: "notifications", label: "Notifications", icon: Bell },
     ],
   },
@@ -182,7 +176,6 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
   const adminTabIds = [
     "dashboard",
     "barcode-generater",
-    "cash-register",
     "notifications",
     "new-sale",
     "sales-history",
@@ -198,7 +191,6 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
   // Tabs to show for BRANCH
   const branchTabIds = [
     "dashboard",
-    "cash-register",
     "notifications",
     "new-sale",
     "sales-history",
