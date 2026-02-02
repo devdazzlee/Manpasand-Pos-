@@ -1,0 +1,4 @@
+name,purchase_rate,sales_rate_exc_dis_and_tax,sales_rate_inc_dis_and_tax,unit_name,category_name
+"Test Product 1",50.00,60.00,65.00,"Pieces","Electronics"
+"Test Product 2",25.00,30.00,32.00,"Kg","Food"
+"Test Product 3",100.00,120.00,130.00,"Boxes","Clothing" 
