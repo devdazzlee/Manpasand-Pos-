@@ -1,9 +1,42 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteAllProducts = exports.bulkUploadProducts = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.listProducts = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = void 0;
+exports.deleteAllProducts = exports.bulkUploadProducts = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.listProducts = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
 const product_service_1 = require("../services/product.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -11,20 +44,63 @@ const sync_1 = require("csv-parse/sync");
 const xlsx_1 = __importDefault(require("xlsx"));
 const path_1 = __importDefault(require("path"));
 const productService = new product_service_1.ProductService();
+/**
+ * Upload a single image to Cloudinary and return the URL.
+ * This is called BEFORE create/update so the PATCH/POST body stays tiny.
+ */
+exports.uploadProductImage = (0, asyncHandler_1.default)(async (req, res) => {
+    if (!req.file) {
+        return new apiResponse_1.ApiResponse(null, 'No image file provided', 400).send(res);
+    }
+    const { imageService } = await Promise.resolve().then(() => __importStar(require('../services/common/cloudinaryService')));
+    const url = await imageService.uploadImage(req.file);
+    new apiResponse_1.ApiResponse({ url }, 'Image uploaded successfully').send(res);
+});
 exports.createProduct = (0, asyncHandler_1.default)(async (req, res) => {
-    const product = await productService.createProduct(req.body);
-    new apiResponse_1.ApiResponse(product, 'Product created successfully', 201).send(res);
+    const { image_urls, ...productData } = req.body;
+    const product = await productService.createProduct(productData);
+    // Handle pre-uploaded image URLs (new flow)
+    if (Array.isArray(image_urls) && image_urls.length > 0) {
+        await productService.addProductImageUrls(product.id, image_urls);
+    }
+    // Legacy: Handle multer files (FormData uploads)
     if (req.files?.length) {
         await productService.processProductImages(product.id, req.files);
     }
+    new apiResponse_1.ApiResponse(product, 'Product created successfully', 201).send(res);
 });
 exports.getProduct = (0, asyncHandler_1.default)(async (req, res) => {
     const product = await productService.getProductById(req.params.id);
     new apiResponse_1.ApiResponse(product, 'Product retrieved successfully').send(res);
 });
 exports.updateProduct = (0, asyncHandler_1.default)(async (req, res) => {
-    const product = await productService.updateProduct(req.params.id, req.body);
+    // Separate image fields from product data
+    const { new_images, existing_images, images, ...updateData } = req.body;
+    const product = await productService.updateProduct(req.params.id, updateData);
+    // Send response IMMEDIATELY — don't make the client wait for Cloudinary
     new apiResponse_1.ApiResponse(product, 'Product updated successfully').send(res);
+    // Process images in the background AFTER response is sent
+    let base64Images = [];
+    if (Array.isArray(new_images) && new_images.length > 0) {
+        base64Images = new_images;
+    }
+    else if (Array.isArray(images) && images.length > 0) {
+        base64Images = images.filter((img) => typeof img === 'string' && img.startsWith('data:'));
+    }
+    let keepImages = [];
+    if (Array.isArray(existing_images)) {
+        keepImages = existing_images;
+    }
+    else if (Array.isArray(images) && images.length > 0) {
+        keepImages = images.filter((img) => typeof img === 'string' && !img.startsWith('data:'));
+    }
+    const hasNewImages = base64Images.length > 0;
+    const hasExistingImagesField = existing_images !== undefined || Array.isArray(images);
+    if (hasNewImages || hasExistingImagesField) {
+        productService.updateProductImagesFromBase64(product.id, base64Images, keepImages)
+            .then(() => console.log(`✅ Images updated for product ${product.id}`))
+            .catch((err) => console.error(`❌ Image update failed for product ${product.id}:`, err));
+    }
 });
 exports.toggleProductStatus = (0, asyncHandler_1.default)(async (req, res) => {
     await productService.toggleProductStatus(req.params.id);

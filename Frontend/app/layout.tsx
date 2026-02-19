@@ -48,6 +48,31 @@ export default function RootLayout({
           {children}
         </DataProvider>
         <PWABanner />
+        {/* Unregister stale service workers in development to prevent timeout issues */}
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `
+              if ('serviceWorker' in navigator && location.hostname === 'localhost') {
+                navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                  registrations.forEach(function(registration) {
+                    registration.unregister().then(function() {
+                      console.log('[SW] Unregistered stale service worker for development');
+                    });
+                  });
+                });
+                // Also clear all caches left by old service workers
+                if ('caches' in window) {
+                  caches.keys().then(function(names) {
+                    names.forEach(function(name) {
+                      caches.delete(name);
+                      console.log('[SW] Deleted cache:', name);
+                    });
+                  });
+                }
+              }
+            `,
+          }}
+        />
       </body>
     </html>
   )

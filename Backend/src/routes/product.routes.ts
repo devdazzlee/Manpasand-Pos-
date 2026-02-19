@@ -9,6 +9,7 @@ import {
   getBestSellingProducts,
   bulkUploadProducts,
   deleteAllProducts,
+  uploadProductImage,
 } from '../controllers/product.controller';
 import {
   createProductSchema,
@@ -17,14 +18,14 @@ import {
   listProductsSchema,
 } from '../validations/product.validation';
 import { validate } from '../middleware/validation.middleware';
-import { authenticate, authorize } from '../middleware/auth.middleware';
+// import { authenticate, authorize } from '../middleware/auth.middleware';
 import upload from '../utils/multer';
 import { parseFormData } from '../middleware/parse-formdata.middleware';
 import uploadBulk from '../utils/uploadBulk';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
+// router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 
 router.post(
   '/',
@@ -33,6 +34,7 @@ router.post(
   validate(createProductSchema),
   createProduct,
 );
+router.post('/upload-image', upload.single('image'), uploadProductImage);
 router.post('/bulk-upload', uploadBulk.single('file'), bulkUploadProducts);
 router.delete('/all', deleteAllProducts);
 router.get('/', validate(listProductsSchema), listProducts);

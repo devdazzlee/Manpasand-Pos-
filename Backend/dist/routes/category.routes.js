@@ -18,5 +18,6 @@ router.get('/', (0, validation_middleware_1.validate)(category_validation_1.list
 router.get('/:id', (0, validation_middleware_1.validate)(category_validation_1.getCategorySchema), category_controller_1.getCategory);
 router.patch('/:id', (0, validation_middleware_1.validate)(category_validation_1.updateCategorySchema), category_controller_1.updateCategory);
 router.patch('/:id/toggle-status', (0, validation_middleware_1.validate)(category_validation_1.getCategorySchema), category_controller_1.toggleCategoryStatus);
+router.delete('/:id', (0, validation_middleware_1.validate)(category_validation_1.getCategorySchema), category_controller_1.deleteCategory);
 exports.default = router;
 //# sourceMappingURL=category.routes.js.map

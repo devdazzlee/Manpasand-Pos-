@@ -4,7 +4,7 @@ import axios, { AxiosResponse, InternalAxiosRequestConfig } from "axios";
 // Create axios instance
 const apiClient = axios.create({
   baseURL: API_BASE,
-  timeout: 10000,
+  timeout: 120000, // 2 minutes – large base64 image payloads need more time
   headers: {
     "Content-Type": "application/json",
   },

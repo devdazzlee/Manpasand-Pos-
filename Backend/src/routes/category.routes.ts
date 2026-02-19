@@ -5,6 +5,7 @@ import {
   updateCategory,
   toggleCategoryStatus,
   listCategories,
+  deleteCategory,
   deleteAllCategories,
 } from '../controllers/category.controller';
 import {
@@ -28,5 +29,6 @@ router.get('/', validate(listCategoriesSchema), listCategories);
 router.get('/:id', validate(getCategorySchema), getCategory);
 router.patch('/:id', validate(updateCategorySchema), updateCategory);
 router.patch('/:id/toggle-status', validate(getCategorySchema), toggleCategoryStatus);
+router.delete('/:id', validate(getCategorySchema), deleteCategory);
 
 export default router;

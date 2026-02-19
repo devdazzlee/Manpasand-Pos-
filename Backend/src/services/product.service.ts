@@ -4,7 +4,7 @@ import { AppError } from '../utils/apiError';
 import { CreateProductInput, UpdateProductInput } from '../validations/product.validation';
 import { Decimal } from 'decimal.js';
 import { startOfMonth } from 'date-fns';
-import { s3Service } from './common/s3BucketService';
+import { imageService } from './common/cloudinaryService';
 import { randomUUID } from 'crypto';
 import { asNumber } from '../utils/helpers';
 
@@ -493,7 +493,7 @@ export class ProductService {
     async processProductImages(productId: string, files: Express.Multer.File[]) {
         try {
             // 1. Upload images
-            const imageUrls = await s3Service.uploadMultipleImages(files);
+            const imageUrls = await imageService.uploadMultipleImages(files);
 
             // 2. Create image records
             await prisma.productImage.createMany({
@@ -522,6 +522,88 @@ export class ProductService {
                     error: err.message.substring(0, 255) // Truncate if needed
                 }))
             });
+            throw error;
+        }
+    }
+
+    /**
+     * Link pre-uploaded image URLs to a product (used after upload-image endpoint)
+     */
+    async addProductImageUrls(productId: string, urls: string[]) {
+        if (urls.length === 0) return;
+        await prisma.productImage.createMany({
+            data: urls.map(url => ({
+                product_id: productId,
+                image: url,
+                status: 'COMPLETE' as const,
+            }))
+        });
+        await prisma.product.update({
+            where: { id: productId },
+            data: { has_images: true }
+        });
+        console.log(`Added ${urls.length} image URLs to product ${productId}`);
+    }
+
+    async updateProductImagesFromBase64(productId: string, base64Images: string[], keepImageUrls: string[]) {
+        try {
+            // 1. Get ALL current image records for this product
+            const currentImages = await prisma.productImage.findMany({
+                where: { product_id: productId },
+                select: { id: true, image: true }
+            });
+
+            // 2. Determine which images to delete (not in keepImageUrls)
+            const imagesToDelete = keepImageUrls.length > 0
+                ? currentImages.filter(img => !keepImageUrls.includes(img.image))
+                : currentImages; // delete all if nothing to keep
+
+            // 3. Delete old images from Cloudinary (skip S3 URLs — they'll just be orphaned)
+            if (imagesToDelete.length > 0) {
+                const cloudinaryUrls = imagesToDelete
+                    .map(img => img.image)
+                    .filter(url => url.includes('cloudinary.com'));
+
+                if (cloudinaryUrls.length > 0) {
+                    await imageService.deleteMultipleImages(cloudinaryUrls);
+                    console.log(`Deleted ${cloudinaryUrls.length} old images from Cloudinary`);
+                }
+
+                // 4. Delete old image DB records
+                await prisma.productImage.deleteMany({
+                    where: {
+                        id: { in: imagesToDelete.map(img => img.id) }
+                    }
+                });
+                console.log(`Deleted ${imagesToDelete.length} old image records from DB`);
+            }
+
+            // 5. Upload new base64 images to Cloudinary and create records
+            if (base64Images.length > 0) {
+                const imageUrls = await imageService.uploadMultipleBase64Images(base64Images);
+                await prisma.productImage.createMany({
+                    data: imageUrls.map(url => ({
+                        product_id: productId,
+                        image: url,
+                        status: 'COMPLETE' as const
+                    }))
+                });
+                console.log(`Uploaded ${imageUrls.length} new images to Cloudinary`);
+            }
+
+            // 6. Update has_images flag
+            const imageCount = await prisma.productImage.count({
+                where: { product_id: productId }
+            });
+
+            await prisma.product.update({
+                where: { id: productId },
+                data: { has_images: imageCount > 0 }
+            });
+
+            console.log(`Images updated for product ${productId}: kept ${keepImageUrls.length}, deleted ${imagesToDelete.length}, uploaded ${base64Images.length}`);
+        } catch (error) {
+            console.error('Error updating product images:', error);
             throw error;
         }
     }
@@ -594,54 +676,68 @@ export class ProductService {
     }
 
     async updateProduct(id: string, data: UpdateProductInput) {
+        // Verify product exists
         const product = await this.getProductById(id);
 
         // Check if new SKU conflicts with existing
         if (data.sku && data.sku !== product.sku) {
             const existingSku = await prisma.product.findUnique({
                 where: { sku: data.sku },
+                select: { id: true },
             });
             if (existingSku) {
                 throw new AppError(400, 'Product with this SKU already exists');
             }
         }
 
-        // Use transaction for atomic operations
-        return await prisma.$transaction(async (tx) => {
-            console.log('🚀 Starting transaction for product update...');
-            
-            // First, ensure all "Unknown" entries exist
-            const unknownEntries = await this.ensureUnknownEntriesExist(tx);
-            console.log('✅ Unknown entries ensured:', unknownEntries);
-            
-            // Build relations using existing or unknown entries
-            const relations = await this.verifyAndFixRelationsForUpdate(data, this.buildUpdateRelationsWithUnknownEntries(data, unknownEntries), tx);
-            console.log('📦 Update relations built:', JSON.stringify(relations, null, 2));
+        // Build the update payload — scalar fields + relation FKs in one shot
+        const updateData: any = { ...this.buildUpdateProductData(data) };
 
-            return tx.product.update({
-            where: { id },
-            data: {
-                // Scalar fields
-                    ...this.buildUpdateProductData(data),
+        // Set relation foreign keys directly (no extra verification queries needed;
+        // the DB's FK constraints will catch invalid IDs automatically)
+        // Required FKs (non-nullable in schema) — only set if a truthy value is provided
+        const requiredFks = ['unit_id', 'category_id'] as const;
+        for (const field of requiredFks) {
+            const val = (data as any)[field];
+            if (val) updateData[field] = val;          // only set when there's a real ID
+        }
+        // Optional FKs (nullable in schema) — set to null when empty/falsy
+        const optionalFks = ['subcategory_id', 'tax_id', 'supplier_id', 'brand_id', 'color_id', 'size_id'] as const;
+        for (const field of optionalFks) {
+            if ((data as any)[field] !== undefined) {
+                updateData[field] = (data as any)[field] || null;
+            }
+        }
 
-                    // Relation fields using the relations object
-                    ...relations,
-            },
-            include: {
-                unit: true,
-                category: true,
-                subcategory: true,
-                tax: true,
-                supplier: true,
-                brand: true,
-                color: true,
-                size: true,
-            },
-        });
-        }, {
-            maxWait: 20000, // 20 seconds
-            timeout: 15000  // 15 seconds,
-        });
+        console.log('📦 Product update payload:', JSON.stringify(updateData, null, 2));
+
+        try {
+            return await prisma.product.update({
+                where: { id },
+                data: updateData,
+                include: {
+                    unit: true,
+                    category: true,
+                    subcategory: true,
+                    tax: true,
+                    supplier: true,
+                    brand: true,
+                    color: true,
+                    size: true,
+                    ProductImage: { select: { id: true, image: true } },
+                },
+            });
+        } catch (error: any) {
+            // If FK constraint fails, give a friendly message
+            if (error?.code === 'P2003') {
+                const field = error?.meta?.field_name || 'unknown';
+                throw new AppError(400, `Invalid reference for ${field}. The related record does not exist.`);
+            }
+            if (error?.code === 'P2025') {
+                throw new AppError(404, 'Product not found');
+            }
+            throw error;
+        }
     }
 
     private buildUpdateRelationsWithUnknownEntries(data: UpdateProductInput, unknownEntries: Record<string, string>) {

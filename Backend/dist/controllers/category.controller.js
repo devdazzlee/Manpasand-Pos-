@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteAllCategories = exports.listCategories = exports.toggleCategoryStatus = exports.updateCategory = exports.getCategory = exports.createCategory = void 0;
+exports.deleteAllCategories = exports.deleteCategory = exports.listCategories = exports.toggleCategoryStatus = exports.updateCategory = exports.getCategory = exports.createCategory = void 0;
 const category_service_1 = require("../services/category.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -39,6 +39,10 @@ exports.listCategories = (0, asyncHandler_1.default)(async (req, res) => {
         branch_id: branch_id,
     });
     new apiResponse_1.ApiResponse(result.data, 'Categories retrieved successfully', 200).send(res);
+});
+exports.deleteCategory = (0, asyncHandler_1.default)(async (req, res) => {
+    const category = await categoryService.deleteCategory(req.params.id);
+    new apiResponse_1.ApiResponse(category, 'Category deleted successfully').send(res);
 });
 exports.deleteAllCategories = (0, asyncHandler_1.default)(async (req, res) => {
     const result = await categoryService.deleteAllCategories();

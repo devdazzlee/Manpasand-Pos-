@@ -47,7 +47,7 @@ const pwaConfig = withPWA({
       }
     },
     {
-      urlPattern: /^https:\/\/.*\/api\/.*/i,
+      urlPattern: /^https?:\/\/.*\/api\/.*/i,
       handler: 'NetworkFirst',
       options: {
         cacheName: 'api-cache',
@@ -55,7 +55,7 @@ const pwaConfig = withPWA({
           maxEntries: 100,
           maxAgeSeconds: 60 * 5 // 5 minutes
         },
-        networkTimeoutSeconds: 10
+        networkTimeoutSeconds: 120 // 2 minutes — image uploads can be slow
       }
     },
     {
@@ -67,7 +67,7 @@ const pwaConfig = withPWA({
           maxEntries: 50,
           maxAgeSeconds: 60 * 60 * 24 // 24 hours
         },
-        networkTimeoutSeconds: 10
+        networkTimeoutSeconds: 30
       }
     }
   ]

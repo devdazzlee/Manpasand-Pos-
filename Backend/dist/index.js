@@ -58,6 +58,7 @@ app.use((0, cors_1.default)({
             'https://manpasand-pos-t623.vercel.app',
             'https://manpasand-pos-beta.vercel.app',
             'http://localhost:3000',
+            'http://localhost:3001',
             'http://localhost:5173',
             'https://manpasandstore.com',
             'https://www.manpasandstore.com'
@@ -80,8 +81,8 @@ app.use((0, helmet_1.default)({
     crossOriginResourcePolicy: { policy: "cross-origin" }
 }));
 app.use((0, morgan_1.default)('dev'));
-app.use(express_1.default.json());
-app.use(express_1.default.urlencoded({ extended: true }));
+app.use(express_1.default.json({ limit: '50mb' })); // Allow large base64 image payloads
+app.use(express_1.default.urlencoded({ extended: true, limit: '50mb' }));
 // Routes
 app.use(`${vAPI}/auth`, auth_routes_1.default);
 app.use(`${vAPI}/categories`, category_routes_1.default);

@@ -9,16 +9,37 @@ import path from 'path';
 
 const productService = new ProductService();
 
+/**
+ * Upload a single image to Cloudinary and return the URL.
+ * This is called BEFORE create/update so the PATCH/POST body stays tiny.
+ */
+export const uploadProductImage = asyncHandler(async (req: Request, res: Response) => {
+    if (!req.file) {
+        return new ApiResponse(null, 'No image file provided', 400).send(res);
+    }
+    const { imageService } = await import('../services/common/cloudinaryService');
+    const url = await imageService.uploadImage(req.file);
+    new ApiResponse({ url }, 'Image uploaded successfully').send(res);
+});
+
 export const createProduct = asyncHandler(async (req: Request, res: Response) => {
-    const product = await productService.createProduct(req.body);
-    new ApiResponse(product, 'Product created successfully', 201).send(res);
-    
+    const { image_urls, ...productData } = req.body;
+    const product = await productService.createProduct(productData);
+
+    // Handle pre-uploaded image URLs (new flow)
+    if (Array.isArray(image_urls) && image_urls.length > 0) {
+        await productService.addProductImageUrls(product.id, image_urls);
+    }
+
+    // Legacy: Handle multer files (FormData uploads)
     if (req.files?.length) {
         await productService.processProductImages(
             product.id,
             req.files as Express.Multer.File[]
-        )
+        );
     }
+
+    new ApiResponse(product, 'Product created successfully', 201).send(res);
 });
 
 export const getProduct = asyncHandler(async (req: Request, res: Response) => {
@@ -27,8 +48,41 @@ export const getProduct = asyncHandler(async (req: Request, res: Response) => {
 });
 
 export const updateProduct = asyncHandler(async (req: Request, res: Response) => {
-    const product = await productService.updateProduct(req.params.id, req.body);
+    // Separate image fields from product data
+    const { new_images, existing_images, images, ...updateData } = req.body;
+
+    const product = await productService.updateProduct(req.params.id, updateData);
+
+    // Send response IMMEDIATELY — don't make the client wait for Cloudinary
     new ApiResponse(product, 'Product updated successfully').send(res);
+
+    // Process images in the background AFTER response is sent
+    let base64Images: string[] = [];
+    if (Array.isArray(new_images) && new_images.length > 0) {
+        base64Images = new_images;
+    } else if (Array.isArray(images) && images.length > 0) {
+        base64Images = images.filter((img: string) =>
+            typeof img === 'string' && img.startsWith('data:')
+        );
+    }
+
+    let keepImages: string[] = [];
+    if (Array.isArray(existing_images)) {
+        keepImages = existing_images;
+    } else if (Array.isArray(images) && images.length > 0) {
+        keepImages = images.filter((img: string) =>
+            typeof img === 'string' && !img.startsWith('data:')
+        );
+    }
+
+    const hasNewImages = base64Images.length > 0;
+    const hasExistingImagesField = existing_images !== undefined || Array.isArray(images);
+
+    if (hasNewImages || hasExistingImagesField) {
+        productService.updateProductImagesFromBase64(product.id, base64Images, keepImages)
+            .then(() => console.log(`✅ Images updated for product ${product.id}`))
+            .catch((err) => console.error(`❌ Image update failed for product ${product.id}:`, err));
+    }
 });
 
 export const toggleProductStatus = asyncHandler(async (req: Request, res: Response) => {

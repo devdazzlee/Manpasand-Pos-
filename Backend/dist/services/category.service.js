@@ -173,6 +173,22 @@ class CategoryService {
             throw error;
         }
     }
+    async deleteCategory(id) {
+        const category = await this.getCategoryById(id);
+        // Check if category has products
+        const productCount = await client_1.prisma.product.count({
+            where: { category_id: id },
+        });
+        if (productCount > 0) {
+            throw new apiError_1.AppError(400, `Cannot delete category "${category.name}" — it has ${productCount} product(s). Remove or reassign them first.`);
+        }
+        // Delete images first, then the category
+        await client_1.prisma.$transaction(async (tx) => {
+            await tx.categoryImages.deleteMany({ where: { category_id: id } });
+            await tx.category.delete({ where: { id } });
+        });
+        return category;
+    }
     async deleteAllCategories() {
         // Delete all categories and their related records in a transaction
         return await client_1.prisma.$transaction(async (tx) => {

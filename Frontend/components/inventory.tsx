@@ -107,7 +107,7 @@ interface Product {
   size?: DropdownOption
   created_at: string
   updated_at: string
-  images?: { id: string; image_url: string }[]
+  images?: { image: string }[]
   available_stock?: number
   current_stock?: number
   reserved_stock?: number
@@ -663,7 +663,8 @@ export default function Inventory() {
   })
   const [formLoading, setFormLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<{ sku?: string; pct_or_hs_code?: string }>({})
-  const [imagePreviews, setImagePreviews] = useState<string[]>([])
+  const [imagePreviews, setImagePreviews] = useState<string[]>([])     // URLs for display (all are Cloudinary URLs)
+  const [existingImageUrls, setExistingImageUrls] = useState<string[]>([]) // URLs to send in PATCH/POST
   const fileInputRef = useRef<HTMLInputElement>(null)
 
   // API Service Functions
@@ -723,13 +724,34 @@ export default function Inventory() {
       return response.data
     },
 
-    async createProduct(productData: ProductFormData) {
-      const response = await apiClient.post("/products", productData)
+    /**
+     * Upload a single image file to Cloudinary via backend. Returns the URL.
+     */
+    async uploadImage(file: File): Promise<string> {
+      const fd = new FormData()
+      fd.append("image", file)
+      const response = await apiClient.post("/products/upload-image", fd, {
+        headers: { "Content-Type": "multipart/form-data" },
+        timeout: 60000, // 60s per image
+      })
+      return response.data.data.url
+    },
+
+    async createProduct(productData: ProductFormData, imageUrls: string[]) {
+      const { images, ...dataWithoutImages } = productData
+      const response = await apiClient.post("/products", {
+        ...dataWithoutImages,
+        image_urls: imageUrls,
+      })
       return response.data
     },
 
-    async updateProduct(id: string, productData: any) {
-      const response = await apiClient.patch(`/products/${id}`, productData)
+    async updateProduct(id: string, productData: any, imageUrls: string[]) {
+      const { images, ...dataWithoutImages } = productData
+      const response = await apiClient.patch(`/products/${id}`, {
+        ...dataWithoutImages,
+        existing_images: imageUrls,
+      })
       return response.data
     },
 
@@ -898,7 +920,8 @@ export default function Inventory() {
         pct_or_hs_code: formData.pct_or_hs_code ? String(formData.pct_or_hs_code) : undefined,
       }
 
-      await apiService.createProduct(dataToSubmit)
+      // Images are already uploaded — existingImageUrls has all Cloudinary URLs
+      await apiService.createProduct(dataToSubmit, existingImageUrls)
 
       toast({
         title: "Success",
@@ -907,7 +930,7 @@ export default function Inventory() {
 
       setIsAddDialogOpen(false)
       resetForm()
-      loadProducts()
+      refreshAllData()
     } catch (error) {
       toast({
         title: "Error",
@@ -929,7 +952,8 @@ export default function Inventory() {
         sku: String(formData.sku),
         pct_or_hs_code: formData.pct_or_hs_code ? String(formData.pct_or_hs_code) : undefined,
       }
-      await apiService.updateProduct(editingProduct.id, dataToSubmit)
+      // All images are already Cloudinary URLs — no base64, no large payload
+      await apiService.updateProduct(editingProduct.id, dataToSubmit, existingImageUrls)
 
       toast({
         title: "Success",
@@ -939,7 +963,7 @@ export default function Inventory() {
       setIsEditDialogOpen(false)
       setEditingProduct(null)
       resetForm()
-      loadProducts()
+      refreshAllData()
     } catch (error) {
       toast({
         title: "Error",
@@ -987,10 +1011,12 @@ export default function Inventory() {
       images: [],
     })
     setImagePreviews([])
+    setExistingImageUrls([])
   }
 
   const openEditDialog = (product: Product) => {
     setEditingProduct(product)
+    const existingUrls = product.images?.map((img) => img.image) || []
     setFormData({
       name: product.name,
       unit_id: product.unit?.id || "",
@@ -1017,9 +1043,10 @@ export default function Inventory() {
       non_inventory_item: product.non_inventory_item,
       is_deal: product.is_deal,
       is_featured: product.is_featured,
-      images: product.images?.map((img) => img.image_url) || [],
+      images: existingUrls,
     })
-    setImagePreviews(product.images?.map((img) => img.image_url) || [])
+    setImagePreviews(existingUrls)
+    setExistingImageUrls(existingUrls)
     setIsEditDialogOpen(true)
   }
 
@@ -1046,41 +1073,30 @@ export default function Inventory() {
 
     setFormLoading(true)
     try {
-      const compressedImages = await Promise.all(
-        Array.from(files).map(async (file) => {
-          if (!file.type.startsWith("image/")) {
-            toast({ title: "Error", description: `${file.name} is not an image.`, variant: "destructive" })
-            return null
-          }
-          if (file.size > 5 * 1024 * 1024) {
-            toast({ title: "Error", description: `Image ${file.name} is larger than 5MB.`, variant: "destructive" })
-            return null
-          }
-          return await compressImage(file)
-        }),
-      )
+      for (const file of Array.from(files)) {
+        if (!file.type.startsWith("image/")) {
+          toast({ title: "Error", description: `${file.name} is not an image.`, variant: "destructive" })
+          continue
+        }
+        if (file.size > 5 * 1024 * 1024) {
+          toast({ title: "Error", description: `Image ${file.name} is larger than 5MB.`, variant: "destructive" })
+          continue
+        }
 
-      const validFiles = compressedImages.filter((f): f is File => f !== null)
+        // Compress the image
+        const compressed = await compressImage(file)
 
-      const base64Promises = validFiles.map((file) => {
-        return new Promise<string>((resolve) => {
-          const reader = new FileReader()
-          reader.onload = (e) => resolve(e.target?.result as string)
-          reader.readAsDataURL(file)
-        })
-      })
+        // Upload immediately to Cloudinary via backend — returns a URL
+        const url = await apiService.uploadImage(compressed)
 
-      const newBase64Images = await Promise.all(base64Promises)
-      const newImages = [...(formData.images || []), ...newBase64Images]
-      const newPreviews = [...imagePreviews, ...newBase64Images]
-
-      setFormData({ ...formData, images: newImages })
-      setImagePreviews(newPreviews)
+        // Store the Cloudinary URL (not base64)
+        setImagePreviews((prev) => [...prev, url])
+        setExistingImageUrls((prev) => [...prev, url])
+      }
     } catch (error) {
-      toast({ title: "Error", description: "Failed to process images.", variant: "destructive" })
+      toast({ title: "Error", description: "Failed to upload image.", variant: "destructive" })
     } finally {
       setFormLoading(false)
-      // Reset file input
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
@@ -1088,14 +1104,9 @@ export default function Inventory() {
   }
 
   const handleRemoveImage = (index: number) => {
-    const newImages = [...(formData.images || [])]
-    const newPreviews = [...imagePreviews]
-
-    newImages.splice(index, 1)
-    newPreviews.splice(index, 1)
-
-    setFormData({ ...formData, images: newImages })
-    setImagePreviews(newPreviews)
+    const removedUrl = imagePreviews[index]
+    setExistingImageUrls((prev) => prev.filter((url) => url !== removedUrl))
+    setImagePreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
   const totalPages = Math.ceil(totalProducts / pageSize)

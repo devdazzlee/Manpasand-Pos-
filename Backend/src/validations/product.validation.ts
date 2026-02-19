@@ -29,11 +29,16 @@ const productBaseSchema = z.object({
 });
 
 export const createProductSchema = z.object({
-    body: productBaseSchema,
+    body: productBaseSchema.extend({
+        image_urls: z.array(z.string()).optional(),
+    }),
 });
 
 export const updateProductSchema = z.object({
-    body: productBaseSchema.partial(),
+    body: productBaseSchema.partial().extend({
+        new_images: z.array(z.string()).optional(),
+        existing_images: z.array(z.string()).optional(),
+    }),
     params: z.object({
         id: z.string().min(1, 'Product ID is required'),
     }),

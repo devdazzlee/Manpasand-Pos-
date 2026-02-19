@@ -30,10 +30,15 @@ const productBaseSchema = zod_1.z.object({
     is_featured: zod_1.z.boolean().optional().default(false),
 });
 exports.createProductSchema = zod_1.z.object({
-    body: productBaseSchema,
+    body: productBaseSchema.extend({
+        image_urls: zod_1.z.array(zod_1.z.string()).optional(),
+    }),
 });
 exports.updateProductSchema = zod_1.z.object({
-    body: productBaseSchema.partial(),
+    body: productBaseSchema.partial().extend({
+        new_images: zod_1.z.array(zod_1.z.string()).optional(),
+        existing_images: zod_1.z.array(zod_1.z.string()).optional(),
+    }),
     params: zod_1.z.object({
         id: zod_1.z.string().min(1, 'Product ID is required'),
     }),

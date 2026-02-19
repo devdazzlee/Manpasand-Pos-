@@ -172,7 +172,7 @@ export const useStore = create<StoreState>()(
           description: item.description,
           created_at: item.created_at,
           updated_at: item.updated_at,
-          images: item.images || [],
+          images: item.ProductImage?.map((img: { image: string }) => ({ id: img.image, image: img.image })) || item.images || [],
         })
 
         try {
