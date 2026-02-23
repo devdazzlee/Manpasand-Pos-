@@ -177,17 +177,10 @@ class SaleService {
         }
         const [sale] = await client_2.prisma.$transaction(ops);
         const saleResult = sale;
-        // Create notification for sale completion (after transaction succeeds)
+        // NOTE: Sale notifications removed per client requirement (Konain Bhai 1/5/2026)
+        // Cash Counter sale notifications should NOT appear in notifications panel
+        // Only important notifications (Inventory Low, Website Orders, etc.) should be shown
         try {
-            console.log('Creating sale notification for:', saleResult.sale_number);
-            const notification = await this.notificationService.notifySaleCreated({
-                saleId: saleResult.id,
-                saleNumber: saleResult.sale_number,
-                totalAmount: Number(saleResult.total_amount),
-                branchId,
-                userId: createdBy,
-            });
-            console.log('Sale notification created:', notification.id);
             // Check for low stock after sale and create notifications
             for (const m of movements) {
                 try {

@@ -591,6 +591,20 @@ export class ProductService {
                 console.log(`Uploaded ${imageUrls.length} new images to Cloudinary`);
             }
 
+            // 5b. Link any pre-uploaded URLs that aren't already in the DB
+            const currentImageUrls = new Set(currentImages.map(img => img.image));
+            const newPreUploadedUrls = keepImageUrls.filter(url => !currentImageUrls.has(url));
+            if (newPreUploadedUrls.length > 0) {
+                await prisma.productImage.createMany({
+                    data: newPreUploadedUrls.map(url => ({
+                        product_id: productId,
+                        image: url,
+                        status: 'COMPLETE' as const
+                    }))
+                });
+                console.log(`Linked ${newPreUploadedUrls.length} pre-uploaded images to product ${productId}`);
+            }
+
             // 6. Update has_images flag
             const imageCount = await prisma.productImage.count({
                 where: { product_id: productId }

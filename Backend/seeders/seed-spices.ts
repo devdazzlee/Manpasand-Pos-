@@ -1,8 +1,21 @@
 import { ProductService } from '../src/services/product.service';
 import { prisma } from '../src/prisma/client';
+import { v2 as cloudinary } from 'cloudinary';
 import * as dotenv from 'dotenv';
+import * as fs from 'fs';
+import * as path from 'path';
 
 dotenv.config();
+
+// Configure Cloudinary
+cloudinary.config({
+  cloud_name: 'djadwzfwg',
+  api_key: '199548153713428',
+  api_secret: 'gdhzagnXsXDYGrVyEx8qjzzYktY',
+});
+
+const IMAGES_DIR = path.resolve(__dirname, '../seeder_images/spices');
+const CATEGORY_IMAGE = 'spice_main_category.PNG';
 
 interface ProductInput {
   name: string;
@@ -116,14 +129,156 @@ const products: ProductInput[] = [
   { name: "Black Sesame seeds (Kaala Til)", unit: "Kgs", category: "Herbs", purchase_rate: 750, selling_price: 1600 },
 ];
 
+// Helper: upload image to Cloudinary
+async function uploadToCloudinary(filePath: string, name: string, folder: string = 'manpasand/products'): Promise<string> {
+  const publicId = name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+
+  return new Promise((resolve, reject) => {
+    cloudinary.uploader.upload(
+      filePath,
+      {
+        public_id: publicId,
+        folder,
+        overwrite: true,
+        resource_type: 'image',
+      },
+      (error, result) => {
+        if (error) {
+          reject(error);
+        } else {
+          resolve(result?.secure_url || '');
+        }
+      }
+    );
+  });
+}
+
+// Helper: find image file with case-insensitive matching
+function findImageFile(imageFilename: string): string | null {
+  const exactPath = path.join(IMAGES_DIR, imageFilename);
+  if (fs.existsSync(exactPath)) {
+    return exactPath;
+  }
+
+  try {
+    const files = fs.readdirSync(IMAGES_DIR);
+    const lowerTarget = imageFilename.toLowerCase();
+    const match = files.find(f => f.toLowerCase() === lowerTarget);
+    if (match) {
+      return path.join(IMAGES_DIR, match);
+    }
+  } catch (e) {
+    // Directory not found
+  }
+
+  return null;
+}
+
+// Helper function to generate slug from name
+function generateSlug(name: string): string {
+  const timestamp = Date.now().toString().slice(-6);
+  return `${name.toLowerCase().replace(/\s+/g, '-').replace(/[&,()]/g, '').replace(/--+/g, '-')}-${timestamp}`;
+}
+
+// Helper function to get or create entry
+async function getOrCreateEntry(
+  model: 'category' | 'unit' | 'tax' | 'supplier' | 'brand',
+  name: string,
+  codePrefix: string,
+  tx?: any
+): Promise<string> {
+  const prismaClient = tx || prisma;
+  const modelName = model as string;
+
+  const existing = await prismaClient[modelName].findFirst({
+    where: { name: { equals: name, mode: 'insensitive' } },
+    select: { id: true },
+  });
+
+  if (existing) return existing.id;
+
+  const code = `${codePrefix}-${Math.random().toString(36).substring(2, 9)}`;
+  const createData: any = {
+    name,
+    code,
+    is_active: true,
+    display_on_pos: true,
+  };
+
+  if (model === 'tax') {
+    createData.percentage = 0;
+  }
+
+  if (model === 'category') {
+    createData.slug = generateSlug(name);
+    createData.display_on_branches = [];
+  }
+
+  const created = await prismaClient[modelName].create({ data: createData });
+  return created.id;
+}
+
 async function seedSpices() {
-  console.log('🌱 Starting Spices seeder...\n');
+  console.log('🌱 Starting Spices seeder (with category image)...\n');
 
   const productService = new ProductService();
   const results = {
     success: [] as string[],
     failed: [] as { name: string; error: string }[],
   };
+
+  // Get or create Spices category
+  const categoryId = await getOrCreateEntry('category', 'Spices', 'CAT');
+  console.log(`✅ Category "Spices" ready (ID: ${categoryId})`);
+
+  // Upload category image
+  if (fs.existsSync(IMAGES_DIR)) {
+    const categoryImagePath = findImageFile(CATEGORY_IMAGE);
+    if (categoryImagePath) {
+      try {
+        console.log(`📤 Uploading Spices category image...`);
+        const cloudinaryUrl = await uploadToCloudinary(categoryImagePath, 'spices_category', 'manpasand/categories');
+
+        // Update category image field
+        await prisma.category.update({
+          where: { id: categoryId },
+          data: { image: cloudinaryUrl },
+        });
+
+        // Also create a CategoryImages record
+        const existingCategoryImage = await prisma.categoryImages.findFirst({
+          where: { category_id: categoryId },
+        });
+
+        if (!existingCategoryImage) {
+          await prisma.categoryImages.create({
+            data: {
+              category_id: categoryId,
+              image: cloudinaryUrl,
+              status: 'COMPLETE',
+              is_active: true,
+            },
+          });
+        } else {
+          await prisma.categoryImages.update({
+            where: { id: existingCategoryImage.id },
+            data: { image: cloudinaryUrl },
+          });
+        }
+
+        console.log(`✅ Category image uploaded: ${cloudinaryUrl}\n`);
+      } catch (error) {
+        console.error(`❌ Category image upload failed: ${(error as Error).message}\n`);
+      }
+    } else {
+      console.log(`⚠️  Category image not found: ${CATEGORY_IMAGE}\n`);
+    }
+  } else {
+    console.log(`⚠️  Images directory not found: ${IMAGES_DIR}\n`);
+  }
 
   console.log(`📦 Processing ${products.length} products...\n`);
 

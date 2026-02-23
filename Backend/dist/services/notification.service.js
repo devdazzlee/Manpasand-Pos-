@@ -27,6 +27,12 @@ class NotificationService {
      */
     async getNotifications({ branchId, userId, type, isRead, priority, limit = 100, offset = 0, }) {
         const where = {};
+        // IMPORTANT: Exclude SALE type notifications per client requirement (Konain Bhai 1/5/2026)
+        // Cash Counter sale notifications should NOT appear in notifications panel
+        // Only important notifications (Inventory Low, Website Orders, etc.) should be shown
+        where.type = {
+            notIn: [client_1.NotificationType.SALE],
+        };
         if (branchId) {
             where.branch_id = branchId;
         }
@@ -37,6 +43,7 @@ class NotificationService {
         }
         // If userId is not provided, don't filter by user_id (get all notifications)
         if (type) {
+            // Override exclusion if specific type is requested
             where.type = type;
         }
         if (isRead !== undefined) {
@@ -156,6 +163,12 @@ class NotificationService {
      */
     async getStats({ branchId, userId }) {
         const where = {};
+        // IMPORTANT: Exclude SALE type notifications per client requirement (Konain Bhai 1/5/2026)
+        // Cash Counter sale notifications should NOT appear in notifications panel
+        // Only important notifications (Inventory Low, Website Orders, etc.) should be shown
+        where.type = {
+            notIn: [client_1.NotificationType.SALE],
+        };
         if (branchId) {
             where.branch_id = branchId;
         }
