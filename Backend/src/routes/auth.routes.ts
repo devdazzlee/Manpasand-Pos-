@@ -9,7 +9,7 @@ const router = express.Router();
 router.post('/register', validate(registerSchema), register);
 // Register endpoint for admins
 router.post('/login', validate(loginSchema), login);
-router.post('/logout', logout);
+router.post('/logout', authenticate, logout);
 
 router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 router.post('/register/admin', validate(registerSchema), registerAdmin);

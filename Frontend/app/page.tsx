@@ -91,8 +91,13 @@ export default function Home() {
     }
   };
 
-  const handleLogout = () => {
-    console.log("👋 Logging out...");
+  const handleLogout = async () => {
+    try {
+      const apiClient = (await import("@/lib/apiClient")).default;
+      await apiClient.post("/auth/logout");
+    } catch {
+      // Proceed with local cleanup even if backend call fails
+    }
     localStorage.removeItem("token");
     localStorage.removeItem("role");
     localStorage.removeItem("branch");

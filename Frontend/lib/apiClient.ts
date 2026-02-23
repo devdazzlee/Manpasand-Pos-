@@ -33,12 +33,16 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
-    // Handle 401 unauthorized errors
     if (error.response?.status === 401) {
-      // Previously we auto-logged the user out here.
-      // As per requirements, do NOT force logout automatically.
-      // Just log the issue so the user can choose when to log out.
-      console.warn("API returned 401 (unauthorized). Please check login/token.", error.response?.data);
+      const token = localStorage.getItem("token");
+      if (token) {
+        localStorage.removeItem("token");
+        localStorage.removeItem("role");
+        localStorage.removeItem("branch");
+        localStorage.removeItem("branchName");
+        localStorage.removeItem("branchAddress");
+        window.location.reload();
+      }
     }
 
     return Promise.reject(error);
