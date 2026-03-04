@@ -742,9 +742,9 @@ function generateZPLForLabel(item, options) {
   const width = Math.round((58 * dpi) / 25.4);   // 58mm wide (horizontal/landscape)
   const height = Math.round((40 * dpi) / 25.4);  // 40mm tall (horizontal/landscape)
   
-  // Margins to prevent cutting
-  const marginX = dpi === 300 ? 35 : 30;  // Left/Right margin
-  const marginY = dpi === 300 ? 25 : 20;  // Top/Bottom margin (compact for 40mm height)
+  // Generous margins to prevent cutting on all printers
+  const marginX = dpi === 300 ? 50 : 40;  // Left/Right margin (~4mm)
+  const marginY = dpi === 300 ? 30 : 24;  // Top/Bottom margin (~3mm)
   const contentWidth = width - (marginX * 2);
   const startX = marginX;
   
@@ -823,9 +823,8 @@ function generateZPLForLabel(item, options) {
     zpl += `^BY${barcodeBarWidth}\n`;
     const hri = humanReadable ? 'Y' : 'N';
     
-    // Calculate barcode area - use 90% of content width (40mm is narrow, need most of it)
-    // Center it horizontally
-    const barcodeAreaWidth = Math.floor(contentWidth * 0.90);
+    // Calculate barcode area – use 80% of content width to stay within safe zone
+    const barcodeAreaWidth = Math.floor(contentWidth * 0.80);
     const barcodeCenterX = startX + Math.floor((contentWidth - barcodeAreaWidth) / 2);
     
     // ^BCN: Code 128 barcode, Normal orientation
@@ -1189,29 +1188,29 @@ app.post('/print-barcode-labels', async (req, res) => {
     
     console.log(`[PDF] Page size: ${labelWidth.toFixed(2)}pt × ${labelHeight.toFixed(2)}pt (${(labelWidth/2.83464567).toFixed(1)}mm × ${(labelHeight/2.83464567).toFixed(1)}mm)`);
     
-    // Minimal margins like boxhero.io - ensure all content fits on one page
+    // Safe margins – most barcode/label printers have ~3-4 mm non-printable area
     const M = { 
-      left: mm(1.5),    
-      right: mm(1.5), 
-      top: mm(1.5),     
-      bottom: mm(1.5)   
+      left: mm(3),    
+      right: mm(3), 
+      top: mm(2),     
+      bottom: mm(2)   
     };
     
     // Content area (landscape dimensions)
-    const CW = labelWidth - M.left - M.right;   // 58 - 1.5 - 1.5 = 55mm
-    const CH = labelHeight - M.top - M.bottom;  // 40 - 1.5 - 1.5 = 37mm
+    const CW = labelWidth - M.left - M.right;   // 58 - 3 - 3 = 52mm
+    const CH = labelHeight - M.top - M.bottom;   // 40 - 2 - 2 = 36mm
     
     const stream = fs.createWriteStream(tmp);
     doc.pipe(stream);
 
-    // Compact font sizes like boxhero.io - ensure fits on one page
-    const TITLE = paper === '3x2inch' ? 9 : 8;  // Compact like boxhero.io
-    const META = paper === '3x2inch' ? 6 : 6;     // Very compact
+    // Compact font sizes – fits within safe area
+    const TITLE = paper === '3x2inch' ? 9 : 8;
+    const META = paper === '3x2inch' ? 6 : 6;
     
-    // Barcode dimensions - compact like boxhero.io
-    const BAR_W_MAX = CW * 0.70;  // Slightly smaller to ensure fit
-    const BAR_H_MM = paper === '3x2inch' ? 7 : 7;  // Smaller barcode height
-    const SCALE = 2;  // Small scale
+    // Barcode dimensions – use 65% of safe content width to avoid edge clipping
+    const BAR_W_MAX = CW * 0.65;
+    const BAR_H_MM = paper === '3x2inch' ? 7 : 7;
+    const SCALE = 2;
 
     for (const it of items) {
       for (let c = 0; c < copiesCount; c++) {
@@ -1302,10 +1301,16 @@ app.post('/print-barcode-labels', async (req, res) => {
           let barcodeWidth = BAR_W_MAX;
           let barcodeHeight = barcodeWidth * aspectRatio;
 
-          // Ensure barcode fits vertically - use 85% of remaining height to prevent overflow
-          if (barcodeHeight > remainingHeight * 0.85) {
-            barcodeHeight = remainingHeight * 0.85;
+          // Ensure barcode fits vertically – use 80% of remaining height to prevent clipping
+          if (barcodeHeight > remainingHeight * 0.80) {
+            barcodeHeight = remainingHeight * 0.80;
             barcodeWidth = barcodeHeight / aspectRatio;
+          }
+
+          // Final width guard: never exceed safe content width
+          if (barcodeWidth > contentWidth * 0.90) {
+            barcodeWidth = contentWidth * 0.90;
+            barcodeHeight = barcodeWidth * aspectRatio;
           }
 
           // Center barcode horizontally and vertically in remaining space

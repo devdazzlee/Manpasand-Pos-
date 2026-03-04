@@ -44,6 +44,7 @@ import { Salaries } from "./Salaries";
 import { Designation } from "./Designation";
 import BarcodeGenerater from "./barcode-generater";
 import { NewSale } from "./new-sale";
+import { PrinterSettings } from "./printer-settings";
 
 
 interface DashboardProps {
@@ -128,6 +129,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <Backup />;
       case "settings":
         return <Settings />;
+      case "printer-settings":
+        return <PrinterSettings />;
       default:
         return <DashboardHome />;
     }

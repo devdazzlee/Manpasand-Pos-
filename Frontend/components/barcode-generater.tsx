@@ -28,7 +28,8 @@ import { usePosData } from "@/hooks/use-pos-data";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/apiClient";
 import { isKioskMode, silentPrint, enableKioskMode } from "@/utils/kiosk-printing";
-import { getPrinters, printBarcodeLabelsViaServer } from "@/lib/print-server";
+import { printBarcodeLabelsViaServer } from "@/lib/print-server";
+import { usePrinterSettings } from "@/hooks/use-printer-settings";
 
 interface Product {
   id: string;
@@ -65,10 +66,9 @@ export default function BarcodeGenerator() {
   const [productDropdownOpen, setProductDropdownOpen] = useState(false);
   const productSearchInputRef = useRef<HTMLInputElement | null>(null);
   const productDropdownRef = useRef<HTMLDivElement | null>(null);
-  const [availablePrinters, setAvailablePrinters] = useState<any[]>([]);
-  const [selectedPrinter, setSelectedPrinter] = useState("");
+  // Global printer settings (configured in Printer Settings page)
+  const { barcodePrinter, printers: globalPrinters } = usePrinterSettings();
   const [selectedPaperSize, setSelectedPaperSize] = useState("3x2inch");
-  const [isLoadingPrinters, setIsLoadingPrinters] = useState(false);
   const [isPrinting, setIsPrinting] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
@@ -80,17 +80,7 @@ export default function BarcodeGenerator() {
     const kiosk = isKioskMode();
     setKioskMode(kiosk);
     if (kiosk) {
-      // In kiosk mode, set default printer and skip printer detection
-      setSelectedPrinter('Default Printer');
-      setAvailablePrinters([{ name: 'Default Printer', id: 'default', isDefault: true, status: 'available' }]);
-      
-      // Optional: Enable kiosk mode in localStorage for future sessions
       enableKioskMode();
-      
-      toast({
-        title: "Kiosk Mode Detected",
-        description: "Printing will use default printer automatically",
-      });
     }
   }, []);
 
@@ -199,10 +189,7 @@ export default function BarcodeGenerator() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  // Fetch printers on component mount
-  useEffect(() => {
-    fetchPrinters();
-  }, []);
+  // Printer loading handled by global usePrinterSettings hook
 
   const parseWeightToGrams = (weightInput: any) => {
     if (!weightInput || weightInput.trim() === "") return 0;
@@ -493,143 +480,9 @@ export default function BarcodeGenerator() {
     });
   };
 
-  // Fetch available printers - Use print server API (tries local server first, then backend)
-  const fetchPrinters = async () => {
-    setIsLoadingPrinters(true);
-    try {
-      // Use print server function - tries local server first, then backend
-      const result = await getPrinters();
-      
-      if (result.success && result.data) {
-        const printerList = result.data;
-        setAvailablePrinters(printerList);
+  // Printer loading is handled globally by usePrinterSettings hook
 
-        // Try to restore saved printer from localStorage first
-        const savedPrinterStr = localStorage.getItem('savedPrinter');
-        if (savedPrinterStr) {
-          try {
-            const savedPrinter = JSON.parse(savedPrinterStr);
-            // Check if saved printer still exists in the list
-            const foundPrinter = printerList.find((p: any) => p.name === savedPrinter.name);
-            if (foundPrinter) {
-              setSelectedPrinter(foundPrinter.name);
-              setIsLoadingPrinters(false);
-              return;
-            }
-          } catch (e) {
-            console.error("Failed to parse saved printer:", e);
-          }
-        }
-        
-        // No saved printer or saved printer not found, use default
-        const defaultPrinter = printerList.find((p: any) => p.isDefault);
-        if (defaultPrinter) {
-          setSelectedPrinter(defaultPrinter.name);
-        } else if (printerList.length > 0) {
-          setSelectedPrinter(printerList[0].name);
-        }
-      } else {
-        throw new Error(result.error || 'Failed to get printers');
-      }
-    } catch (err: any) {
-      console.error("Failed to load printers:", err);
-      setAvailablePrinters([]);
-      setSelectedPrinter('');
-    } finally {
-      setIsLoadingPrinters(false);
-    }
-  };
-
-  // Detect printer by opening print dialog (user selects, we capture selection)
-  const detectPrinterViaDialog = () => {
-    toast({
-      title: "Detect Printer",
-      description: "Open print dialog and select your printer. The printer name will be saved.",
-    });
-    
-    // Create a temporary print preview to capture printer selection
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      toast({
-        variant: "destructive",
-        title: "Error",
-        description: "Please allow pop-ups to detect your printer",
-      });
-      return;
-    }
-
-    printWindow.document.write(`
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <title>Printer Detection</title>
-          <style>
-            body { 
-              font-family: Arial, sans-serif; 
-              padding: 20px; 
-              text-align: center;
-            }
-            @media print {
-              body { display: none; }
-            }
-          </style>
-        </head>
-        <body>
-          <h2>Select your printer from the print dialog</h2>
-          <p>After selecting, you'll be prompted to save the printer name.</p>
-          <script>
-            window.onbeforeprint = function() {
-              window.opener.postMessage('print-dialog-opened', '*');
-            };
-            window.onafterprint = function() {
-              setTimeout(() => {
-                const printerName = prompt('Enter the printer name you selected:', '');
-                if (printerName && printerName.trim()) {
-                  window.opener.postMessage({ type: 'printer-detected', name: printerName.trim() }, '*');
-                }
-                window.close();
-              }, 100);
-            };
-          </script>
-        </body>
-      </html>
-    `);
-    printWindow.document.close();
-    
-    // Listen for printer name from print dialog
-    const messageHandler = (event: MessageEvent) => {
-      if (event.data === 'print-dialog-opened') {
-        printWindow?.print();
-      } else if (event.data?.type === 'printer-detected' && event.data.name) {
-        const newPrinter = {
-          name: event.data.name,
-          id: `client-${Date.now()}`,
-          isDefault: availablePrinters.length === 0,
-          status: 'available'
-        };
-        const updatedPrinters = [...availablePrinters, newPrinter];
-        setAvailablePrinters(updatedPrinters);
-        setSelectedPrinter(newPrinter.name);
-        localStorage.setItem('saved_printers', JSON.stringify(updatedPrinters));
-        localStorage.setItem('last_used_printer', newPrinter.name);
-        window.removeEventListener('message', messageHandler);
-        
-        toast({
-          title: "Printer Detected",
-          description: `Printer "${newPrinter.name}" has been added`,
-        });
-      }
-    };
-    
-    window.addEventListener('message', messageHandler);
-    
-    // Auto-trigger print dialog after a short delay
-    setTimeout(() => {
-      if (printWindow && !printWindow.closed) {
-        printWindow.print();
-      }
-    }, 500);
-  };
+  // Printer detection is now handled globally in Printer Settings page
 
 
   const handlePrintAll = async () => {
@@ -1126,33 +979,12 @@ export default function BarcodeGenerator() {
     setTimeout(() => {
       printWindow.print();
       
-      // After printing, prompt user to save printer name if not already saved
-      printWindow.onbeforeunload = () => {
-        const savedPrinter = localStorage.getItem('last_used_printer');
-        if (selectedPrinter && selectedPrinter !== savedPrinter) {
-          localStorage.setItem('last_used_printer', selectedPrinter);
-          // Check if printer exists in list, if not add it
-          const printerExists = availablePrinters.some(p => p.name === selectedPrinter);
-          if (!printerExists && selectedPrinter !== 'Default Printer') {
-            const newPrinter = {
-              name: selectedPrinter,
-              id: `client-${Date.now()}`,
-              isDefault: false,
-              status: 'available'
-            };
-            const updatedPrinters = [...availablePrinters, newPrinter];
-            setAvailablePrinters(updatedPrinters);
-            localStorage.setItem('saved_printers', JSON.stringify(updatedPrinters));
-          }
-        }
-      };
-      
       setTimeout(() => {
         printWindow.close();
         setIsPrinting(false);
         toast({
           title: "Print Dialog Opened",
-          description: selectedPrinter ? `Select your printer: ${selectedPrinter}` : "Select your printer from the dialog",
+          description: barcodePrinter ? `Printer: ${barcodePrinter}` : "Select your printer from the dialog",
         });
       }, 100);
     }, 250);
@@ -1250,135 +1082,20 @@ export default function BarcodeGenerator() {
               </div>
             </div>
 
-            {/* Printer Selection - Hidden in kiosk mode */}
-            {!kioskMode ? (
-              <div className="space-y-2 border-t pt-4">
-                <Label>Select Printer</Label>
-                <div className="flex gap-2">
-                  <Select
-                    onValueChange={setSelectedPrinter}
-                    value={selectedPrinter}
-                    disabled={isLoadingPrinters}
-                  >
-                    <SelectTrigger className="flex-1">
-                      <SelectValue placeholder={isLoadingPrinters ? "Loading printers..." : "Choose a printer"} />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {availablePrinters.map((printer) => (
-                        <SelectItem key={printer.name} value={printer.name}>
-                          <div className="flex items-center gap-2">
-                            <span>{printer.name}</span>
-                            {printer.isDefault && (
-                              <span className="text-xs bg-blue-100 text-blue-800 px-1 rounded">
-                                Default
-                              </span>
-                            )}
-                          </div>
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Button
-                    onClick={() => fetchPrinters()}
-                    variant="outline"
-                    size="sm"
-                    disabled={isLoadingPrinters}
-                    title="Refresh printers"
-                  >
-                    {isLoadingPrinters ? (
-                      <Loader2 className="h-4 w-4 animate-spin" />
-                    ) : (
-                      <RefreshCw className="h-4 w-4" />
-                    )}
-                  </Button>
-                  <Button
-                    onClick={detectPrinterViaDialog}
-                    variant="outline"
-                    size="sm"
-                    title="Detect printer from your device"
-                  >
-                    <Search className="h-4 w-4" />
-                  </Button>
-                  <Button
-                    onClick={() => {
-                      const printerName = prompt('Enter printer name:');
-                      if (printerName && printerName.trim()) {
-                        const newPrinter = {
-                          name: printerName.trim(),
-                          id: `manual-${Date.now()}`,
-                          isDefault: availablePrinters.length === 0,
-                          status: 'available'
-                        };
-                        const updatedPrinters = [...availablePrinters, newPrinter];
-                        setAvailablePrinters(updatedPrinters);
-                        setSelectedPrinter(newPrinter.name);
-                        localStorage.setItem('saved_printers', JSON.stringify(updatedPrinters));
-                        localStorage.setItem('last_used_printer', newPrinter.name);
-                        toast({
-                          title: "Printer Added",
-                          description: `Printer "${newPrinter.name}" has been added`,
-                        });
-                      }
-                    }}
-                    variant="outline"
-                    size="sm"
-                    title="Add printer manually"
-                  >
-                    <Plus className="h-4 w-4" />
-                  </Button>
+            {/* Barcode Printer - configured globally in Printer Settings */}
+            <div className="space-y-2 border-t pt-4">
+              <Label>Barcode Printer</Label>
+              {barcodePrinter ? (
+                <div className="px-3 py-2 rounded-lg border border-purple-100 bg-purple-50/60 flex items-center gap-2 text-sm text-purple-800">
+                  🖨️ <span className="font-medium">{barcodePrinter}</span>
+                  <span className="text-purple-600 text-xs">(change in Printer Settings)</span>
                 </div>
-                {isLoadingPrinters && (
-                  <div className="text-xs text-gray-500 flex items-center gap-1">
-                    <Loader2 className="h-3 w-3 animate-spin" />
-                    Loading printers...
-                  </div>
-                )}
-                {availablePrinters.length === 0 && !isLoadingPrinters && (
-                <div className="text-xs text-gray-500 space-y-2">
-                  <div>No printers found.</div>
-                  <div className="flex gap-2">
-                    <Button
-                      onClick={detectPrinterViaDialog}
-                      variant="outline"
-                      size="sm"
-                      className="text-xs flex-1"
-                    >
-                      <Search className="h-3 w-3 mr-1" />
-                      Detect Printer
-                    </Button>
-                    <Button
-                      onClick={() => {
-                        const printerName = prompt('Enter printer name:');
-                        if (printerName && printerName.trim()) {
-                          const newPrinter = {
-                            name: printerName.trim(),
-                            id: `manual-${Date.now()}`,
-                            isDefault: availablePrinters.length === 0,
-                            status: 'available'
-                          };
-                          const updatedPrinters = [...availablePrinters, newPrinter];
-                          setAvailablePrinters(updatedPrinters);
-                          setSelectedPrinter(newPrinter.name);
-                          localStorage.setItem('saved_printers', JSON.stringify(updatedPrinters));
-                          localStorage.setItem('last_used_printer', newPrinter.name);
-                          toast({
-                            title: "Printer Added",
-                            description: `Printer "${newPrinter.name}" has been added`,
-                          });
-                        }
-                      }}
-                      variant="outline"
-                      size="sm"
-                      className="text-xs flex-1"
-                    >
-                      <Plus className="h-3 w-3 mr-1" />
-                      Add Manually
-                    </Button>
-                  </div>
+              ) : (
+                <div className="px-3 py-2 rounded-lg border border-amber-100 bg-amber-50 text-sm text-amber-800">
+                  No barcode printer configured. Go to <strong>Printer Settings</strong> to set one.
                 </div>
-                )}
-              </div>
-            ) : null}
+              )}
+            </div>
 
             {/* Global Dates */}
             <div className="space-y-2 border-t pt-4">

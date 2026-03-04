@@ -33,7 +33,8 @@ import { offlineAPIClient } from "@/lib/offline-api-client";
 import { offlineDB } from "@/lib/offline-db";
 import { syncManager } from "@/lib/offline-sync";
 import { usePosData } from "@/hooks/use-pos-data";
-import { printReceiptViaServer, getPrinters, type ReceiptData } from "@/lib/print-server";
+import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
+import { usePrinterSettings } from "@/hooks/use-printer-settings";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
   Select,
@@ -77,17 +78,8 @@ interface Product {
   unitName?: string;
 }
 
-interface Printer {
-  name: string;
-  isDefault?: boolean;
-  status?: string;
-  receiptProfile?: {
-    roll: '80mm' | '58mm';
-    printableWidthMM: number;
-    columns: { fontA: number; fontB: number };
-  };
-  languageHint?: 'escpos' | 'zpl' | 'generic';
-}
+// Printer type from global hook
+type Printer = ReturnType<typeof usePrinterSettings>["printers"][number];
 
 
 export function NewSale() {
@@ -131,50 +123,13 @@ export function NewSale() {
   const [scanLoading, setScanLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
-  const [printers, setPrinters] = useState<Printer[]>([]);
-  const [savedPrinterObj, setSavedPrinterObj] = useState<Printer | null>(() => {
-    // Load saved printer object from localStorage on initial state
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('savedPrinter');
-      if (saved) {
-        try {
-          const printer = JSON.parse(saved);
-          return printer;
-        } catch (e) {
-          return null;
-        }
-      }
-    }
-    return null;
-  });
-  const [selectedPrinter, setSelectedPrinter] = useState<string>(() => {
-    // Load saved printer name for dropdown
-    if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('savedPrinter');
-      if (saved) {
-        try {
-          const printer = JSON.parse(saved);
-          return printer.name || "";
-        } catch (e) {
-          return "";
-        }
-      }
-    }
-    return "";
-  });
+  // Global printer settings (configured in Printer Settings page)
+  const { receiptPrinter, getReceiptPrinterObj, printers } = usePrinterSettings();
   const [showHeldSales, setShowHeldSales] = useState(false);
   const [isHoldingSale, setIsHoldingSale] = useState(false);
   const [isViewingHeldSales, setIsViewingHeldSales] = useState(false);
   const [resumingHoldIndex, setResumingHoldIndex] = useState<number | null>(null);
 
-  // Save selected printer object to localStorage whenever it changes
-  useEffect(() => {
-    if (savedPrinterObj) {
-      localStorage.setItem('savedPrinter', JSON.stringify(savedPrinterObj));
-      // Also update selectedPrinter name for the dropdown
-      setSelectedPrinter(savedPrinterObj.name);
-    }
-  }, [savedPrinterObj]);
 
 
   const [branchName, setBranchName] = useState({
@@ -207,7 +162,6 @@ export function NewSale() {
           fetchCategories(),
           fetchCustomers(),
           getBranchName(),
-          loadPrinters(),
         ]);
       } catch (error) {
         // Error loading data - no toast shown
@@ -869,50 +823,7 @@ export function NewSale() {
     }
   };
 
-  const loadPrinters = async () => {
-    try {
-      // Use print server function - tries local server first, then backend
-      const result = await getPrinters();
-      
-      if (result.success && result.data) {
-        const printerList = result.data;
-        setPrinters(printerList);
-
-        // Try to restore saved printer object from localStorage first
-        const savedPrinterStr = localStorage.getItem('savedPrinter');
-        if (savedPrinterStr) {
-          try {
-            const savedPrinter: Printer = JSON.parse(savedPrinterStr);
-            // Check if saved printer still exists in the list
-            const foundPrinter = printerList.find((p: Printer) => p.name === savedPrinter.name);
-            if (foundPrinter) {
-              // Use the current printer data from API (in case it was updated)
-              setSavedPrinterObj(foundPrinter);
-              setSelectedPrinter(foundPrinter.name);
-              return;
-            }
-          } catch (e) {
-            console.error("Failed to parse saved printer:", e);
-          }
-        }
-        
-        // No saved printer or saved printer not found, use default
-        const defaultPrinter = printerList.find((p: Printer) => p.isDefault);
-        if (defaultPrinter) {
-          setSavedPrinterObj(defaultPrinter);
-          setSelectedPrinter(defaultPrinter.name);
-        } else if (printerList.length > 0) {
-          setSavedPrinterObj(printerList[0]);
-          setSelectedPrinter(printerList[0].name);
-        }
-      } else {
-        throw new Error(result.error || 'Failed to get printers');
-      }
-    } catch (err) {
-      console.error("Failed to load printers:", err);
-      // Failed to load printers - no toast shown
-    }
-  };
+  // Printer loading is handled globally by usePrinterSettings hook
 
   const removeFromCart = (id: string) => {
     setCart(cart.filter((item) => item.id !== id));
@@ -1245,38 +1156,14 @@ export function NewSale() {
             footerMessage: "Visit us again soon!",
           };
 
-          // Get printer object from saved state or localStorage
-          let printerToUse: Printer | null = savedPrinterObj;
-          
-          // If not in state, try to load from localStorage
+          // Get printer from global settings (Printer Settings page)
+          const printerToUse = getReceiptPrinterObj();
           if (!printerToUse) {
-            const savedPrinterStr = localStorage.getItem('savedPrinter');
-            if (savedPrinterStr) {
-              try {
-                printerToUse = JSON.parse(savedPrinterStr);
-              } catch (e) {
-                console.error("Failed to parse saved printer:", e);
-              }
-            }
+            throw new Error("No receipt printer configured. Go to Printer Settings to select one.");
           }
 
-          // Fallback: use default printer from printers list
-          if (!printerToUse && printers.length > 0) {
-            printerToUse = printers.find((p) => p.isDefault) || printers[0];
-          }
-
-          // If still no printer, show error
-          if (!printerToUse) {
-            throw new Error("No printer selected. Please select a printer in settings.");
-          }
-
-          // Send full printer object from localStorage to API
-          // Use the complete printer object saved in localStorage with all its properties
-          // This ensures all printer details (name, receiptProfile, languageHint, status, etc.) are sent to API
           const printerObj = {
-            // Spread all properties from saved printer object (name, receiptProfile, languageHint, status, etc.)
             ...printerToUse,
-            // Include columns for backward compatibility (in case receiptProfile.columns doesn't exist)
             columns: printerToUse.receiptProfile?.columns || { fontA: 48, fontB: 64 },
           };
 
@@ -1842,49 +1729,13 @@ export function NewSale() {
           </div>
         </div>
 
-          <div className="mb-4">
-            <div className="rounded-2xl border border-blue-200 bg-white shadow-sm px-4 py-4 space-y-3">
-                <div>
-                <p className="text-sm font-semibold text-gray-900">Printer Selection</p>
-                  <p className="text-xs text-gray-500">
-                  Choose receipt printer before completing the sale.
-                  </p>
-                </div>
-              <div className="space-y-4">
-                  <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                    Select printer
-                  </label>
-                <Select
-                  value={selectedPrinter || undefined}
-                  onValueChange={(printerName) => {
-                      setSelectedPrinter(printerName);
-                      const selectedPrinterObj = printers.find((p) => p.name === printerName);
-                      if (selectedPrinterObj) {
-                        setSavedPrinterObj(selectedPrinterObj);
-                      }
-                    }}
-                  disabled={printers.length === 0}
-                  >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Choose a printer" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {printers.map((printer) => (
-                      <SelectItem key={printer.name} value={printer.name}>
-                        {printer.name} {printer.isDefault ? "(Default)" : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                  {printers.length === 0 && (
-                    <p className="text-xs text-gray-500">Loading available printers...</p>
-                  )}
-                  <p className="text-xs text-gray-500">
-                  Selected printer will be used for automatic receipt printing.
-                  </p>
-                </div>
+          {/* Printer info - configured globally in Printer Settings */}
+          {receiptPrinter && (
+            <div className="mb-4 px-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50/60 flex items-center gap-2 text-sm text-blue-800">
+              <span className="font-medium">🖨️ {receiptPrinter}</span>
+              <span className="text-blue-600 text-xs">(change in Printer Settings)</span>
             </div>
-          </div>
+          )}
 
         {/* Categories */}
         <div className="flex space-x-2 mb-6 overflow-x-auto">

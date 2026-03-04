@@ -49,7 +49,8 @@ import {
   DialogDescription,
   DialogFooter,
 } from "@/components/ui/dialog";
-import { getPrinters, printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
+import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
+import { usePrinterSettings } from "@/hooks/use-printer-settings";
 
 interface SaleItem {
   id: string;
@@ -100,21 +101,6 @@ interface BranchInfo {
   address: string;
 }
 
-interface PrinterOption {
-  name: string;
-  isDefault?: boolean;
-  status?: string;
-  receiptProfile?: {
-    roll?: string;
-    printableWidthMM?: number;
-    columns?: {
-      fontA: number;
-      fontB: number;
-    };
-  };
-  languageHint?: string;
-}
-
 export function SalesHistory() {
   const { toast } = useToast();
   const [sales, setSales] = useState<Sale[]>([]);
@@ -129,8 +115,8 @@ export function SalesHistory() {
   const [iframeHeight, setIframeHeight] = useState<number>(620);
   const receiptIframeRef = useRef<HTMLIFrameElement | null>(null);
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
-  const [printers, setPrinters] = useState<PrinterOption[]>([]);
-  const [selectedPrinter, setSelectedPrinter] = useState<string>("");
+  // Global printer settings (configured in Printer Settings page)
+  const { receiptPrinter, getReceiptPrinterObj, printers } = usePrinterSettings();
   const [kioskMode, setKioskMode] = useState<boolean>(false);
 
   const [searchTerm, setSearchTerm] = useState("");
@@ -285,29 +271,7 @@ export function SalesHistory() {
 
   useEffect(() => {
     setKioskMode(isKioskMode());
-    const loadPrinters = async () => {
-      try {
-        const result = await getPrinters();
-        if (result.success && result.data?.length) {
-          setPrinters(result.data);
-          const defaultPrinter =
-            result.data.find((p) => p.isDefault) || result.data[0];
-          setSelectedPrinter(defaultPrinter.name);
-        }
-      } catch (error: any) {
-        console.error("Failed to load printers:", error);
-        toast({
-          variant: "destructive",
-          title: "Printer list unavailable",
-          description: error?.message || "Could not load available printers.",
-        });
-      }
-    };
-    loadPrinters();
-    if (isKioskMode()) {
-      setSelectedPrinter((prev) => prev || "Default Printer");
-    }
-  }, [toast]);
+  }, []);
 
   // Reset to page 1 when filters change
   useEffect(() => {
@@ -905,22 +869,19 @@ ${aceHtml}
       toast({ title: "No receipt data available", variant: "destructive" });
       return;
     }
-    const printerName = kioskMode
-      ? selectedPrinter || "Default Printer"
-      : selectedPrinter;
+    const printerInfo = getReceiptPrinterObj();
+    const printerName = printerInfo?.name || (kioskMode ? "Default Printer" : "");
     if (!printerName) {
       toast({
         variant: "destructive",
-        title: "Select a printer",
-        description: "Choose a printer before printing the receipt.",
+        title: "No receipt printer configured",
+        description: "Go to Printer Settings to select a receipt printer.",
       });
       return;
     }
     const printerObj = {
       name: printerName,
-      columns:
-        printers.find((p) => p.name === printerName)?.receiptProfile?.columns ||
-        { fontA: 48, fontB: 64 },
+      columns: printerInfo?.receiptProfile?.columns || { fontA: 48, fontB: 64 },
     };
     const job = { copies: 1, cut: true, openDrawer: false };
     try {
@@ -1279,23 +1240,9 @@ ${aceHtml}
                       <span className="mx-2 text-gray-400">•</span>
                       <span className="text-gray-600">{format(parseISO(viewSale.sale_date), "PPpp")}</span>
                     </div>
-                    {printers.length > 0 && (
-                      <div className="flex items-center gap-2.5">
-                        <label className="text-xs font-semibold uppercase tracking-wide text-gray-600 whitespace-nowrap">
-                          Printer:
-                        </label>
-                        <Select value={selectedPrinter || undefined} onValueChange={setSelectedPrinter}>
-                          <SelectTrigger className="h-9 min-w-[200px]">
-                            <SelectValue placeholder="Choose printer" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {printers.map((printer) => (
-                              <SelectItem key={printer.name} value={printer.name}>
-                                {printer.name} {printer.isDefault ? "(Default)" : ""}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                    {receiptPrinter && (
+                      <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50 rounded-lg px-3 py-1.5">
+                        🖨️ <span className="font-medium">{receiptPrinter}</span>
                       </div>
                     )}
                   </div>
@@ -1305,7 +1252,7 @@ ${aceHtml}
                       {(printers.length > 0 || kioskMode) && (
                         <Button 
                           onClick={handleServerPrint} 
-                          disabled={!selectedPrinter && !kioskMode}
+                          disabled={!receiptPrinter && !kioskMode}
                           className="whitespace-nowrap shadow-sm hover:shadow-md transition-all"
                           size="default"
                         >

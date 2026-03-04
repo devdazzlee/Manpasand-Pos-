@@ -37,12 +37,13 @@
   import { API_BASE } from "@/config/constants";
   import { useToast } from "@/hooks/use-toast";
   import { CashRegister } from "@/components/cash-register";
+  import { usePrinterSettings } from "@/hooks/use-printer-settings";
 
 interface Branch { id: string; name: string; }
 interface Customer { id: string; email: string; name: string | null; }
 interface Product { id: string; name: string; }
 interface SaleItem { productId: string; quantity: number; price: number; }
-interface Printer { name: string; isDefault?: boolean; }
+interface PrinterLocal { name: string; isDefault?: boolean; }
 interface Sale {
   id: string;
   sale_number: string;
@@ -63,7 +64,8 @@ interface Sale {
     const [customers, setCustomers] = useState<Customer[]>([]);
     const [products, setProducts] = useState<Product[]>([]);
     const [sales, setSales] = useState<Sale[]>([]);
-    const [printers, setPrinters] = useState<Printer[]>([]);
+    // Global printer settings (configured in Printer Settings page)
+    const { receiptPrinter, printers: globalPrinters } = usePrinterSettings();
 
     // UI state
     const [branchFilter, setBranchFilter] = useState<string>("");
@@ -150,32 +152,13 @@ interface Sale {
         .finally(() => setIsLoading(false));
     }, [branchFilter, toast]);
 
-    // 3) Load available printers when dialog opens
+    // Auto-fill printer from global settings when dialog opens
     useEffect(() => {
       if (!isAddOpen) return;
-      
-      const loadPrinters = async () => {
-        try {
-          const response = await apiClient.get(`/barcode-generator/printers`);
-          setPrinters(response.data.data || response.data);
-          
-          // Auto-select default printer if available
-          const defaultPrinter = (response.data.data || response.data).find((p: Printer) => p.isDefault);
-          if (defaultPrinter) {
-            setSaleForm(f => ({ ...f, printerName: defaultPrinter.name }));
-          }
-        } catch (err) {
-          console.log(err);
-          toast({
-            title: "Warning",
-            description: "Failed to load available printers",
-            variant: "destructive",
-          });
-        }
-      };
-
-      loadPrinters();
-    }, [isAddOpen, toast]);
+      if (receiptPrinter) {
+        setSaleForm(f => ({ ...f, printerName: receiptPrinter }));
+      }
+    }, [isAddOpen, receiptPrinter]);
 
     // Handlers
     const handleAddSale = async () => {
@@ -374,28 +357,13 @@ interface Sale {
                   </Select>
                 </div>
 
-                {/* Printer Selection */}
-                <div>
-                  <Label htmlFor="sale-printer">Select Printer</Label>
-                  <Select
-                    value={saleForm.printerName || "none"}
-                    onValueChange={(value) =>
-                      setSaleForm({ ...saleForm, printerName: value === "none" ? "" : value })
-                    }
-                  >
-                    <SelectTrigger id="sale-printer" className="w-full">
-                      <SelectValue placeholder="Select printer" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select printer</SelectItem>
-                      {printers.map((p) => (
-                        <SelectItem key={p.name} value={p.name}>
-                          {p.name} {p.isDefault ? "(Default)" : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
+                {/* Printer info - configured globally in Printer Settings */}
+                {receiptPrinter && (
+                  <div className="px-3 py-2 rounded-lg border border-blue-100 bg-blue-50/60 flex items-center gap-2 text-sm text-blue-800">
+                    🖨️ <span className="font-medium">{receiptPrinter}</span>
+                    <span className="text-blue-600 text-xs">(change in Printer Settings)</span>
+                  </div>
+                )}
 
                 {/* Line Items */}
                 {saleForm.items.map((item, i) => (

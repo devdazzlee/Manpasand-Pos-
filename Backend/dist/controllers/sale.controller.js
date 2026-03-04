@@ -52,9 +52,27 @@ const getSalesController = (0, asyncHandler_1.default)(async (req, res) => {
         branchId = undefined;
         console.log("Admin user - no branchId in query, returning all sales");
     }
-    const sales = await saleService.getSales({ branchId });
-    console.log(`Returning ${sales.length} sales for branchId: ${branchId || 'ALL'}`);
-    new apiResponse_1.ApiResponse(sales, "Sales fetched successfully").send(res);
+    const page = Number(req.query.page);
+    const limit = Number(req.query.limit);
+    const search = req.query.search?.trim();
+    const startDateRaw = req.query.startDate;
+    const endDateRaw = req.query.endDate;
+    const parsedStartDate = startDateRaw && !Number.isNaN(new Date(startDateRaw).getTime())
+        ? new Date(startDateRaw)
+        : undefined;
+    const parsedEndDate = endDateRaw && !Number.isNaN(new Date(endDateRaw).getTime())
+        ? new Date(endDateRaw)
+        : undefined;
+    const result = await saleService.getSales({
+        branchId,
+        page: Number.isFinite(page) && page > 0 ? page : undefined,
+        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+        search,
+        startDate: parsedStartDate,
+        endDate: parsedEndDate,
+    });
+    console.log(`Returning ${result.data.length} sales for branchId: ${branchId || 'ALL'} (page: ${result.meta?.page}, total: ${result.meta?.total})`);
+    new apiResponse_1.ApiResponse(result.data, "Sales fetched successfully", 200, true, result.meta).send(res);
 });
 exports.getSalesController = getSalesController;
 const getSalesForReturnsController = (0, asyncHandler_1.default)(async (req, res) => {

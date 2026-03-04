@@ -14,7 +14,8 @@ import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/ui/page-loader";
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
-import { getPrinters, printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
+import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
+import { usePrinterSettings } from "@/hooks/use-printer-settings";
 
 interface OrderItem { 
   productId?: string;
@@ -36,20 +37,10 @@ interface WebsiteOrder {
   payment_method: string;
 }
 
-interface PrinterOption {
-  name: string;
-  isDefault?: boolean;
-  status?: string;
-  receiptProfile?: {
-    columns?: {
-      fontA: number;
-      fontB: number;
-    };
-  };
-}
-
 const WebsiteOrders: React.FC = () => {
   const { toast } = useToast();
+  // Global printer settings (configured in Printer Settings page)
+  const { receiptPrinter, getReceiptPrinterObj, printers } = usePrinterSettings();
 
   const [orders, setOrders] = useState<WebsiteOrder[]>([]);
   const [statusFilter, setStatusFilter] = useState<string>("");
@@ -62,8 +53,6 @@ const WebsiteOrders: React.FC = () => {
   const [isDetailOpen, setIsDetailOpen] = useState(false);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<WebsiteOrder | null>(null);
-  const [printers, setPrinters] = useState<PrinterOption[]>([]);
-  const [selectedPrinter, setSelectedPrinter] = useState<string>("");
   const [isPrinting, setIsPrinting] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [statusUpdatingIds, setStatusUpdatingIds] = useState<Record<string, boolean>>({});
@@ -71,22 +60,6 @@ const WebsiteOrders: React.FC = () => {
   useEffect(() => {
     fetchOrders();
   }, [statusFilter]);
-
-  useEffect(() => {
-    const loadPrinters = async () => {
-      try {
-        const result = await getPrinters();
-        if (result.success && result.data?.length) {
-          setPrinters(result.data as PrinterOption[]);
-          const defaultPrinter = result.data.find((p) => p.isDefault) || result.data[0];
-          setSelectedPrinter(defaultPrinter.name);
-        }
-      } catch (error) {
-        console.error("Failed to load printers", error);
-      }
-    };
-    loadPrinters();
-  }, []);
 
   const normalizeOrderItems = (items: any[]): OrderItem[] => {
     if (!Array.isArray(items)) return [];
@@ -224,10 +197,11 @@ const WebsiteOrders: React.FC = () => {
   };
 
   const handlePrinterPrint = async (order: WebsiteOrder) => {
-    if (!selectedPrinter) {
+    const printerInfo = getReceiptPrinterObj();
+    if (!printerInfo) {
       toast({
-        title: "Select printer first",
-        description: "Please choose a printer before printing.",
+        title: "No receipt printer configured",
+        description: "Go to Printer Settings to select a receipt printer.",
         variant: "destructive",
       });
       return;
@@ -236,10 +210,8 @@ const WebsiteOrders: React.FC = () => {
     setIsPrinting(true);
     try {
       const printerObj = {
-        name: selectedPrinter,
-        columns:
-          printers.find((p) => p.name === selectedPrinter)?.receiptProfile?.columns ||
-          { fontA: 48, fontB: 64 },
+        name: printerInfo.name,
+        columns: printerInfo.receiptProfile?.columns || { fontA: 48, fontB: 64 },
       };
       const result = await printReceiptViaServer(printerObj, buildReceiptData(order), {
         copies: 1,
@@ -251,7 +223,7 @@ const WebsiteOrders: React.FC = () => {
       }
       toast({
         title: "Printed successfully",
-        description: `Receipt sent to ${selectedPrinter}`,
+        description: `Receipt sent to ${printerInfo.name}`,
       });
     } catch (error: any) {
       toast({
@@ -901,21 +873,9 @@ const WebsiteOrders: React.FC = () => {
 
               {/* Action Buttons */}
               <div className="flex flex-col gap-3 pt-4 border-t">
-                {printers.length > 0 && (
-                  <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                    <Label htmlFor="printer-select" className="text-xs text-gray-600">Printer:</Label>
-                    <Select value={selectedPrinter || undefined} onValueChange={setSelectedPrinter}>
-                      <SelectTrigger id="printer-select" className="min-w-[220px]">
-                        <SelectValue placeholder="Choose printer" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {printers.map((printer) => (
-                          <SelectItem key={printer.name} value={printer.name}>
-                            {printer.name} {printer.isDefault ? "(Default)" : ""}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                {receiptPrinter && (
+                  <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50 rounded-lg px-3 py-1.5">
+                    🖨️ <span className="font-medium">{receiptPrinter}</span>
                   </div>
                 )}
                 <div className="flex flex-wrap gap-2 sm:justify-end">
@@ -944,7 +904,7 @@ const WebsiteOrders: React.FC = () => {
                     className="w-full sm:w-auto"
                     variant="outline"
                     onClick={() => handlePrinterPrint(selectedOrder)}
-                    disabled={isPrinting || !selectedPrinter}
+                    disabled={isPrinting || !receiptPrinter}
                   >
                     {isPrinting ? (
                       <Loader2 className="h-4 w-4 mr-2 animate-spin" />

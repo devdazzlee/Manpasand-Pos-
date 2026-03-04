@@ -5,24 +5,79 @@ const client_1 = require("@prisma/client");
 const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 class SaleService {
-    async getSales({ branchId }) {
-        return client_2.prisma.sale.findMany({
-            where: branchId ? { branch_id: branchId } : undefined,
-            include: {
-                sale_items: {
-                    include: { product: true },
-                },
-                customer: true,
-                branch: {
-                    select: {
-                        id: true,
-                        name: true,
-                        address: true,
+    async getSales({ branchId, page, limit, search, startDate, endDate, }) {
+        const where = {
+            ...(branchId ? { branch_id: branchId } : {}),
+            ...(search
+                ? {
+                    OR: [
+                        { sale_number: { contains: search, mode: 'insensitive' } },
+                        { customer: { email: { contains: search, mode: 'insensitive' } } },
+                        { customer: { name: { contains: search, mode: 'insensitive' } } },
+                    ],
+                }
+                : {}),
+            ...(startDate || endDate
+                ? {
+                    sale_date: {
+                        ...(startDate ? { gte: startDate } : {}),
+                        ...(endDate ? { lte: endDate } : {}),
                     },
+                }
+                : {}),
+        };
+        const include = {
+            sale_items: {
+                include: { product: true },
+            },
+            customer: true,
+            branch: {
+                select: {
+                    id: true,
+                    name: true,
+                    address: true,
                 },
             },
-            orderBy: { sale_date: 'desc' },
-        });
+        };
+        // Backward-compatible behavior: when pagination is not requested, return all rows.
+        if (!page || !limit) {
+            const data = await client_2.prisma.sale.findMany({
+                where,
+                include,
+                orderBy: { sale_date: 'desc' },
+            });
+            return {
+                data,
+                meta: {
+                    total: data.length,
+                    page: 1,
+                    limit: data.length,
+                    totalPages: 1,
+                },
+            };
+        }
+        const safePage = Math.max(1, Number(page) || 1);
+        const safeLimit = Math.max(1, Number(limit) || 10);
+        const skip = (safePage - 1) * safeLimit;
+        const [total, data] = await Promise.all([
+            client_2.prisma.sale.count({ where }),
+            client_2.prisma.sale.findMany({
+                where,
+                include,
+                orderBy: { sale_date: 'desc' },
+                skip,
+                take: safeLimit,
+            }),
+        ]);
+        return {
+            data,
+            meta: {
+                total,
+                page: safePage,
+                limit: safeLimit,
+                totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+            },
+        };
     }
     async getSalesForReturns({ branchId }) {
         return client_2.prisma.sale.findMany({

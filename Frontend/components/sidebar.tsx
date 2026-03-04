@@ -29,6 +29,7 @@ import {
   X,
   Warehouse,
   Globe,
+  Printer as PrinterIcon,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -124,6 +125,7 @@ const menuSections: SidebarMenuSection[] = [
     expandable: true,
     items: [
       { id: "reports", label: "Reports & Analytics", icon: BarChart3 },
+      { id: "printer-settings", label: "Printer Settings", icon: PrinterIcon },
       // { id: "audit", label: "Audit Trail", icon: Shield },
       // { id: "multi-location", label: "Multi-Location", icon: MapPin },
       // { id: "integrations", label: "Integrations", icon: Zap },
@@ -161,6 +163,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
     // "units",
     "customers",
     "expenses",
+    "printer-settings",
   ];
 
   // Tabs to show for BRANCH
@@ -180,6 +183,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
     "brand",
     "colors",
     "sizes",
+    "printer-settings",
   ];
 
   // Filter menuSections based on role
