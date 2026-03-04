@@ -2,12 +2,18 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.createGuestOrderSchema = void 0;
 const zod_1 = require("zod");
-const orderItemSchema = zod_1.z.object({
-    id: zod_1.z.string().min(1, 'Product ID is required'),
+const orderItemSchema = zod_1.z
+    .object({
+    id: zod_1.z.string().min(1).optional(),
+    productId: zod_1.z.string().min(1).optional(),
     name: zod_1.z.string().min(1, 'Product name is required'),
     price: zod_1.z.number().min(0, 'Price must be positive'),
     quantity: zod_1.z.number().int().min(1, 'Quantity must be at least 1'),
     image: zod_1.z.string().optional(),
+})
+    .refine((val) => Boolean(val.id || val.productId), {
+    message: 'Product ID is required',
+    path: ['id'],
 });
 const createGuestOrderSchema = zod_1.z.object({
     body: zod_1.z.object({

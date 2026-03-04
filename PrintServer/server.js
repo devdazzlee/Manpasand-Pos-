@@ -543,8 +543,12 @@ app.post('/print-receipt', async (req, res) => {
     // ===== ITEMS =====
     for (const it of receiptData.items || []) {
       const name = String(it.name || '');
-      const qty = (it.quantity ?? 0).toString() + (it.unit ? ` ${it.unit}` : '');
-      const rate = `${money(Number(it.price || 0) * Number(it.quantity || 0))}`;
+      const qtyNumber = Number(it.quantity || 0);
+      const unitPrice = Number(
+        it.sellingPrice ?? it.actualUnitPrice ?? it.price ?? 0
+      );
+      const qty = qtyNumber.toString() + (it.unit ? ` ${it.unit}` : '');
+      const rate = `${money(unitPrice * qtyNumber)}`;
       const lh = rowIQR(name, qty, rate, y);
       y += lh;
     }
@@ -633,6 +637,7 @@ app.post('/print-receipt', async (req, res) => {
     y += lineH(usedTy) - 2;
     const footerLines = [
       'Branch: 021 34892110',
+      `Address: ${receiptData.address || 'Karachi'}`,
       'Delivery Hotline WhatsApp: +92 342 3344040',
       'Website: Manpasandstore.com'
     ];
@@ -657,8 +662,7 @@ app.post('/print-receipt', async (req, res) => {
     y += lineH(poweredBy) + 1;
 
     const aceLines = [
-      'Website: acesoface.com',
-      'Contact: +92 336 2500357'
+      'Website: acesoface.com | Contact: +92 336 2500357'
     ];
     for (const line of aceLines) {
       const usedAce = drawFit(line, margins.left, y, W, {

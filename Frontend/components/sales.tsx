@@ -20,6 +20,7 @@
     TableRow,
   } from "@/components/ui/table";
   import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+  import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
   import {
     Search,
     Plus,
@@ -308,80 +309,92 @@ interface Sale {
                 {/* Branch */}
                 <div>
                   <Label htmlFor="sale-branch">Branch</Label>
-                  <select
-                    id="sale-branch"
-                    className="block w-full border rounded p-2"
-                    value={saleForm.branchId}
-                    onChange={e =>
-                      setSaleForm({ ...saleForm, branchId: e.target.value })
+                  <Select
+                    value={saleForm.branchId || "none"}
+                    onValueChange={(value) =>
+                      setSaleForm({ ...saleForm, branchId: value === "none" ? "" : value })
                     }
                   >
-                    <option value="">Select branch</option>
-                    {branches.map(b => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="sale-branch" className="w-full">
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Select branch</SelectItem>
+                      {branches.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Customer */}
                 <div>
                   <Label htmlFor="sale-customer">Customer</Label>
-                  <select
-                    id="sale-customer"
-                    className="block w-full border rounded p-2"
-                    value={saleForm.customerId}
-                    onChange={e =>
-                      setSaleForm({ ...saleForm, customerId: e.target.value })
+                  <Select
+                    value={saleForm.customerId || "none"}
+                    onValueChange={(value) =>
+                      setSaleForm({ ...saleForm, customerId: value === "none" ? "" : value })
                     }
                   >
-                    <option value="">-- walk-in --</option>
-                    {customers.map(c => (
-                      <option key={c.id} value={c.id}>
-                        {c.email}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="sale-customer" className="w-full">
+                      <SelectValue placeholder="-- walk-in --" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">-- walk-in --</SelectItem>
+                      {customers.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.email}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Payment Method */}
                 <div>
                   <Label htmlFor="sale-payment">Payment Method</Label>
-                  <select
-                    id="sale-payment"
-                    className="block w-full border rounded p-2"
+                  <Select
                     value={saleForm.paymentMethod}
-                    onChange={e =>
-                      setSaleForm({ ...saleForm, paymentMethod: e.target.value })
+                    onValueChange={(value) =>
+                      setSaleForm({ ...saleForm, paymentMethod: value })
                     }
                   >
-                    {["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER", "CREDIT"].map(m => (
-                      <option key={m} value={m}>
-                        {m.replace("_", " ")}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="sale-payment" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER", "CREDIT"].map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m.replace("_", " ")}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Printer Selection */}
                 <div>
                   <Label htmlFor="sale-printer">Select Printer</Label>
-                  <select
-                    id="sale-printer"
-                    className="block w-full border rounded p-2"
-                    value={saleForm.printerName}
-                    onChange={e =>
-                      setSaleForm({ ...saleForm, printerName: e.target.value })
+                  <Select
+                    value={saleForm.printerName || "none"}
+                    onValueChange={(value) =>
+                      setSaleForm({ ...saleForm, printerName: value === "none" ? "" : value })
                     }
                   >
-                    <option value="">Select printer</option>
-                    {printers.map(p => (
-                      <option key={p.name} value={p.name}>
-                        {p.name} {p.isDefault ? "(Default)" : ""}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="sale-printer" className="w-full">
+                      <SelectValue placeholder="Select printer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Select printer</SelectItem>
+                      {printers.map((p) => (
+                        <SelectItem key={p.name} value={p.name}>
+                          {p.name} {p.isDefault ? "(Default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
 
                 {/* Line Items */}
@@ -389,26 +402,29 @@ interface Sale {
                   <div key={i} className="grid grid-cols-4 gap-2 items-end">
                     <div>
                       <Label htmlFor={`prod-${i}`}>Product</Label>
-                      <select
-                        id={`prod-${i}`}
-                        className="block w-full border rounded p-2"
-                        value={item.productId}
-                        onChange={e => {
-                          const pid = e.target.value;
-                          setSaleForm(f => {
+                      <Select
+                        value={item.productId || "none"}
+                        onValueChange={(value) => {
+                          const pid = value === "none" ? "" : value;
+                          setSaleForm((f) => {
                             const items = [...f.items];
                             items[i].productId = pid;
                             return { ...f, items };
                           });
                         }}
                       >
-                        <option value="">Select product</option>
-                        {products.map(p => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                          </option>
-                        ))}
-                      </select>
+                        <SelectTrigger id={`prod-${i}`} className="w-full">
+                          <SelectValue placeholder="Select product" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Select product</SelectItem>
+                          {products.map((p) => (
+                            <SelectItem key={p.id} value={p.id}>
+                              {p.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
                     <div>
                       <Label htmlFor={`qty-${i}`}>Qty</Label>
@@ -524,18 +540,18 @@ interface Sale {
         <div className="grid grid-cols-2 gap-4">
           <div>
             <Label htmlFor="filter-branch">View Branch</Label>
-            <select
-              id="filter-branch"
-              className="block w-full border rounded p-2"
-              value={branchFilter}
-              onChange={e => setBranchFilter(e.target.value)}
-            >
-              {branches.map(b => (
-                <option key={b.id} value={b.id}>
-                  {b.name}
-                </option>
-              ))}
-            </select>
+            <Select value={branchFilter} onValueChange={setBranchFilter}>
+              <SelectTrigger id="filter-branch" className="w-full">
+                <SelectValue placeholder="Select branch" />
+              </SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="relative max-w-md top-[25px]">
             <Search className="absolute left-3 top-[20px] -translate-y-1/2 text-gray-400 h-4 w-4" />

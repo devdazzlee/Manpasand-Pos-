@@ -34,6 +34,13 @@ import { syncManager } from "@/lib/offline-sync";
 import { usePosData } from "@/hooks/use-pos-data";
 import { printReceiptViaServer, getPrinters, type ReceiptData } from "@/lib/print-server";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useHoldSales } from "@/hooks/use-hold-sales";
 
 interface CartItem {
@@ -93,7 +100,7 @@ export function ManualSale() {
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
-  const { holdSales, holdSale, retrieveHoldSale } = useHoldSales();
+  const { holdSales, holdSale, retrieveHoldSale, holdSalesLoading, refreshHoldSales } = useHoldSales();
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [globalDiscountType, setGlobalDiscountType] = useState<'percentage' | 'amount'>('percentage');
   const [discountInput, setDiscountInput] = useState<string>("");
@@ -145,6 +152,9 @@ export function ManualSale() {
   });
   const [showPrinterSettings, setShowPrinterSettings] = useState(false);
   const [showHeldSales, setShowHeldSales] = useState(false);
+  const [isHoldingSale, setIsHoldingSale] = useState(false);
+  const [isViewingHeldSales, setIsViewingHeldSales] = useState(false);
+  const [resumingHoldIndex, setResumingHoldIndex] = useState<number | null>(null);
 
   // Save selected printer object to localStorage whenever it changes
   useEffect(() => {
@@ -472,24 +482,51 @@ export function ManualSale() {
     );
   };
 
-  const holdCurrentSale = () => {
+  const holdCurrentSale = async () => {
     if (cart.length === 0) {
       return;
     }
-    holdSale(cart);
-    setCart([]);
+    setIsHoldingSale(true);
+    const held = await holdSale(cart, selectedCustomer || undefined);
+    if (held) {
+      setCart([]);
+    }
+    setIsHoldingSale(false);
   };
 
-  const handleRetrieveHoldSale = (index: number) => {
+  const handleRetrieveHoldSale = async (index: number) => {
     if (cart.length > 0) {
       const shouldReplace = window.confirm(
         "Current cart will be replaced. Continue?"
       );
       if (!shouldReplace) return;
     }
-    const heldSale = retrieveHoldSale(index);
+    setResumingHoldIndex(index);
+    const heldSale = await retrieveHoldSale(index);
     if (heldSale) {
-      setCart(heldSale);
+      setCart(
+        heldSale.map((item) => ({
+          ...item,
+          discount: Number(item.discount || 0),
+        }))
+      );
+    }
+    setResumingHoldIndex(null);
+  };
+
+  const handleViewHeldSales = async () => {
+    if (showHeldSales) {
+      setShowHeldSales(false);
+      return;
+    }
+
+    setIsViewingHeldSales(true);
+    await refreshHoldSales();
+    setShowHeldSales(true);
+    setIsViewingHeldSales(false);
+    const element = document.getElementById('held-sales-list');
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
@@ -1108,8 +1145,8 @@ export function ManualSale() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {cart.length > 0 && (
-                <Button variant="outline" onClick={holdCurrentSale}>
-                  Hold Sale
+                <Button variant="outline" onClick={holdCurrentSale} disabled={isHoldingSale}>
+                  {isHoldingSale ? "Saving..." : "Hold Sale"}
                 </Button>
               )}
               {holdSales.length > 0 && (
@@ -1122,15 +1159,10 @@ export function ManualSale() {
                   </Badge>
                   <Button
                     variant="outline"
-                    onClick={() => {
-                      // Scroll the held sales list into view
-                      const element = document.getElementById('held-sales-list');
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth' });
-                      }
-                    }}
+                    onClick={handleViewHeldSales}
+                    disabled={isViewingHeldSales || holdSalesLoading}
                   >
-                    View Held Sales
+                    {isViewingHeldSales || holdSalesLoading ? "Loading..." : "View Held Sales"}
                   </Button>
                 </div>
               )}
@@ -1182,26 +1214,28 @@ export function ManualSale() {
                   <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Select printer
                   </label>
-                  <select
-                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={selectedPrinter}
-                    onChange={(e) => {
-                      const printerName = e.target.value;
+                  <Select
+                    value={selectedPrinter || undefined}
+                    onValueChange={(printerName) => {
                       setSelectedPrinter(printerName);
-                      // Find and save the full printer object
                       const selectedPrinterObj = printers.find((p) => p.name === printerName);
                       if (selectedPrinterObj) {
                         setSavedPrinterObj(selectedPrinterObj);
                       }
                     }}
+                    disabled={printers.length === 0}
                   >
-                    <option value="">Choose a printer</option>
-                    {printers.map((printer) => (
-                      <option key={printer.name} value={printer.name}>
-                        {printer.name} {printer.isDefault ? "(Default)" : ""}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger className="w-full">
+                      <SelectValue placeholder="Choose a printer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {printers.map((printer) => (
+                        <SelectItem key={printer.name} value={printer.name}>
+                          {printer.name} {printer.isDefault ? "(Default)" : ""}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                   {printers.length === 0 && (
                     <p className="text-xs text-gray-500">Loading available printers...</p>
                   )}
@@ -1235,24 +1269,22 @@ export function ManualSale() {
           <label className="block text-sm font-medium text-gray-700 mb-1">
             Customer (optional)
           </label>
-          <select
-            className="w-full border rounded px-3 py-2"
-            style={{ color: "black", backgroundColor: "white" }}
-            value={selectedCustomer ?? ""}
-            onChange={(e) => setSelectedCustomer(e.target.value || null)}
+          <Select
+            value={selectedCustomer || "none"}
+            onValueChange={(value) => setSelectedCustomer(value === "none" ? null : value)}
           >
-            <option value="">Select customer</option>
-            {customers.map((customer: any) => (
-              <option
-                className="text-black"
-                key={customer.id}
-                value={customer.id}
-              >
-                <span className="text-black">{customer.email}</span>
-                asdasdas
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="Select customer" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Select customer</SelectItem>
+              {customers.map((customer: any) => (
+                <SelectItem key={customer.id} value={customer.id}>
+                  {customer.email}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Products Grid */}
@@ -1359,8 +1391,9 @@ export function ManualSale() {
                 size="sm"
                 onClick={holdCurrentSale}
                 className="flex-1 min-w-[120px]"
+                disabled={isHoldingSale}
               >
-                Hold Sale
+                {isHoldingSale ? "Saving..." : "Hold Sale"}
               </Button>
             </div>
           )}
@@ -1369,39 +1402,51 @@ export function ManualSale() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setShowHeldSales((prev) => !prev)}
+              onClick={handleViewHeldSales}
               className="mt-3 w-full justify-between border border-gray-200 bg-white hover:bg-white"
+              disabled={isViewingHeldSales || holdSalesLoading}
             >
               <span className="text-sm font-medium text-gray-700">
-                Held Sales ({holdSales.length})
+                {isViewingHeldSales || holdSalesLoading
+                  ? "Loading held sales..."
+                  : `Held Sales (${holdSales.length})`}
               </span>
               {showHeldSales ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </Button>
           )}
 
-          {holdSales.length > 0 && showHeldSales && (
+          {showHeldSales && holdSalesLoading && (
+            <div className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3 text-xs text-gray-500">
+              Loading held sales...
+            </div>
+          )}
+
+          {holdSales.length > 0 && showHeldSales && !holdSalesLoading && (
             <div id="held-sales-list" className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3">
               <ScrollArea className="max-h-32">
                 <div className="space-y-2 pr-2">
                   {holdSales.map((sale, index) => {
-                    const saleTotal = sale.reduce(
+                    const saleTotal = sale.items.reduce(
                       (sum, item) => sum + (item.actualUnitPrice || item.price) * item.quantity,
                       0
                     );
                     return (
                       <Button
-                        key={index}
+                        key={sale.id}
                         variant="outline"
                         onClick={() => handleRetrieveHoldSale(index)}
                         className="h-auto w-full justify-between border-gray-200 py-2"
+                        disabled={resumingHoldIndex === index}
                       >
                         <div className="flex flex-col items-start text-left">
-                          <span className="font-medium text-gray-900">Sale #{index + 1}</span>
+                          <span className="font-medium text-gray-900">Sale #{index + 1} - {sale.branchName}</span>
                           <span className="text-xs text-gray-500">
-                            {sale.length} items • Rs {saleTotal.toFixed(2)}
+                            {sale.items.length} items • Rs {saleTotal.toFixed(2)}
                           </span>
                         </div>
-                        <span className="text-xs font-semibold text-blue-600">Resume</span>
+                        <span className="text-xs font-semibold text-blue-600">
+                          {resumingHoldIndex === index ? "Resuming..." : "Resume"}
+                        </span>
                       </Button>
                     );
                   })}
@@ -1722,22 +1767,22 @@ export function ManualSale() {
                     Discount
                   </label>
                   <div className="mt-1 flex items-center gap-1.5">
-                    <select
-                      data-discount-select="true"
-                      className="h-8 rounded border border-gray-200 px-2 text-xs"
+                    <Select
                       value={globalDiscountType}
-                      onChange={(e) => {
-                        setGlobalDiscountType(
-                          e.target.value as "percentage" | "amount"
-                        );
-                        // Clear discount input when switching types
+                      onValueChange={(value) => {
+                        setGlobalDiscountType(value as "percentage" | "amount");
                         setDiscountInput("");
                         setGlobalDiscount(0);
                       }}
                     >
-                      <option value="percentage">%</option>
-                      <option value="amount">Rs</option>
-                    </select>
+                      <SelectTrigger data-discount-select="true" className="h-8 w-[82px] text-xs">
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="percentage">%</SelectItem>
+                        <SelectItem value="amount">Rs</SelectItem>
+                      </SelectContent>
+                    </Select>
                     <Input
                       data-discount-input="true"
                       type="text"

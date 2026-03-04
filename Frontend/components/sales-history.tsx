@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import apiClient from "@/lib/apiClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -38,9 +38,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   format,
   parseISO,
-  isWithinInterval,
-  startOfDay,
-  endOfDay,
 } from "date-fns";
 import { isKioskMode } from "@/utils/kiosk-printing";
 import { useToast } from "@/hooks/use-toast";
@@ -143,6 +140,8 @@ export function SalesHistory() {
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState<number>(25);
+  const [totalSales, setTotalSales] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   // Helper function to safely format currency
   const formatCurrency = (
@@ -191,9 +190,25 @@ export function SalesHistory() {
       // ALWAYS send branchId from localStorage if it exists and is valid
       // Backend will filter by this branchId (even for admins)
       // If no branchId in localStorage, backend will show all for admins or use JWT branch_id for non-admins
-      const params: { branchId?: string } = {};
+      const params: Record<string, string> = {};
       if (branchId && branchId !== "Not Found" && branchId.trim()) {
         params.branchId = branchId.trim();
+      }
+
+      if (pageSize > 0) {
+        params.page = String(currentPage);
+        params.limit = String(pageSize);
+      }
+      if (searchTerm.trim()) {
+        params.search = searchTerm.trim();
+      }
+      if (startDate) {
+        params.startDate = startDate.toISOString();
+      }
+      if (endDate) {
+        const inclusiveEnd = new Date(endDate);
+        inclusiveEnd.setHours(23, 59, 59, 999);
+        params.endDate = inclusiveEnd.toISOString();
       }
       
       // Debug logging
@@ -204,7 +219,10 @@ export function SalesHistory() {
         localStorageBranchId: branchId 
       });
       
-      const res = await apiClient.get<{ data: Sale[] }>("/sale", { params });
+      const res = await apiClient.get<{
+        data: Sale[];
+        meta?: { total?: number; totalPages?: number; page?: number; limit?: number };
+      }>("/sale", { params });
 
       // Filter out or handle invalid sales data
       const validSales = res.data.data.filter((sale) => {
@@ -218,6 +236,8 @@ export function SalesHistory() {
       });
 
       setSales(validSales);
+      setTotalSales(res.data.meta?.total ?? validSales.length);
+      setTotalPages(res.data.meta?.totalPages ?? 1);
     } catch (err) {
       console.error("Failed to fetch sales:", err);
       toast({ title: "Failed to load sales", variant: "destructive" });
@@ -228,7 +248,7 @@ export function SalesHistory() {
 
   useEffect(() => {
     fetchSales();
-  }, []);
+  }, [currentPage, pageSize, searchTerm, startDate, endDate]);
 
   useEffect(() => {
     const loadBranchInfo = async () => {
@@ -289,52 +309,6 @@ export function SalesHistory() {
     }
   }, [toast]);
 
-  // Filtered
-  const filtered = useMemo(() => {
-    return sales.filter((s) => {
-      // Search by sale number or customer email
-      const term = searchTerm.toLowerCase();
-      if (
-        term &&
-        !s.sale_number.toLowerCase().includes(term) &&
-        !s.customer?.email.toLowerCase().includes(term)
-      ) {
-        return false;
-      }
-      // Date filter
-      if (startDate && endDate) {
-        try {
-          const d = parseISO(s.sale_date);
-          if (
-            !isWithinInterval(d, {
-              start: startOfDay(startDate),
-              end: endOfDay(endDate),
-            })
-          ) {
-            return false;
-          }
-        } catch (error) {
-          console.warn("Invalid date format for sale:", s.id, s.sale_date);
-          return false;
-        }
-      }
-      return true;
-    });
-  }, [sales, searchTerm, startDate, endDate]);
-
-  // Paginated data
-  const paginatedData = useMemo(() => {
-    if (pageSize === 0) return filtered;
-    const startIndex = (currentPage - 1) * pageSize;
-    const endIndex = startIndex + pageSize;
-    return filtered.slice(startIndex, endIndex);
-  }, [filtered, currentPage, pageSize]);
-
-  const totalPages = useMemo(() => {
-    if (pageSize === 0) return 1;
-    return Math.ceil(filtered.length / pageSize);
-  }, [filtered.length, pageSize]);
-
   // Reset to page 1 when filters change
   useEffect(() => {
     setCurrentPage(1);
@@ -351,7 +325,7 @@ export function SalesHistory() {
       "Status",
       "Type",
     ];
-    const rows = filtered.map((s) => [
+    const rows = sales.map((s) => [
       s.sale_number,
       format(parseISO(s.sale_date), "yyyy-MM-dd"),
       s.customer?.email || "—",
@@ -409,10 +383,13 @@ export function SalesHistory() {
       };
     });
 
+    const storeName = sale.branch?.name || branch.name || "MANPASAND GENERAL STORE";
+    const storeAddress = sale.branch?.address || branch.address || "";
+
     return {
-      storeName: branch.name || "MANPASAND GENERAL STORE",
+      storeName,
       tagline: "Quality • Service • Value",
-      address: branch.address ? `${branch.address}, Karachi` : "Karachi",
+      address: storeAddress,
       transactionId: sale.sale_number,
       timestamp: sale.created_at || sale.sale_date,
       cashier: "Walk-in",
@@ -467,6 +444,7 @@ export function SalesHistory() {
     // Footer lines matching PrintServer
     const footerLines = [
       'Branch: 021 34892110',
+      `Address: ${data.address || "Karachi"}`,
       'Delivery Hotline WhatsApp: +92 342 3344040',
       'Website: Manpasandstore.com'
     ];
@@ -477,8 +455,7 @@ export function SalesHistory() {
     const aceHtml = `
 <div class="divider-thin"></div>
 <div class="powered-by">Powered by Ace Studios</div>
-<div class="ace-line">Website: acesoface.com</div>
-<div class="ace-line">Contact: +92 336 2500357</div>`;
+<div class="ace-line">Website: acesoface.com | Contact: +92 336 2500357</div>`;
     
     return `
 <div class="receipt">
@@ -1045,7 +1022,7 @@ ${aceHtml}
       {/* Table */}
       <Card>
         <CardHeader>
-          <CardTitle>Sales History ({filtered.length})</CardTitle>
+          <CardTitle>Sales History ({totalSales})</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="overflow-x-auto -mx-4 md:mx-0">
@@ -1071,7 +1048,7 @@ ${aceHtml}
                       <PageLoader message="Loading sales..." />
                     </TableCell>
                   </TableRow>
-                ) : filtered.length === 0 ? (
+                ) : sales.length === 0 ? (
                   <TableRow>
                     <TableCell
                       colSpan={9}
@@ -1081,7 +1058,7 @@ ${aceHtml}
                     </TableCell>
                   </TableRow>
                 ) : (
-                  paginatedData.map((s) => {
+                  sales.map((s) => {
                     const saleType = getSaleType(s.total_amount);
                     const isNegative = parseFloat(s.total_amount) < 0;
 
@@ -1145,7 +1122,7 @@ ${aceHtml}
           </div>
           
           {/* Pagination */}
-          {filtered.length > 0 && (
+          {totalSales > 0 && (
             <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
               <div className="flex items-center gap-2">
                 <Label htmlFor="page-size" className="text-sm font-medium whitespace-nowrap">
@@ -1170,7 +1147,7 @@ ${aceHtml}
                   </SelectContent>
                 </Select>
                 <span className="text-sm text-gray-600">
-                  Showing {((currentPage - 1) * pageSize) + 1} to {Math.min(currentPage * pageSize, filtered.length)} of {filtered.length} sales
+                  Showing {totalSales === 0 ? 0 : ((currentPage - 1) * pageSize) + 1} to {Math.min((currentPage - 1) * pageSize + sales.length, totalSales)} of {totalSales} sales
                 </span>
               </div>
 
@@ -1307,18 +1284,18 @@ ${aceHtml}
                         <label className="text-xs font-semibold uppercase tracking-wide text-gray-600 whitespace-nowrap">
                           Printer:
                         </label>
-                        <select
-                          className="h-9 rounded-md border border-gray-300 bg-white px-3 py-1.5 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-blue-500 transition-all min-w-[200px] shadow-sm hover:border-gray-400"
-                          value={selectedPrinter}
-                          onChange={(e) => setSelectedPrinter(e.target.value)}
-                        >
-                          <option value="">Choose printer</option>
-                          {printers.map((printer) => (
-                            <option key={printer.name} value={printer.name}>
-                              {printer.name} {printer.isDefault ? "(Default)" : ""}
-                            </option>
-                          ))}
-                        </select>
+                        <Select value={selectedPrinter || undefined} onValueChange={setSelectedPrinter}>
+                          <SelectTrigger className="h-9 min-w-[200px]">
+                            <SelectValue placeholder="Choose printer" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {printers.map((printer) => (
+                              <SelectItem key={printer.name} value={printer.name}>
+                                {printer.name} {printer.isDefault ? "(Default)" : ""}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                     )}
                   </div>

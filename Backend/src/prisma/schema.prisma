@@ -22,9 +22,9 @@ model User {
 
   // Relations for tracking user actions
   sales           Sale[]
+  hold_sales      HoldSale[]
   purchase_orders PurchaseOrder[]
   stock_movements StockMovement[]
-  notifications   Notification[]
 
   @@index([email])
 }
@@ -58,12 +58,12 @@ model Branch {
   category        Category[]
   stock           Stock[]
   sales           Sale[]
+  hold_sales      HoldSale[]
   purchase_orders PurchaseOrder[]
   stock_movements StockMovement[]
   Order           Order[]
   User            User[]
   employees       Employee[]
-  notifications   Notification[]
 
   @@index([code])
   @@index([is_active])
@@ -495,6 +495,7 @@ model Customer {
   ref_contact_number String?
   orders             Order[]
   sales              Sale[] // NEW: Link to sales
+  hold_sales         HoldSale[]
   device             DeviceIdentity?
   created_at         DateTime        @default(now())
   updated_at         DateTime        @default(now()) @updatedAt
@@ -512,6 +513,26 @@ model Discount {
   created_at DateTime     @default(now())
 
   @@index([is_active])
+}
+
+model HoldSale {
+  id          String    @id @default(uuid())
+  branch_id   String
+  branch      Branch    @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  customer_id String?
+  customer    Customer? @relation(fields: [customer_id], references: [id])
+  created_by  String?
+  user        User?     @relation(fields: [created_by], references: [id])
+  items       Json
+  subtotal    Decimal   @default(0)
+  total_items Int       @default(0)
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now()) @updatedAt
+
+  @@index([branch_id])
+  @@index([customer_id])
+  @@index([created_by])
+  @@index([created_at])
 }
 
 model Order {
@@ -728,47 +749,3 @@ model Salary {
   @@index([employee_id])
 }
 
-// Notification System
-enum NotificationType {
-  SALE
-  STOCK
-  RETURN
-  EXCHANGE
-  ORDER
-  PURCHASE_ORDER
-  SYSTEM
-  PAYMENT
-  CUSTOMER
-  INVENTORY
-}
-
-enum NotificationPriority {
-  LOW
-  MEDIUM
-  HIGH
-  CRITICAL
-}
-
-model Notification {
-  id          String             @id @default(uuid())
-  type        NotificationType
-  priority    NotificationPriority @default(MEDIUM)
-  title       String
-  message     String
-  category    String?            // e.g., "sales", "inventory", "system"
-  is_read     Boolean            @default(false)
-  branch_id   String?
-  branch      Branch?            @relation(fields: [branch_id], references: [id])
-  user_id     String?            // Target user (null = all users)
-  user        User?              @relation(fields: [user_id], references: [id])
-  metadata    Json?              // Additional data (sale_id, product_id, etc.)
-  created_at  DateTime           @default(now())
-  read_at     DateTime?
-
-  @@index([branch_id])
-  @@index([user_id])
-  @@index([type])
-  @@index([is_read])
-  @@index([created_at])
-  @@index([priority])
-}

@@ -1,116 +1,164 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from "react";
+import apiClient from "@/lib/apiClient";
 
 interface CartItem {
   id: string;
   name: string;
   price: number;
   originalPrice: number;
+  actualUnitPrice?: number;
   quantity: number;
   category: string;
-  discount: number;
+  discount?: number;
   unitId?: string;
   unitName?: string;
   unit?: string;
+  productId?: string;
 }
 
-const STORAGE_KEY = 'pos-hold-sales';
+interface HoldSaleRecord {
+  id: string;
+  items: CartItem[];
+  subtotal: number;
+  totalItems: number;
+  branchId: string;
+  branchName: string;
+  createdAt: string;
+}
 
-/**
- * Custom hook for managing hold sales with localStorage persistence
- * Provides a clean API for holding and retrieving sales
- */
 export function useHoldSales() {
-  const [holdSales, setHoldSales] = useState<CartItem[][]>(() => {
-    // Load from localStorage on initialization
-    if (typeof window === 'undefined') return [];
-    
-    try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        // Validate that it's an array of arrays
-        if (Array.isArray(parsed) && parsed.every(Array.isArray)) {
-          return parsed;
-        }
-      }
-    } catch (error) {
-      console.error('Failed to load hold sales from localStorage:', error);
-    }
-    
-    return [];
+  const [holdSales, setHoldSales] = useState<HoldSaleRecord[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  const getBranchId = () => {
+    if (typeof window === "undefined") return "";
+    return localStorage.getItem("branch") || "";
+  };
+
+  const normalizeItem = (item: any): CartItem => ({
+    id: item.id,
+    productId: item.productId,
+    name: item.name,
+    price: Number(item.price || 0),
+    originalPrice: Number(item.originalPrice ?? item.price ?? 0),
+    actualUnitPrice: Number(item.actualUnitPrice ?? item.price ?? 0),
+    quantity: Number(item.quantity || 0),
+    category: item.category || "",
+    discount: Number(item.discount || 0),
+    unitId: item.unitId,
+    unitName: item.unitName,
+    unit: item.unit,
   });
 
-  // Keep a ref to the latest holdSales for callbacks
-  const holdSalesRef = useRef(holdSales);
-  holdSalesRef.current = holdSales;
+  const mapHoldSale = (holdSale: any): HoldSaleRecord => ({
+    id: holdSale.id,
+    items: Array.isArray(holdSale.items) ? holdSale.items.map(normalizeItem) : [],
+    subtotal: Number(holdSale.subtotal || 0),
+    totalItems: Number(holdSale.total_items || 0),
+    branchId: holdSale.branch_id || "",
+    branchName: holdSale.branch?.name || "Unknown Branch",
+    createdAt: holdSale.created_at || new Date().toISOString(),
+  });
 
-  // Sync to localStorage whenever holdSales changes
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    
+  const refreshHoldSales = useCallback(async () => {
+    const branchId = getBranchId();
+    if (!branchId || branchId === "Not Found") {
+      setHoldSales([]);
+      return;
+    }
+
     try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(holdSales));
+      setLoading(true);
+      const response = await apiClient.get("/sale/hold", { params: { branchId } });
+      const holds = Array.isArray(response?.data?.data)
+        ? response.data.data.map(mapHoldSale)
+        : [];
+      setHoldSales(holds);
     } catch (error) {
-      console.error('Failed to save hold sales to localStorage:', error);
+      console.error("Failed to load hold sales from API:", error);
+      setHoldSales([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    refreshHoldSales();
+  }, [refreshHoldSales]);
+
+  const holdSale = useCallback(async (cart: CartItem[], customerId?: string) => {
+    if (!cart.length) return false;
+
+    const branchId = getBranchId();
+    if (!branchId || branchId === "Not Found") return false;
+
+    try {
+      const response = await apiClient.post("/sale/hold", {
+        branchId,
+        customerId,
+        items: cart,
+      });
+      const created = response?.data?.data ? mapHoldSale(response.data.data) : null;
+      if (created) {
+        setHoldSales((prev) => [created, ...prev]);
+        return true;
+      }
+      await refreshHoldSales();
+      return true;
+    } catch (error) {
+      console.error("Failed to hold sale in DB:", error);
+      return false;
+    }
+  }, []);
+
+  const retrieveHoldSale = useCallback(async (index: number): Promise<CartItem[] | null> => {
+    if (index < 0 || index >= holdSales.length) return null;
+    const holdSaleRecord = holdSales[index];
+    const branchId = getBranchId();
+
+    try {
+      const response = await apiClient.post(`/sale/hold/${holdSaleRecord.id}/retrieve`, {
+        branchId,
+      });
+      const retrieved = response?.data?.data ? mapHoldSale(response.data.data) : null;
+      setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
+      return retrieved?.items || null;
+    } catch (error) {
+      console.error("Failed to retrieve hold sale from DB:", error);
+      return null;
     }
   }, [holdSales]);
 
-  /**
-   * Add current cart to hold sales
-   */
-  const holdSale = useCallback((cart: CartItem[]) => {
-    if (cart.length === 0) return;
-    
-    setHoldSales((prev) => {
-      // Create a deep copy to avoid reference issues
-      const newSale = JSON.parse(JSON.stringify(cart));
-      return [...prev, newSale];
-    });
-  }, []);
+  const deleteHoldSale = useCallback(async (index: number) => {
+    if (index < 0 || index >= holdSales.length) return;
+    const holdSaleRecord = holdSales[index];
+    const branchId = getBranchId();
 
-  /**
-   * Retrieve a held sale by index
-   * Returns the sale and removes it from hold sales
-   */
-  const retrieveHoldSale = useCallback((index: number): CartItem[] | null => {
-    let heldSale: CartItem[] | null = null;
-    
-    setHoldSales((prev) => {
-      if (index < 0 || index >= prev.length) return prev;
-      
-      heldSale = prev[index];
-      return prev.filter((_, i) => i !== index);
-    });
-    
-    // Return a deep copy if sale was found
-    return heldSale ? JSON.parse(JSON.stringify(heldSale)) : null;
-  }, []);
+    try {
+      await apiClient.delete(`/sale/hold/${holdSaleRecord.id}`, {
+        data: { branchId },
+      });
+      setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
+    } catch (error) {
+      console.error("Failed to delete hold sale from DB:", error);
+    }
+  }, [holdSales]);
 
-  /**
-   * Delete a held sale by index without retrieving it
-   */
-  const deleteHoldSale = useCallback((index: number) => {
-    setHoldSales((prev) => {
-      if (index < 0 || index >= prev.length) return prev;
-      return prev.filter((_, i) => i !== index);
-    });
-  }, []);
-
-  /**
-   * Clear all hold sales
-   */
-  const clearAllHoldSales = useCallback(() => {
+  const clearAllHoldSales = useCallback(async () => {
+    const holdIds = holdSales.map((sale) => sale.id);
+    const branchId = getBranchId();
+    for (const holdId of holdIds) {
+      try {
+        // eslint-disable-next-line no-await-in-loop
+        await apiClient.delete(`/sale/hold/${holdId}`, {
+          data: { branchId },
+        });
+      } catch (error) {
+        console.error("Failed to delete hold sale from DB:", error);
+      }
+    }
     setHoldSales([]);
-  }, []);
-
-  /**
-   * Get hold sale by index without removing it
-   */
-  const getHoldSale = useCallback((index: number): CartItem[] | null => {
-    const current = holdSalesRef.current;
-    if (index < 0 || index >= current.length) return null;
-    return JSON.parse(JSON.stringify(current[index]));
-  }, []);
+  }, [holdSales]);
 
   return {
     holdSales,
@@ -118,7 +166,8 @@ export function useHoldSales() {
     retrieveHoldSale,
     deleteHoldSale,
     clearAllHoldSales,
-    getHoldSale,
+    refreshHoldSales,
+    holdSalesLoading: loading,
   };
 }
 

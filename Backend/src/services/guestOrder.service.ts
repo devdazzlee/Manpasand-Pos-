@@ -5,7 +5,8 @@ import { EmailService } from '../utils/email.service';
 
 interface GuestOrderData {
   items: Array<{
-    id: string;
+    id?: string;
+    productId?: string;
     name: string;
     price: number;
     quantity: number;
@@ -32,7 +33,13 @@ interface GuestOrderData {
 class GuestOrderService {
   async createGuestOrder(data: GuestOrderData) {
     return prisma.$transaction(async (tx) => {
-      const productIds = data.items.map(item => item.id);
+      const productIds = data.items
+        .map((item) => item.id || item.productId)
+        .filter((id): id is string => Boolean(id));
+
+      if (productIds.length !== data.items.length) {
+        throw new AppError(400, 'Product ID is missing in one or more items');
+      }
 
       // Verify products exist and are active
       const products = await tx.product.findMany({
@@ -62,8 +69,11 @@ class GuestOrderService {
       const stockMovements: Promise<any>[] = [];
 
       for (const item of data.items) {
-        const product = products.find(p => p.id === item.id);
-        if (!product) continue;
+        const productId = item.id || item.productId;
+        const product = products.find((p) => p.id === productId);
+        if (!product) {
+          throw new AppError(400, `Product not found for item: ${item.name}`);
+        }
 
         const price = new Prisma.Decimal(product.sales_rate_inc_dis_and_tax || item.price);
         const itemTotal = price.times(item.quantity);
@@ -76,7 +86,7 @@ class GuestOrderService {
         });
 
         // Try to update stock if record exists, otherwise skip
-        const stock = stockRecords.find(s => s.product_id === item.id);
+        const stock = stockRecords.find((s) => s.product_id === product.id);
         if (stock) {
           // Decrement stock (allows negative stock)
           stockUpdates.push(tx.stock.update({
@@ -108,6 +118,10 @@ class GuestOrderService {
         }
       }
 
+      if (orderItems.length === 0) {
+        throw new AppError(400, 'No valid order items found');
+      }
+
       await Promise.all([...stockUpdates, ...stockMovements]);
 
       // Create order without customer (guest order)
@@ -127,6 +141,10 @@ class GuestOrderService {
           items: { include: { product: true } },
         },
       });
+
+      if (!order.items || order.items.length === 0) {
+        throw new AppError(500, 'Order created without item details');
+      }
 
       // Send confirmation emails
       const emailData = {
@@ -196,7 +214,7 @@ class GuestOrderService {
   }
 
   async getGuestOrderById(orderId: string) {
-    const order = await prisma.order.findUnique({
+    const order = await prisma.order.findFirst({
       where: {
         id: orderId,
         customer_id: null, // Ensure it's a guest order

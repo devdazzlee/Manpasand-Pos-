@@ -5,6 +5,26 @@ import { ApiResponse } from "../utils/apiResponse";
 
 const saleService = new SaleService();
 
+const resolveBranchId = (req: Request): string | undefined => {
+    const queryBranchId = req.query.branchId as string | undefined;
+    const bodyBranchId = req.body?.branchId as string | undefined;
+
+    if (queryBranchId && queryBranchId.trim() && queryBranchId !== "Not Found") {
+        return queryBranchId.trim();
+    }
+
+    if (bodyBranchId && bodyBranchId.trim() && bodyBranchId !== "Not Found") {
+        return bodyBranchId.trim();
+    }
+
+    const jwtBranchId = req.user?.branch_id as string | undefined;
+    if (jwtBranchId && jwtBranchId.trim() && jwtBranchId !== "Not Found") {
+        return jwtBranchId.trim();
+    }
+
+    return undefined;
+};
+
 const getSalesController = asyncHandler(async (req: Request, res: Response) => {
     // Priority: query parameter (branchId from localStorage) > JWT token branch_id
     // If branchId is provided in query, use it to filter (even for admins)
@@ -37,9 +57,34 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
         console.log("Admin user - no branchId in query, returning all sales");
     }
     
-    const sales = await saleService.getSales({ branchId });
-    console.log(`Returning ${sales.length} sales for branchId: ${branchId || 'ALL'}`);
-    new ApiResponse(sales, "Sales fetched successfully").send(res);
+    const page = Number(req.query.page);
+    const limit = Number(req.query.limit);
+    const search = (req.query.search as string | undefined)?.trim();
+    const startDateRaw = req.query.startDate as string | undefined;
+    const endDateRaw = req.query.endDate as string | undefined;
+
+    const parsedStartDate =
+      startDateRaw && !Number.isNaN(new Date(startDateRaw).getTime())
+        ? new Date(startDateRaw)
+        : undefined;
+    const parsedEndDate =
+      endDateRaw && !Number.isNaN(new Date(endDateRaw).getTime())
+        ? new Date(endDateRaw)
+        : undefined;
+
+    const result = await saleService.getSales({
+        branchId,
+        page: Number.isFinite(page) && page > 0 ? page : undefined,
+        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+        search,
+        startDate: parsedStartDate,
+        endDate: parsedEndDate,
+    });
+
+    console.log(
+      `Returning ${result.data.length} sales for branchId: ${branchId || 'ALL'} (page: ${result.meta?.page}, total: ${result.meta?.total})`
+    );
+    new ApiResponse(result.data, "Sales fetched successfully", 200, true, result.meta).send(res);
 });
 
 const getSalesForReturnsController = asyncHandler(async (req: Request, res: Response) => {
@@ -90,6 +135,60 @@ const getRecentSaleItemProductNameAndPrice = asyncHandler(async (req: Request, r
     new ApiResponse(recentSaleItem, "Recent sale item product name and price fetched successfully").send(res);
 });
 
+const getHoldSalesController = asyncHandler(async (req: Request, res: Response) => {
+    const branchId = resolveBranchId(req);
+    if (!branchId) {
+        return new ApiResponse([], "No branch ID found for hold sales").send(res);
+    }
+
+    const holdSales = await saleService.getHoldSales({ branchId });
+    new ApiResponse(holdSales, "Held sales fetched successfully").send(res);
+});
+
+const createHoldSaleController = asyncHandler(async (req: Request, res: Response) => {
+    const branchId = resolveBranchId(req);
+    if (!branchId) {
+        return new ApiResponse(null, "No branch ID found for hold sale", 400, false).send(res);
+    }
+
+    const holdSale = await saleService.createHoldSale({
+        branchId,
+        customerId: req.body?.customerId,
+        createdBy: req.user?.id,
+        items: req.body?.items || [],
+    });
+
+    new ApiResponse(holdSale, "Sale held successfully", 201).send(res);
+});
+
+const retrieveHoldSaleController = asyncHandler(async (req: Request, res: Response) => {
+    const branchId = resolveBranchId(req);
+    if (!branchId) {
+        return new ApiResponse(null, "No branch ID found for hold sale retrieval", 400, false).send(res);
+    }
+
+    const holdSale = await saleService.retrieveHoldSale({
+        holdSaleId: req.params.holdSaleId,
+        branchId,
+    });
+
+    new ApiResponse(holdSale, "Held sale retrieved successfully").send(res);
+});
+
+const deleteHoldSaleController = asyncHandler(async (req: Request, res: Response) => {
+    const branchId = resolveBranchId(req);
+    if (!branchId) {
+        return new ApiResponse(null, "No branch ID found for hold sale deletion", 400, false).send(res);
+    }
+
+    await saleService.deleteHoldSale({
+        holdSaleId: req.params.holdSaleId,
+        branchId,
+    });
+
+    new ApiResponse(null, "Held sale deleted successfully").send(res);
+});
+
 export {
     getSalesController,
     getSalesForReturnsController,
@@ -97,5 +196,9 @@ export {
     createSaleController,
     refundSaleController,
     getTodaySalesController,
-    getRecentSaleItemProductNameAndPrice
+    getRecentSaleItemProductNameAndPrice,
+    getHoldSalesController,
+    createHoldSaleController,
+    retrieveHoldSaleController,
+    deleteHoldSaleController,
 };

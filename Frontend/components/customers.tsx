@@ -19,6 +19,16 @@ import {
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Table,
   TableBody,
   TableCell,
@@ -67,6 +77,8 @@ export function Customers() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
   const [newCustomer, setNewCustomer] = useState<Partial<Customer & { billing_address?: string }>>({});
   const [editingCustomer, setEditingCustomer] = useState<(Customer & { billing_address?: string }) | null>(null);
+  const [deleteTargetCustomer, setDeleteTargetCustomer] = useState<Customer | null>(null);
+  const [isDeletingCustomer, setIsDeletingCustomer] = useState(false);
 
   // 1) Fetch customers
   const fetchCustomers = async () => {
@@ -174,13 +186,16 @@ export function Customers() {
   };
 
   // Delete customer
-  const handleDeleteCustomer = async (id: string) => {
+  const handleDeleteCustomer = async () => {
+    if (!deleteTargetCustomer) return;
+    setIsDeletingCustomer(true);
     try {
-      await apiClient.delete(`${API_BASE}/customer/${id}`);
+      await apiClient.delete(`${API_BASE}/customer/${deleteTargetCustomer.id}`);
       toast({
         title: "Success",
         description: "Customer deleted successfully",
       });
+      setDeleteTargetCustomer(null);
       fetchCustomers();
     } catch (err: any) {
       console.log(err);
@@ -192,6 +207,8 @@ export function Customers() {
         description: errorMessage,
         variant: "destructive",
       });
+    } finally {
+      setIsDeletingCustomer(false);
     }
   };
 
@@ -473,12 +490,15 @@ export function Customers() {
                         <Button
                           size="sm"
                           variant="outline"
-                          onClick={() =>
-                            handleDeleteCustomer(customer.id)
-                          }
+                          onClick={() => setDeleteTargetCustomer(customer)}
+                          disabled={isDeletingCustomer}
                           className="text-red-600 hover:text-red-700"
                         >
-                          <Trash2 className="h-3 w-3" />
+                          {isDeletingCustomer && deleteTargetCustomer?.id === customer.id ? (
+                            <Loader2 className="h-3 w-3 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3 w-3" />
+                          )}
                         </Button>
                       </div>
                     </TableCell>
@@ -596,6 +616,48 @@ export function Customers() {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={!!deleteTargetCustomer}
+        onOpenChange={(open) => {
+          if (!open && !isDeletingCustomer) {
+            setDeleteTargetCustomer(null);
+          }
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete customer?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete{" "}
+              <span className="font-semibold">
+                {deleteTargetCustomer?.name || deleteTargetCustomer?.email || "this customer"}
+              </span>
+              . This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingCustomer}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteCustomer();
+              }}
+              disabled={isDeletingCustomer}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeletingCustomer ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

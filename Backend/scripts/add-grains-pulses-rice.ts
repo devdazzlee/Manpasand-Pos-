@@ -1,78 +1,142 @@
 import { ProductService } from '../src/services/product.service';
 import { prisma } from '../src/prisma/client';
+import { v2 as cloudinary } from 'cloudinary';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as dotenv from 'dotenv';
+
+dotenv.config();
 
 interface ProductInput {
     name: string;
     unit: string;
-    category: string;
-    purchase_rate?: number;
+  category?: string;
     selling_price: number;
 }
 
-const products: ProductInput[] = [
-    { name: "Anmol Rice", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 0, selling_price: 0 },
-    { name: "Barley (Jaww)", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 200, selling_price: 320 },
-    { name: "Black Chickpeas (Kaala Chana)", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 280, selling_price: 500 },
-    { name: "Daal Arhar", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 640, selling_price: 880 },
-    { name: "Daal Haleem Mix", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 250, selling_price: 600 },
-    { name: "Daal Maash", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 470, selling_price: 680 },
-    { name: "Daal Maash Chilka", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 440, selling_price: 560 },
-    { name: "Daal Maash Sabut", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 420, selling_price: 680 },
-    { name: "Daal Mix", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 250, selling_price: 600 },
-    { name: "Daal Moong", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 405, selling_price: 480 },
-    { name: "Daal Moong Chilka", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 380, selling_price: 480 },
-    { name: "Daal Moong Sabut", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 400, selling_price: 480 },
-    { name: "Gandum Daliya Bareeq", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 180, selling_price: 320 },
-    { name: "Gandum Daliya Mota", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 180, selling_price: 320 },
-    { name: "Jasmine Rice", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 0, selling_price: 0 },
-    { name: "Jaww Ka Daliya", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 230, selling_price: 400 },
-    { name: "Kaali Masoor", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 270, selling_price: 480 },
-    { name: "Kangni", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 250, selling_price: 340 },
-    { name: "Kidney Beans (Red)", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 640, selling_price: 800 },
-    { name: "Lal Masoor", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 295, selling_price: 480 },
-    { name: "Millets (Bajra)", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 125, selling_price: 160 },
-    { name: "Mixed Dana", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 0, selling_price: 0 },
-    { name: "Mughal Rice", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 0, selling_price: 0 },
-    { name: "Red Rice", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 220, selling_price: 380 },
-    { name: "Roasted Chickpeas", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 600, selling_price: 1000 },
-    { name: "Roasted Chickpeas (W/o Skin)", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 700, selling_price: 1100 },
-    { name: "Sella Rice", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 340, selling_price: 450 },
-    { name: "Soya Bean", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 480, selling_price: 1000 },
-    { name: "Split Chickpeas (Channay Ki Daal)", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 290, selling_price: 540 },
-    { name: "Star Rice", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 220, selling_price: 350 },
-    { name: "Super Kernel Basmati", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 355, selling_price: 450 },
-    { name: "Taj Mehal rice", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 355, selling_price: 450 },
-    { name: "Ujala Rice", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 0, selling_price: 0 },
-    { name: "Wheat", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 150, selling_price: 240 },
-    { name: "White Beans", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 400, selling_price: 700 },
-    { name: "White Chickpeas (Large)", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 480, selling_price: 680 },
-    { name: "White Chickpeas (small)", unit: "Kgs", category: "Grains, Pulses & Rice", purchase_rate: 320, selling_price: 480 },
-];
+const CATEGORY_NAME = 'Grains, Pulses & Rice';
+const CATEGORY_SLUG = 'grains-pulses-rice';
+const JSON_PATH = path.resolve(__dirname, '../seeder_with_images/grains_pulses_rice.json');
+const IMAGE_PATH = path.resolve(__dirname, '../seeder_images/grains_pulses_rice/main_category_image.jpeg');
 
-async function addAllProducts() {
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME || 'djadwzfwg',
+  api_key: process.env.CLOUDINARY_API_KEY || '199548153713428',
+  api_secret: process.env.CLOUDINARY_API_SECRET || 'gdhzagnXsXDYGrVyEx8qjzzYktY',
+});
+
+function loadProducts(): ProductInput[] {
+  if (!fs.existsSync(JSON_PATH)) {
+    throw new Error(`Products file not found: ${JSON_PATH}`);
+  }
+  const raw = fs.readFileSync(JSON_PATH, 'utf-8');
+  const parsed = JSON.parse(raw) as ProductInput[];
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error('Products JSON is empty or invalid');
+  }
+  return parsed;
+}
+
+async function ensureCategoryWithImage(): Promise<{ categoryId: string; imageUrl: string }> {
+  if (!fs.existsSync(IMAGE_PATH)) {
+    throw new Error(`Category image not found: ${IMAGE_PATH}`);
+  }
+
+  // Find by slug first to avoid duplicates with similar names.
+  let category = await prisma.category.findUnique({
+    where: { slug: CATEGORY_SLUG },
+  });
+
+  if (!category) {
+    const lastCategory = await prisma.category.findFirst({
+      orderBy: { created_at: 'desc' },
+      select: { code: true },
+    });
+
+    const newCode = lastCategory ? (parseInt(lastCategory.code) + 1).toString() : '1000';
+
+    category = await prisma.category.create({
+      data: {
+        name: CATEGORY_NAME,
+        slug: CATEGORY_SLUG,
+        code: newCode,
+        is_active: true,
+        display_on_pos: true,
+        display_on_branches: [],
+      },
+    });
+    console.log(`✅ Created category "${CATEGORY_NAME}" (ID: ${category.id})`);
+  } else {
+    console.log(`ℹ️ Category "${CATEGORY_NAME}" already exists (ID: ${category.id}), updating image...`);
+  }
+
+  const uploadResult = await cloudinary.uploader.upload(IMAGE_PATH, {
+    public_id: 'grains_pulses_rice_category',
+    folder: 'manpasand/categories',
+    overwrite: true,
+    resource_type: 'image',
+  });
+
+  const imageUrl = uploadResult.secure_url;
+
+  await prisma.category.update({
+    where: { id: category.id },
+    data: { image: imageUrl },
+  });
+
+  const existingImage = await prisma.categoryImages.findFirst({
+    where: { category_id: category.id },
+  });
+
+  if (existingImage) {
+    await prisma.categoryImages.update({
+      where: { id: existingImage.id },
+      data: {
+        image: imageUrl,
+        status: 'COMPLETE',
+        is_active: true,
+      },
+    });
+  } else {
+    await prisma.categoryImages.create({
+      data: {
+        category_id: category.id,
+        image: imageUrl,
+        status: 'COMPLETE',
+        is_active: true,
+      },
+    });
+  }
+
+  console.log(`✅ Category image updated: ${imageUrl}`);
+  return { categoryId: category.id, imageUrl };
+}
+
+async function addGrainsPulsesRiceProducts() {
     const productService = new ProductService();
+  const products = loadProducts();
+  const { categoryId, imageUrl } = await ensureCategoryWithImage();
+
     const results = {
         success: [] as string[],
         failed: [] as { name: string; error: string }[],
     };
 
-    console.log(`🚀 Starting to add ${products.length} products...\n`);
+  console.log(`🚀 Starting to add ${products.length} products to "${CATEGORY_NAME}"...\n`);
 
     for (let i = 0; i < products.length; i++) {
         const product = products[i];
         try {
-            // Handle products with 0 or missing prices
-            let purchaseRate = product.purchase_rate && product.purchase_rate > 0 
-                ? product.purchase_rate 
-                : (product.selling_price > 0 ? Math.round(product.selling_price * 0.7) : 100);
-            
-            let sellingPrice = product.selling_price > 0 
+      // Always force this new category; do not use incoming category values.
+      const sellingPrice =
+        typeof product.selling_price === 'number' && product.selling_price > 0
                 ? product.selling_price 
-                : (purchaseRate > 0 ? Math.round(purchaseRate * 1.5) : 100);
+          : 100;
+      const purchaseRate = Math.max(Math.round(sellingPrice * 0.7), 50);
 
             const created = await productService.createProductFromBulkUpload({
                 name: product.name,
-                category_name: product.category,
+        category_name: CATEGORY_NAME,
                 unit_name: product.unit,
                 purchase_rate: purchaseRate,
                 sales_rate_exc_dis_and_tax: sellingPrice,
@@ -81,8 +145,32 @@ async function addAllProducts() {
                 max_qty: 10,
             });
 
+      // Ensure all products in this category also have the main category image.
+      const existingProductImage = await prisma.productImage.findFirst({
+        where: { product_id: created.id, image: imageUrl },
+      });
+
+      if (!existingProductImage) {
+        await prisma.productImage.create({
+          data: {
+            product_id: created.id,
+            image: imageUrl,
+            status: 'COMPLETE',
+            is_active: true,
+          },
+        });
+      }
+
+      await prisma.product.update({
+        where: { id: created.id },
+        data: {
+          category_id: categoryId,
+          has_images: true,
+        },
+      });
+
             results.success.push(product.name);
-            console.log(`✅ [${i + 1}/${products.length}] ${product.name} - Created (ID: ${created.id})`);
+      console.log(`✅ [${i + 1}/${products.length}] ${product.name} - Upserted (ID: ${created.id})`);
         } catch (error) {
             const errorMessage = (error as Error).message;
             results.failed.push({ name: product.name, error: errorMessage });
@@ -91,8 +179,8 @@ async function addAllProducts() {
     }
 
     console.log('\n📊 Summary:');
-    console.log(`   ✅ Successfully created: ${results.success.length} products`);
-    console.log(`   ❌ Failed: ${results.failed.length} products`);
+  console.log(`   ✅ Success: ${results.success.length}`);
+  console.log(`   ❌ Failed: ${results.failed.length}`);
     
     if (results.failed.length > 0) {
         console.log('\n❌ Failed products:');
@@ -102,7 +190,7 @@ async function addAllProducts() {
     }
 }
 
-addAllProducts()
+addGrainsPulsesRiceProducts()
     .then(() => {
         console.log('\n✅ Process completed!');
         return prisma.$disconnect();

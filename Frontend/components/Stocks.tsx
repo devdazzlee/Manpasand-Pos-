@@ -400,21 +400,24 @@ export function Stocks() {
                 </div>
                 <div>
                   <Label htmlFor="add-branch">Branch</Label>
-                  <select
-                    id="add-branch"
-                    className="block w-full border rounded p-2"
-                    value={addForm.branchId}
-                    onChange={(e) =>
-                      setAddForm({ ...addForm, branchId: e.target.value })
+                  <Select
+                    value={addForm.branchId || "none"}
+                    onValueChange={(value) =>
+                      setAddForm({ ...addForm, branchId: value === "none" ? "" : value })
                     }
                   >
-                    <option value="">Select branch</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="add-branch">
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Select branch</SelectItem>
+                      {branches.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label htmlFor="add-qty">Quantity</Label>
@@ -510,21 +513,24 @@ export function Stocks() {
                 </div>
                 <div>
                   <Label htmlFor="adj-branch">Branch</Label>
-                  <select
-                    id="adj-branch"
-                    className="block w-full border rounded p-2"
-                    value={adjForm.branchId}
-                    onChange={(e) =>
-                      setAdjForm({ ...adjForm, branchId: e.target.value })
+                  <Select
+                    value={adjForm.branchId || "none"}
+                    onValueChange={(value) =>
+                      setAdjForm({ ...adjForm, branchId: value === "none" ? "" : value })
                     }
                   >
-                    <option value="">Select branch</option>
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name}
-                      </option>
-                    ))}
-                  </select>
+                    <SelectTrigger id="adj-branch">
+                      <SelectValue placeholder="Select branch" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Select branch</SelectItem>
+                      {branches.map((b) => (
+                        <SelectItem key={b.id} value={b.id}>
+                          {b.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
                 <div>
                   <Label htmlFor="adj-change">Qty Change</Label>
@@ -596,18 +602,18 @@ export function Stocks() {
       {/* Filter & Search */}
       <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
         <div>
-          <select
-            id="filter-branch"
-            className="block w-full border rounded p-2"
-            value={branchFilter}
-            onChange={(e) => setBranchFilter(e.target.value)}
-          >
-            {branches.map((b) => (
-              <option key={b.id} value={b.id}>
-                {b.name}
-              </option>
-            ))}
-          </select>
+          <Select value={branchFilter} onValueChange={setBranchFilter}>
+            <SelectTrigger id="filter-branch">
+              <SelectValue placeholder="Select branch" />
+            </SelectTrigger>
+            <SelectContent>
+              {branches.map((b) => (
+                <SelectItem key={b.id} value={b.id}>
+                  {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
          <div className="relative max-w-md">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />

@@ -124,6 +124,7 @@ export function Returns() {
 
   const [returns, setReturns] = useState<ReturnItem[]>([])
   const [sales, setSales] = useState<Sale[]>([])
+  const [allSalesForMetrics, setAllSalesForMetrics] = useState<any[]>([])
   const [loading, setLoading] = useState(true) // Start with true to show loader on initial load
   const [salesLoading, setSalesLoading] = useState(false)
   const [processingReturn, setProcessingReturn] = useState(false) // Separate loading state for process return button
@@ -217,6 +218,7 @@ export function Returns() {
       // Fetch sales that have returns/exchanges (status REFUNDED or EXCHANGED)
       const response = await apiClient.get("/sale")
       const allSales = response.data.data || []
+      setAllSalesForMetrics(allSales)
       const returnSales = allSales.filter((sale: any) => 
         sale.status === "REFUNDED" || sale.status === "EXCHANGED"
       )
@@ -352,14 +354,28 @@ export function Returns() {
   }, [searchTerm])
 
   // Calculate stats
-  const today = new Date().toISOString().split('T')[0]
-  const todayReturns = returns.filter((r) => r.sale_date.startsWith(today)).length
+  const today = new Date()
+  const yesterday = new Date()
+  yesterday.setDate(yesterday.getDate() - 1)
+  const sameDay = (dateValue: string, compareDate: Date) => {
+    const d = new Date(dateValue)
+    return d.toDateString() === compareDate.toDateString()
+  }
+  const todayReturns = returns.filter((r) => sameDay(r.sale_date, today)).length
+  const yesterdayReturns = returns.filter((r) => sameDay(r.sale_date, yesterday)).length
   // Use Math.abs to ensure return value is always positive (returns are stored as negative in some systems)
-  const todayValue = returns.filter((r) => r.sale_date.startsWith(today)).reduce((sum, r) => sum + Math.abs(Number(r.total_amount)), 0)
+  const todayValue = returns
+    .filter((r) => sameDay(r.sale_date, today))
+    .reduce((sum, r) => sum + Math.abs(Number(r.total_amount)), 0)
   const pendingReturns = returns.filter((r) => r.status === "PENDING").length
-  const returnRate = sales.length > 0 
-    ? ((returns.length / sales.length) * 100).toFixed(1) 
+  const returnRate = allSalesForMetrics.length > 0 
+    ? ((returns.length / allSalesForMetrics.length) * 100).toFixed(1) 
     : "0.0"
+  const returnsDelta = todayReturns - yesterdayReturns
+  const returnsDeltaText =
+    returnsDelta === 0
+      ? "Same as yesterday"
+      : `${returnsDelta > 0 ? "+" : ""}${returnsDelta} from yesterday`
 
   // Handle exchange product selection
   const handleExchangeProductSelect = (productId: string) => {
@@ -1337,7 +1353,7 @@ export function Returns() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{todayReturns}</div>
-                <p className="text-xs text-muted-foreground">+2 from yesterday</p>
+                <p className="text-xs text-muted-foreground">{returnsDeltaText}</p>
               </CardContent>
             </Card>
             <Card>
@@ -1426,16 +1442,23 @@ export function Returns() {
 
       {/* View Return Details Dialog */}
       <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
-        <DialogContent className="max-w-2xl">
+        <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>Return Details - {selectedReturn?.id}</DialogTitle>
+            <DialogTitle className="text-2xl font-bold">
+              Return Details - {selectedReturn?.sale_number || selectedReturn?.id}
+            </DialogTitle>
+            <DialogDescription>
+              Review return/refund transaction details and item-level impact.
+            </DialogDescription>
           </DialogHeader>
           {selectedReturn && (
             <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-medium mb-2">Sale Information</h3>
-                  <div className="space-y-1 text-sm">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Sale Information</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
                     <div>
                       <strong>Sale ID:</strong> {selectedReturn.id}
                     </div>
@@ -1449,11 +1472,13 @@ export function Returns() {
                       <strong>Status:</strong>{" "}
                       <Badge className={getStatusColor(selectedReturn.status)}>{selectedReturn.status}</Badge>
                     </div>
-                  </div>
-                </div>
-                <div>
-                  <h3 className="font-medium mb-2">Customer & Payment</h3>
-                  <div className="space-y-1 text-sm">
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Customer & Payment</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-2 text-sm">
                     <div>
                       <strong>Customer:</strong> {selectedReturn.customer?.name || selectedReturn.customer?.email || "N/A"}
                     </div>
@@ -1463,27 +1488,29 @@ export function Returns() {
                     <div>
                       <strong>Total Amount:</strong> Rs {Math.abs(Number(selectedReturn.total_amount)).toLocaleString()}
                     </div>
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               </div>
 
               {selectedReturn.sale_items && selectedReturn.sale_items.length > 0 && (
-                <div>
-                  <h3 className="font-medium mb-2">Sale Items</h3>
-                  <div className="border rounded-lg p-4">
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-lg">Sale Items ({selectedReturn.sale_items.length})</CardTitle>
+                  </CardHeader>
+                  <CardContent className="border rounded-lg p-4">
                     {selectedReturn.sale_items.map((item, index) => (
-                      <div key={index} className="flex justify-between items-center py-2">
+                      <div key={index} className="flex justify-between items-center py-2 border-b last:border-b-0">
                         <div>
                           <div className="font-medium">{item.product.name}</div>
                           <div className="text-sm text-gray-500">
                             Qty: {item.quantity} • SKU: {item.product.sku} • Type: {item.item_type}
                           </div>
                         </div>
-                        <div className="font-medium">Rs {Number(item.line_total).toLocaleString()}</div>
+                        <div className="font-semibold text-red-700">Rs {Number(item.line_total).toLocaleString()}</div>
                       </div>
                     ))}
-                  </div>
-                </div>
+                  </CardContent>
+                </Card>
               )}
 
               {selectedReturn.notes && (

@@ -27,7 +27,6 @@ import { MultiLocation } from "@/components/multi-location";
 import { Reservations } from "@/components/reservations";
 import { LayawayHolds } from "@/components/layaway-holds";
 import { Pricing } from "@/components/pricing";
-import { Notifications } from "@/components/notifications";
 import { Branches } from "./branches";
 import Inventory from "./inventory";
 import { Stocks } from "./Stocks";
@@ -127,8 +126,6 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <Integrations />;
       case "backup":
         return <Backup />;
-      case "notifications":
-        return <Notifications />;
       case "settings":
         return <Settings />;
       default:

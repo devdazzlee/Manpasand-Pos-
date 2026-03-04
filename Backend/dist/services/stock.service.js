@@ -4,9 +4,7 @@ exports.StockService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const helpers_1 = require("../utils/helpers");
-const notification_service_1 = require("./notification.service");
 class StockService {
-    notificationService = new notification_service_1.NotificationService();
     async createStock({ productId, branchId, quantity, createdBy }) {
         return client_1.prisma.$transaction(async (tx) => {
             const exists = await tx.stock.findUnique({
@@ -84,49 +82,6 @@ class StockService {
                 },
             });
             return { newQty };
-        }).then(async () => {
-            // Check for low stock after adjustment (outside transaction)
-            try {
-                const updatedStock = await client_1.prisma.stock.findUnique({
-                    where: {
-                        product_id_branch_id: {
-                            product_id: productId,
-                            branch_id: branchId,
-                        },
-                    },
-                });
-                if (updatedStock) {
-                    const product = await client_1.prisma.product.findUnique({
-                        where: { id: productId },
-                        select: { id: true, name: true },
-                    });
-                    if (product) {
-                        const currentStock = Number(updatedStock.current_quantity);
-                        const minStock = Number(updatedStock.minimum_quantity) || 0;
-                        if (currentStock <= 0) {
-                            await this.notificationService.notifyLowStock({
-                                productId: product.id,
-                                productName: product.name,
-                                currentStock,
-                                minStock,
-                                branchId,
-                            });
-                        }
-                        else if (currentStock <= minStock && minStock > 0) {
-                            await this.notificationService.notifyLowStock({
-                                productId: product.id,
-                                productName: product.name,
-                                currentStock,
-                                minStock,
-                                branchId,
-                            });
-                        }
-                    }
-                }
-            }
-            catch (error) {
-                console.error('Failed to create stock notification:', error);
-            }
         });
     }
     async transferStock({ productId, fromBranchId, toBranchId, quantity, notes, createdBy }) {

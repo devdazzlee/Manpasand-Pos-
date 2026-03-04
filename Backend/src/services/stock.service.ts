@@ -2,10 +2,8 @@ import { Stock, StockMovement } from "@prisma/client";
 import { prisma } from '../prisma/client';
 import { AppError } from "../utils/apiError";
 import { addDecimal, asNumber } from "../utils/helpers";
-import { NotificationService } from './notification.service';
 
 class StockService {
-  private notificationService = new NotificationService();
     async createStock({ productId, branchId, quantity, createdBy }: {
         productId: Stock["product_id"];
         branchId: Stock["branch_id"];
@@ -102,50 +100,6 @@ class StockService {
             });
 
             return { newQty };
-        }).then(async () => {
-            // Check for low stock after adjustment (outside transaction)
-            try {
-                const updatedStock = await prisma.stock.findUnique({
-                    where: {
-                        product_id_branch_id: {
-                            product_id: productId,
-                            branch_id: branchId,
-                        },
-                    },
-                });
-
-                if (updatedStock) {
-                    const product = await prisma.product.findUnique({
-                        where: { id: productId },
-                        select: { id: true, name: true },
-                    });
-
-                    if (product) {
-                        const currentStock = Number(updatedStock.current_quantity);
-                        const minStock = Number(updatedStock.minimum_quantity) || 0;
-                        
-                        if (currentStock <= 0) {
-                            await this.notificationService.notifyLowStock({
-                                productId: product.id,
-                                productName: product.name,
-                                currentStock,
-                                minStock,
-                                branchId,
-                            });
-                        } else if (currentStock <= minStock && minStock > 0) {
-                            await this.notificationService.notifyLowStock({
-                                productId: product.id,
-                                productName: product.name,
-                                currentStock,
-                                minStock,
-                                branchId,
-                            });
-                        }
-                    }
-                }
-            } catch (error) {
-                console.error('Failed to create stock notification:', error);
-            }
         });
     }
 

@@ -7,7 +7,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Loader2, Trash2, Edit, Eye, RefreshCcw, Search, ShoppingBag, DollarSign, Clock } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Plus, Loader2, Trash2, Eye, RefreshCcw, Search, ShoppingBag, DollarSign, Clock } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
@@ -33,6 +34,7 @@ const Orders: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAddOpen, setIsAddOpen] = useState(false);
   const [isDetailOpen, setIsDetailOpen] = useState(false);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
 
   const [orderForm, setOrderForm] = useState<{
@@ -207,10 +209,13 @@ const Orders: React.FC = () => {
   };
 
   const viewOrderDetail = async (orderId: string) => {
+    setIsDetailOpen(true);
+    setIsDetailLoading(true);
+    setSelectedOrder(null);
+
     try {
       const res = await apiClient.get(`${API_BASE}/order/${orderId}`);
       setSelectedOrder(res.data.data);
-      setIsDetailOpen(true);
     } catch (err: any) {
       console.log("Fetch detail failed", err);
       
@@ -228,6 +233,9 @@ const Orders: React.FC = () => {
         description: errorMessage,
         variant: "destructive",
       });
+      setIsDetailOpen(false);
+    } finally {
+      setIsDetailLoading(false);
     }
   };
 
@@ -267,44 +275,68 @@ const Orders: React.FC = () => {
             <div className="space-y-4">
               <div>
                 <Label>Customer</Label>
-                <select 
-                  className="w-full p-2 border rounded" 
-                  value={orderForm.customerId} 
-                  onChange={e => setOrderForm({ ...orderForm, customerId: e.target.value })}
+                <Select
+                  value={orderForm.customerId || "none"}
+                  onValueChange={(value) => setOrderForm({ ...orderForm, customerId: value === "none" ? "" : value })}
                 >
-                  <option value="">Select customer</option>
-                  {customers.map(c => <option key={c.id} value={c.id}>{c.email}</option>)}
-                </select>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Select customer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Select customer</SelectItem>
+                    {customers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.email}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div>
                 <Label>Payment Method</Label>
-                <select 
-                  className="w-full p-2 border rounded" 
-                  value={orderForm.paymentMethod} 
-                  onChange={e => setOrderForm({ ...orderForm, paymentMethod: e.target.value })}
+                <Select
+                  value={orderForm.paymentMethod}
+                  onValueChange={(value) => setOrderForm({ ...orderForm, paymentMethod: value })}
                 >
-                  {['CASH','CARD','MOBILE_MONEY'].map(pm => <option key={pm} value={pm}>{pm.replace(/_/g,' ')}</option>)}
-                </select>
+                  <SelectTrigger className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {["CASH", "CARD", "MOBILE_MONEY"].map((pm) => (
+                      <SelectItem key={pm} value={pm}>
+                        {pm.replace(/_/g, " ")}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               {orderForm.items.map((item, idx) => (
                 <div key={idx} className="grid grid-cols-3 gap-3 items-end">
                   <div>
                     <Label>Product</Label>
-                    <select 
-                      className="w-full p-2 border rounded" 
-                      value={item.productId} 
-                      onChange={e => {
-                        const pid = e.target.value;
-                        setOrderForm(f => { 
-                          const items=[...f.items]; 
-                          items[idx].productId=pid; 
-                          return {...f,items}; 
+                    <Select
+                      value={item.productId || "none"}
+                      onValueChange={(value) => {
+                        const pid = value === "none" ? "" : value;
+                        setOrderForm((f) => {
+                          const items = [...f.items];
+                          items[idx].productId = pid;
+                          return { ...f, items };
                         });
                       }}
                     >
-                      <option value="">Select product</option>
-                      {products.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                    </select>
+                      <SelectTrigger className="w-full">
+                        <SelectValue placeholder="Select product" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Select product</SelectItem>
+                        {products.map((p) => (
+                          <SelectItem key={p.id} value={p.id}>
+                            {p.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   </div>
                   <div>
                     <Label>Qty</Label>
@@ -377,7 +409,7 @@ const Orders: React.FC = () => {
                 <DollarSign className="h-4 w-4 text-green-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-600">${(Number(totalRevenue) || 0).toFixed(2)}</div>
+                <div className="text-2xl font-bold text-green-600">Rs {(Number(totalRevenue) || 0).toFixed(2)}</div>
               </CardContent>
             </Card>
             <Card>
@@ -406,20 +438,24 @@ const Orders: React.FC = () => {
         </div>
         <div className="flex items-center space-x-2">
           <Label htmlFor="status-filter">Status:</Label>
-          <select 
-            id="status-filter" 
-            className="border rounded p-2" 
-            value={statusFilter} 
-            onChange={e => { 
-              setStatusFilter(e.target.value); 
-              fetchOrders(); 
+          <Select
+            value={statusFilter || "ALL"}
+            onValueChange={(value) => {
+              const next = value === "ALL" ? "" : value;
+              setStatusFilter(next);
+              fetchOrders();
             }}
           >
-            <option value="">All</option>
-            <option value="PENDING">Pending</option>
-            <option value="PROCESSING">Processing</option>
-            <option value="COMPLETED">Completed</option>
-          </select>
+            <SelectTrigger id="status-filter" className="w-[160px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="ALL">All</SelectItem>
+              <SelectItem value="PENDING">Pending</SelectItem>
+              <SelectItem value="PROCESSING">Processing</SelectItem>
+              <SelectItem value="COMPLETED">Completed</SelectItem>
+            </SelectContent>
+          </Select>
           <Button onClick={fetchOrders} variant="outline">
             <RefreshCcw className="w-4 h-4" />
           </Button>
@@ -456,17 +492,18 @@ const Orders: React.FC = () => {
                 {filtered.map(o=> (
                   <TableRow key={o.id}>
                     <TableCell className="font-medium">{o.order_number}</TableCell>
-                    <TableCell className="font-medium">${(Number(o.total_amount) || 0).toFixed(2)}</TableCell>
+                    <TableCell className="font-medium">Rs {(Number(o.total_amount) || 0).toFixed(2)}</TableCell>
                     <TableCell>
-                      <select 
-                        className="border rounded p-1" 
-                        value={o.status} 
-                        onChange={e=>handleStatusUpdate(o.id,e.target.value)}
-                      >
-                        <option>PENDING</option>
-                        <option>PROCESSING</option>
-                        <option>COMPLETED</option>
-                      </select>
+                      <Select value={o.status} onValueChange={(value) => handleStatusUpdate(o.id, value)}>
+                        <SelectTrigger className="h-8 w-[145px]">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="PENDING">PENDING</SelectItem>
+                          <SelectItem value="PROCESSING">PROCESSING</SelectItem>
+                          <SelectItem value="COMPLETED">COMPLETED</SelectItem>
+                        </SelectContent>
+                      </Select>
                     </TableCell>
                     <TableCell>{o.created_at.split('T')[0]}</TableCell>
                     <TableCell className="flex space-x-2">
@@ -497,12 +534,22 @@ const Orders: React.FC = () => {
       </Card>
 
       {/* Detail Dialog */}
-      <Dialog open={isDetailOpen} onOpenChange={()=>setIsDetailOpen(false)}>
+      <Dialog open={isDetailOpen} onOpenChange={(open)=> {
+        setIsDetailOpen(open);
+        if (!open) {
+          setSelectedOrder(null);
+          setIsDetailLoading(false);
+        }
+      }}>
         <DialogContent className="max-w-md">
           <DialogHeader>
             <DialogTitle>Order Details</DialogTitle>
           </DialogHeader>
-          {selectedOrder && (
+          {isDetailLoading ? (
+            <div className="py-8">
+              <PageLoader message="Loading order details..." />
+            </div>
+          ) : selectedOrder ? (
             <div className="space-y-4">
               <div className="grid grid-cols-2 gap-4">
                 <div>
@@ -519,7 +566,7 @@ const Orders: React.FC = () => {
                 </div>
                 <div>
                   <Label className="text-sm font-medium">Total</Label>
-                  <p className="text-sm font-medium">${(Number(selectedOrder.total_amount) || 0).toFixed(2)}</p>
+                  <p className="text-sm font-medium">Rs {(Number(selectedOrder.total_amount) || 0).toFixed(2)}</p>
                 </div>
               </div>
               <div>
@@ -542,6 +589,8 @@ const Orders: React.FC = () => {
                 </Table>
               </div>
             </div>
+          ) : (
+            <p className="text-sm text-muted-foreground py-6">Order details not available.</p>
           )}
         </DialogContent>
       </Dialog>

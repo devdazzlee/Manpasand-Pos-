@@ -8,7 +8,12 @@ const email_service_1 = require("../utils/email.service");
 class GuestOrderService {
     async createGuestOrder(data) {
         return client_2.prisma.$transaction(async (tx) => {
-            const productIds = data.items.map(item => item.id);
+            const productIds = data.items
+                .map((item) => item.id || item.productId)
+                .filter((id) => Boolean(id));
+            if (productIds.length !== data.items.length) {
+                throw new apiError_1.AppError(400, 'Product ID is missing in one or more items');
+            }
             // Verify products exist and are active
             const products = await tx.product.findMany({
                 where: {
@@ -32,9 +37,11 @@ class GuestOrderService {
             const stockUpdates = [];
             const stockMovements = [];
             for (const item of data.items) {
-                const product = products.find(p => p.id === item.id);
-                if (!product)
-                    continue;
+                const productId = item.id || item.productId;
+                const product = products.find((p) => p.id === productId);
+                if (!product) {
+                    throw new apiError_1.AppError(400, `Product not found for item: ${item.name}`);
+                }
                 const price = new client_1.Prisma.Decimal(product.sales_rate_inc_dis_and_tax || item.price);
                 const itemTotal = price.times(item.quantity);
                 orderItems.push({
@@ -44,7 +51,7 @@ class GuestOrderService {
                     total_price: itemTotal,
                 });
                 // Try to update stock if record exists, otherwise skip
-                const stock = stockRecords.find(s => s.product_id === item.id);
+                const stock = stockRecords.find((s) => s.product_id === product.id);
                 if (stock) {
                     // Decrement stock (allows negative stock)
                     stockUpdates.push(tx.stock.update({
@@ -75,6 +82,9 @@ class GuestOrderService {
                     console.warn(`No stock record found for product ${product.name} (${product.id}). Order will proceed without stock update.`);
                 }
             }
+            if (orderItems.length === 0) {
+                throw new apiError_1.AppError(400, 'No valid order items found');
+            }
             await Promise.all([...stockUpdates, ...stockMovements]);
             // Create order without customer (guest order)
             const orderNumber = `MP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
@@ -92,6 +102,9 @@ class GuestOrderService {
                     items: { include: { product: true } },
                 },
             });
+            if (!order.items || order.items.length === 0) {
+                throw new apiError_1.AppError(500, 'Order created without item details');
+            }
             // Send confirmation emails
             const emailData = {
                 orderNumber,
@@ -153,7 +166,7 @@ class GuestOrderService {
         };
     }
     async getGuestOrderById(orderId) {
-        const order = await client_2.prisma.order.findUnique({
+        const order = await client_2.prisma.order.findFirst({
             where: {
                 id: orderId,
                 customer_id: null, // Ensure it's a guest order

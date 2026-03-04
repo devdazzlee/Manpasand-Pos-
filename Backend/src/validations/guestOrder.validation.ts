@@ -1,12 +1,18 @@
 import { z } from 'zod';
 
-const orderItemSchema = z.object({
-  id: z.string().min(1, 'Product ID is required'),
-  name: z.string().min(1, 'Product name is required'),
-  price: z.number().min(0, 'Price must be positive'),
-  quantity: z.number().int().min(1, 'Quantity must be at least 1'),
-  image: z.string().optional(),
-});
+const orderItemSchema = z
+  .object({
+    id: z.string().min(1).optional(),
+    productId: z.string().min(1).optional(),
+    name: z.string().min(1, 'Product name is required'),
+    price: z.number().min(0, 'Price must be positive'),
+    quantity: z.number().int().min(1, 'Quantity must be at least 1'),
+    image: z.string().optional(),
+  })
+  .refine((val) => Boolean(val.id || val.productId), {
+    message: 'Product ID is required',
+    path: ['id'],
+  });
 
 const createGuestOrderSchema = z.object({
   body: z.object({

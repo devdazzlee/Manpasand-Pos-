@@ -18,7 +18,7 @@ export function Audit() {
       user: "John Doe",
       action: "Sale Created",
       module: "Sales",
-      details: "Created sale SALE-1234 for ₹2,500",
+      details: "Created sale SALE-1234 for Rs 2,500",
       ipAddress: "192.168.1.100",
       severity: "info",
     },

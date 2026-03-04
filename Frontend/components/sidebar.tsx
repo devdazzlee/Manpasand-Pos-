@@ -22,7 +22,6 @@ import {
   Gift,
   Clock,
   Shield,
-  Bell,
   TagIcon as PriceTag,
   ListOrdered,
   StoreIcon,
@@ -32,7 +31,6 @@ import {
   Globe,
 } from "lucide-react";
 import { useState, useEffect } from "react";
-import apiClient from "@/lib/apiClient";
 
 interface SidebarMenuItem {
   id: string;
@@ -62,7 +60,6 @@ const menuSections: SidebarMenuSection[] = [
     label: "Main",
     items: [
       { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
-      { id: "notifications", label: "Notifications", icon: Bell },
     ],
   },
   {
@@ -146,36 +143,15 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
     "system",
   ]);
   const [role, setRole] = useState<string | null>(null);
-  const [unreadNotificationCount, setUnreadNotificationCount] = useState<number>(0);
 
   useEffect(() => {
     setRole(localStorage.getItem("role"));
-  }, []);
-
-  // Fetch unread notification count
-  const fetchUnreadCount = async () => {
-    try {
-      const response = await apiClient.get('/notifications/stats');
-      const stats = response.data?.data || {};
-      setUnreadNotificationCount(stats.unread || 0);
-    } catch (error) {
-      console.error('Failed to fetch notification stats:', error);
-      setUnreadNotificationCount(0);
-    }
-  };
-
-  useEffect(() => {
-    fetchUnreadCount();
-    // Refresh every 30 seconds
-    const interval = setInterval(fetchUnreadCount, 30000);
-    return () => clearInterval(interval);
   }, []);
 
   // Tabs to show for ADMIN
   const adminTabIds = [
     "dashboard",
     "barcode-generater",
-    "notifications",
     "new-sale",
     "sales-history",
     // "inventory",
@@ -190,7 +166,6 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
   // Tabs to show for BRANCH
   const branchTabIds = [
     "dashboard",
-    "notifications",
     "new-sale",
     "sales-history",
     "orders",
@@ -349,14 +324,6 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
                   <div className="space-y-1">
                     {section.items.map((item) => {
                       const Icon = item.icon;
-                      // Show dynamic badge for notifications, static badge for others
-                      const showBadge = item.id === "notifications" 
-                        ? unreadNotificationCount > 0 
-                        : item.badge;
-                      const badgeValue = item.id === "notifications" 
-                        ? unreadNotificationCount.toString() 
-                        : item.badge;
-                      
                       return (
                         <Button
                           key={item.id}
@@ -366,17 +333,11 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
                               ? "bg-blue-600 text-white hover:bg-blue-700 shadow-sm"
                               : "text-gray-700 hover:bg-gray-100"
                           }`}
-                          onClick={() => {
-                            handleMenuClick(item.id);
-                            // Refresh notification count when clicking on notifications
-                            if (item.id === "notifications") {
-                              fetchUnreadCount();
-                            }
-                          }}
+                          onClick={() => handleMenuClick(item.id)}
                         >
                           <Icon className="h-4 w-4 mr-3" />
                           {item.label}
-                          {showBadge && (
+                          {item.badge && (
                             <Badge
                               variant={
                                 item.badge === "Live"
@@ -385,7 +346,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
                               }
                               className="ml-auto text-xs"
                             >
-                              {badgeValue}
+                              {item.badge}
                             </Badge>
                           )}
                         </Button>

@@ -24,6 +24,7 @@ import {
   CreditCard,
   DollarSign,
   Scan,
+  Pencil,
   ChevronDown,
   ChevronUp,
 } from "lucide-react";
@@ -34,6 +35,13 @@ import { syncManager } from "@/lib/offline-sync";
 import { usePosData } from "@/hooks/use-pos-data";
 import { printReceiptViaServer, getPrinters, type ReceiptData } from "@/lib/print-server";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useHoldSales } from "@/hooks/use-hold-sales";
 
 interface CartItem {
@@ -45,7 +53,6 @@ interface CartItem {
   actualUnitPrice: number; // Actual unit price for calculations (always original product price)
   quantity: number;
   category: string;
-  discount: number;
   unitId?: string;
   unitName?: string;
   unit?: string;
@@ -88,6 +95,9 @@ export function NewSale() {
   // Track input values as strings to allow decimal point typing
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
   const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
+  const [quantityModes, setQuantityModes] = useState<Record<string, "preset" | "custom">>({});
+  const [amountInputs, setAmountInputs] = useState<Record<string, string>>({});
+  const [showAmountEditors, setShowAmountEditors] = useState<Record<string, boolean>>({});
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -95,14 +105,11 @@ export function NewSale() {
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
-  const { holdSales, holdSale, retrieveHoldSale } = useHoldSales();
-  const [globalDiscount, setGlobalDiscount] = useState(0);
-  const [globalDiscountType, setGlobalDiscountType] = useState<'percentage' | 'amount'>('percentage');
-  const [discountInput, setDiscountInput] = useState<string>("");
+  const { holdSales, holdSale, retrieveHoldSale, holdSalesLoading, refreshHoldSales } = useHoldSales();
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Refs for price and quantity inputs for keyboard navigation
   const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
-  const quantityInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
+  const quantityInputRefs = useRef<Record<string, HTMLElement | null>>({});
   const lastAddedProductId = useRef<string | null>(null);
   // Refs for cart items and scrollable container
   const cartItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
@@ -155,8 +162,10 @@ export function NewSale() {
     }
     return "";
   });
-  const [showPrinterSettings, setShowPrinterSettings] = useState(false);
   const [showHeldSales, setShowHeldSales] = useState(false);
+  const [isHoldingSale, setIsHoldingSale] = useState(false);
+  const [isViewingHeldSales, setIsViewingHeldSales] = useState(false);
+  const [resumingHoldIndex, setResumingHoldIndex] = useState<number | null>(null);
 
   // Save selected printer object to localStorage whenever it changes
   useEffect(() => {
@@ -248,8 +257,8 @@ export function NewSale() {
       // Check data attributes for special inputs
       if (element.getAttribute('data-price-input') === 'true' ||
           element.getAttribute('data-quantity-input') === 'true' ||
-          element.getAttribute('data-discount-input') === 'true' ||
-          element.getAttribute('data-discount-select') === 'true') {
+          element.getAttribute('data-quantity-select') === 'true' ||
+          element.getAttribute('data-amount-input') === 'true') {
         return true;
       }
       
@@ -324,7 +333,7 @@ export function NewSale() {
 
       const activeElement = document.activeElement as HTMLElement;
       
-      // If typing in any interactive input (price/quantity/discount), allow it
+      // If typing in any interactive input (price/quantity), allow it
       if (isInteractiveElement(activeElement)) {
         markUserInteracting();
         return;
@@ -464,7 +473,6 @@ export function NewSale() {
         actualUnitPrice: actualUnitPrice, // Actual unit price for line total calculations
         quantity: finalQuantity, // Calculated quantity (barcodePrice / originalPrice)
         category: product.category,
-        discount: 0,
         unitId: product.unitId,
         unitName: product.unitName,
         unit: product.unitName,
@@ -511,11 +519,13 @@ export function NewSale() {
     
     const unitLower = unitName.toLowerCase();
     const qty = quantity;
+    const formatSmart = (value: number, maxDecimals = 2) =>
+      Number(value.toFixed(maxDecimals)).toString();
     
     // For weight units (kgs, kg, kilograms)
     if (unitLower.includes('kg') || unitLower.includes('kilogram')) {
       if (qty >= 1) {
-        return `${qty.toFixed(2)} kg`;
+        return `${formatSmart(qty)} kg`;
       } else {
         // Convert to grams for values less than 1kg
         const grams = qty * 1000;
@@ -527,7 +537,7 @@ export function NewSale() {
     if (unitLower.includes('gram') || unitLower === 'g') {
       if (qty >= 1000) {
         const kg = qty / 1000;
-        return `${kg.toFixed(2)} kg`;
+        return `${formatSmart(kg)} kg`;
       } else {
         return `${qty.toFixed(0)} g`;
       }
@@ -539,7 +549,75 @@ export function NewSale() {
     }
     
     // For other units, show with unit name
-    return `${qty.toFixed(2)} ${unitName}`;
+    return `${formatSmart(qty)} ${unitName}`;
+  };
+
+  const formatMoney = (value: number) => {
+    const rounded = Number(value);
+    if (Number.isInteger(rounded)) {
+      return rounded.toLocaleString();
+    }
+    return rounded.toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
+  };
+
+  const formatQuantityValue = (value: number) => {
+    if (Number.isInteger(value)) return String(value);
+    return Number(value.toFixed(3)).toString();
+  };
+
+  const isWeightUnit = (unitName?: string): boolean => {
+    if (!unitName) return false;
+    const unitLower = unitName.toLowerCase();
+    return (
+      unitLower.includes("kg") ||
+      unitLower.includes("kilogram") ||
+      unitLower.includes("gram") ||
+      unitLower === "g"
+    );
+  };
+
+  const isPieceUnit = (unitName?: string): boolean => {
+    if (!unitName) return false;
+    const unitLower = unitName.toLowerCase();
+    return unitLower.includes("pc") || unitLower.includes("piece");
+  };
+
+  const getQuantityPresetOptions = (unitName?: string) => {
+    if (isWeightUnit(unitName)) {
+      return [
+        { value: "0.25", label: "250g", quantity: 0.25 },
+        { value: "0.50", label: "500g", quantity: 0.5 },
+        { value: "0.75", label: "750g", quantity: 0.75 },
+        { value: "1.00", label: "1 KG", quantity: 1 },
+        { value: "1.50", label: "1.5 KG", quantity: 1.5 },
+        { value: "2.00", label: "2 KG", quantity: 2 },
+      ];
+    }
+
+    if (isPieceUnit(unitName)) {
+      return [
+        { value: "1", label: "1", quantity: 1 },
+        { value: "2", label: "2", quantity: 2 },
+        { value: "3", label: "3", quantity: 3 },
+        { value: "5", label: "5", quantity: 5 },
+        { value: "10", label: "10", quantity: 10 },
+      ];
+    }
+
+    return [
+      { value: "0.50", label: "0.5", quantity: 0.5 },
+      { value: "1.00", label: "1", quantity: 1 },
+      { value: "2.00", label: "2", quantity: 2 },
+    ];
+  };
+
+  const getPresetValueForQuantity = (quantity: number, unitName?: string): string => {
+    const presets = getQuantityPresetOptions(unitName);
+    const matched = presets.find((preset) => Math.abs(preset.quantity - quantity) < 0.0001);
+    return matched?.value ?? "custom";
   };
 
   // Helper function to get quantity increment based on unit
@@ -590,23 +668,52 @@ export function NewSale() {
 
     // Get unit-aware increment
     const unitName = item?.unitName || item?.unit || product?.unitName;
+    const currentQuantity = Number(item?.quantity || 0);
+    const mode = quantityModes[id] ?? "preset";
+    const minQuantity = isPieceUnit(unitName) ? 1 : 0.01;
+    let targetQuantity = currentQuantity;
+
+    // Keep weight preset flow simple for sellers:
+    // 250g -> 500g, 1kg -> 2kg (and reverse on minus).
+    if (mode === "preset" && isWeightUnit(unitName)) {
+      const presets = getQuantityPresetOptions(unitName).map((preset) => preset.quantity);
+      const presetMin = Math.min(...presets);
+      const presetMax = Math.max(...presets);
+      targetQuantity =
+        change > 0
+          ? Math.min(presetMax, Math.max(presetMin, currentQuantity * 2))
+          : Math.max(presetMin, currentQuantity / 2);
+
+      // Snap to nearest preset value to avoid float precision mismatches.
+      targetQuantity = presets.reduce((best, candidate) =>
+        Math.abs(candidate - targetQuantity) < Math.abs(best - targetQuantity) ? candidate : best,
+      presets[0]);
+    } else {
     const increment = getQuantityIncrement(unitName);
     const actualChange = change > 0 ? increment : -increment;
+      targetQuantity = currentQuantity + actualChange;
+    }
 
     setCart(
       cart.map((item) => {
         if (item.id === id) {
-          const newQuantity = Number(item.quantity) + actualChange;
-          return { ...item, quantity: Math.max(0.01, newQuantity) };
+          const newQuantity = targetQuantity;
+          const normalizedQuantity = isPieceUnit(unitName)
+            ? Math.round(newQuantity)
+            : newQuantity;
+          return { ...item, quantity: Math.max(minQuantity, normalizedQuantity) };
         }
         return item;
       })
     );
   };
 
-  const updateQuantityManual = (id: string, newQuantity: number) => {
-    // Ensure quantity is valid (>= 0.01)
-    const validQuantity = Math.max(0.01, Number(newQuantity));
+  const updateQuantityManual = (id: string, newQuantity: number, unitName?: string) => {
+    const minQuantity = isPieceUnit(unitName) ? 1 : 0.01;
+    const normalizedQuantity = isPieceUnit(unitName)
+      ? Math.round(Number(newQuantity))
+      : Number(newQuantity);
+    const validQuantity = Math.max(minQuantity, normalizedQuantity);
     setCart(
       cart.map((item) => {
         if (item.id === id) {
@@ -615,6 +722,41 @@ export function NewSale() {
         return item;
       })
     );
+  };
+
+  const parseCustomQuantityInput = (rawValue: string, unitName?: string): number | null => {
+    const value = rawValue.trim().toLowerCase().replace(/\s+/g, "");
+    if (!value) return null;
+
+    if (isWeightUnit(unitName)) {
+      const match = value.match(/^(\d*\.?\d+)(kg|kgs|g|gram|grams)?$/);
+      if (!match) return null;
+      const numericValue = parseFloat(match[1]);
+      if (Number.isNaN(numericValue) || numericValue < 0) return null;
+      const unitSuffix = match[2];
+
+      if (unitSuffix === "g" || unitSuffix === "gram" || unitSuffix === "grams") {
+        return numericValue / 1000;
+      }
+
+      if (unitSuffix === "kg" || unitSuffix === "kgs") {
+        return numericValue;
+      }
+
+      // No suffix provided:
+      // - Large integer-like values are usually grams in POS usage (e.g. 250 => 250g)
+      // - Smaller values are treated as kg (e.g. 1 => 1kg, 0.5 => 0.5kg)
+      if (numericValue >= 10) {
+        return numericValue / 1000;
+      }
+      return numericValue;
+    }
+
+    const numericOnly = value.match(/^(\d*\.?\d+)$/);
+    if (!numericOnly) return null;
+    const parsed = parseFloat(numericOnly[1]);
+    if (Number.isNaN(parsed) || parsed < 0) return null;
+    return parsed;
   };
 
   const updateItemPrice = (id: string, newPrice: number) => {
@@ -630,42 +772,71 @@ export function NewSale() {
     );
   };
 
-  const updateItemDiscount = (id: string, discountPercentage: number) => {
-    if (discountPercentage < 0 || discountPercentage > 100) return;
-    setCart(
-      cart.map((item) => {
-        if (item.id === id) {
-          const discountAmount =
-            (item.originalPrice * discountPercentage) / 100;
-          return {
-            ...item,
-            discount: discountPercentage,
-            price: item.originalPrice - discountAmount,
-          };
-        }
-        return item;
-      })
-    );
+  const isPriceOverridden = (item: CartItem) => {
+    const effectivePrice = Number(item.actualUnitPrice ?? item.price ?? 0);
+    const basePrice = Number(item.originalPrice ?? 0);
+    return Math.abs(effectivePrice - basePrice) > 0.0001;
   };
 
-  const holdCurrentSale = () => {
+  // Runtime selling price for this sale only.
+  // Do not fall back to originalPrice when building print/sale payloads.
+  const getSellingPrice = (item: CartItem) => {
+    const fromEdited = Number(item.actualUnitPrice);
+    if (!Number.isNaN(fromEdited) && fromEdited >= 0) return fromEdited;
+
+    const fromDisplay = Number(item.price);
+    if (!Number.isNaN(fromDisplay) && fromDisplay >= 0) return fromDisplay;
+
+    return 0;
+  };
+
+  const holdCurrentSale = async () => {
     if (cart.length === 0) {
       return;
     }
-    holdSale(cart);
+
+    setIsHoldingSale(true);
+    const held = await holdSale(cart, selectedCustomer || undefined);
+    if (held) {
     setCart([]);
+    }
+    setIsHoldingSale(false);
   };
 
-  const handleRetrieveHoldSale = (index: number) => {
+  const handleRetrieveHoldSale = async (index: number) => {
     if (cart.length > 0) {
       const shouldReplace = window.confirm(
         "Current cart will be replaced. Continue?"
       );
       if (!shouldReplace) return;
     }
-    const heldSale = retrieveHoldSale(index);
+    setResumingHoldIndex(index);
+    const heldSale = await retrieveHoldSale(index);
     if (heldSale) {
-      setCart(heldSale);
+      setCart(
+        heldSale.map((item) => ({
+          ...item,
+          originalPrice: Number(item.originalPrice ?? item.price ?? 0),
+          actualUnitPrice: Number(item.actualUnitPrice ?? item.price ?? 0),
+        }))
+      );
+    }
+    setResumingHoldIndex(null);
+  };
+
+  const handleViewHeldSales = async () => {
+    if (showHeldSales) {
+      setShowHeldSales(false);
+      return;
+    }
+
+    setIsViewingHeldSales(true);
+    await refreshHoldSales();
+    setShowHeldSales(true);
+    setIsViewingHeldSales(false);
+    const element = document.getElementById('held-sales-list');
+    if (element) {
+      element.scrollIntoView({ behavior: 'smooth' });
     }
   };
 
@@ -745,23 +916,39 @@ export function NewSale() {
 
   const removeFromCart = (id: string) => {
     setCart(cart.filter((item) => item.id !== id));
+    setQuantityInputs((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setQuantityModes((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setAmountInputs((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setShowAmountEditors((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
   };
 
   const clearCart = () => {
     setCart([]);
+    setQuantityInputs({});
+    setQuantityModes({});
+    setAmountInputs({});
+    setShowAmountEditors({});
   };
 
-  const subtotal = cart.reduce(
-    (sum, item) => sum + (item.actualUnitPrice || item.price) * item.quantity,
-    0
-  );
+  const subtotal = cart.reduce((sum, item) => sum + getSellingPrice(item) * item.quantity, 0);
 
-  const discountAmount =
-    globalDiscountType === "percentage"
-      ? (subtotal * globalDiscount) / 100
-      : globalDiscount;
-
-  const total = Math.max(0, subtotal - discountAmount);
+  const total = subtotal;
   const totalQuantity = cart.reduce(
     (sum, item) => sum + item.quantity,
     0
@@ -792,8 +979,7 @@ export function NewSale() {
     subtotal: number,
     total: number,
     amountPaid: number,
-    changeAmount: number,
-    discount?: number
+    changeAmount: number
   ) => {
     return {
       transactionId,
@@ -806,7 +992,6 @@ export function NewSale() {
       store: "MANPASAND Store #001",
       amountPaid,
       changeAmount,
-      discount,
     };
   };
 
@@ -884,10 +1069,11 @@ export function NewSale() {
           if (!productId) {
             throw new Error(`Missing product ID for item: ${item.name}`);
           }
+          const effectivePrice = getSellingPrice(item);
           return {
             productId,
             quantity: item.quantity,
-            price: item.price,
+            price: effectivePrice,
           };
         });
 
@@ -999,8 +1185,7 @@ export function NewSale() {
           subtotal,
           total,
           amountPaid,
-          changeAmount,
-          discountAmount > 0 ? discountAmount : undefined
+          changeAmount
         );
 
         // Save transaction to local storage (simulate database)
@@ -1012,10 +1197,6 @@ export function NewSale() {
 
         setLastTransactionId(transactionId);
         setCart([]);
-        // Clear discount after sale
-        setGlobalDiscount(0);
-        setGlobalDiscountType('percentage');
-        setDiscountInput("");
 
         // Auto-print receipt
         try {
@@ -1024,8 +1205,10 @@ export function NewSale() {
           
           console.log("🏢 Current Branch:", storedBranchName);
           
-          // Only show branch name and Karachi
-          const fullAddress = `${storedBranchName}, Karachi`
+          // Use DB branch address when available instead of hardcoded city text
+          const fullAddress = branchName.address?.trim()
+            ? branchName.address
+            : (storedBranchName || branchName.name || "Karachi");
          
           console.log("fullAddress", fullAddress);
           const receiptDataForServer: ReceiptData = {
@@ -1049,12 +1232,11 @@ export function NewSale() {
               return {
                 name: item.name,
                 quantity: item.quantity,
-                price: item.price,
+                price: getSellingPrice(item),
                 unit: unitLabel,
               };
             }),
             subtotal: subtotal,
-            discount: discountAmount > 0 ? discountAmount : undefined,
             total: total,
             paymentMethod: method === "Cash" ? "CASH" : "CARD",
             amountPaid,
@@ -1531,8 +1713,8 @@ export function NewSale() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {cart.length > 0 && (
-                <Button variant="outline" onClick={holdCurrentSale}>
-                  Hold Sale
+                <Button variant="outline" onClick={holdCurrentSale} disabled={isHoldingSale}>
+                  {isHoldingSale ? "Saving..." : "Hold Sale"}
                 </Button>
               )}
               {holdSales.length > 0 && (
@@ -1545,15 +1727,10 @@ export function NewSale() {
                   </Badge>
                   <Button
                     variant="outline"
-                    onClick={() => {
-                      // Scroll the held sales list into view
-                      const element = document.getElementById('held-sales-list');
-                      if (element) {
-                        element.scrollIntoView({ behavior: 'smooth' });
-                      }
-                    }}
+                    onClick={handleViewHeldSales}
+                    disabled={isViewingHeldSales || holdSalesLoading}
                   >
-                    View Held Sales
+                    {isViewingHeldSales || holdSalesLoading ? "Loading..." : "View Held Sales"}
                   </Button>
                 </div>
               )}
@@ -1575,8 +1752,8 @@ export function NewSale() {
                   if (relatedTarget && (
                     relatedTarget.getAttribute('data-price-input') === 'true' ||
                     relatedTarget.getAttribute('data-quantity-input') === 'true' ||
-                    relatedTarget.getAttribute('data-discount-input') === 'true' ||
-                    relatedTarget.getAttribute('data-discount-select') === 'true' ||
+                    relatedTarget.getAttribute('data-quantity-select') === 'true' ||
+                    relatedTarget.getAttribute('data-amount-input') === 'true' ||
                     relatedTarget.tagName === 'SELECT' ||
                     relatedTarget.closest('select')
                   )) {
@@ -1666,55 +1843,46 @@ export function NewSale() {
         </div>
 
           <div className="mb-4">
-            <div className="rounded-2xl border border-dashed border-blue-200 bg-white shadow-sm">
-              <button
-                type="button"
-                onClick={() => setShowPrinterSettings((prev) => !prev)}
-                className="flex w-full items-center justify-between gap-3 rounded-2xl px-4 py-3 text-left transition hover:bg-blue-50/40"
-              >
+            <div className="rounded-2xl border border-blue-200 bg-white shadow-sm px-4 py-4 space-y-3">
                 <div>
-                  <p className="text-sm font-semibold text-gray-900">Printer Settings</p>
+                <p className="text-sm font-semibold text-gray-900">Printer Selection</p>
                   <p className="text-xs text-gray-500">
-                    Choose the receipt printer before completing a sale.
+                  Choose receipt printer before completing the sale.
                   </p>
                 </div>
-                <div className="rounded-full bg-blue-100 p-1 text-blue-600">
-                  {showPrinterSettings ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
-                </div>
-              </button>
-              {showPrinterSettings && (
-                <div className="space-y-3 border-t border-blue-100 px-4 py-4">
+              <div className="space-y-4">
                   <label className="block text-xs font-semibold uppercase tracking-wide text-gray-500">
                     Select printer
                   </label>
-                  <select
-                    className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-900 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                    value={selectedPrinter}
-                    onChange={(e) => {
-                      const printerName = e.target.value;
+                <Select
+                  value={selectedPrinter || undefined}
+                  onValueChange={(printerName) => {
                       setSelectedPrinter(printerName);
-                      // Find and save the full printer object
                       const selectedPrinterObj = printers.find((p) => p.name === printerName);
                       if (selectedPrinterObj) {
                         setSavedPrinterObj(selectedPrinterObj);
                       }
                     }}
+                  disabled={printers.length === 0}
                   >
-                    <option value="">Choose a printer</option>
+                  <SelectTrigger className="w-full">
+                    <SelectValue placeholder="Choose a printer" />
+                  </SelectTrigger>
+                  <SelectContent>
                     {printers.map((printer) => (
-                      <option key={printer.name} value={printer.name}>
+                      <SelectItem key={printer.name} value={printer.name}>
                         {printer.name} {printer.isDefault ? "(Default)" : ""}
-                      </option>
+                      </SelectItem>
                     ))}
-                  </select>
+                  </SelectContent>
+                </Select>
                   {printers.length === 0 && (
                     <p className="text-xs text-gray-500">Loading available printers...</p>
                   )}
                   <p className="text-xs text-gray-500">
-                    A printer must be selected to enable payments and automatic receipt printing.
+                  Selected printer will be used for automatic receipt printing.
                   </p>
                 </div>
-              )}
             </div>
           </div>
 
@@ -1734,30 +1902,6 @@ export function NewSale() {
               {category.name}
             </Button>
           ))}
-        </div>
-
-        <div className="mb-4 max-w-xs bg-white text-black">
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Customer (optional)
-          </label>
-          <select
-            className="w-full border rounded px-3 py-2"
-            style={{ color: "black", backgroundColor: "white" }}
-            value={selectedCustomer ?? ""}
-            onChange={(e) => setSelectedCustomer(e.target.value || null)}
-          >
-            <option value="">Select customer</option>
-            {customers.map((customer: any) => (
-              <option
-                className="text-black"
-                key={customer.id}
-                value={customer.id}
-              >
-                <span className="text-black">{customer.email}</span>
-                asdasdas
-              </option>
-            ))}
-          </select>
         </div>
 
         {/* Products Grid */}
@@ -1805,7 +1949,7 @@ export function NewSale() {
                       </span>
                       {totalQuantity > 0 && (
                         <Badge className="bg-blue-600 text-[10px] px-1.5 py-0.5">
-                          {totalQuantity.toFixed(2)}
+                          {formatQuantityValue(totalQuantity)}
                         </Badge>
                       )}
                     </div>
@@ -1835,23 +1979,6 @@ export function NewSale() {
           </div>
 
           {cart.length > 0 && (
-            <div className="mt-3 grid grid-cols-3 gap-1.5">
-              <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                <p className="text-[9px] uppercase tracking-wide text-gray-500">Items</p>
-                <p className="text-sm font-semibold text-gray-900">{cart.length}</p>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                <p className="text-[9px] uppercase tracking-wide text-gray-500">Quantity</p>
-                <p className="text-sm font-semibold text-gray-900">{totalQuantity.toFixed(2)}</p>
-              </div>
-              <div className="rounded-lg border border-gray-200 bg-white p-2 shadow-sm">
-                <p className="text-[9px] uppercase tracking-wide text-gray-500">Total</p>
-                <p className="text-sm font-semibold text-gray-900">Rs {total.toFixed(2)}</p>
-              </div>
-            </div>
-          )}
-
-          {cart.length > 0 && (
             <div className="mt-3 flex flex-wrap gap-2">
               <Button
                 variant="outline"
@@ -1866,8 +1993,9 @@ export function NewSale() {
                 size="sm"
                 onClick={holdCurrentSale}
                 className="flex-1 min-w-[120px]"
+                disabled={isHoldingSale}
               >
-                Hold Sale
+                {isHoldingSale ? "Saving..." : "Hold Sale (Save)"}
               </Button>
             </div>
           )}
@@ -1876,39 +2004,51 @@ export function NewSale() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setShowHeldSales((prev) => !prev)}
+              onClick={handleViewHeldSales}
               className="mt-3 w-full justify-between border border-gray-200 bg-white hover:bg-white"
+              disabled={isViewingHeldSales || holdSalesLoading}
             >
               <span className="text-sm font-medium text-gray-700">
-                Held Sales ({holdSales.length})
+                {isViewingHeldSales || holdSalesLoading
+                  ? "Loading held sales..."
+                  : `Held Sales (${holdSales.length})`}
               </span>
               {showHeldSales ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
             </Button>
           )}
 
-          {holdSales.length > 0 && showHeldSales && (
+          {showHeldSales && holdSalesLoading && (
+            <div className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3 text-xs text-gray-500">
+              Loading held sales...
+            </div>
+          )}
+
+          {holdSales.length > 0 && showHeldSales && !holdSalesLoading && (
             <div id="held-sales-list" className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3">
               <ScrollArea className="max-h-32">
                 <div className="space-y-2 pr-2">
                   {holdSales.map((sale, index) => {
-                    const saleTotal = sale.reduce(
-                      (sum, item) => sum + (item.actualUnitPrice || item.price) * item.quantity,
+                    const saleTotal = sale.items.reduce(
+                      (sum, item) => sum + getSellingPrice(item as CartItem) * item.quantity,
                       0
                     );
                     return (
                       <Button
-                        key={index}
+                        key={sale.id}
                         variant="outline"
                         onClick={() => handleRetrieveHoldSale(index)}
                         className="h-auto w-full justify-between border-gray-200 py-2"
+                        disabled={resumingHoldIndex === index}
                       >
                         <div className="flex flex-col items-start text-left">
-                          <span className="font-medium text-gray-900">Sale #{index + 1}</span>
+                          <span className="font-medium text-gray-900">Sale #{index + 1} - {sale.branchName}</span>
                           <span className="text-xs text-gray-500">
-                            {sale.length} items • Rs {saleTotal.toFixed(2)}
+                            {sale.items.length} items • Rs {saleTotal.toFixed(2)}
                           </span>
                         </div>
-                        <span className="text-xs font-semibold text-blue-600">Resume</span>
+                        <span className="text-xs font-semibold text-blue-600">
+                          {resumingHoldIndex === index ? "Resuming..." : "Resume"}
+                        </span>
                       </Button>
                     );
                   })}
@@ -1928,7 +2068,25 @@ export function NewSale() {
               </div>
             ) : (
               <div className="space-y-2">
-                {cart.map((item) => (
+                {cart.map((item) => {
+                  const unitName = item.unitName || item.unit;
+                  const presetOptions = getQuantityPresetOptions(unitName);
+                  const matchedPresetValue = getPresetValueForQuantity(item.quantity, unitName);
+                  const quantityMode = quantityModes[item.id] === "custom" ? "custom" : "preset";
+                  const selectedPresetValue =
+                    quantityMode === "custom"
+                      ? "custom"
+                      : matchedPresetValue === "custom"
+                        ? presetOptions[0]?.value || "custom"
+                        : matchedPresetValue;
+                  const minQuantity = isPieceUnit(unitName) ? 1 : 0.01;
+                  const minControlQuantity =
+                    quantityMode === "preset" && isWeightUnit(unitName)
+                      ? presetOptions[0]?.quantity ?? minQuantity
+                      : minQuantity;
+                  const effectiveUnitPrice = getSellingPrice(item);
+
+                  return (
                   <div
                     key={item.id}
                     ref={(el) => {
@@ -1938,10 +2096,15 @@ export function NewSale() {
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="space-y-1">
-                        <h4 className="text-sm font-semibold text-gray-900 leading-snug">{item.name}</h4>
-                        <p className="text-xs text-gray-500">
-                          Original: Rs {item.originalPrice.toLocaleString()} • Line Total: <span className="font-semibold text-blue-600">Rs {((item.actualUnitPrice || item.price) * item.quantity).toLocaleString()}</span>
-                        </p>
+                        <h4 className="text-sm font-semibold text-gray-900 leading-snug flex items-center gap-2">
+                          <span>{item.name}</span>
+                          {isPriceOverridden(item) && (
+                            <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">
+                              <Pencil className="h-3 w-3 mr-1" />
+                              Custom Price
+                            </Badge>
+                          )}
+                        </h4>
                       </div>
                       <Button
                         size="sm"
@@ -1953,342 +2116,372 @@ export function NewSale() {
                       </Button>
                     </div>
 
-                    <div className="mt-3 grid grid-cols-3 gap-2">
-                      {/* Unit Price - Can be changed to sell at custom price */}
+                    <div className="mt-3 rounded-lg border border-gray-100 bg-slate-50 p-3 space-y-3">
+                      {/* Price editor */}
                       <div>
-                        <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                          Unit Price
+                        <div className="flex items-center justify-between">
+                          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                            Sell Price (Rs)
                         </label>
+                          {isPriceOverridden(item) && (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 px-2 text-[11px] text-amber-700 hover:text-amber-800"
+                              onClick={() => {
+                                setCart(
+                                  cart.map((cartItem) =>
+                                    cartItem.id === item.id
+                                      ? {
+                                          ...cartItem,
+                                          actualUnitPrice: cartItem.originalPrice,
+                                          price: cartItem.originalPrice,
+                                        }
+                                      : cartItem,
+                                  ),
+                                );
+                              }}
+                            >
+                              Reset Default
+                            </Button>
+                          )}
+                        </div>
                           <Input
                             ref={(el) => {
                               priceInputRefs.current[item.id] = el;
                               if (el) {
-                                el.setAttribute('data-price-input', 'true');
+                              el.setAttribute("data-price-input", "true");
                               }
                             }}
                             type="text"
                             inputMode="decimal"
-                            value={priceInputs[item.id] !== undefined ? priceInputs[item.id] : (item.actualUnitPrice === 0 ? "" : String(item.actualUnitPrice || item.price))}
+                          value={
+                            priceInputs[item.id] !== undefined
+                              ? priceInputs[item.id]
+                              : item.actualUnitPrice === 0
+                                ? ""
+                                : String(item.actualUnitPrice || item.price)
+                          }
                             onFocus={() => {
                               isUserInteractingRef.current = true;
                             }}
                           onKeyDown={(e) => {
-                            // Enter or Tab: Move to quantity input
                             if (e.key === "Enter" || e.key === "Tab") {
                               e.preventDefault();
                               const quantityInput = quantityInputRefs.current[item.id];
                               if (quantityInput) {
                                 quantityInput.focus();
+                                if (quantityInput instanceof HTMLInputElement) {
                                 quantityInput.select();
+                                }
                               }
                             }
                           }}
                           onChange={(e) => {
                             const value = e.target.value;
+                            setPriceInputs((prev) => ({ ...prev, [item.id]: value }));
                             
-                            // Update local input state
-                            setPriceInputs(prev => ({ ...prev, [item.id]: value }));
-                            
-                            // Allow empty string - clear the value
                             if (value === "") {
                               setCart(
-                                cart.map((cartItem) => {
-                                  if (cartItem.id === item.id) {
-                                    return { ...cartItem, actualUnitPrice: 0, price: 0 };
-                                  }
-                                  return cartItem;
-                                })
+                                cart.map((cartItem) =>
+                                  cartItem.id === item.id
+                                    ? { ...cartItem, actualUnitPrice: 0, price: 0 }
+                                    : cartItem,
+                                ),
                               );
                               return;
                             }
                             
-                            // Allow decimal point and numbers - validate format
                             if (/^(\d*\.?\d*)$/.test(value)) {
-                              // If it's just a decimal point, don't update cart yet
-                              if (value === ".") {
-                                return;
-                              }
-                              
+                              if (value === ".") return;
                               const numValue = parseFloat(value);
                               if (!isNaN(numValue) && numValue >= 0) {
-                                // Update both actualUnitPrice and price
                                 setCart(
-                                  cart.map((cartItem) => {
-                                    if (cartItem.id === item.id) {
-                                      return { ...cartItem, actualUnitPrice: numValue, price: numValue };
-                                    }
-                                    return cartItem;
-                                  })
+                                  cart.map((cartItem) =>
+                                    cartItem.id === item.id
+                                      ? { ...cartItem, actualUnitPrice: numValue, price: numValue }
+                                      : cartItem,
+                                  ),
                                 );
                               }
                             }
                           }}
                           onBlur={(e) => {
                             const value = e.target.value.trim();
-                            // Clear local input state
-                            setPriceInputs(prev => {
+                            setPriceInputs((prev) => {
                               const newState = { ...prev };
                               delete newState[item.id];
                               return newState;
                             });
                             
-                            // If empty or just a decimal point, reset to original price
                             if (value === "" || value === "." || value === "0") {
                               setCart(
-                                cart.map((cartItem) => {
-                                  if (cartItem.id === item.id) {
-                                    return { ...cartItem, actualUnitPrice: cartItem.originalPrice, price: cartItem.originalPrice };
-                                  }
-                                  return cartItem;
-                                })
+                                cart.map((cartItem) =>
+                                  cartItem.id === item.id
+                                    ? {
+                                        ...cartItem,
+                                        actualUnitPrice: cartItem.originalPrice,
+                                        price: cartItem.originalPrice,
+                                      }
+                                    : cartItem,
+                                ),
                               );
                             } else {
-                              // Ensure valid number on blur
                               const numValue = parseFloat(value);
                               if (!isNaN(numValue) && numValue >= 0) {
                                 setCart(
-                                  cart.map((cartItem) => {
-                                    if (cartItem.id === item.id) {
-                                      return { ...cartItem, actualUnitPrice: numValue, price: numValue };
-                                    }
-                                    return cartItem;
-                                  })
+                                  cart.map((cartItem) =>
+                                    cartItem.id === item.id
+                                      ? { ...cartItem, actualUnitPrice: numValue, price: numValue }
+                                      : cartItem,
+                                  ),
                                 );
                               } else {
-                                // Invalid, reset to original
                                 setCart(
-                                  cart.map((cartItem) => {
-                                    if (cartItem.id === item.id) {
-                                      return { ...cartItem, actualUnitPrice: cartItem.originalPrice, price: cartItem.originalPrice };
-                                    }
-                                    return cartItem;
-                                  })
+                                  cart.map((cartItem) =>
+                                    cartItem.id === item.id
+                                      ? {
+                                          ...cartItem,
+                                          actualUnitPrice: cartItem.originalPrice,
+                                          price: cartItem.originalPrice,
+                                        }
+                                      : cartItem,
+                                  ),
                                 );
                               }
                             }
-                            // Allow a moment before allowing refocus
                             setTimeout(() => {
                               isUserInteractingRef.current = false;
                             }, 300);
                           }}
-                          className="mt-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          className={`mt-1 h-10 text-base font-semibold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                            isPriceOverridden(item) ? "border-amber-400 bg-amber-50" : ""
+                          }`}
                         />
                       </div>
                       
-                      {/* Quantity */}
+                      {/* Quantity + amount based auto-calc */}
+                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
                       <div>
-                        <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                          Qty {item.unitName ? `(${item.unitName})` : ''}
+                          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                            Quantity {unitName ? `(${unitName})` : ""}
                         </label>
-                        <div className="mt-1 flex items-center gap-1">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => {
-                              const currentItem = cart.find((cartItem) => cartItem.id === item.id);
-                              if (currentItem && currentItem.quantity > 0.01) {
-                                updateQuantity(item.id, -1);
+                          <div className="mt-1 space-y-2">
+                            <Select
+                              value={selectedPresetValue}
+                              onValueChange={(value) => {
+                                if (value === "custom") {
+                                  setQuantityModes((prev) => ({ ...prev, [item.id]: "custom" }));
+                                  setQuantityInputs((prev) => ({
+                                    ...prev,
+                                    [item.id]: isPieceUnit(unitName)
+                                      ? String(Math.max(1, Math.round(item.quantity)))
+                                      : item.quantity.toFixed(3),
+                                  }));
+                                  return;
+                                }
+
+                                const selectedPreset = presetOptions.find((preset) => preset.value === value);
+                                if (!selectedPreset) return;
+
+                                setQuantityModes((prev) => ({ ...prev, [item.id]: "preset" }));
+                                setQuantityInputs((prev) => {
+                                  const next = { ...prev };
+                                  delete next[item.id];
+                                  return next;
+                                });
+                                updateQuantityManual(item.id, selectedPreset.quantity, unitName);
+                              }}
+                            >
+                              <SelectTrigger
+                            ref={(el) => {
+                              quantityInputRefs.current[item.id] = el;
+                              if (el) {
+                                    el.setAttribute("data-quantity-select", "true");
                               }
                             }}
-                            className="h-8 w-6 p-0"
-                            disabled={item.quantity <= 0.01}
-                          >
-                            <Minus className="h-3 w-3" />
-                          </Button>
+                                className="h-10 bg-white text-sm"
+                            onFocus={() => {
+                              isUserInteractingRef.current = true;
+                            }}
+                                onBlur={() => {
+                                  setTimeout(() => {
+                                    isUserInteractingRef.current = false;
+                                  }, 300);
+                                }}
+                              >
+                                <SelectValue placeholder="Select quantity" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {presetOptions.map((preset) => (
+                                  <SelectItem key={`${item.id}-${preset.value}`} value={preset.value}>
+                                    {preset.label}
+                                  </SelectItem>
+                                ))}
+                                <SelectItem value="custom">Custom...</SelectItem>
+                              </SelectContent>
+                            </Select>
+
+                            {quantityMode === "custom" && (
                           <Input
                             ref={(el) => {
                               quantityInputRefs.current[item.id] = el;
                               if (el) {
-                                el.setAttribute('data-quantity-input', 'true');
+                                    el.setAttribute("data-quantity-input", "true");
                               }
                             }}
                             type="text"
-                            inputMode="decimal"
+                                inputMode={isWeightUnit(unitName) ? "text" : "decimal"}
+                                placeholder={
+                                  isPieceUnit(unitName)
+                                    ? "Type pieces"
+                                    : isWeightUnit(unitName)
+                                      ? "250g or 0.25kg"
+                                      : "Type quantity"
+                                }
+                                value={quantityInputs[item.id] ?? ""}
                             onFocus={() => {
                               isUserInteractingRef.current = true;
                             }}
-                            placeholder="0"
-                            value={quantityInputs[item.id] !== undefined 
-                              ? quantityInputs[item.id] 
-                              : (item.quantity === 0 || item.quantity === 0.01 
-                                  ? "" 
-                                  : item.quantity.toFixed(2))}
-                            onKeyDown={(e) => {
-                              // Enter: Move to payment (open payment dialog)
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                if (cart.length > 0 && total > 0) {
-                                  startPayment("Cash");
-                                }
-                              }
-                              // Tab: Move to total price input
-                              if (e.key === "Tab" && !e.shiftKey) {
-                                e.preventDefault();
-                                const totalPriceInput = document.querySelector(`[data-total-price-input="${item.id}"]`) as HTMLInputElement;
-                                if (totalPriceInput) {
-                                  totalPriceInput.focus();
-                                  totalPriceInput.select();
-                                }
-                              }
-                            }}
                             onChange={(e) => {
-                              const value = e.target.value;
-                              
-                              // Remove unit from value if present (e.g., "2.5 kg" -> "2.5", "250 g" -> "250")
-                              const cleanValue = value.replace(/\s*(kg|g|pcs|ml|l|gram|grams|piece|pieces|pc)\s*$/i, '').trim();
-                              
-                              // Update local input state
-                              setQuantityInputs(prev => ({ ...prev, [item.id]: cleanValue }));
-                              
-                              // Allow empty string - clear the value
-                              if (cleanValue === "") {
-                                setCart(
-                                  cart.map((cartItem) => {
-                                    if (cartItem.id === item.id) {
-                                      return { ...cartItem, quantity: 0 };
-                                    }
-                                    return cartItem;
-                                  })
-                                );
+                                  const value = e.target.value.trim();
+                                  if (value === "") {
+                                    setQuantityInputs((prev) => ({ ...prev, [item.id]: "" }));
                                 return;
                               }
                               
-                              // Allow decimal point and numbers - validate format
-                              if (/^(\d*\.?\d*)$/.test(cleanValue)) {
-                                // If it's just a decimal point, don't update cart yet
-                                if (cleanValue === ".") {
-                                  return;
-                                }
-                                
-                                const numValue = parseFloat(cleanValue);
-                                if (!isNaN(numValue) && numValue >= 0) {
-                                  updateQuantityManual(item.id, numValue);
-                                }
-                              }
-                            }}
-                            onBlur={(e) => {
-                              const value = e.target.value.trim();
-                              // Clear local input state
-                              setQuantityInputs(prev => {
-                                const newState = { ...prev };
-                                delete newState[item.id];
-                                return newState;
-                              });
-                              
-                              // If empty or just a decimal point, set to minimum
-                              if (value === "" || value === "." || value === "0") {
-                                setCart(
-                                  cart.map((cartItem) => {
-                                    if (cartItem.id === item.id) {
-                                      return { ...cartItem, quantity: 0.01 };
-                                    }
-                                    return cartItem;
-                                  })
-                                );
+                                  setQuantityInputs((prev) => ({ ...prev, [item.id]: value }));
+                                  const parsed = parseCustomQuantityInput(value, unitName);
+                                  if (parsed === null) return;
+                                  updateQuantityManual(item.id, parsed, unitName);
+                                }}
+                                onBlur={() => {
+                                  const currentValue = quantityInputs[item.id];
+                                  const parsed = currentValue
+                                    ? parseCustomQuantityInput(currentValue, unitName)
+                                    : null;
+                                  if (!currentValue || parsed === null || parsed <= 0) {
+                                    setQuantityInputs((prev) => ({
+                                      ...prev,
+                                      [item.id]: isPieceUnit(unitName) ? "1" : "0.01",
+                                    }));
+                                    updateQuantityManual(item.id, minQuantity, unitName);
                               } else {
-                                // Ensure valid number on blur
-                                const numValue = parseFloat(value);
-                                if (!isNaN(numValue) && numValue > 0) {
-                                  updateQuantityManual(item.id, numValue);
-                                } else {
-                                  // Invalid or <= 0, set to minimum
-                                  setCart(
-                                    cart.map((cartItem) => {
-                                      if (cartItem.id === item.id) {
-                                        return { ...cartItem, quantity: 0.01 };
-                                      }
-                                      return cartItem;
-                                    })
-                                  );
-                                }
-                              }
-                              // Allow a moment before allowing refocus
+                                    updateQuantityManual(item.id, parsed, unitName);
+                                  }
                               setTimeout(() => {
                                 isUserInteractingRef.current = false;
                               }, 300);
                             }}
-                            className="h-8 w-12 text-center text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
+                                className="h-10 text-sm font-semibold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                              />
+                            )}
+
+                            <div className="flex items-center gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => {
+                                  const currentItem = cart.find((cartItem) => cartItem.id === item.id);
+                                  if (currentItem && currentItem.quantity > minControlQuantity) {
+                                    updateQuantity(item.id, -1);
+                                  }
+                                }}
+                                className="h-10 w-10 p-0"
+                                disabled={item.quantity <= minControlQuantity}
+                              >
+                                <Minus className="h-4 w-4" />
+                              </Button>
+                              <div className="h-10 flex-1 rounded-md border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-800 flex items-center justify-center whitespace-nowrap">
+                                {formatQuantityWithUnit(item.quantity, unitName)}
+                              </div>
                           <Button
                             size="sm"
                             variant="outline"
                             onClick={() => updateQuantity(item.id, 1)}
-                            className="h-8 w-6 p-0"
+                                className="h-10 w-10 p-0"
                           >
-                            <Plus className="h-3 w-3" />
+                                <Plus className="h-4 w-4" />
                           </Button>
+                            </div>
                         </div>
                       </div>
                       
-                      {/* Total Price - Auto calculates quantity */}
-                      <div>
-                        <label className="text-[10px] font-medium uppercase tracking-wide text-gray-500">
-                          Total (Rs)
+                        <div className="space-y-2">
+                          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                            Total
+                          </label>
+                          <div className="rounded-md border border-blue-100 bg-blue-50 px-3 h-10 flex items-center justify-start">
+                            <span className="text-base font-semibold text-blue-900 whitespace-nowrap text-left">
+                              Rs {formatMoney(effectiveUnitPrice * item.quantity)}
+                            </span>
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-8 w-full text-xs"
+                            onClick={() =>
+                              setShowAmountEditors((prev) => ({
+                                ...prev,
+                                [item.id]: !prev[item.id],
+                              }))
+                            }
+                          >
+                            {showAmountEditors[item.id] ? "Hide Amount" : "Amount by Rs"}
+                          </Button>
+                          {showAmountEditors[item.id] && (
+                            <div className="rounded-md border border-gray-200 bg-white p-2">
+                              <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">
+                                Amount (Rs)
                         </label>
                         <Input
-                          data-total-price-input={item.id}
+                                data-amount-input="true"
                           type="text"
                           inputMode="decimal"
-                          placeholder={((item.actualUnitPrice || item.price) * item.quantity).toFixed(0)}
+                                placeholder="e.g. 500"
+                                value={amountInputs[item.id] ?? ""}
                           onFocus={() => {
                             isUserInteractingRef.current = true;
                           }}
-                          onKeyDown={(e) => {
-                            // Tab: Move to next item's unit price
-                            if (e.key === "Tab" && !e.shiftKey) {
-                              const currentIndex = cart.findIndex(cartItem => cartItem.id === item.id);
-                              if (currentIndex < cart.length - 1) {
-                                e.preventDefault();
-                                const nextItem = cart[currentIndex + 1];
-                                const nextPriceInput = priceInputRefs.current[nextItem.id];
-                                if (nextPriceInput) {
-                                  nextPriceInput.focus();
-                                  nextPriceInput.select();
-                                }
-                              }
-                            }
-                            // Enter: Open payment
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              if (cart.length > 0 && total > 0) {
-                                startPayment("Cash");
-                              }
-                            }
-                          }}
                           onChange={(e) => {
                             const value = e.target.value;
-                            
-                            // Allow decimal point and numbers
-                            if (/^(\d*\.?\d*)$/.test(value) && value !== ".") {
-                              const totalPrice = parseFloat(value);
-                              const unitPrice = item.actualUnitPrice || item.price || item.originalPrice;
-                              
-                              if (!isNaN(totalPrice) && totalPrice >= 0 && unitPrice > 0) {
-                                // Calculate quantity from total price
-                                const calculatedQuantity = totalPrice / unitPrice;
-                                setCart(
-                                  cart.map((cartItem) => {
-                                    if (cartItem.id === item.id) {
-                                      return { ...cartItem, quantity: Math.max(0.01, calculatedQuantity) };
-                                    }
-                                    return cartItem;
-                                  })
-                                );
-                              }
-                            }
+                                  if (value !== "" && !/^(\d*\.?\d*)$/.test(value)) return;
+                                  setAmountInputs((prev) => ({ ...prev, [item.id]: value }));
+
+                                  if (value === "" || value === ".") return;
+
+                                  const amountValue = parseFloat(value);
+                                  if (Number.isNaN(amountValue) || amountValue < 0 || effectiveUnitPrice <= 0) return;
+                                  const computedQuantity = amountValue / effectiveUnitPrice;
+                                  updateQuantityManual(item.id, computedQuantity, unitName);
+                                  setQuantityModes((prev) => ({ ...prev, [item.id]: "custom" }));
+                                  setQuantityInputs((prev) => ({
+                                    ...prev,
+                                    [item.id]: isPieceUnit(unitName)
+                                      ? String(Math.max(1, Math.round(computedQuantity)))
+                                      : computedQuantity.toFixed(3),
+                                  }));
                           }}
                           onBlur={() => {
-                            // Allow a moment before allowing refocus
                             setTimeout(() => {
                               isUserInteractingRef.current = false;
                             }, 300);
                           }}
-                          className="mt-1 h-8 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                                className="mt-1 h-9 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                         />
+                              <p className="mt-1 text-[10px] text-blue-600 font-medium">
+                                Auto qty: {formatQuantityWithUnit(item.quantity, unitName)}
+                              </p>
                       </div>
+                          )}
                     </div>
                   </div>
-                ))}
+                    </div>
+                  </div>
+                  );
+                })}
               </div>
             )}
           </div>
@@ -2298,152 +2491,14 @@ export function NewSale() {
           <div className="border-t border-gray-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_-20px_rgba(15,23,42,0.4)] backdrop-blur">
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-2.5">
-                <div>
-                  <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-500">
-                    Discount
-                  </label>
-                  <div className="mt-1 flex items-center gap-1.5">
-                    <select
-                      data-discount-select="true"
-                      className="h-8 rounded border border-gray-200 px-2 text-xs"
-                      value={globalDiscountType}
-                      onFocus={() => {
-                        isUserInteractingRef.current = true;
-                      }}
-                      onBlur={() => {
-                        // Allow a moment for user to continue interacting
-                        setTimeout(() => {
-                          isUserInteractingRef.current = false;
-                        }, 300);
-                      }}
-                      onChange={(e) => {
-                        setGlobalDiscountType(
-                          e.target.value as "percentage" | "amount"
-                        );
-                        // Clear discount input when switching types
-                        setDiscountInput("");
-                        setGlobalDiscount(0);
-                      }}
-                    >
-                      <option value="percentage">%</option>
-                      <option value="amount">Rs</option>
-                    </select>
-                    <Input
-                      data-discount-input="true"
-                      type="text"
-                      inputMode="decimal"
-                      value={discountInput}
-                      onFocus={() => {
-                        isUserInteractingRef.current = true;
-                      }}
-                      onBlur={(e) => {
-                        const value = e.target.value.trim();
-                        
-                        // If empty or just a decimal point, clear discount
-                        if (value === "" || value === "." || value === "0") {
-                          setDiscountInput("");
-                          setGlobalDiscount(0);
-                        } else {
-                          // Ensure valid number on blur
-                          const numValue = parseFloat(value);
-                          if (!isNaN(numValue) && numValue >= 0) {
-                            // Validate max for percentage
-                            if (globalDiscountType === "percentage" && numValue > 100) {
-                              setDiscountInput("100");
-                              setGlobalDiscount(100);
-                            } else {
-                              setDiscountInput(value);
-                              setGlobalDiscount(numValue);
-                            }
-                          } else {
-                            // Invalid, clear
-                            setDiscountInput("");
-                            setGlobalDiscount(0);
-                          }
-                        }
-                        
-                        // Allow a moment before allowing refocus
-                        setTimeout(() => {
-                          isUserInteractingRef.current = false;
-                        }, 300);
-                      }}
-                      onChange={(e) => {
-                        const value = e.target.value;
-                        setDiscountInput(value);
-                        
-                        // Allow empty string - clear the value
-                        if (value === "") {
-                          setGlobalDiscount(0);
-                          return;
-                        }
-                        
-                        // Allow decimal point and numbers - validate format
-                        if (/^(\d*\.?\d*)$/.test(value)) {
-                          // If it's just a decimal point, don't update discount yet
-                          if (value === ".") {
-                            return;
-                          }
-                          
-                          const numValue = parseFloat(value);
-                          if (!isNaN(numValue) && numValue >= 0) {
-                            // Validate max for percentage
-                            if (globalDiscountType === "percentage" && numValue > 100) {
-                              return;
-                            }
-                            setGlobalDiscount(numValue);
-                          }
-                        }
-                      }}
-                      onBlur={(e) => {
-                        const value = e.target.value.trim();
-                        
-                        // If empty or just a decimal point, clear discount
-                        if (value === "" || value === "." || value === "0") {
-                          setDiscountInput("");
-                          setGlobalDiscount(0);
-                        } else {
-                          // Ensure valid number on blur
-                          const numValue = parseFloat(value);
-                          if (!isNaN(numValue) && numValue >= 0) {
-                            // Validate max for percentage
-                            if (globalDiscountType === "percentage" && numValue > 100) {
-                              setDiscountInput("100");
-                              setGlobalDiscount(100);
-                            } else {
-                              setDiscountInput(value);
-                              setGlobalDiscount(numValue);
-                            }
-                          } else {
-                            // Invalid, clear
-                            setDiscountInput("");
-                            setGlobalDiscount(0);
-                          }
-                        }
-                        
-                        // Allow a moment before allowing refocus
-                        setTimeout(() => {
-                          isUserInteractingRef.current = false;
-                        }, 300);
-                      }}
-                      className="h-8 flex-1 text-xs [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
                 <div className="rounded-lg border border-gray-200 bg-slate-50 p-2.5 text-xs">
                   <div className="flex items-center justify-between text-gray-600 text-xs font-medium">
                     <span>Subtotal</span>
-                    <span className="text-sm font-semibold text-blue-700">{subtotal.toFixed(2)}</span>
+                    <span className="text-sm font-semibold text-blue-700">{formatMoney(subtotal)}</span>
                   </div>
-                  {discountAmount > 0 && (
-                    <div className="mt-1 flex items-center justify-between text-green-600 text-xs font-medium">
-                      <span>Discount</span>
-                      <span>- {discountAmount.toFixed(2)}</span>
-                    </div>
-                  )}
                   <div className="mt-1 flex items-center justify-between text-blue-700 text-sm font-semibold">
                     <span>Payable</span>
-                    <span>{total.toFixed(2)}</span>
+                    <span>{formatMoney(total)}</span>
                   </div>
                 </div>
               </div>
@@ -2492,7 +2547,7 @@ export function NewSale() {
               <div className="flex items-center justify-between text-gray-600">
                 <span>Payable Amount</span>
                 <span className="font-semibold text-gray-900">
-                  Rs {total.toFixed(2)}
+                  Rs {formatMoney(total)}
                 </span>
               </div>
               <div className="mt-2 flex items-center justify-between text-green-600 font-semibold">

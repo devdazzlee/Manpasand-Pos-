@@ -9,6 +9,10 @@ import {
     refundSaleController,
     getTodaySalesController,
     getRecentSaleItemProductNameAndPrice,
+    getHoldSalesController,
+    createHoldSaleController,
+    retrieveHoldSaleController,
+    deleteHoldSaleController,
 } from "../controllers/sale.controller";
 import { createSaleSchema, refundSaleSchema } from "../validations/sale.validation";
 
@@ -19,6 +23,10 @@ router.use(authenticate, authorize(["SUPER_ADMIN", "ADMIN"]));
 router.get("/recent", getRecentSaleItemProductNameAndPrice);
 router.get("/today", getTodaySalesController);
 router.get("/for-returns", getSalesForReturnsController);
+router.get("/hold", getHoldSalesController);
+router.post("/hold", createHoldSaleController);
+router.post("/hold/:holdSaleId/retrieve", retrieveHoldSaleController);
+router.delete("/hold/:holdSaleId", deleteHoldSaleController);
 router.get("/", getSalesController);
 router.get("/:saleId", getSaleByIdController);
 router.post("/", validate(createSaleSchema), createSaleController);
