@@ -668,17 +668,45 @@ export function StockManagement() {
   };
 
   const getMovementBadge = (type: string) => {
-    const colors: Record<string, string> = {
-      PURCHASE: "bg-green-100 text-green-800",
-      SALE: "bg-blue-100 text-blue-800",
-      ADJUSTMENT: "bg-purple-100 text-purple-800",
-      TRANSFER_IN: "bg-emerald-100 text-emerald-800",
-      TRANSFER_OUT: "bg-orange-100 text-orange-800",
-      RETURN: "bg-yellow-100 text-yellow-800",
-      DAMAGE: "bg-red-100 text-red-800",
-      EXPIRED: "bg-gray-100 text-gray-800",
+    // Keep movement colors simple for faster understanding:
+    // green = stock added, red = stock removed, amber = manual adjust.
+    const incoming = ["PURCHASE", "TRANSFER_IN", "RETURN"];
+    const outgoing = ["SALE", "TRANSFER_OUT", "DAMAGE", "EXPIRED"];
+    if (incoming.includes(type)) {
+      return <Badge variant="outline" className="bg-green-100 text-green-800">{type}</Badge>;
+    }
+    if (outgoing.includes(type)) {
+      return <Badge variant="outline" className="bg-red-100 text-red-800">{type}</Badge>;
+    }
+    if (type === "ADJUSTMENT") {
+      return <Badge variant="outline" className="bg-amber-100 text-amber-800">{type}</Badge>;
+    }
+    return <Badge variant="outline" className="bg-gray-100 text-gray-800">{type}</Badge>;
+  };
+
+  const formatQty = (value: number) => {
+    const num = Number(value || 0);
+    if (Number.isInteger(num)) return num.toLocaleString();
+    return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  };
+
+  const getStockStatusMeta = (qty: number) => {
+    if (qty <= 0) {
+      return {
+        label: "Out",
+        className: "bg-red-100 text-red-800 border-red-200",
+      };
+    }
+    if (qty <= 10) {
+      return {
+        label: "Low",
+        className: "bg-amber-100 text-amber-800 border-amber-200",
+      };
+    }
+    return {
+      label: "In Stock",
+      className: "bg-green-100 text-green-800 border-green-200",
     };
-    return <Badge className={colors[type] || "bg-gray-100 text-gray-800"}>{type}</Badge>;
   };
 
   const handleProductSearch = (search: string) => {
@@ -700,12 +728,6 @@ export function StockManagement() {
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Stock Management</h1>
-          <p className="text-sm md:text-base text-gray-600">
-            Manage stock arrivals, transfers, and track movements across branches
-          </p>
-          <p className="text-xs text-gray-500 mt-1">
-            Use "Add Stock" to record stock arrivals with date and quantity • Track today's movements in history
-          </p>
           {globalLoading && (
             <p className="text-xs md:text-sm text-blue-600 mt-1">Loading data from cache...</p>
           )}
@@ -732,7 +754,7 @@ export function StockManagement() {
             }}
           >
             <DialogTrigger asChild>
-              <Button className="bg-green-600 hover:bg-green-700">
+              <Button>
                 <Plus className="h-4 w-4 mr-2" />
                 Add Stock
               </Button>
@@ -1042,7 +1064,7 @@ export function StockManagement() {
             }}
           >
             <DialogTrigger asChild>
-              <Button variant="outline" className="bg-red-50 hover:bg-red-100 text-red-700 border-red-300">
+              <Button variant="outline">
                 <Package className="h-4 w-4 mr-2" />
                 Remove Stock
               </Button>
@@ -1200,7 +1222,7 @@ export function StockManagement() {
             }}
           >
             <DialogTrigger asChild>
-              <Button className="bg-blue-600 hover:bg-blue-700">
+              <Button>
                 <ArrowRightLeft className="h-4 w-4 mr-2" />
                 Transfer Stock
               </Button>
@@ -1391,8 +1413,8 @@ export function StockManagement() {
             <TrendingUp className="h-4 w-4 text-green-600" />
           </CardHeader>
           <CardContent>
-            <div className={`text-2xl font-bold ${totalQuantity < 0 ? "text-red-600" : "text-green-600"}`}>
-              {totalQuantity.toFixed(2)}
+            <div className="text-2xl font-bold text-gray-900">
+              {formatQty(totalQuantity)}
             </div>
           </CardContent>
         </Card>
@@ -1443,12 +1465,19 @@ export function StockManagement() {
         </div>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border bg-white px-3 py-2">
+        <span className="text-xs font-semibold text-gray-600">Stock status:</span>
+        <Badge variant="outline" className="bg-green-100 text-green-800 border-green-200">In Stock</Badge>
+        <Badge variant="outline" className="bg-amber-100 text-amber-800 border-amber-200">Low</Badge>
+        <Badge variant="outline" className="bg-red-100 text-red-800 border-red-200">Out</Badge>
+      </div>
+
       {/* Tabs for Stock and History */}
       <Tabs defaultValue="stock" className="space-y-4">
         <TabsList className="grid w-full grid-cols-3">
-          <TabsTrigger value="stock">Current Stock</TabsTrigger>
-          <TabsTrigger value="history">All History</TabsTrigger>
-          <TabsTrigger value="today">Today's Movements</TabsTrigger>
+          <TabsTrigger value="stock">Stock List</TabsTrigger>
+          <TabsTrigger value="history">Movement Log</TabsTrigger>
+          <TabsTrigger value="today">Today</TabsTrigger>
         </TabsList>
 
         {/* Current Stock Tab */}
@@ -1484,27 +1513,30 @@ export function StockManagement() {
                             <TableHead>Product</TableHead>
                             <TableHead>SKU</TableHead>
                             <TableHead>Current Stock</TableHead>
+                            <TableHead>Status</TableHead>
                             <TableHead>Last Updated</TableHead>
                           </TableRow>
                         </TableHeader>
                         <TableBody>
                           {allStocks.length === 0 ? (
                             <TableRow>
-                              <TableCell colSpan={4} className="text-center py-8 text-gray-500">
+                              <TableCell colSpan={5} className="text-center py-8 text-gray-500">
                                 No stock found for this branch
                               </TableCell>
                             </TableRow>
                           ) : (
                             allStocks.map((s) => {
                               const qty = Number(s.current_quantity || 0);
+                              const stockStatus = getStockStatusMeta(qty);
                               return (
                                 <TableRow key={s.id}>
                                   <TableCell className="font-medium">{s.product.name}</TableCell>
                                   <TableCell className="text-sm text-gray-500">{s.product.sku || s.product.id.slice(0, 8)}</TableCell>
                                   <TableCell>
-                                    <Badge variant={qty <= 10 ? "destructive" : qty < 0 ? "outline" : "secondary"}>
-                                      {qty.toFixed(2)}
-                                    </Badge>
+                                    <span className="font-semibold">{formatQty(qty)}</span>
+                                  </TableCell>
+                                  <TableCell>
+                                    <Badge variant="outline" className={stockStatus.className}>{stockStatus.label}</Badge>
                                   </TableCell>
                                   <TableCell className="text-sm text-gray-500">
                                     {new Date(s.last_updated).toLocaleDateString()}
@@ -1593,11 +1625,11 @@ export function StockManagement() {
                                   variant={m.quantity_change > 0 ? "default" : "destructive"}
                                 >
                                   {m.quantity_change > 0 ? "+" : ""}
-                                  {m.quantity_change}
+                                  {formatQty(Number(m.quantity_change))}
                                 </Badge>
                               </TableCell>
-                              <TableCell>{Number(m.previous_qty).toFixed(2)}</TableCell>
-                              <TableCell>{Number(m.new_qty).toFixed(2)}</TableCell>
+                              <TableCell>{formatQty(Number(m.previous_qty))}</TableCell>
+                              <TableCell>{formatQty(Number(m.new_qty))}</TableCell>
                               <TableCell className="text-sm text-gray-500">
                                 {m.notes || "-"}
                               </TableCell>
@@ -1660,11 +1692,11 @@ export function StockManagement() {
                                   variant={m.quantity_change > 0 ? "default" : "destructive"}
                                 >
                                   {m.quantity_change > 0 ? "+" : ""}
-                                  {m.quantity_change}
+                                  {formatQty(Number(m.quantity_change))}
                                 </Badge>
                               </TableCell>
-                              <TableCell>{Number(m.previous_qty).toFixed(2)}</TableCell>
-                              <TableCell>{Number(m.new_qty).toFixed(2)}</TableCell>
+                              <TableCell>{formatQty(Number(m.previous_qty))}</TableCell>
+                              <TableCell>{formatQty(Number(m.new_qty))}</TableCell>
                               <TableCell className="text-sm text-gray-500">
                                 {m.notes || "-"}
                               </TableCell>
