@@ -26,16 +26,17 @@ export const toggleBranchStatus = asyncHandler(async (req: Request, res: Respons
 });
 
 export const listBranches = asyncHandler(async (req: Request, res: Response) => {
-    const { page = 1, limit = 10, search, is_active } = req.query;
+    const { page = 1, limit = 10, search, is_active, fetch_all } = req.query;
 
     const result = await branchService.listBranches({
         page: Number(page),
         limit: Number(limit),
         search: search as string | undefined,
         is_active: is_active ? is_active === 'true' : undefined,
+        fetch_all: fetch_all === 'true',
     });
 
-    new ApiResponse(result.data, 'Branches retrieved successfully', 200).send(res);
+    new ApiResponse(result.data, 'Branches retrieved successfully', 200, true, result.meta).send(res);
 });
 
 export const getBranchDetails = asyncHandler(async (req: Request, res: Response) => {

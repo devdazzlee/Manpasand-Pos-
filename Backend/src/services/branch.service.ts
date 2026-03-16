@@ -79,11 +79,13 @@ export class BranchService {
     limit = 10,
     search,
     is_active = true,
+    fetch_all,
   }: {
     page?: number;
     limit?: number;
     search?: string;
     is_active?: boolean;
+    fetch_all?: boolean;
   }) {
     const where: Prisma.BranchWhereInput = {};
 
@@ -98,12 +100,15 @@ export class BranchService {
       where.is_active = is_active;
     }
 
+    const take = fetch_all ? 1000 : limit;
+    const skip = fetch_all ? 0 : (page - 1) * limit;
+
     const [total, branches] = await Promise.all([
       prisma.branch.count({ where }),
       prisma.branch.findMany({
         where,
-        skip: (page - 1) * limit,
-        take: limit,
+        skip,
+        take,
         orderBy: {
           created_at: 'desc',
         },

@@ -5,6 +5,7 @@ const zod_1 = require("zod");
 const branchBaseSchema = {
     name: zod_1.z.string().min(1, 'Name is required').max(100),
     address: zod_1.z.string().min(1, 'Address is required').optional(),
+    branch_type: zod_1.z.enum(['WAREHOUSE', 'BRANCH']).optional().default('BRANCH'),
     allow_neg_pos_stock: zod_1.z.boolean().optional().default(false),
     allow_neg_stock_grrn: zod_1.z.boolean().optional().default(false),
     allow_neg_transferout: zod_1.z.boolean().optional().default(false),
@@ -33,6 +34,7 @@ exports.listBranchesSchema = zod_1.z.object({
         limit: zod_1.z.string().optional().default('10'),
         search: zod_1.z.string().optional(),
         is_active: zod_1.z.string().optional(),
+        fetch_all: zod_1.z.string().optional(),
     }),
 });
 //# sourceMappingURL=branch.validation.js.map

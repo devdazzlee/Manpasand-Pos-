@@ -33,6 +33,7 @@ interface Branch {
   name: string
   code: string
   address?: string
+  branch_type?: "WAREHOUSE" | "BRANCH"
   allow_neg_pos_stock: boolean
   allow_neg_stock_grrn: boolean
   allow_neg_transferout: boolean
@@ -44,6 +45,7 @@ interface Branch {
 interface CreateBranchData {
   name: string
   address?: string
+  branch_type?: "WAREHOUSE" | "BRANCH"
   allow_neg_pos_stock?: boolean
   allow_neg_stock_grrn?: boolean
   allow_neg_transferout?: boolean
@@ -76,6 +78,7 @@ export function Branches() {
   const [newBranch, setNewBranch] = useState<CreateBranchData>({
     name: "",
     address: "",
+    branch_type: "BRANCH",
     allow_neg_pos_stock: false,
     allow_neg_stock_grrn: false,
     allow_neg_transferout: false,
@@ -197,6 +200,7 @@ export function Branches() {
       const updateData = {
         name: editingBranch.name,
         address: editingBranch.address,
+        branch_type: editingBranch.branch_type || "BRANCH",
         allow_neg_pos_stock: editingBranch.allow_neg_pos_stock,
         allow_neg_stock_grrn: editingBranch.allow_neg_stock_grrn,
         allow_neg_transferout: editingBranch.allow_neg_transferout,
@@ -333,6 +337,23 @@ export function Branches() {
                   placeholder="Enter branch address"
                   rows={3}
                 />
+              </div>
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select
+                  value={newBranch.branch_type || "BRANCH"}
+                  onValueChange={(v: "WAREHOUSE" | "BRANCH") =>
+                    setNewBranch({ ...newBranch, branch_type: v })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BRANCH">Branch</SelectItem>
+                    <SelectItem value="WAREHOUSE">Warehouse</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-3">
@@ -623,6 +644,24 @@ export function Branches() {
                   onChange={(e) => setEditingBranch({ ...editingBranch, address: e.target.value })}
                   rows={3}
                 />
+              </div>
+
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select
+                  value={editingBranch.branch_type || "BRANCH"}
+                  onValueChange={(v: "WAREHOUSE" | "BRANCH") =>
+                    setEditingBranch({ ...editingBranch, branch_type: v })
+                  }
+                >
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="BRANCH">Branch</SelectItem>
+                    <SelectItem value="WAREHOUSE">Warehouse</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-3">

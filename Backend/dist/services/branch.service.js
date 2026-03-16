@@ -62,7 +62,7 @@ class BranchService {
         console.log('Updated Branch:', updatedBranch, 'is_active:', updatedBranch.is_active, branch);
         return updatedBranch;
     }
-    async listBranches({ page = 1, limit = 10, search, is_active = true, }) {
+    async listBranches({ page = 1, limit = 10, search, is_active = true, fetch_all, }) {
         const where = {};
         if (search) {
             where.OR = [
@@ -73,12 +73,14 @@ class BranchService {
         if (is_active !== undefined) {
             where.is_active = is_active;
         }
+        const take = fetch_all ? 1000 : limit;
+        const skip = fetch_all ? 0 : (page - 1) * limit;
         const [total, branches] = await Promise.all([
             client_1.prisma.branch.count({ where }),
             client_1.prisma.branch.findMany({
                 where,
-                skip: (page - 1) * limit,
-                take: limit,
+                skip,
+                take,
                 orderBy: {
                     created_at: 'desc',
                 },

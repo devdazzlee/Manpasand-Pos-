@@ -25,14 +25,15 @@ exports.toggleBranchStatus = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(null, 'Branch status changed successfully').send(res);
 });
 exports.listBranches = (0, asyncHandler_1.default)(async (req, res) => {
-    const { page = 1, limit = 10, search, is_active } = req.query;
+    const { page = 1, limit = 10, search, is_active, fetch_all } = req.query;
     const result = await branchService.listBranches({
         page: Number(page),
         limit: Number(limit),
         search: search,
         is_active: is_active ? is_active === 'true' : undefined,
+        fetch_all: fetch_all === 'true',
     });
-    new apiResponse_1.ApiResponse(result.data, 'Branches retrieved successfully', 200).send(res);
+    new apiResponse_1.ApiResponse(result.data, 'Branches retrieved successfully', 200, true, result.meta).send(res);
 });
 exports.getBranchDetails = (0, asyncHandler_1.default)(async (req, res) => {
     const branchId = req.params.id;

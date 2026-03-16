@@ -4,10 +4,11 @@ import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { LoadingButton } from "@/components/ui/loading-button"
+import { Button } from "@/components/ui/button"
 import { PageLoader } from "@/components/ui/page-loader"
 import { useLoading } from "@/hooks/use-loading"
 import { useToast } from "@/hooks/use-toast"
-import { DollarSign, ShoppingCart, Users, Package, TrendingUp, TrendingDown, RefreshCw, Download } from "lucide-react"
+import { DollarSign, ShoppingCart, Users, Package, TrendingUp, TrendingDown, RefreshCw, Download, Truck, Plus } from "lucide-react"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import apiClient from "@/lib/apiClient"
 
@@ -39,7 +40,11 @@ interface DashboardStats {
   todaySales: any[]
 }
 
-export function DashboardHome() {
+interface DashboardHomeProps {
+  onNavigate?: (tab: string) => void;
+}
+
+export function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [topProducts, setTopProducts] = useState<TopProduct[]>([])
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
   const [stats, setStats] = useState<DashboardStats | null>(null)
@@ -342,18 +347,41 @@ export function DashboardHome() {
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-md transition-shadow">
+            <Card
+              className="hover:shadow-md transition-shadow cursor-pointer"
+              onClick={() => onNavigate?.("inventory-dashboard")}
+            >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
                 <Package className="h-4 w-4 text-yellow-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-yellow-600">{stats?.lowStockProducts?.length || 0}</div>
+                {onNavigate && (
+                  <p className="text-xs text-blue-600 mt-1">View inventory →</p>
+                )}
               </CardContent>
             </Card>
           </>
         )}
       </div>
+
+      {onNavigate && (
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" size="sm" onClick={() => onNavigate("purchases")}>
+            <Plus className="h-4 w-4 mr-1" />
+            New Purchase
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => onNavigate("transfers")}>
+            <Truck className="h-4 w-4 mr-1" />
+            New Transfer
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => onNavigate("stock-out")}>
+            <Package className="h-4 w-4 mr-1" />
+            Stock Out
+          </Button>
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* Recent Sales */}

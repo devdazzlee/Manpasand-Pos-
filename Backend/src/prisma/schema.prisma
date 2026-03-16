@@ -21,10 +21,13 @@ model User {
   branch    Branch? @relation(fields: [branch_id], references: [id])
 
   // Relations for tracking user actions
-  sales           Sale[]
-  hold_sales      HoldSale[]
-  purchase_orders PurchaseOrder[]
-  stock_movements StockMovement[]
+  sales            Sale[]
+  hold_sales       HoldSale[]
+  purchase_orders  PurchaseOrder[]
+  stock_movements  StockMovement[]
+  purchases        Purchase[]
+  transfers        Transfer[]
+  stock_adjustments StockAdjustment[]
 
   @@index([email])
 }
@@ -41,32 +44,43 @@ model Session {
   @@index([token])
 }
 
+enum BranchType {
+  WAREHOUSE
+  BRANCH
+}
+
 model Branch {
-  id                    String   @id @default(uuid())
-  code                  String   @unique
+  id                    String      @id @default(uuid())
+  code                  String      @unique
   name                  String
   address               String?
-  allow_neg_pos_stock   Boolean  @default(false)
-  allow_neg_stock_grrn  Boolean  @default(false)
-  allow_neg_transferout Boolean  @default(false)
-  is_active             Boolean  @default(true)
-  created_at            DateTime @default(now())
-  updated_at            DateTime @default(now()) @updatedAt
+  branch_type           BranchType  @default(BRANCH)
+  allow_neg_pos_stock   Boolean     @default(false)
+  allow_neg_stock_grrn  Boolean     @default(false)
+  allow_neg_transferout Boolean     @default(false)
+  is_active             Boolean     @default(true)
+  created_at            DateTime    @default(now())
+  updated_at            DateTime    @default(now()) @updatedAt
   cashflows             CashFlow[]
 
   // Relations
-  category        Category[]
-  stock           Stock[]
-  sales           Sale[]
-  hold_sales      HoldSale[]
-  purchase_orders PurchaseOrder[]
-  stock_movements StockMovement[]
-  Order           Order[]
-  User            User[]
-  employees       Employee[]
+  category           Category[]
+  stock              Stock[]
+  sales              Sale[]
+  hold_sales         HoldSale[]
+  purchase_orders     PurchaseOrder[]
+  stock_movements     StockMovement[]
+  Order              Order[]
+  User               User[]
+  employees          Employee[]
+  purchases_from     Purchase[]    @relation("PurchaseWarehouse")
+  transfers_from     Transfer[]    @relation("TransferFrom")
+  transfers_to       Transfer[]    @relation("TransferTo")
+  stock_adjustments  StockAdjustment[]
 
   @@index([code])
   @@index([is_active])
+  @@index([branch_type])
 }
 
 model Category {
@@ -187,6 +201,7 @@ model Supplier {
   display_on_pos  Boolean         @default(true)
   products        Product[]
   purchase_orders PurchaseOrder[]
+  purchases       Purchase[]
   created_at      DateTime        @default(now())
   updated_at      DateTime        @default(now()) @updatedAt
 
@@ -269,6 +284,9 @@ model Product {
   purchase_order_items PurchaseOrderItem[]
   stock_movements      StockMovement[]
   ProductImage         ProductImage[]
+  purchases            Purchase[]
+  stock_adjustments    StockAdjustment[]
+  transfers            Transfer[]
   created_at           DateTime            @default(now())
   updated_at           DateTime            @default(now()) @updatedAt
 
@@ -350,6 +368,89 @@ model StockMovement {
   @@index([movement_type])
   @@index([reference_id])
   @@index([created_at])
+}
+
+enum PurchaseDeliveryStatus {
+  PARTIAL
+  COMPLETE
+}
+
+model Purchase {
+  id                String                 @id @default(uuid())
+  product_id         String
+  product            Product                @relation(fields: [product_id], references: [id])
+  supplier_id        String
+  supplier           Supplier               @relation(fields: [supplier_id], references: [id])
+  warehouse_branch_id String
+  warehouse_branch   Branch                 @relation("PurchaseWarehouse", fields: [warehouse_branch_id], references: [id])
+  quantity           Decimal
+  cost_price         Decimal
+  sale_price         Decimal
+  purchase_date      DateTime               @default(now())
+  invoice_ref        String?
+  notes              String?
+  delivery_status    PurchaseDeliveryStatus  @default(COMPLETE)
+  created_by         String
+  user               User                   @relation(fields: [created_by], references: [id])
+  created_at         DateTime               @default(now())
+
+  @@index([product_id])
+  @@index([supplier_id])
+  @@index([warehouse_branch_id])
+  @@index([purchase_date])
+  @@index([created_by])
+}
+
+enum TransferStatus {
+  PENDING
+  DISPATCHED
+  RECEIVED
+}
+
+model Transfer {
+  id              String         @id @default(uuid())
+  product_id      String
+  product         Product        @relation(fields: [product_id], references: [id])
+  quantity        Decimal
+  from_branch_id  String
+  from_branch     Branch         @relation("TransferFrom", fields: [from_branch_id], references: [id])
+  to_branch_id    String
+  to_branch       Branch         @relation("TransferTo", fields: [to_branch_id], references: [id])
+  status          TransferStatus @default(PENDING)
+  transfer_date   DateTime       @default(now())
+  reference_no    String?        @unique
+  notes           String?
+  created_by      String
+  user            User           @relation(fields: [created_by], references: [id])
+  received_at     DateTime?
+  received_by     String?
+  created_at      DateTime       @default(now())
+
+  @@index([product_id])
+  @@index([from_branch_id])
+  @@index([to_branch_id])
+  @@index([status])
+  @@index([transfer_date])
+}
+
+model StockAdjustment {
+  id              String   @id @default(uuid())
+  product_id      String
+  product         Product  @relation(fields: [product_id], references: [id])
+  branch_id       String
+  branch          Branch   @relation(fields: [branch_id], references: [id])
+  system_quantity Decimal
+  physical_count  Decimal
+  difference      Decimal
+  reason          String?
+  adjustment_date DateTime @default(now())
+  adjusted_by     String
+  user            User     @relation(fields: [adjusted_by], references: [id])
+  created_at      DateTime @default(now())
+
+  @@index([product_id])
+  @@index([branch_id])
+  @@index([adjustment_date])
 }
 
 // NEW: Sales/Sell Table
@@ -587,6 +688,9 @@ model DeviceIdentity {
 enum Role {
   ADMIN
   SUPER_ADMIN
+  PURCHASE_MANAGER
+  WAREHOUSE_MANAGER
+  BRANCH_MANAGER
 }
 
 enum OrderStatus {
@@ -634,6 +738,7 @@ enum StockMovementType {
   RETURN
   DAMAGE
   EXPIRED
+  LOSS
 }
 
 enum PurchaseOrderStatus {

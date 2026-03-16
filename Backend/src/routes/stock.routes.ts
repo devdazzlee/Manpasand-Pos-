@@ -14,7 +14,10 @@ import { createStockSchema, adjustStockSchema, transferStockSchema, removeStockS
 
 const router = Router();
 
-router.use(authenticate, authorize(["SUPER_ADMIN", "ADMIN"]));
+router.use(
+  authenticate,
+  authorize(["SUPER_ADMIN", "ADMIN", "PURCHASE_MANAGER", "WAREHOUSE_MANAGER", "BRANCH_MANAGER"])
+);
 
 router.post("/", validate(createStockSchema), createStockController);
 router.patch("/adjust", validate(adjustStockSchema), adjustStockController);

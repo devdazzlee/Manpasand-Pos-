@@ -31,6 +31,16 @@ import { Branches } from "./branches";
 import Inventory from "./inventory";
 import { Stocks } from "./Stocks";
 import { StockManagement } from "./StockManagement";
+import {
+  InventoryDashboard,
+  Purchases,
+  Transfers,
+  StockOut,
+  StockMovementLog,
+  StockAdjustment,
+  StockView,
+  InventoryReports,
+} from "./inventory/index";
 import { Sales } from "./sales";
 import Orders from "./orders";
 import WebsiteOrders from "./website-orders";
@@ -58,7 +68,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const renderContent = () => {
     switch (activeTab) {
       case "dashboard":
-        return <DashboardHome />;
+        return <DashboardHome onNavigate={setActiveTab} />;
       case "barcode-generater":
         return <BarcodeGenerater />;
       case "new-sale":
@@ -103,6 +113,22 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <Stocks />;
       case "stock-management":
         return <StockManagement />;
+      case "inventory-dashboard":
+        return <InventoryDashboard />;
+      case "purchases":
+        return <Purchases />;
+      case "transfers":
+        return <Transfers />;
+      case "stock-out":
+        return <StockOut />;
+      case "stock-movement-log":
+        return <StockMovementLog />;
+      case "stock-adjustment":
+        return <StockAdjustment />;
+      case "stock-view":
+        return <StockView />;
+      case "inventory-reports":
+        return <InventoryReports />;
       case "designation":
         return <Designation />;
       case "employees":

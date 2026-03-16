@@ -3,6 +3,7 @@ import { z } from 'zod';
 const branchBaseSchema = {
   name: z.string().min(1, 'Name is required').max(100),
   address: z.string().min(1, 'Address is required').optional(),
+  branch_type: z.enum(['WAREHOUSE', 'BRANCH']).optional().default('BRANCH'),
   allow_neg_pos_stock: z.boolean().optional().default(false),
   allow_neg_stock_grrn: z.boolean().optional().default(false),
   allow_neg_transferout: z.boolean().optional().default(false),
@@ -35,6 +36,7 @@ export const listBranchesSchema = z.object({
     limit: z.string().optional().default('10'),
     search: z.string().optional(),
     is_active: z.string().optional(),
+    fetch_all: z.string().optional(),
   }),
 });
 
