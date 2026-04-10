@@ -169,7 +169,6 @@ export class CategoryService {
           }
         },
       },
-      take: 10,
     });
   }
 

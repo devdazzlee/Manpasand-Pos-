@@ -21,3 +21,8 @@ export const getProductById = asyncHandler(async (req: Request, res: Response) =
     const product = await appService.getProductById(req.params.id);
     new ApiResponse(product, 'Product fetched successfully', 200).send(res);
 });
+
+export const getCategories = asyncHandler(async (_req: Request, res: Response) => {
+    const categories = await appService.getCategories();
+    new ApiResponse(categories, 'Categories fetched successfully', 200).send(res);
+});

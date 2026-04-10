@@ -37,6 +37,10 @@ class AppService {
         const product = await this.productService.getProductById(id);
         return product;
     }
+
+    public async getCategories() {
+        return this.categoryService.getCategories();
+    }
 }
 
 export default AppService;
