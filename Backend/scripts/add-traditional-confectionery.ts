@@ -39,7 +39,34 @@ async function addAllProducts() {
         failed: [] as { name: string; error: string }[],
     };
 
+    const categoryName = 'Traditional Confectionery';
+    const category = await prisma.category.findFirst({
+        where: {
+            name: {
+                equals: categoryName,
+                mode: 'insensitive',
+            },
+        },
+        include: {
+            CategoryImages: {
+                where: { status: 'COMPLETE' },
+                orderBy: { created_at: 'asc' },
+                select: { image: true },
+            },
+        },
+    });
+
+    if (!category) {
+        throw new Error(`Category "${categoryName}" not found`);
+    }
+
+    const mainCategoryImageUrl = category.CategoryImages?.[0]?.image;
+    if (!mainCategoryImageUrl) {
+        throw new Error(`No COMPLETE category image found for "${categoryName}"`);
+    }
+
     console.log(`🚀 Starting to add ${products.length} products...\n`);
+    console.log(`🖼️ Using category image for all products: ${mainCategoryImageUrl}\n`);
 
     for (let i = 0; i < products.length; i++) {
         const product = products[i];
@@ -62,6 +89,30 @@ async function addAllProducts() {
                 sales_rate_inc_dis_and_tax: sellingPrice,
                 min_qty: 10,
                 max_qty: 10,
+            });
+
+            const existingMainImage = await prisma.productImage.findFirst({
+                where: {
+                    product_id: created.id,
+                    image: mainCategoryImageUrl,
+                    status: 'COMPLETE',
+                },
+                select: { id: true },
+            });
+
+            if (!existingMainImage) {
+                await prisma.productImage.create({
+                    data: {
+                        product_id: created.id,
+                        image: mainCategoryImageUrl,
+                        status: 'COMPLETE',
+                    },
+                });
+            }
+
+            await prisma.product.update({
+                where: { id: created.id },
+                data: { has_images: true },
             });
 
             results.success.push(product.name);
