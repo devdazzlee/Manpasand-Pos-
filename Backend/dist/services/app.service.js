@@ -32,6 +32,9 @@ class AppService {
         const product = await this.productService.getProductById(id);
         return product;
     }
+    async getCategories() {
+        return this.categoryService.getCategories();
+    }
 }
 exports.default = AppService;
 //# sourceMappingURL=app.service.js.map

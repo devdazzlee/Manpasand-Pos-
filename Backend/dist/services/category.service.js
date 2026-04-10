@@ -139,7 +139,6 @@ class CategoryService {
                     }
                 },
             },
-            take: 10,
         });
     }
     async processCategoryImages(categoryId, files) {
