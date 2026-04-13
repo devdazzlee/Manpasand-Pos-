@@ -36,11 +36,14 @@ export const toggleCategoryStatus = asyncHandler(async (req: Request, res: Respo
 });
 
 export const listCategories = asyncHandler(async (req: Request, res: Response) => {
-  const { page = 1, limit = 10, search, is_active, branch_id } = req.query;
+  const { page = 1, limit, search, is_active, branch_id } = req.query;
+
+  const parsedLimit =
+    typeof limit === 'string' && limit.trim() !== '' ? Number(limit) : undefined;
 
   const result = await categoryService.listCategories({
     page: Number(page),
-    limit: Number(limit),
+    limit: parsedLimit,
     search: search as string | undefined,
     is_active: is_active ? is_active === 'true' : undefined,
     branch_id: branch_id as string | undefined,

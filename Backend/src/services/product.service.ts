@@ -16,6 +16,112 @@ type RelationField =
 type Numeric = number | Prisma.Decimal
 
 export class ProductService {
+    async getProductsForExcelExport(filters?: {
+        search?: string;
+        category_id?: string;
+        subcategory_id?: string;
+        supplier_id?: string;
+        brand_id?: string;
+        is_active?: boolean;
+        display_on_pos?: boolean;
+    }) {
+        const where: Prisma.ProductWhereInput = {};
+
+        if (filters?.search) {
+            where.OR = [
+                { name: { contains: filters.search, mode: 'insensitive' } },
+                { sku: { contains: filters.search, mode: 'insensitive' } },
+                { code: { contains: filters.search, mode: 'insensitive' } },
+            ];
+        }
+
+        if (filters?.category_id) where.category_id = filters.category_id;
+        if (filters?.subcategory_id) where.subcategory_id = filters.subcategory_id;
+        if (filters?.supplier_id) where.supplier_id = filters.supplier_id;
+        if (filters?.brand_id) where.brand_id = filters.brand_id;
+        if (filters?.is_active !== undefined) where.is_active = filters.is_active;
+        if (filters?.display_on_pos !== undefined) where.display_on_pos = filters.display_on_pos;
+
+        return prisma.product.findMany({
+            where,
+            orderBy: { created_at: 'desc' },
+            include: {
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                subcategory: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                unit: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                tax: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        percentage: true,
+                    },
+                },
+                supplier: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                brand: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                color: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                size: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                ProductImage: {
+                    where: { status: 'COMPLETE' },
+                    select: {
+                        image: true,
+                    },
+                },
+                stock: {
+                    select: {
+                        branch_id: true,
+                        current_quantity: true,
+                        reserved_quantity: true,
+                        minimum_quantity: true,
+                        maximum_quantity: true,
+                    },
+                },
+            },
+        });
+    }
+
     private async getOrCreateUnknownEntry(modelName: string, codePrefix: string, tx?: any) {
         const unknownName = 'Unknown';
         const unknownCode = `${codePrefix}-UNKNOWN`;

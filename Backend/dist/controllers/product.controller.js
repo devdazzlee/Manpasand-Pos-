@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteAllProducts = exports.bulkUploadProducts = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.listProducts = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
+exports.deleteAllProducts = exports.bulkUploadProducts = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.exportProductsToExcel = exports.listProducts = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
 const product_service_1 = require("../services/product.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -121,6 +121,158 @@ exports.listProducts = (0, asyncHandler_1.default)(async (req, res) => {
     });
     console.log(result);
     new apiResponse_1.ApiResponse(result.data, 'Products retrieved successfully', 200, true, result.meta).send(res);
+});
+exports.exportProductsToExcel = (0, asyncHandler_1.default)(async (req, res) => {
+    const { search, category_id, subcategory_id, supplier_id, brand_id, is_active, display_on_pos, } = req.query;
+    const products = await productService.getProductsForExcelExport({
+        search: search,
+        category_id: category_id,
+        subcategory_id: subcategory_id,
+        supplier_id: supplier_id,
+        brand_id: brand_id,
+        is_active: is_active ? is_active === 'true' : undefined,
+        display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
+    });
+    const requestedColumnsRaw = typeof req.query.columns === 'string' ? req.query.columns : '';
+    const requestedColumns = requestedColumnsRaw
+        .split(',')
+        .map((key) => key.trim())
+        .filter(Boolean);
+    const columnLabelMap = {
+        product_id: 'Product ID',
+        product_code: 'Product Code',
+        product_name: 'Product Name',
+        sku: 'SKU',
+        barcode: 'Barcode',
+        description: 'Description',
+        hs_code: 'PCT / HS Code',
+        purchase_rate: 'Purchase Rate',
+        sales_rate_exc: 'Sales Rate (Exc Tax/Discount)',
+        sales_rate_inc: 'Sales Rate (Inc Tax/Discount)',
+        discount_amount: 'Discount Amount',
+        category_id: 'Category ID',
+        category_name: 'Category',
+        category_code: 'Category Code',
+        subcategory_id: 'Subcategory ID',
+        subcategory_name: 'Subcategory',
+        subcategory_code: 'Subcategory Code',
+        unit_id: 'Unit ID',
+        unit_name: 'Unit',
+        unit_code: 'Unit Code',
+        tax_id: 'Tax ID',
+        tax_name: 'Tax',
+        tax_code: 'Tax Code',
+        tax_percentage: 'Tax Percentage',
+        supplier_id: 'Supplier ID',
+        supplier_name: 'Supplier',
+        supplier_code: 'Supplier Code',
+        brand_id: 'Brand ID',
+        brand_name: 'Brand',
+        brand_code: 'Brand Code',
+        color_id: 'Color ID',
+        color_name: 'Color',
+        color_code: 'Color Code',
+        size_id: 'Size ID',
+        size_name: 'Size',
+        size_code: 'Size Code',
+        min_qty: 'Min Quantity',
+        max_qty: 'Max Quantity',
+        current_stock: 'Current Stock',
+        reserved_stock: 'Reserved Stock',
+        available_stock: 'Available Stock',
+        minimum_stock: 'Minimum Stock',
+        maximum_stock: 'Maximum Stock',
+        is_active: 'Active?',
+        display_on_pos: 'Display On POS?',
+        is_batch: 'Batch Item?',
+        auto_fill_on_demand_sheet: 'Auto Fill On Demand Sheet?',
+        non_inventory_item: 'Non Inventory Item?',
+        is_deal: 'Deal Item?',
+        is_featured: 'Featured?',
+        has_images: 'Has Images?',
+        first_image_url: 'First Image URL',
+        created_at: 'Created At',
+        updated_at: 'Updated At',
+    };
+    const allColumnKeys = Object.keys(columnLabelMap);
+    const selectedColumns = requestedColumns.length
+        ? requestedColumns.filter((key) => allColumnKeys.includes(key))
+        : allColumnKeys;
+    const rows = products.map((product) => {
+        const totalCurrentStock = product.stock.reduce((sum, item) => sum + Number(item.current_quantity ?? 0), 0);
+        const totalReservedStock = product.stock.reduce((sum, item) => sum + Number(item.reserved_quantity ?? 0), 0);
+        const totalMinimumStock = product.stock.reduce((sum, item) => sum + Number(item.minimum_quantity ?? 0), 0);
+        const totalMaximumStock = product.stock.reduce((sum, item) => sum + Number(item.maximum_quantity ?? 0), 0);
+        const valuesByKey = {
+            product_id: product.id,
+            product_code: product.code,
+            product_name: product.name,
+            sku: product.sku || '',
+            barcode: product.sku || '',
+            description: product.description || '',
+            hs_code: product.pct_or_hs_code || '',
+            purchase_rate: Number(product.purchase_rate ?? 0),
+            sales_rate_exc: Number(product.sales_rate_exc_dis_and_tax ?? 0),
+            sales_rate_inc: Number(product.sales_rate_inc_dis_and_tax ?? 0),
+            discount_amount: Number(product.discount_amount ?? 0),
+            category_id: product.category_id,
+            category_name: product.category?.name || '',
+            category_code: product.category?.code || '',
+            subcategory_id: product.subcategory_id || '',
+            subcategory_name: product.subcategory?.name || '',
+            subcategory_code: product.subcategory?.code || '',
+            unit_id: product.unit_id,
+            unit_name: product.unit?.name || '',
+            unit_code: product.unit?.code || '',
+            tax_id: product.tax_id || '',
+            tax_name: product.tax?.name || '',
+            tax_code: product.tax?.code || '',
+            tax_percentage: Number(product.tax?.percentage ?? 0),
+            supplier_id: product.supplier_id || '',
+            supplier_name: product.supplier?.name || '',
+            supplier_code: product.supplier?.code || '',
+            brand_id: product.brand_id || '',
+            brand_name: product.brand?.name || '',
+            brand_code: product.brand?.code || '',
+            color_id: product.color_id || '',
+            color_name: product.color?.name || '',
+            color_code: product.color?.code || '',
+            size_id: product.size_id || '',
+            size_name: product.size?.name || '',
+            size_code: product.size?.code || '',
+            min_qty: product.min_qty ?? 0,
+            max_qty: product.max_qty ?? 0,
+            current_stock: totalCurrentStock,
+            reserved_stock: totalReservedStock,
+            available_stock: totalCurrentStock - totalReservedStock,
+            minimum_stock: totalMinimumStock,
+            maximum_stock: totalMaximumStock,
+            is_active: product.is_active,
+            display_on_pos: product.display_on_pos,
+            is_batch: product.is_batch,
+            auto_fill_on_demand_sheet: product.auto_fill_on_demand_sheet,
+            non_inventory_item: product.non_inventory_item,
+            is_deal: product.is_deal,
+            is_featured: product.is_featured,
+            has_images: product.has_images,
+            first_image_url: product.ProductImage[0]?.image || '',
+            created_at: product.created_at.toISOString(),
+            updated_at: product.updated_at.toISOString(),
+        };
+        const exportRow = {};
+        selectedColumns.forEach((key) => {
+            exportRow[columnLabelMap[key]] = valuesByKey[key] ?? '';
+        });
+        return exportRow;
+    });
+    const workbook = xlsx_1.default.utils.book_new();
+    const worksheet = xlsx_1.default.utils.json_to_sheet(rows);
+    xlsx_1.default.utils.book_append_sheet(workbook, worksheet, 'Products');
+    const buffer = xlsx_1.default.write(workbook, { type: 'buffer', bookType: 'xlsx' });
+    const fileName = `products-export-${new Date().toISOString().split('T')[0]}.xlsx`;
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+    res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
+    res.send(buffer);
 });
 exports.getFeaturedProducts = (0, asyncHandler_1.default)(async (req, res) => {
     console.log('Fetching featured products');

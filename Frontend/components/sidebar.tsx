@@ -30,6 +30,7 @@ import {
   Warehouse,
   Globe,
   Printer as PrinterIcon,
+  Download,
 } from "lucide-react";
 import { useState, useEffect } from "react";
 
@@ -129,6 +130,7 @@ const menuSections: SidebarMenuSection[] = [
     expandable: true,
     items: [
       { id: "reports", label: "Reports & Analytics", icon: BarChart3 },
+      { id: "product-export", label: "Product Export", icon: Download },
       { id: "printer-settings", label: "Printer Settings", icon: PrinterIcon },
       // { id: "audit", label: "Audit Trail", icon: Shield },
       // { id: "multi-location", label: "Multi-Location", icon: MapPin },
@@ -184,6 +186,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
     "sizes",
     "expenses",
     "reports",
+    "product-export",
     "printer-settings",
   ];
 
@@ -214,6 +217,7 @@ export function Sidebar({ activeTab, setActiveTab, onLogout, isOpen = true, onCl
     "sizes",
     "suppliers",
     "branches",
+    "product-export",
     "printer-settings",
   ];
 

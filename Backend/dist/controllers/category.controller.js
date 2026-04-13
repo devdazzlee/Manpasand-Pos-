@@ -30,10 +30,11 @@ exports.toggleCategoryStatus = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(null, 'Category status changed successfully').send(res);
 });
 exports.listCategories = (0, asyncHandler_1.default)(async (req, res) => {
-    const { page = 1, limit = 10, search, is_active, branch_id } = req.query;
+    const { page = 1, limit, search, is_active, branch_id } = req.query;
+    const parsedLimit = typeof limit === 'string' && limit.trim() !== '' ? Number(limit) : undefined;
     const result = await categoryService.listCategories({
         page: Number(page),
-        limit: Number(limit),
+        limit: parsedLimit,
         search: search,
         is_active: is_active ? is_active === 'true' : undefined,
         branch_id: branch_id,

@@ -18,6 +18,7 @@ router.post('/upload-image', multer_1.default.single('image'), product_controlle
 router.post('/bulk-upload', uploadBulk_1.default.single('file'), product_controller_1.bulkUploadProducts);
 router.delete('/all', product_controller_1.deleteAllProducts);
 router.get('/', (0, validation_middleware_1.validate)(product_validation_1.listProductsSchema), product_controller_1.listProducts);
+router.get('/export/excel', product_controller_1.exportProductsToExcel);
 router.get('/featured', product_controller_1.getFeaturedProducts);
 router.get('/best-selling', product_controller_1.getBestSellingProducts);
 router.get('/:id', (0, validation_middleware_1.validate)(product_validation_1.getProductSchema), product_controller_1.getProduct);

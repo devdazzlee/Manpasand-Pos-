@@ -37,7 +37,7 @@ export const getCategorySchema = z.object({
 export const listCategoriesSchema = z.object({
   query: z.object({
     page: z.string().optional().default('1'),
-    limit: z.string().optional().default('10'),
+    limit: z.string().optional(),
     search: z.string().optional(),
     is_active: z.string().optional(),
     branch_id: z.string().optional(),

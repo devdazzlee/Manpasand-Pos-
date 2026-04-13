@@ -35,7 +35,7 @@ exports.getCategorySchema = zod_1.z.object({
 exports.listCategoriesSchema = zod_1.z.object({
     query: zod_1.z.object({
         page: zod_1.z.string().optional().default('1'),
-        limit: zod_1.z.string().optional().default('10'),
+        limit: zod_1.z.string().optional(),
         search: zod_1.z.string().optional(),
         is_active: zod_1.z.string().optional(),
         branch_id: zod_1.z.string().optional(),

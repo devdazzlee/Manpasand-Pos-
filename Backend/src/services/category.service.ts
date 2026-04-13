@@ -88,7 +88,7 @@ export class CategoryService {
 
   async listCategories({
     page = 1,
-    limit = 10,
+    limit,
     search,
     is_active,
     branch_id,
@@ -117,11 +117,14 @@ export class CategoryService {
       where.branch_id = branch_id;
     }
 
+    const shouldPaginate =
+      typeof limit === 'number' && Number.isFinite(limit) && limit > 0;
+
     const [categories, total] = await Promise.all([
       prisma.category.findMany({
         where,
-        skip: (page - 1) * limit,
-        take: limit,
+        skip: shouldPaginate ? (page - 1) * limit : undefined,
+        take: shouldPaginate ? limit : undefined,
         orderBy: { created_at: 'desc' },
         include: {
           branch: {
@@ -144,8 +147,8 @@ export class CategoryService {
       meta: {
         total,
         page,
-        limit,
-        totalPages: Math.ceil(total / limit),
+        limit: shouldPaginate ? limit : total,
+        totalPages: shouldPaginate ? Math.ceil(total / limit) : 1,
       },
     };
   }

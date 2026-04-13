@@ -74,7 +74,7 @@ class CategoryService {
             data: { is_active: !category.is_active },
         });
     }
-    async listCategories({ page = 1, limit = 10, search, is_active, branch_id, }) {
+    async listCategories({ page = 1, limit, search, is_active, branch_id, }) {
         const where = {};
         if (search) {
             where.OR = [
@@ -89,11 +89,12 @@ class CategoryService {
         if (branch_id) {
             where.branch_id = branch_id;
         }
+        const shouldPaginate = typeof limit === 'number' && Number.isFinite(limit) && limit > 0;
         const [categories, total] = await Promise.all([
             client_1.prisma.category.findMany({
                 where,
-                skip: (page - 1) * limit,
-                take: limit,
+                skip: shouldPaginate ? (page - 1) * limit : undefined,
+                take: shouldPaginate ? limit : undefined,
                 orderBy: { created_at: 'desc' },
                 include: {
                     branch: {
@@ -115,8 +116,8 @@ class CategoryService {
             meta: {
                 total,
                 page,
-                limit,
-                totalPages: Math.ceil(total / limit),
+                limit: shouldPaginate ? limit : total,
+                totalPages: shouldPaginate ? Math.ceil(total / limit) : 1,
             },
         };
     }

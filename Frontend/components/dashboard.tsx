@@ -55,6 +55,7 @@ import { Designation } from "./Designation";
 import BarcodeGenerater from "./barcode-generater";
 import { NewSale } from "./new-sale";
 import { PrinterSettings } from "./printer-settings";
+import { ProductExport } from "./product-export";
 
 
 interface DashboardProps {
@@ -157,6 +158,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <Settings />;
       case "printer-settings":
         return <PrinterSettings />;
+      case "product-export":
+        return <ProductExport />;
       default:
         return <DashboardHome />;
     }

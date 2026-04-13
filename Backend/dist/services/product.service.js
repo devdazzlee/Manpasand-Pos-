@@ -10,6 +10,106 @@ const cloudinaryService_1 = require("./common/cloudinaryService");
 const crypto_1 = require("crypto");
 const helpers_1 = require("../utils/helpers");
 class ProductService {
+    async getProductsForExcelExport(filters) {
+        const where = {};
+        if (filters?.search) {
+            where.OR = [
+                { name: { contains: filters.search, mode: 'insensitive' } },
+                { sku: { contains: filters.search, mode: 'insensitive' } },
+                { code: { contains: filters.search, mode: 'insensitive' } },
+            ];
+        }
+        if (filters?.category_id)
+            where.category_id = filters.category_id;
+        if (filters?.subcategory_id)
+            where.subcategory_id = filters.subcategory_id;
+        if (filters?.supplier_id)
+            where.supplier_id = filters.supplier_id;
+        if (filters?.brand_id)
+            where.brand_id = filters.brand_id;
+        if (filters?.is_active !== undefined)
+            where.is_active = filters.is_active;
+        if (filters?.display_on_pos !== undefined)
+            where.display_on_pos = filters.display_on_pos;
+        return client_2.prisma.product.findMany({
+            where,
+            orderBy: { created_at: 'desc' },
+            include: {
+                category: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                subcategory: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                unit: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                tax: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                        percentage: true,
+                    },
+                },
+                supplier: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                brand: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                color: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                size: {
+                    select: {
+                        id: true,
+                        name: true,
+                        code: true,
+                    },
+                },
+                ProductImage: {
+                    where: { status: 'COMPLETE' },
+                    select: {
+                        image: true,
+                    },
+                },
+                stock: {
+                    select: {
+                        branch_id: true,
+                        current_quantity: true,
+                        reserved_quantity: true,
+                        minimum_quantity: true,
+                        maximum_quantity: true,
+                    },
+                },
+            },
+        });
+    }
     async getOrCreateUnknownEntry(modelName, codePrefix, tx) {
         const unknownName = 'Unknown';
         const unknownCode = `${codePrefix}-UNKNOWN`;
