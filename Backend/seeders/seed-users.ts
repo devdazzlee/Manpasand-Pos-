@@ -16,23 +16,44 @@ interface UserSeedData {
 
 const usersToSeed: UserSeedData[] = [
   {
-    email: 'admin123@gmail.com',
-    password: 'admin@123123',
+    email: 'admin',
+    password: 'Admin123',
     role: Role.SUPER_ADMIN,
   },
   {
-    email: 'bahadrabad@gmail.com',
-    password: 'bahadrabad@123',
-    role: Role.ADMIN,
-    branchName: '1st Branch',
+    email: 'bahadurabad',
+    password: 'Branch123',
+    role: Role.BRANCH_MANAGER,
+    branchName: 'Bahadurabad',
     branchCode: 'BRANCH-001',
   },
   {
-    email: 'dha@gmail.com',
-    password: 'dha@123',
-    role: Role.ADMIN,
-    branchName: '2nd Branch',
+    email: 'dha',
+    password: 'Branch123',
+    role: Role.BRANCH_MANAGER,
+    branchName: 'DHA',
     branchCode: 'BRANCH-002',
+  },
+  {
+    email: 'bahria',
+    password: 'Branch123',
+    role: Role.BRANCH_MANAGER,
+    branchName: 'Bahria Town',
+    branchCode: 'BRANCH-003',
+  },
+  {
+    email: 'bahriatown',
+    password: 'Branch123',
+    role: Role.BRANCH_MANAGER,
+    branchName: 'Bahria Town North',
+    branchCode: 'BRANCH-004',
+  },
+  {
+    email: 'warehouse',
+    password: 'Warehouse123',
+    role: Role.WAREHOUSE_MANAGER,
+    branchName: 'Main Warehouse',
+    branchCode: 'WAREHOUSE-001',
   },
 ];
 
@@ -50,11 +71,13 @@ async function seedUsers() {
         });
 
         if (!branch) {
+          const isWarehouse = userData.branchCode.startsWith('WAREHOUSE');
           branch = await prisma.branch.create({
             data: {
               code: userData.branchCode,
               name: userData.branchName,
               is_active: true,
+              branch_type: isWarehouse ? 'WAREHOUSE' : 'BRANCH',
             },
           });
           console.log(`✅ Created branch: ${userData.branchName} (${userData.branchCode})`);
@@ -70,15 +93,10 @@ async function seedUsers() {
 
     // Create users
     for (const userData of usersToSeed) {
-      // Check if user already exists
+      // Check if user already exists — try to find and update if exists
       const existingUser = await prisma.user.findUnique({
         where: { email: userData.email },
       });
-
-      if (existingUser) {
-        console.log(`⚠️  User already exists: ${userData.email} - Skipping`);
-        continue;
-      }
 
       // Hash password
       const hashedPassword = await bcrypt.hash(userData.password, 10);
@@ -88,43 +106,81 @@ async function seedUsers() {
         ? branches.get(userData.branchCode)
         : null;
 
-      // Create user
-      const user = await prisma.user.create({
-        data: {
-          email: userData.email,
-          password: hashedPassword,
-          role: userData.role,
-          branch_id: branchId || null,
-        },
-      });
+      if (existingUser) {
+        // Update existing user with new password and branch
+        await prisma.user.update({
+          where: { email: userData.email },
+          data: {
+            password: hashedPassword,
+            role: userData.role,
+            branch_id: branchId || null,
+          },
+        });
 
-      const branchInfo = branchId
-        ? ` (Branch: ${userData.branchName})`
-        : ' (No branch - Super Admin)';
+        const branchInfo = branchId
+          ? ` (Branch: ${userData.branchName})`
+          : ' (No branch - Super Admin)';
 
-      console.log(
-        `✅ Created user: ${userData.email} - Role: ${userData.role}${branchInfo}`
-      );
+        console.log(
+          `🔄 Updated existing user: ${userData.email} - Role: ${userData.role}${branchInfo}`
+        );
+      } else {
+        // Create new user
+        await prisma.user.create({
+          data: {
+            email: userData.email,
+            password: hashedPassword,
+            role: userData.role,
+            branch_id: branchId || null,
+          },
+        });
+
+        const branchInfo = branchId
+          ? ` (Branch: ${userData.branchName})`
+          : ' (No branch - Super Admin)';
+
+        console.log(
+          `✅ Created user: ${userData.email} - Role: ${userData.role}${branchInfo}`
+        );
+      }
     }
 
     console.log('\n📊 Summary:');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('Super Admin:');
-    console.log('  Email: admin123@gmail.com');
-    console.log('  Password: admin@123123');
-    console.log('  Role: SUPER_ADMIN');
+    console.log('  Username : admin');
+    console.log('  Password : Admin123');
+    console.log('  Role     : SUPER_ADMIN');
     console.log('');
-    console.log('1st Branch Admin:');
-    console.log('  Email: bahadrabad@gmail.com');
-    console.log('  Password: bahadrabad@123');
-    console.log('  Role: ADMIN');
-    console.log('  Branch: 1st Branch (BRANCH-001)');
+    console.log('Branch 1 - Bahadurabad:');
+    console.log('  Username : bahadurabad');
+    console.log('  Password : Branch123');
+    console.log('  Role     : BRANCH_MANAGER');
+    console.log('  Branch   : Bahadurabad (BRANCH-001)');
     console.log('');
-    console.log('2nd Branch Admin:');
-    console.log('  Email: dha@gmail.com');
-    console.log('  Password: dha@123');
-    console.log('  Role: ADMIN');
-    console.log('  Branch: 2nd Branch (BRANCH-002)');
+    console.log('Branch 2 - DHA:');
+    console.log('  Username : dha');
+    console.log('  Password : Branch123');
+    console.log('  Role     : BRANCH_MANAGER');
+    console.log('  Branch   : DHA (BRANCH-002)');
+    console.log('');
+    console.log('Branch 3 - Bahria Town:');
+    console.log('  Username : bahria');
+    console.log('  Password : Branch123');
+    console.log('  Role     : BRANCH_MANAGER');
+    console.log('  Branch   : Bahria Town (BRANCH-003)');
+    console.log('');
+    console.log('Branch 4 - Bahria Town North:');
+    console.log('  Username : bahriatown');
+    console.log('  Password : Branch123');
+    console.log('  Role     : BRANCH_MANAGER');
+    console.log('  Branch   : Bahria Town North (BRANCH-004)');
+    console.log('');
+    console.log('Warehouse:');
+    console.log('  Username : warehouse');
+    console.log('  Password : Warehouse123');
+    console.log('  Role     : WAREHOUSE_MANAGER');
+    console.log('  Branch   : Main Warehouse (WAREHOUSE-001)');
     console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
     console.log('\n✅ User seeder completed successfully!');
   } catch (error) {
@@ -144,4 +200,3 @@ seedUsers()
     console.error('Fatal error:', error);
     process.exit(1);
   });
-

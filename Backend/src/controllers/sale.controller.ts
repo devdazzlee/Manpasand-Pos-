@@ -6,18 +6,24 @@ import { ApiResponse } from "../utils/apiResponse";
 const saleService = new SaleService();
 
 const resolveBranchId = (req: Request): string | undefined => {
-    const queryBranchId = req.query.branchId as string | undefined;
-    const bodyBranchId = req.body?.branchId as string | undefined;
-
-    if (queryBranchId && queryBranchId.trim() && queryBranchId !== "Not Found") {
-        return queryBranchId.trim();
-    }
-
-    if (bodyBranchId && bodyBranchId.trim() && bodyBranchId !== "Not Found") {
-        return bodyBranchId.trim();
-    }
-
     const jwtBranchId = req.user?.branch_id as string | undefined;
+    const userRole = req.user?.role;
+    
+    // Admins can override branch ID
+    if (userRole === "SUPER_ADMIN" || userRole === "ADMIN") {
+        const queryBranchId = req.query.branchId as string | undefined;
+        const bodyBranchId = req.body?.branchId as string | undefined;
+
+        if (queryBranchId && queryBranchId.trim() && queryBranchId !== "Not Found") {
+            return queryBranchId.trim();
+        }
+
+        if (bodyBranchId && bodyBranchId.trim() && bodyBranchId !== "Not Found") {
+            return bodyBranchId.trim();
+        }
+    }
+
+    // Force non-admins to use their JWT branch ID
     if (jwtBranchId && jwtBranchId.trim() && jwtBranchId !== "Not Found") {
         return jwtBranchId.trim();
     }
@@ -88,7 +94,11 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
 });
 
 const getSalesForReturnsController = asyncHandler(async (req: Request, res: Response) => {
-    const sales = await saleService.getSalesForReturns({ branchId: req.user?.branch_id as string as string });
+    const search = (req.query.search as string | undefined)?.replace(/\s+/g, ' ').trim();
+    const sales = await saleService.getSalesForReturns({ 
+        branchId: req.user?.branch_id as string,
+        search
+    });
     new ApiResponse(sales, "Sales eligible for returns fetched successfully").send(res);
 });
 
@@ -98,9 +108,14 @@ const getSaleByIdController = asyncHandler(async (req: Request, res: Response) =
 });
 
 const createSaleController = asyncHandler(async (req: Request, res: Response) => {
+    const branchId = resolveBranchId(req);
+    if (!branchId) {
+        return new ApiResponse(null, "No branch ID found for sale", 400, false).send(res);
+    }
+
     const sale = await saleService.createSale({
         ...req.body,
-        branchId: req.user?.branch_id as string,
+        branchId,
         createdBy: req.user!.id
     });
     new ApiResponse(sale, "Sale created successfully", 201).send(res);
@@ -118,6 +133,7 @@ const refundSaleController = asyncHandler(async (req: Request, res: Response) =>
         customerId,
         returnedItems,
         exchangedItems,
+        notes,
         createdBy,
     });
 

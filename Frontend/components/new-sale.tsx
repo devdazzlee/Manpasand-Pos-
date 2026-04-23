@@ -17,6 +17,16 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Search,
   Plus,
   Minus,
@@ -27,6 +37,7 @@ import {
   Pencil,
   ChevronDown,
   ChevronUp,
+  Loader2,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { offlineAPIClient } from "@/lib/offline-api-client";
@@ -44,6 +55,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useHoldSales } from "@/hooks/use-hold-sales";
+import { usePosBranch } from "@/hooks/use-pos-branch";
 
 interface CartItem {
   id: string; // Unique cart item ID (product.id + timestamp for separate entries)
@@ -97,7 +109,17 @@ export function NewSale() {
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
-  const { holdSales, holdSale, retrieveHoldSale, holdSalesLoading, refreshHoldSales } = useHoldSales();
+  const {
+    adminMode,
+    branchLoading,
+    branches: availableBranches,
+    selectedBranchId,
+    setSelectedBranchId,
+    branchInfo,
+    hasBranch,
+  } = usePosBranch();
+  const { holdSales, holdSale, retrieveHoldSale, deleteHoldSale, holdSalesLoading, refreshHoldSales } =
+    useHoldSales(selectedBranchId);
   const searchInputRef = useRef<HTMLInputElement>(null);
   // Refs for price and quantity inputs for keyboard navigation
   const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
@@ -128,14 +150,13 @@ export function NewSale() {
   const [showHeldSales, setShowHeldSales] = useState(false);
   const [isHoldingSale, setIsHoldingSale] = useState(false);
   const [isViewingHeldSales, setIsViewingHeldSales] = useState(false);
+  const [deleteTargetHoldSale, setDeleteTargetHoldSale] = useState<number | null>(null);
+  const [isDeletingHoldSale, setIsDeletingHoldSale] = useState(false);
   const [resumingHoldIndex, setResumingHoldIndex] = useState<number | null>(null);
 
+  const [globalDiscountType, setGlobalDiscountType] = useState<"percentage" | "fixed">("fixed");
+  const [globalDiscountValue, setGlobalDiscountValue] = useState<string>("");
 
-
-  const [branchName, setBranchName] = useState({
-    name: "",
-    address: "",
-  });
   // Global store with custom hook
   const {
     products,
@@ -161,7 +182,6 @@ export function NewSale() {
           fetchProducts(),
           fetchCategories(),
           fetchCustomers(),
-          getBranchName(),
         ]);
       } catch (error) {
         // Error loading data - no toast shown
@@ -745,14 +765,15 @@ export function NewSale() {
   };
 
   const holdCurrentSale = async () => {
-    if (cart.length === 0) {
+    if (cart.length === 0 || !hasBranch) {
       return;
     }
 
     setIsHoldingSale(true);
     const held = await holdSale(cart, selectedCustomer || undefined);
     if (held) {
-    setCart([]);
+      setCart([]);
+      setGlobalDiscountValue("");
     }
     setIsHoldingSale(false);
   };
@@ -794,35 +815,6 @@ export function NewSale() {
     }
   };
 
-  const getBranchName = async () => {
-    try {
-      const branchId = localStorage.getItem("branch");
-      const userRole = localStorage.getItem("role");
-      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
-      
-      // Skip for admin users or if branch is "Not Found"
-      if (!branchId || branchId === "Not Found" || isAdmin) {
-        setBranchName({
-          name: "Admin",
-          address: "",
-        });
-        return;
-      }
-
-      const data = await apiClient.get(`/branches/${branchId}`); // axios-style
-      setBranchName({
-        name: data.data.data.name || "",
-        address: data.data.data.address || "",
-      });
-      // setBranchName(data.data.data.name);
-      console.log("data", data.data);
-      // return data?.name ?? null; // or just `return data` if you need the whole object
-    } catch (err) {
-      console.error("Failed to fetch branch name:", err);
-      return null;
-    }
-  };
-
   // Printer loading is handled globally by usePrinterSettings hook
 
   const removeFromCart = (id: string) => {
@@ -855,11 +847,18 @@ export function NewSale() {
     setQuantityModes({});
     setAmountInputs({});
     setShowAmountEditors({});
+    setGlobalDiscountValue("");
   };
 
   const subtotal = cart.reduce((sum, item) => sum + getSellingPrice(item) * item.quantity, 0);
 
-  const total = subtotal;
+  const parsedDiscount = parseFloat(globalDiscountValue) || 0;
+  const globalDiscountAmount = globalDiscountType === "percentage" 
+    ? (subtotal * parsedDiscount) / 100 
+    : parsedDiscount;
+
+  const total = Math.max(0, subtotal - globalDiscountAmount);
+  
   const totalQuantity = cart.reduce(
     (sum, item) => sum + item.quantity,
     0
@@ -924,6 +923,10 @@ export function NewSale() {
   };
 
   const startPayment = (method: "Cash" | "Card") => {
+    if (!hasBranch) {
+      return;
+    }
+
     setPaymentMethodPending(method);
     setTenderedAmount(total.toFixed(2));
     setPaymentError("");
@@ -988,16 +991,10 @@ export function NewSale() {
           };
         });
 
-        // Get branchId from localStorage (key: 'branch')
-        let branchId = "";
-        try {
-          const branchStr = localStorage.getItem("branch");
-          console.log(branchStr);
-          if (branchStr) {
-            branchId = branchStr || "";
-          }
-        } catch (e) {
-          branchId = "";
+        const branchId = selectedBranchId;
+
+        if (!branchId) {
+          throw new Error("A branch must be selected before creating a sale.");
         }
 
         // Prepare payload
@@ -1005,6 +1002,7 @@ export function NewSale() {
           items: saleItems,
           paymentMethod: method === "Cash" ? "CASH" : "CARD",
           branchId,
+          discountAmount: globalDiscountAmount,
         };
         if (selectedCustomer) {
           payload.customerId = selectedCustomer;
@@ -1047,7 +1045,8 @@ export function NewSale() {
               employeeId: localStorage.getItem("userId") || undefined,
               branchId: branchId || undefined,
               timestamp: Date.now(),
-              synced: false
+              synced: false,
+              discountAmount: globalDiscountAmount,
             });
             
             // Queue the API request for when online
@@ -1079,7 +1078,8 @@ export function NewSale() {
             employeeId: localStorage.getItem("userId") || undefined,
             branchId: branchId || undefined,
             timestamp: Date.now(),
-            synced: false
+            synced: false,
+            discountAmount: globalDiscountAmount,
           });
           
           // Also queue the API request for when online
@@ -1108,6 +1108,7 @@ export function NewSale() {
 
         setLastTransactionId(transactionId);
         setCart([]);
+        setGlobalDiscountValue("");
 
         // Auto-print receipt
         try {
@@ -1117,13 +1118,11 @@ export function NewSale() {
           console.log("🏢 Current Branch:", storedBranchName);
           
           // Use DB branch address when available instead of hardcoded city text
-          const fullAddress = branchName.address?.trim()
-            ? branchName.address
-            : (storedBranchName || branchName.name || "Karachi");
+          const fullAddress = "Karachi, Pakistan";
          
           console.log("fullAddress", fullAddress);
           const receiptDataForServer: ReceiptData = {
-            storeName: storedBranchName || branchName.name || "MANPASAND GENERAL STORE",
+            storeName: storedBranchName || branchInfo.name || "MANPASAND GENERAL STORE",
             tagline: "Quality • Service • Value",
             address: fullAddress,
             transactionId: transactionId,
@@ -1148,6 +1147,7 @@ export function NewSale() {
               };
             }),
             subtotal: subtotal,
+            discount: globalDiscountAmount > 0 ? globalDiscountAmount : undefined,
             total: total,
             paymentMethod: method === "Cash" ? "CASH" : "CARD",
             amountPaid,
@@ -1428,7 +1428,7 @@ export function NewSale() {
     console.log('FINAL RESULT - Code:', codeLower, 'Price:', customPrice, 'Found Product:', product?.name || 'NOT FOUND', 'ID:', product?.id);
     
     if (!product) {
-      console.error('❌ Product not found for scanned code:', productCode, 'Price:', customPrice);
+      console.error('Product not found for scanned code:', productCode, 'Price:', customPrice);
       // Reset processing flag to allow next scan
       isProcessingScanRef.current = false;
       lastProcessedScanRef.current = '';
@@ -1600,7 +1600,11 @@ export function NewSale() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {cart.length > 0 && (
-                <Button variant="outline" onClick={holdCurrentSale} disabled={isHoldingSale}>
+                <Button
+                  variant="outline"
+                  onClick={holdCurrentSale}
+                  disabled={isHoldingSale || branchLoading || !hasBranch}
+                >
                   {isHoldingSale ? "Saving..." : "Hold Sale"}
                 </Button>
               )}
@@ -1615,7 +1619,7 @@ export function NewSale() {
                   <Button
                     variant="outline"
                     onClick={handleViewHeldSales}
-                    disabled={isViewingHeldSales || holdSalesLoading}
+                    disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !hasBranch}
                   >
                     {isViewingHeldSales || holdSalesLoading ? "Loading..." : "View Held Sales"}
                   </Button>
@@ -1623,6 +1627,34 @@ export function NewSale() {
               )}
             </div>
           </div>
+          {adminMode && (
+            <div className="mb-4 max-w-sm">
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                POS Branch
+              </label>
+              <Select
+                value={selectedBranchId || "none"}
+                onValueChange={(value) => setSelectedBranchId(value === "none" ? "" : value)}
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder={branchLoading ? "Loading branches..." : "Select branch"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select branch</SelectItem>
+                  {availableBranches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!hasBranch && !branchLoading && (
+                <p className="mt-2 text-sm text-amber-700">
+                  Select a branch to use Hold Sale and complete sales.
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex items-center space-x-4">
             <div className="relative flex-1 max-w-md">
               <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
@@ -1844,7 +1876,7 @@ export function NewSale() {
                 size="sm"
                 onClick={holdCurrentSale}
                 className="flex-1 min-w-[120px]"
-                disabled={isHoldingSale}
+                disabled={isHoldingSale || branchLoading || !hasBranch}
               >
                 {isHoldingSale ? "Saving..." : "Hold Sale (Save)"}
               </Button>
@@ -1857,7 +1889,7 @@ export function NewSale() {
               size="sm"
               onClick={handleViewHeldSales}
               className="mt-3 w-full justify-between border border-gray-200 bg-white hover:bg-white"
-              disabled={isViewingHeldSales || holdSalesLoading}
+              disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !hasBranch}
             >
               <span className="text-sm font-medium text-gray-700">
                 {isViewingHeldSales || holdSalesLoading
@@ -1876,35 +1908,51 @@ export function NewSale() {
 
           {holdSales.length > 0 && showHeldSales && !holdSalesLoading && (
             <div id="held-sales-list" className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3">
-              <ScrollArea className="max-h-32">
-                <div className="space-y-2 pr-2">
+              <div className="max-h-60 pr-2 space-y-3 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
                   {holdSales.map((sale, index) => {
                     const saleTotal = sale.items.reduce(
                       (sum, item) => sum + getSellingPrice(item as CartItem) * item.quantity,
                       0
                     );
                     return (
-                      <Button
-                        key={sale.id}
-                        variant="outline"
-                        onClick={() => handleRetrieveHoldSale(index)}
-                        className="h-auto w-full justify-between border-gray-200 py-2"
-                        disabled={resumingHoldIndex === index}
-                      >
-                        <div className="flex flex-col items-start text-left">
-                          <span className="font-medium text-gray-900">Sale #{index + 1} - {sale.branchName}</span>
-                          <span className="text-xs text-gray-500">
-                            {sale.items.length} items • Rs {saleTotal.toFixed(2)}
-                          </span>
+                      <div key={sale.id} className="flex flex-col gap-2 rounded-md border border-gray-200 p-2.5 bg-gray-50/50 hover:border-blue-300 transition-colors">
+                        <div className="flex items-start justify-between">
+                          <div className="flex flex-col leading-tight">
+                            <span className="font-semibold text-sm text-gray-800">Sale #{index + 1} - {sale.branchName}</span>
+                            <span className="text-xs text-gray-500 mt-1">
+                              {sale.items.length} items • Rs {saleTotal.toFixed(2)}
+                            </span>
+                          </div>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50 -mt-1 -mr-1 shrink-0"
+                            disabled={isDeletingHoldSale}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setDeleteTargetHoldSale(index);
+                            }}
+                          >
+                            {isDeletingHoldSale && deleteTargetHoldSale === index ? (
+                              <Loader2 className="h-4 w-4 animate-spin" />
+                            ) : (
+                              <Trash2 className="h-4 w-4" />
+                            )}
+                          </Button>
                         </div>
-                        <span className="text-xs font-semibold text-blue-600">
-                          {resumingHoldIndex === index ? "Resuming..." : "Resume"}
-                        </span>
-                      </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleRetrieveHoldSale(index)}
+                          className="w-full text-xs font-semibold text-blue-600 bg-white hover:bg-blue-50 hover:text-blue-700 border-blue-200 h-8 mt-1"
+                          disabled={resumingHoldIndex === index}
+                        >
+                          {resumingHoldIndex === index ? "Resuming..." : "Resume Sale"}
+                        </Button>
+                      </div>
                     );
                   })}
-                </div>
-              </ScrollArea>
+              </div>
             </div>
           )}
 
@@ -1971,9 +2019,9 @@ export function NewSale() {
                       {/* Price editor */}
                       <div>
                         <div className="flex items-center justify-between">
-                          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
-                            Sell Price (Rs)
-                        </label>
+                          <label className="text-[11px] font-semibold tracking-wide text-gray-600">
+                            Selling Price (Rs)
+                          </label>
                           {isPriceOverridden(item) && (
                             <Button
                               type="button"
@@ -2347,7 +2395,37 @@ export function NewSale() {
                     <span>Subtotal</span>
                     <span className="text-sm font-semibold text-blue-700">{formatMoney(subtotal)}</span>
                   </div>
-                  <div className="mt-1 flex items-center justify-between text-blue-700 text-sm font-semibold">
+
+                  <div className="mt-2 flex items-center justify-between">
+                    <span className="text-gray-600 text-xs font-medium">Discount</span>
+                    <div className="flex items-center space-x-1.5 w-32">
+                      <select 
+                        value={globalDiscountType} 
+                        onChange={(e) => setGlobalDiscountType(e.target.value as "percentage" | "fixed")} 
+                        className="h-7 w-12 rounded border border-gray-300 bg-white px-1 text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                      >
+                        <option value="fixed">Rs</option>
+                        <option value="percentage">%</option>
+                      </select>
+                      <Input 
+                        type="number"
+                        min="0"
+                        placeholder="0"
+                        value={globalDiscountValue} 
+                        onChange={(e) => setGlobalDiscountValue(e.target.value)} 
+                        className="h-7 w-full px-2 text-xs text-right"
+                      />
+                    </div>
+                  </div>
+                  
+                  {globalDiscountAmount > 0 && (
+                    <div className="mt-1 flex items-center justify-between text-green-600 text-xs font-medium">
+                      <span>Discount Given</span>
+                      <span>-{formatMoney(globalDiscountAmount)}</span>
+                    </div>
+                  )}
+
+                  <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between text-blue-700 text-sm font-bold">
                     <span>Payable</span>
                     <span>{formatMoney(total)}</span>
                   </div>
@@ -2358,7 +2436,7 @@ export function NewSale() {
                 <Button
                   size="sm"
                   onClick={() => startPayment("Cash")}
-                  disabled={paymentLoading}
+                  disabled={paymentLoading || branchLoading || !hasBranch}
                   className="h-10 text-sm"
                 >
                   <DollarSign className="mr-2 h-4 w-4" />
@@ -2368,7 +2446,7 @@ export function NewSale() {
                   size="sm"
                   variant="outline"
                   onClick={() => startPayment("Card")}
-                  disabled={paymentLoading}
+                  disabled={paymentLoading || branchLoading || !hasBranch}
                   className="h-10 text-sm"
                 >
                   <CreditCard className="mr-2 h-4 w-4" />
@@ -2455,6 +2533,45 @@ export function NewSale() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={deleteTargetHoldSale !== null} onOpenChange={(open) => !open && !isDeletingHoldSale && setDeleteTargetHoldSale(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete Hold Sale</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to discard this held sale permanently? This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeletingHoldSale}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              disabled={isDeletingHoldSale}
+              onClick={async (e) => {
+                e.preventDefault();
+                if (deleteTargetHoldSale !== null) {
+                  setIsDeletingHoldSale(true);
+                  try {
+                    await deleteHoldSale(deleteTargetHoldSale);
+                  } finally {
+                    setIsDeletingHoldSale(false);
+                    setDeleteTargetHoldSale(null);
+                  }
+                }
+              }}
+            >
+              {isDeletingHoldSale ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

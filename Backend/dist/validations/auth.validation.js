@@ -13,7 +13,7 @@ const registerSchema = zod_1.z.object({
 exports.registerSchema = registerSchema;
 const loginSchema = zod_1.z.object({
     body: zod_1.z.object({
-        email: zod_1.z.string().email('Invalid email address'),
+        email: zod_1.z.string().min(1, 'Username is required'),
         password: zod_1.z.string().min(1, 'Password is required'),
     }),
 });

@@ -37,6 +37,27 @@ interface WebsiteOrder {
   payment_method: string;
 }
 
+const ORDER_STATUS_OPTIONS = ["PENDING", "PROCESSING", "COMPLETED", "CANCELLED"] as const;
+type OrderStatusOption = (typeof ORDER_STATUS_OPTIONS)[number];
+
+const isTerminalOrderStatus = (status: string) =>
+  status === "COMPLETED" || status === "CANCELLED";
+
+const getAllowedStatusOptions = (status: string): OrderStatusOption[] => {
+  switch (status) {
+    case "PENDING":
+      return ["PENDING", "PROCESSING", "COMPLETED", "CANCELLED"];
+    case "PROCESSING":
+      return ["PROCESSING", "PENDING", "COMPLETED", "CANCELLED"];
+    case "COMPLETED":
+      return ["COMPLETED"];
+    case "CANCELLED":
+      return ["CANCELLED"];
+    default:
+      return [...ORDER_STATUS_OPTIONS];
+  }
+};
+
 const WebsiteOrders: React.FC = () => {
   const { toast } = useToast();
   // Global printer settings (configured in Printer Settings page)
@@ -344,7 +365,51 @@ const WebsiteOrders: React.FC = () => {
     }
   };
 
+  const handleReopenOrder = async (orderId: string) => {
+    if (!window.confirm("Re-opening this order will re-allocate stock. Ensure items are available. Continue?")) {
+      return;
+    }
+
+    setStatusUpdatingIds((prev) => ({ ...prev, [orderId]: true }));
+    try {
+      await apiClient.patch(`${API_BASE}/order/${orderId}/reopen`);
+      toast({
+        title: "Order Re-opened",
+        description: "Status changed to PENDING and stock re-allocated.",
+      });
+      await fetchOrders();
+    } catch (err: any) {
+      toast({
+        title: "Re-open failed",
+        description: err.response?.data?.message || "Unable to re-open order",
+        variant: "destructive",
+      });
+    } finally {
+      setStatusUpdatingIds((prev) => {
+        const next = { ...prev };
+        delete next[orderId];
+        return next;
+      });
+    }
+  };
+
   const handleStatusUpdate = async (orderId: string, newStatus: string) => {
+    const currentOrder =
+      orders.find((order) => order.id === orderId) ||
+      (selectedOrder?.id === orderId ? selectedOrder : null);
+
+    if (!currentOrder || currentOrder.status === newStatus) {
+      return;
+    }
+
+    if (isTerminalOrderStatus(currentOrder.status)) {
+      toast({
+        title: "Locked State",
+        description: `${currentOrder.status} is a terminal state. Use explicit actions to modify.`,
+        variant: "destructive",
+      });
+      return;
+    }
     const previousOrders = [...orders];
     const previousSelectedOrder = selectedOrder && selectedOrder.id === orderId ? { ...selectedOrder } : null;
 
@@ -664,30 +729,45 @@ const WebsiteOrders: React.FC = () => {
                         <TableCell className="font-medium">Rs. {(Number(o.total_amount) || 0).toFixed(2)}</TableCell>
                         <TableCell className="text-sm">{o.payment_method || 'CASH'}</TableCell>
                         <TableCell>
-                          <div className="flex items-center gap-2">
-                            <Select
-                            value={o.status} 
-                              onValueChange={(value) => handleStatusUpdate(o.id, value)}
-                              disabled={!!statusUpdatingIds[o.id]}
-                            >
-                              <SelectTrigger className="h-8 w-[145px] text-sm">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="PENDING">PENDING</SelectItem>
-                                <SelectItem value="PROCESSING">PROCESSING</SelectItem>
-                                <SelectItem value="COMPLETED">COMPLETED</SelectItem>
-                                <SelectItem value="CANCELLED">CANCELLED</SelectItem>
-                              </SelectContent>
-                            </Select>
-                            {statusUpdatingIds[o.id] && (
-                              <span className="inline-flex items-center text-xs text-blue-600">
+                          {(() => {
+                            const allowedStatusOptions = getAllowedStatusOptions(o.status);
+                            const isTerminal = isTerminalOrderStatus(o.status);
+
+                            return (
+                            <>
+                            <div className="flex items-center gap-2">
+                              <Select
+                                value={o.status} 
+                                onValueChange={(value) => handleStatusUpdate(o.id, value)}
+                                disabled={!!statusUpdatingIds[o.id] || isTerminal}
+                              >
+                                <SelectTrigger className="h-8 w-[140px] text-sm font-medium">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {allowedStatusOptions.map((status) => (
+                                    <SelectItem key={status} value={status}>
+                                      {status}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              {isTerminal && (
+                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 uppercase">
+                                  Terminal
+                                </span>
+                              )}
+                            </div>
+                            {statusUpdatingIds[o.id] && !o.status.includes('CANCELLED') && (
+                              <span className="inline-flex items-center text-xs text-blue-600 mt-1">
                                 <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
                                 Updating...
                               </span>
                             )}
-                          </div>
-                        </TableCell>
+                            </>
+                          );
+                        })()}
+                      </TableCell>
                         <TableCell>{o.items?.length || 0}</TableCell>
                         <TableCell>{new Date(o.created_at).toLocaleDateString()}</TableCell>
                         <TableCell className="text-sm text-gray-500">{new Date(o.created_at).toLocaleTimeString()}</TableCell>
@@ -755,29 +835,43 @@ const WebsiteOrders: React.FC = () => {
                     <div>
                       <Label className="text-sm font-medium text-gray-500">Order Status</Label>
                       <div className="mt-1">
-                        <Select
-                          value={selectedOrder.status} 
-                          onValueChange={(value) => {
-                            handleStatusUpdate(selectedOrder.id, value);
-                          }}
-                          disabled={!!statusUpdatingIds[selectedOrder.id]}
-                        >
-                          <SelectTrigger className="w-full text-sm font-semibold">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="PENDING">PENDING</SelectItem>
-                            <SelectItem value="PROCESSING">PROCESSING</SelectItem>
-                            <SelectItem value="COMPLETED">COMPLETED</SelectItem>
-                            <SelectItem value="CANCELLED">CANCELLED</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        {statusUpdatingIds[selectedOrder.id] && (
-                          <p className="mt-1 inline-flex items-center text-xs text-blue-600">
-                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                            Updating status...
-                          </p>
-                        )}
+                        {(() => {
+                          const allowedStatusOptions = getAllowedStatusOptions(selectedOrder.status);
+                          const isTerminal = isTerminalOrderStatus(selectedOrder.status);
+
+                          return (
+                            <div className="flex flex-col gap-2">
+                              <Select
+                                value={selectedOrder.status} 
+                                onValueChange={(value) => handleStatusUpdate(selectedOrder.id, value)}
+                                disabled={!!statusUpdatingIds[selectedOrder.id] || isTerminal}
+                              >
+                                <SelectTrigger className="w-full text-sm font-semibold">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {allowedStatusOptions.map((status) => (
+                                    <SelectItem key={status} value={status}>
+                                      {status}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                              
+                              {isTerminal && (
+                                <div className="mt-2 flex items-center gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
+                                  <CheckCircle2 className="h-4 w-4 text-amber-600 shrink-0" />
+                                  <div className="flex flex-col">
+                                    <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Terminal State</span>
+                                    <p className="text-[11px] text-amber-700 font-medium">
+                                      This order is {selectedOrder.status} and cannot be modified.
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                     <div>

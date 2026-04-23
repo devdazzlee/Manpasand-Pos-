@@ -60,7 +60,8 @@ class OfflineSyncManager {
 
   // Sync all pending data
   async syncAll() {
-    if (this.status.isSyncing || !this.status.isOnline) {
+    const token = typeof window !== 'undefined' ? localStorage.getItem('token') : null;
+    if (this.status.isSyncing || !this.status.isOnline || !token) {
       return;
     }
 
@@ -105,11 +106,15 @@ class OfflineSyncManager {
           continue;
         }
 
+        const token = localStorage.getItem('token');
+        const authHeader = token ? { 'Authorization': `Bearer ${token}` } : {};
+
         // Make the request
         const response = await fetch(request.url, {
           method: request.method,
           headers: {
             'Content-Type': 'application/json',
+            ...authHeader,
             ...request.headers
           },
           body: request.body ? JSON.stringify(request.body) : undefined

@@ -11,7 +11,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const multer_1 = __importDefault(require("../utils/multer"));
 const parse_formdata_middleware_1 = require("../middleware/parse-formdata.middleware");
 const router = express_1.default.Router();
-router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
+router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
 router.post('/', multer_1.default.array('images', 10), parse_formdata_middleware_1.parseFormData, (0, validation_middleware_1.validate)(category_validation_1.createCategorySchema), category_controller_1.createCategory);
 router.delete('/all', category_controller_1.deleteAllCategories);
 router.get('/', (0, validation_middleware_1.validate)(category_validation_1.listCategoriesSchema), category_controller_1.listCategories);

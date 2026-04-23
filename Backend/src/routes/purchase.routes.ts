@@ -13,7 +13,7 @@ const router = Router();
 
 router.use(
   authenticate,
-  authorize(['SUPER_ADMIN', 'ADMIN', 'PURCHASE_MANAGER'])
+  authorize(['SUPER_ADMIN', 'ADMIN', 'PURCHASE_MANAGER', 'WAREHOUSE_MANAGER', 'BRANCH_MANAGER'])
 );
 
 router.post('/', validate(createPurchaseSchema), createPurchase);

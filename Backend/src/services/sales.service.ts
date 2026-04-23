@@ -122,11 +122,22 @@ class SaleService {
     };
   }
 
-  async getSalesForReturns({ branchId }: { branchId?: string }) {
+  async getSalesForReturns({ branchId, search }: { branchId?: string; search?: string }) {
+    const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
+
     return prisma.sale.findMany({
       where: {
         branch_id: branchId,
         status: 'COMPLETED', // Only completed sales can be returned
+        ...(normalizedSearch
+          ? {
+              OR: [
+                { sale_number: { contains: normalizedSearch, mode: 'insensitive' } },
+                { customer: { name: { contains: normalizedSearch, mode: 'insensitive' } } },
+                { customer: { email: { contains: normalizedSearch, mode: 'insensitive' } } },
+              ],
+            }
+          : {}),
       },
       include: {
         sale_items: {
@@ -135,6 +146,7 @@ class SaleService {
         customer: true,
       },
       orderBy: { sale_date: 'desc' },
+      take: 50, // Limit results for performance
     });
   }
 
@@ -282,12 +294,14 @@ class SaleService {
     customerId,
     paymentMethod,
     items,
+    discountAmount,
     createdBy,
   }: {
     branchId: string;
     customerId?: string;
     paymentMethod: Prisma.SaleCreateInput['payment_method'];
     items: Array<{ productId: string; quantity: number; price: number }>;
+    discountAmount?: number;
     createdBy: string;
   }) {
     // 1) Validate OUTSIDE any interactive transaction
@@ -360,7 +374,9 @@ class SaleService {
     }
   
     // 5) Prepare all writes as a single non-interactive transaction (prevents P2028)
-    const total = items.reduce((s, it) => s + it.price * it.quantity, 0);
+    const subtotalAmt = items.reduce((s, it) => s + it.price * it.quantity, 0);
+    const finalDiscount = discountAmount ?? 0;
+    const finalTotal = Math.max(0, subtotalAmt - finalDiscount);
   
     const ops: Prisma.PrismaPromise<any>[] = [];
   
@@ -371,8 +387,9 @@ class SaleService {
           sale_number: `SALE-${Date.now()}`,
           branch_id: branchId,
           customer_id: customerId,
-          total_amount: new Prisma.Decimal(total),
-          subtotal: new Prisma.Decimal(total),
+          total_amount: new Prisma.Decimal(finalTotal),
+          subtotal: new Prisma.Decimal(subtotalAmt),
+          discount_amount: new Prisma.Decimal(finalDiscount),
           payment_method: paymentMethod,
           payment_status: 'PAID',
           status: 'COMPLETED',
@@ -612,6 +629,7 @@ class SaleService {
     customerId,
     returnedItems,
     exchangedItems,
+    notes,
     createdBy,
   }: {
     originalSaleId: string;
@@ -619,231 +637,192 @@ class SaleService {
     customerId?: string;
     returnedItems: ReturnItem[];
     exchangedItems: ExchangeItem[];
+    notes?: string;
     createdBy: string;
   }) {
-    return prisma.$transaction(async (tx) => {
-      const originalSale = await tx.sale.findUnique({
+    if (!returnedItems.length && !exchangedItems.length) {
+      throw new AppError(400, 'No return or exchange items provided');
+    }
+
+    const uniqueProductIds = [...new Set([
+      ...returnedItems.map((item) => item.productId),
+      ...exchangedItems.map((item) => item.productId),
+    ])];
+    const uniqueExchangeProductIds = [...new Set(exchangedItems.map((item) => item.productId))];
+
+    const [originalSale, branch, customer, exchangeProducts, stocks] = await Promise.all([
+      prisma.sale.findUnique({
         where: { id: originalSaleId },
         include: { sale_items: true },
+      }),
+      prisma.branch.findUnique({
+        where: { id: branchId },
+        select: { id: true },
+      }),
+      customerId
+        ? prisma.customer.findUnique({
+            where: { id: customerId },
+            select: { id: true },
+          })
+        : Promise.resolve(null),
+      uniqueExchangeProductIds.length
+        ? prisma.product.findMany({
+            where: { id: { in: uniqueExchangeProductIds } },
+            select: { id: true },
+          })
+        : Promise.resolve([] as Array<{ id: string }>),
+      uniqueProductIds.length
+        ? prisma.stock.findMany({
+            where: {
+              product_id: { in: uniqueProductIds },
+              branch_id: branchId,
+            },
+          })
+        : Promise.resolve([] as Array<{ product_id: string; current_quantity: Prisma.Decimal }>),
+    ]);
+
+    if (!originalSale) throw new AppError(400, 'Original sale not found');
+    if (!branch) throw new AppError(400, 'Invalid branch');
+    if (customerId && !customer) throw new AppError(400, 'Invalid customer');
+
+    const foundExchangeProductIds = new Set(exchangeProducts.map((product) => product.id));
+    const missingExchangeProductIds = uniqueExchangeProductIds.filter(
+      (productId) => !foundExchangeProductIds.has(productId),
+    );
+    if (missingExchangeProductIds.length > 0) {
+      throw new AppError(400, `Products not found: ${missingExchangeProductIds.join(', ')}`);
+    }
+
+    for (const ret of returnedItems) {
+      const originalItem = originalSale.sale_items.find((item) => item.product_id === ret.productId);
+      if (!originalItem) {
+        throw new AppError(400, `Product ${ret.productId} not found in original sale`);
+      }
+      if (ret.quantity > originalItem.quantity.toNumber()) {
+        throw new AppError(
+          400,
+          `Return quantity (${ret.quantity}) exceeds original sale quantity (${originalItem.quantity}) for product ${ret.productId}`,
+        );
+      }
+    }
+
+    type MovementRow = {
+      product_id: string;
+      movement_type: StockMovementType;
+      quantity_change: Prisma.Decimal;
+      previous_qty: Prisma.Decimal;
+      new_qty: Prisma.Decimal;
+      reference_type: string;
+      notes: string;
+    };
+
+    const saleItems: Prisma.SaleItemUncheckedCreateWithoutSaleInput[] = [];
+    const movementRows: MovementRow[] = [];
+    const stockNetChanges = new Map<string, Prisma.Decimal>();
+    const stockQuantityMap = new Map<string, Prisma.Decimal>(
+      stocks.map((stock) => [stock.product_id, new Prisma.Decimal(stock.current_quantity)]),
+    );
+    let total = new Prisma.Decimal(0);
+    const hasReturn = returnedItems.length > 0;
+    const hasExchange = exchangedItems.length > 0;
+
+    const recordMovement = ({
+      productId,
+      change,
+      movementType,
+      referenceType,
+      notes: movementNote,
+    }: {
+      productId: string;
+      change: Prisma.Decimal;
+      movementType: StockMovementType;
+      referenceType: string;
+      notes: string;
+    }) => {
+      const previousQty = stockQuantityMap.get(productId) ?? new Prisma.Decimal(0);
+      const newQty = previousQty.plus(change);
+
+      stockQuantityMap.set(productId, newQty);
+      stockNetChanges.set(productId, (stockNetChanges.get(productId) ?? new Prisma.Decimal(0)).plus(change));
+      movementRows.push({
+        product_id: productId,
+        movement_type: movementType,
+        quantity_change: change,
+        previous_qty: previousQty,
+        new_qty: newQty,
+        reference_type: referenceType,
+        notes: movementNote,
+      });
+    };
+
+    for (const ret of returnedItems) {
+      const originalItem = originalSale.sale_items.find((item) => item.product_id === ret.productId);
+      if (!originalItem) {
+        throw new AppError(400, `Product ${ret.productId} not in original sale`);
+      }
+
+      const returnQuantity = new Prisma.Decimal(ret.quantity);
+      const lineTotal = new Prisma.Decimal(originalItem.unit_price).mul(returnQuantity).mul(-1);
+      total = total.plus(lineTotal);
+
+      recordMovement({
+        productId: ret.productId,
+        change: returnQuantity,
+        movementType: StockMovementType.RETURN,
+        referenceType: 'return',
+        notes: 'Returned by customer',
       });
 
-      if (!originalSale) throw new AppError(400, 'Original sale not found');
+      saleItems.push({
+        product_id: ret.productId,
+        quantity: returnQuantity.mul(-1),
+        unit_price: originalItem.unit_price,
+        tax_rate: originalItem.tax_rate,
+        discount_rate: originalItem.discount_rate,
+        tax_amount: new Prisma.Decimal(0),
+        discount_amount: new Prisma.Decimal(0),
+        line_total: lineTotal,
+        item_type: SaleItemType.RETURN,
+        ref_sale_item_id: originalItem.id,
+      });
+    }
 
-      // Validate return quantities against original sale
-      for (const ret of returnedItems) {
-        const originalItem = originalSale.sale_items.find((i) => i.product_id === ret.productId);
-        if (!originalItem) {
-          throw new AppError(400, `Product ${ret.productId} not found in original sale`);
-        }
-        if (ret.quantity > originalItem.quantity.toNumber()) {
-          throw new AppError(
-            400,
-            `Return quantity (${ret.quantity}) exceeds original sale quantity (${originalItem.quantity}) for product ${ret.productId}`,
-          );
-        }
-      }
+    for (const item of exchangedItems) {
+      const exchangeQuantity = new Prisma.Decimal(item.quantity);
+      const unitPrice = new Prisma.Decimal(item.price);
+      const lineTotal = unitPrice.mul(exchangeQuantity);
+      total = total.plus(lineTotal);
 
-      const productIds = [
-        ...returnedItems.map((i) => i.productId),
-        ...exchangedItems.map((i) => i.productId),
-      ];
-
-      const stocks = await tx.stock.findMany({
-        where: {
-          product_id: { in: productIds },
-          branch_id: branchId,
-        },
+      recordMovement({
+        productId: item.productId,
+        change: exchangeQuantity.mul(-1),
+        movementType: StockMovementType.SALE,
+        referenceType: 'exchange',
+        notes: 'Exchanged to customer',
       });
 
-      const saleItems: any[] = [];
-      let total = 0;
-      let hasReturn = returnedItems.length > 0;
-      let hasExchange = exchangedItems.length > 0;
+      saleItems.push({
+        product_id: item.productId,
+        quantity: exchangeQuantity,
+        unit_price: unitPrice,
+        tax_rate: new Prisma.Decimal(0),
+        discount_rate: new Prisma.Decimal(0),
+        tax_amount: new Prisma.Decimal(0),
+        discount_amount: new Prisma.Decimal(0),
+        line_total: lineTotal,
+        item_type: SaleItemType.EXCHANGE,
+      });
+    }
 
-      // Process Returns
-      for (const ret of returnedItems) {
-        const stock = stocks.find((s) => s.product_id === ret.productId);
-        // For testing: Create stock record if it doesn't exist
-        if (!stock) {
-          await tx.stock.create({
-            data: {
-              product_id: ret.productId,
-              branch_id: branchId,
-              current_quantity: 0,
-              minimum_quantity: 0,
-              maximum_quantity: 1000,
-              reserved_quantity: 0,
-            },
-          });
-        }
-
-        const originalItem = originalSale.sale_items.find((i) => i.product_id === ret.productId);
-        if (!originalItem) throw new AppError(400, `Product ${ret.productId} not in original sale`);
-
-        if (ret.quantity > originalItem.quantity.toNumber()) {
-          throw new AppError(400, `Return quantity exceeds original`);
-        }
-
-        // Update stock using upsert to handle both existing and new records
-        await tx.stock.upsert({
-          where: {
-            product_id_branch_id: {
-              product_id: ret.productId,
-              branch_id: branchId,
-            },
-          },
-          update: {
-            current_quantity: { increment: ret.quantity },
-          },
-          create: {
-            product_id: ret.productId,
-            branch_id: branchId,
-            current_quantity: ret.quantity,
-            minimum_quantity: 0,
-            maximum_quantity: 1000,
-            reserved_quantity: 0,
-          },
-        });
-
-        // Get current stock after upsert
-        const currentStock = await tx.stock.findUnique({
-          where: {
-            product_id_branch_id: {
-              product_id: ret.productId,
-              branch_id: branchId,
-            },
-          },
-        });
-
-        // Create stock movement
-        await tx.stockMovement.create({
-          data: {
-            product_id: ret.productId,
-            branch_id: branchId,
-            movement_type: StockMovementType.RETURN,
-            quantity_change: ret.quantity,
-            previous_qty: currentStock
-              ? currentStock.current_quantity.minus(ret.quantity) // Decimal.minus(number)
-              : new Prisma.Decimal(0),
-
-            new_qty: currentStock ? currentStock.current_quantity : ret.quantity,
-            created_by: createdBy,
-            reference_id: originalSaleId,
-            reference_type: 'return',
-            notes: 'Returned by customer',
-          },
-        });
-
-        const lineTotal = -Number(originalItem.unit_price) * ret.quantity;
-        total += lineTotal;
-
-        saleItems.push({
-          product_id: ret.productId,
-          quantity: -ret.quantity,
-          unit_price: originalItem.unit_price,
-          tax_rate: originalItem.tax_rate,
-          discount_rate: originalItem.discount_rate,
-          tax_amount: 0,
-          discount_amount: 0,
-          line_total: lineTotal,
-          item_type: SaleItemType.RETURN,
-          ref_sale_item_id: originalItem.id,
-        });
-      }
-
-      // Process Exchanges
-      for (const item of exchangedItems) {
-        const stock = stocks.find((s) => s.product_id === item.productId);
-        // For testing: Create stock record if it doesn't exist
-        if (!stock) {
-          await tx.stock.create({
-            data: {
-              product_id: item.productId,
-              branch_id: branchId,
-              current_quantity: 0,
-              minimum_quantity: 0,
-              maximum_quantity: 1000,
-              reserved_quantity: 0,
-            },
-          });
-        }
-        // For testing: Allow negative stock (comment out stock validation)
-        // if (stock && stock.current_quantity < item.quantity) {
-        //     throw new AppError(400, `Insufficient stock for product ${item.productId}`);
-        // }
-
-        // Use upsert to handle both existing and new stock records
-        await tx.stock.upsert({
-          where: {
-            product_id_branch_id: {
-              product_id: item.productId,
-              branch_id: branchId,
-            },
-          },
-          update: {
-            current_quantity: { decrement: item.quantity },
-          },
-          create: {
-            product_id: item.productId,
-            branch_id: branchId,
-            current_quantity: -item.quantity,
-            minimum_quantity: 0,
-            maximum_quantity: 1000,
-            reserved_quantity: 0,
-          },
-        });
-
-        // Get current stock after upsert
-        const currentStock = await tx.stock.findUnique({
-          where: {
-            product_id_branch_id: {
-              product_id: item.productId,
-              branch_id: branchId,
-            },
-          },
-        });
-
-        await tx.stockMovement.create({
-          data: {
-            product_id: item.productId,
-            branch_id: branchId,
-            movement_type: StockMovementType.SALE,
-            quantity_change: -item.quantity,
-            previous_qty: currentStock
-              ? currentStock.current_quantity.plus(item.quantity)
-              : new Prisma.Decimal(0),
-            new_qty: currentStock
-              ? currentStock.current_quantity
-              : new Prisma.Decimal(-item.quantity),
-            created_by: createdBy,
-            reference_id: originalSaleId,
-            reference_type: 'exchange',
-            notes: 'Exchanged to customer',
-          },
-        });
-
-        const lineTotal = item.price * item.quantity;
-        total += lineTotal;
-
-        saleItems.push({
-          product_id: item.productId,
-          quantity: item.quantity,
-          unit_price: item.price,
-          tax_rate: 0,
-          discount_rate: 0,
-          tax_amount: 0,
-          discount_amount: 0,
-          line_total: lineTotal,
-          item_type: SaleItemType.EXCHANGE,
-        });
-      }
-
-      const sale = await tx.sale.create({
+    const ops: Prisma.PrismaPromise<any>[] = [];
+    ops.push(
+      prisma.sale.create({
         data: {
           sale_number: `SALE-${Date.now()}`,
           branch_id: branchId,
           customer_id: customerId,
           original_sale_id: originalSaleId,
+          notes,
           subtotal: total,
           total_amount: total,
           payment_method: 'CASH',
@@ -862,10 +841,56 @@ class SaleService {
         include: {
           sale_items: true,
         },
-      });
+      }),
+    );
 
-      return sale;
-    });
+    for (const [productId, quantityChange] of stockNetChanges.entries()) {
+      ops.push(
+        prisma.stock.upsert({
+          where: {
+            product_id_branch_id: {
+              product_id: productId,
+              branch_id: branchId,
+            },
+          },
+          update: {
+            current_quantity: {
+              increment: quantityChange,
+            },
+          },
+          create: {
+            product_id: productId,
+            branch_id: branchId,
+            current_quantity: quantityChange,
+            minimum_quantity: new Prisma.Decimal(0),
+            maximum_quantity: new Prisma.Decimal(1000),
+            reserved_quantity: new Prisma.Decimal(0),
+          },
+        }),
+      );
+    }
+
+    if (movementRows.length > 0) {
+      ops.push(
+        prisma.stockMovement.createMany({
+          data: movementRows.map((movement) => ({
+            product_id: movement.product_id,
+            branch_id: branchId,
+            movement_type: movement.movement_type,
+            reference_id: originalSaleId,
+            reference_type: movement.reference_type,
+            quantity_change: movement.quantity_change,
+            previous_qty: movement.previous_qty,
+            new_qty: movement.new_qty,
+            notes: movement.notes,
+            created_by: createdBy,
+          })),
+        }),
+      );
+    }
+
+    const [sale] = await prisma.$transaction(ops);
+    return sale as Prisma.SaleGetPayload<{ include: { sale_items: true } }>;
   }
 
   async getRecentSaleItemsProductNameAndPrice(branchId: string) {

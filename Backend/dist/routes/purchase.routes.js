@@ -6,7 +6,7 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const purchase_controller_1 = require("../controllers/purchase.controller");
 const purchase_validation_1 = require("../validations/purchase.validation");
 const router = (0, express_1.Router)();
-router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'PURCHASE_MANAGER']));
+router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'PURCHASE_MANAGER', 'WAREHOUSE_MANAGER', 'BRANCH_MANAGER']));
 router.post('/', (0, validation_middleware_1.validate)(purchase_validation_1.createPurchaseSchema), purchase_controller_1.createPurchase);
 router.get('/', (0, validation_middleware_1.validate)(purchase_validation_1.listPurchasesSchema), purchase_controller_1.listPurchases);
 router.get('/stats', purchase_controller_1.getMonthlyStats);

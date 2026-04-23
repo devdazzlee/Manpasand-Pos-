@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle, Loader2, Minus, X, ChevronLeft, ChevronRight } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { PageLoader } from "@/components/ui/page-loader"
@@ -119,6 +120,93 @@ interface SelectedReturnItem {
   unitPrice: number
 }
 
+const normalizeSaleSearchTerm = (value?: string) =>
+  (value || "").replace(/\s+/g, " ").trim()
+
+const normalizeSaleRecord = (sale: any): Sale => ({
+  id: String(sale?.id || ""),
+  sale_number: String(sale?.sale_number || ""),
+  customer: sale?.customer
+    ? {
+        name: String(sale.customer.name || ""),
+        email: String(sale.customer.email || ""),
+      }
+    : undefined,
+  sale_date:
+    typeof sale?.sale_date === "string"
+      ? sale.sale_date
+      : new Date(sale?.sale_date || Date.now()).toISOString(),
+  total_amount: Number(sale?.total_amount || 0),
+  sale_items: Array.isArray(sale?.sale_items)
+    ? sale.sale_items.map((item: any) => ({
+        id: String(item?.id || ""),
+        product: {
+          id: String(item?.product?.id || item?.product_id || ""),
+          name: String(item?.product?.name || "Unnamed Product"),
+          sku: String(item?.product?.sku || ""),
+        },
+        quantity: Number(item?.quantity || 0),
+        unit_price: Number(item?.unit_price || 0),
+        line_total: Number(item?.line_total || 0),
+      }))
+    : [],
+})
+
+const matchesSaleSearch = (sale: any, term: string) => {
+  if (!term) return true
+
+  const saleNumber = String(sale?.sale_number || "").toLowerCase()
+  const customerName = String(sale?.customer?.name || "").toLowerCase()
+  const customerEmail = String(sale?.customer?.email || "").toLowerCase()
+
+  return (
+    saleNumber.includes(term) ||
+    customerName.includes(term) ||
+    customerEmail.includes(term)
+  )
+}
+
+const getIneligibleSaleReason = (status?: string) => {
+  switch (status) {
+    case "REFUNDED":
+      return "This sale is already refunded and cannot be processed again."
+    case "EXCHANGED":
+      return "This sale is already exchanged and cannot be processed again."
+    case "CANCELLED":
+      return "Cancelled sales cannot be returned."
+    case "PENDING":
+      return "This sale is not completed yet, so it cannot be returned."
+    default:
+      return "This sale is not eligible for return."
+  }
+}
+
+const findIneligibleSaleMatch = (sales: any[], searchTerm: string) => {
+  const term = normalizeSaleSearchTerm(searchTerm).toLowerCase()
+  if (!term) {
+    return null
+  }
+
+  const exactMatch =
+    sales.find(
+      (sale: any) =>
+        String(sale?.sale_number || "").toLowerCase() === term ||
+        String(sale?.customer?.email || "").toLowerCase() === term ||
+        String(sale?.customer?.name || "").toLowerCase() === term
+    ) ||
+    sales.find((sale: any) => matchesSaleSearch(sale, term))
+
+  if (!exactMatch || exactMatch.status === "COMPLETED") {
+    return null
+  }
+
+  return {
+    saleNumber: String(exactMatch.sale_number || ""),
+    status: String(exactMatch.status || ""),
+    reason: getIneligibleSaleReason(exactMatch.status),
+  }
+}
+
 export function Returns() {
   const { toast } = useToast()
 
@@ -146,12 +234,15 @@ export function Returns() {
   const [isViewOpen, setIsViewOpen] = useState(false)
   const [searchTerm, setSearchTerm] = useState("")
   const [saleSearch, setSaleSearch] = useState("")
+  const [saleSearchPending, setSaleSearchPending] = useState(false)
   
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(25)
   const saleSearchInputRef = useRef<HTMLInputElement | null>(null)
   const saleDropdownRef = useRef<HTMLDivElement | null>(null)
+  const latestSalesRequestRef = useRef(0)
+  const saleSearchDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const [newReturn, setNewReturn] = useState<NewReturn>({
     saleId: "",
     customerId: "",
@@ -196,20 +287,65 @@ export function Returns() {
   }
 
   // Fetch sales and returns data
-  const fetchSales = async () => {
+  const fetchSales = async (search = "", options?: { keepPending?: boolean }) => {
+    const normalizedSearch = normalizeSaleSearchTerm(search)
+    const requestId = ++latestSalesRequestRef.current
+
     setSalesLoading(true)
     try {
-      const response = await apiClient.get("/sale/for-returns")
+      const response = await apiClient.get("/sale/for-returns", {
+        params: { search: normalizedSearch }
+      })
+
+      if (requestId !== latestSalesRequestRef.current) {
+        return
+      }
+
       setSales(response.data.data || [])
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Failed to fetch sales",
-        description: "Could not load sales data",
-      })
+      if (requestId === latestSalesRequestRef.current) {
+        toast({
+          variant: "destructive",
+          title: "Failed to fetch sales",
+          description: "Could not load sales data",
+        })
+      }
     } finally {
-      setSalesLoading(false)
+      if (requestId === latestSalesRequestRef.current) {
+        setSalesLoading(false)
+        if (!options?.keepPending) {
+          setSaleSearchPending(false)
+        }
+      }
     }
+  }
+
+  const triggerSaleSearch = (value: string, options?: { immediate?: boolean }) => {
+    const normalizedValue = normalizeSaleSearchTerm(value)
+
+    setSaleSearch(normalizedValue)
+    setSaleDropdownOpen(true)
+    setSaleSearchPending(true)
+
+    if (saleSearchDebounceRef.current) {
+      clearTimeout(saleSearchDebounceRef.current)
+      saleSearchDebounceRef.current = null
+    }
+
+    if (!isProcessOpen) {
+      setSaleSearchPending(false)
+      return
+    }
+
+    if (options?.immediate) {
+      fetchSales(normalizedValue)
+      return
+    }
+
+    saleSearchDebounceRef.current = setTimeout(() => {
+      fetchSales(normalizedValue)
+      saleSearchDebounceRef.current = null
+    }, normalizedValue ? 250 : 0)
   }
 
   const fetchReturns = async () => {
@@ -235,9 +371,23 @@ export function Returns() {
   }
 
   useEffect(() => {
-    fetchSales()
-    fetchReturns()
-  }, [])
+    if (!isProcessOpen) {
+      if (saleSearchDebounceRef.current) {
+        clearTimeout(saleSearchDebounceRef.current)
+        saleSearchDebounceRef.current = null
+      }
+      return
+    }
+
+    fetchSales(saleSearch)
+
+    return () => {
+      if (saleSearchDebounceRef.current) {
+        clearTimeout(saleSearchDebounceRef.current)
+        saleSearchDebounceRef.current = null
+      }
+    }
+  }, [isProcessOpen])
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -279,6 +429,7 @@ export function Returns() {
   useEffect(() => {
     if (!isProcessOpen) {
       setSaleSearch("")
+      setSaleSearchPending(false)
       setSaleDropdownOpen(false)
       setExchangeProductSearch("")
       setExchangeProductDropdownOpen(false)
@@ -316,32 +467,66 @@ export function Returns() {
   }
 
   const filteredReturns = useMemo(() => {
+    const normalizedTerm = normalizeSaleSearchTerm(searchTerm).toLowerCase()
+
     return returns.filter((returnItem) => {
       const matchesSearch =
-        returnItem.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        returnItem.sale_number.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (returnItem.customer?.name && returnItem.customer.name.toLowerCase().includes(searchTerm.toLowerCase())) ||
-        (returnItem.customer?.email && returnItem.customer.email.toLowerCase().includes(searchTerm.toLowerCase()))
+        returnItem.id.toLowerCase().includes(normalizedTerm) ||
+        returnItem.sale_number.toLowerCase().includes(normalizedTerm) ||
+        (returnItem.customer?.name && returnItem.customer.name.toLowerCase().includes(normalizedTerm)) ||
+        (returnItem.customer?.email && returnItem.customer.email.toLowerCase().includes(normalizedTerm))
 
       return matchesSearch
     })
   }, [returns, searchTerm])
 
-  const filteredSales = useMemo(() => {
-    const term = saleSearch.trim().toLowerCase()
-    if (!term) return sales
+  const searchableSales = useMemo(() => {
+    const eligibleSalesFromCache = allSalesForMetrics
+      .filter((sale: any) => sale?.status === "COMPLETED")
+      .map(normalizeSaleRecord)
 
-    return sales.filter((sale) => {
-      const saleNumber = sale.sale_number.toLowerCase()
-      const customerName = sale.customer?.name?.toLowerCase() || ""
-      const customerEmail = sale.customer?.email?.toLowerCase() || ""
-      return (
-        saleNumber.includes(term) ||
-        customerName.includes(term) ||
-        customerEmail.includes(term)
-      )
+    const eligibleSalesFromSearch = sales.map(normalizeSaleRecord)
+    const dedupedSales = new Map<string, Sale>()
+
+    ;[...eligibleSalesFromSearch, ...eligibleSalesFromCache].forEach((sale) => {
+      if (!sale.id) return
+      dedupedSales.set(sale.id, sale)
     })
-  }, [saleSearch, sales])
+
+    return Array.from(dedupedSales.values())
+  }, [allSalesForMetrics, sales])
+
+  const pageSearchMatchingSales = useMemo(() => {
+    const term = normalizeSaleSearchTerm(searchTerm).toLowerCase()
+    if (!term || filteredReturns.length > 0) {
+      return []
+    }
+
+    return searchableSales.filter((sale) => matchesSaleSearch(sale, term)).slice(0, 5)
+  }, [filteredReturns.length, searchableSales, searchTerm])
+
+  const filteredSales = useMemo(() => {
+    const term = normalizeSaleSearchTerm(saleSearch).toLowerCase()
+    if (!term) return searchableSales
+
+    return searchableSales.filter((sale) => matchesSaleSearch(sale, term))
+  }, [saleSearch, searchableSales])
+
+  const ineligibleSaleMatch = useMemo(() => {
+    if (!normalizeSaleSearchTerm(saleSearch) || filteredSales.length > 0) {
+      return null
+    }
+
+    return findIneligibleSaleMatch(allSalesForMetrics, saleSearch)
+  }, [allSalesForMetrics, filteredSales.length, saleSearch])
+
+  const pageSearchIneligibleSaleMatch = useMemo(() => {
+    if (!normalizeSaleSearchTerm(searchTerm) || filteredReturns.length > 0 || pageSearchMatchingSales.length > 0) {
+      return null
+    }
+
+    return findIneligibleSaleMatch(allSalesForMetrics, searchTerm)
+  }, [allSalesForMetrics, filteredReturns.length, pageSearchMatchingSales.length, searchTerm])
 
   const getFilteredReturnsByStatus = (status: string) => {
     if (status === "all") return filteredReturns
@@ -626,7 +811,13 @@ export function Returns() {
   }
 
   const handleSaleSelect = (saleId: string) => {
-    const sale = sales.find(s => s.id === saleId)
+    if (saleSearchDebounceRef.current) {
+      clearTimeout(saleSearchDebounceRef.current)
+      saleSearchDebounceRef.current = null
+    }
+
+    setSaleSearchPending(false)
+    const sale = searchableSales.find(s => s.id === saleId)
     setSelectedSale(sale || null)
     setNewReturn(prev => ({ ...prev, saleId }))
     setSaleDropdownOpen(false)
@@ -659,6 +850,21 @@ export function Returns() {
     } else {
       setSelectedReturnItems([])
     }
+  }
+
+  const handleSaleSearchPaste = (event: React.ClipboardEvent<HTMLInputElement>) => {
+    const pastedValue = event.clipboardData.getData("text")
+    if (!pastedValue) {
+      return
+    }
+
+    event.preventDefault()
+    triggerSaleSearch(pastedValue, { immediate: true })
+  }
+
+  const handleStartReturnForSale = (saleId: string) => {
+    handleSaleSelect(saleId)
+    setIsProcessOpen(true)
   }
 
   const handleReturnQuantityChange = (productId: string, quantity: number) => {
@@ -710,6 +916,13 @@ export function Returns() {
     const startIndex = pageSize === 0 ? 0 : (currentPage - 1) * pageSize
     const endIndex = pageSize === 0 ? returnsData.length : startIndex + pageSize
     const paginatedData = returnsData.slice(startIndex, endIndex)
+    const hasSearchTerm = Boolean(normalizeSaleSearchTerm(searchTerm))
+    const emptyStateMessage =
+      hasSearchTerm && pageSearchMatchingSales.length > 0
+        ? "No return history found for this search. Matching sales are shown above."
+        : hasSearchTerm && pageSearchIneligibleSaleMatch
+          ? "No return history found for this search. Sale status details are shown above."
+          : "No returns found"
     
     return (
       <>
@@ -731,7 +944,7 @@ export function Returns() {
             {returnsData.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={7} className="text-center py-8 text-gray-500">
-                  No returns found
+                  {emptyStateMessage}
                 </TableCell>
               </TableRow>
             ) : (
@@ -867,7 +1080,7 @@ export function Returns() {
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Returns & Refunds</h1>
+          <h1 className="text-2xl md:text-3xl font-bold">Returns & Exchange</h1>
           <p className="text-sm md:text-base text-gray-600">Process customer returns and refunds</p>
         </div>
         <Dialog 
@@ -903,21 +1116,40 @@ export function Returns() {
                     value={saleSearch}
                     onFocus={() => setSaleDropdownOpen(true)}
                     autoComplete="off"
+                    onPaste={handleSaleSearchPaste}
                     onChange={(e) => {
-                      setSaleSearch(e.target.value)
-                      setSaleDropdownOpen(true)
+                      triggerSaleSearch(e.target.value)
+                    }}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") {
+                        event.preventDefault()
+                        triggerSaleSearch(saleSearch, { immediate: true })
+                      }
                     }}
                     className="pl-9"
                   />
                   {saleDropdownOpen && (
                     <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
-                      {salesLoading ? (
-                        <div className="px-3 py-2 text-sm text-gray-500">
-                          Loading sales...
+                      {salesLoading || saleSearchPending ? (
+                        <div className="flex items-center justify-center py-6">
+                          <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
+                          <span className="ml-2 text-sm text-gray-500">Searching sales...</span>
+                        </div>
+                      ) : filteredSales.length === 0 && ineligibleSaleMatch ? (
+                        <div className="px-3 py-6 text-center">
+                          <XCircle className="mx-auto mb-2 h-8 w-8 text-amber-400" />
+                          <p className="text-sm font-medium text-gray-700">
+                            {ineligibleSaleMatch.saleNumber} is {ineligibleSaleMatch.status}
+                          </p>
+                          <p className="mt-1 text-xs text-gray-500">
+                            {ineligibleSaleMatch.reason}
+                          </p>
                         </div>
                       ) : filteredSales.length === 0 ? (
-                        <div className="px-3 py-2 text-sm text-gray-500">
-                          No matching sales found
+                        <div className="px-3 py-10 text-center">
+                          <Search className="mx-auto h-8 w-8 text-gray-300 mb-2" />
+                          <p className="text-sm text-gray-500 font-medium">No matching sales found</p>
+                          <p className="text-xs text-gray-400 mt-1">Try a different sale # or customer info</p>
                         </div>
                       ) : (
                         filteredSales.map((sale) => (
@@ -1401,7 +1633,7 @@ export function Returns() {
           <div className="relative flex-1">
             <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
             <Input
-              placeholder="Search returns..."
+              placeholder="Search returns or paste a sale #"
               className="pl-10"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
@@ -1409,10 +1641,57 @@ export function Returns() {
           </div>
         </div>
 
+        {normalizeSaleSearchTerm(searchTerm) && filteredReturns.length === 0 && pageSearchMatchingSales.length > 0 && (
+          <Alert className="border-green-200 bg-green-50 text-green-950">
+            <CheckCircle className="h-4 w-4 text-green-700" />
+            <AlertTitle>Matching sales ready for return</AlertTitle>
+            <AlertDescription>
+              These sales have not been returned yet. You can start the return flow directly from here.
+            </AlertDescription>
+            <div className="mt-4 space-y-3">
+              {pageSearchMatchingSales.map((sale) => (
+                <div
+                  key={sale.id}
+                  className="flex flex-col gap-3 rounded-lg border border-green-200 bg-white/80 p-3 md:flex-row md:items-center md:justify-between"
+                >
+                  <div className="space-y-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-semibold">{sale.sale_number}</span>
+                      <Badge className="bg-green-100 text-green-800 hover:bg-green-100">READY FOR RETURN</Badge>
+                    </div>
+                    <div className="text-sm text-gray-600">
+                      {sale.customer?.name || sale.customer?.email || "Walk-in customer"}
+                    </div>
+                    <div className="text-xs text-gray-500">
+                      {new Date(sale.sale_date).toLocaleDateString()} | Rs {Math.abs(Number(sale.total_amount)).toLocaleString()}
+                    </div>
+                  </div>
+                  <Button onClick={() => handleStartReturnForSale(sale.id)}>
+                    Process Return
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </Alert>
+        )}
+
+        {normalizeSaleSearchTerm(searchTerm) &&
+          filteredReturns.length === 0 &&
+          pageSearchMatchingSales.length === 0 &&
+          pageSearchIneligibleSaleMatch && (
+            <Alert className="border-amber-200 bg-amber-50 text-amber-950">
+              <XCircle className="h-4 w-4 text-amber-700" />
+              <AlertTitle>
+                {pageSearchIneligibleSaleMatch.saleNumber} is {pageSearchIneligibleSaleMatch.status}
+              </AlertTitle>
+              <AlertDescription>{pageSearchIneligibleSaleMatch.reason}</AlertDescription>
+            </Alert>
+          )}
+
         <TabsContent value="all">
           <Card>
             <CardHeader>
-              <CardTitle>All Returns & Refunds</CardTitle>
+              <CardTitle>All Returns & Exchange</CardTitle>
               <CardDescription>Manage all customer returns and refunds</CardDescription>
             </CardHeader>
             <CardContent>{renderReturnsTable(getFilteredReturnsByStatus("all"))}</CardContent>

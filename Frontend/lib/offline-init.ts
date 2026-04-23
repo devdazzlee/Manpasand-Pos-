@@ -47,10 +47,10 @@ export async function initializeOfflineMode() {
   }
 }
 
+import { API_BASE } from '../config/constants';
+
 async function fetchInitialData() {
   try {
-    // Import API_BASE from constants instead of using env variable
-    const API_BASE = 'https://manpasand-pos-beta.vercel.app/api/v1';
     const token = localStorage.getItem('token');
 
     // Fetch products

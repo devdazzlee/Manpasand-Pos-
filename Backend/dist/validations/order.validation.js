@@ -15,7 +15,7 @@ const createOrderSchema = zod_1.z.object({
 exports.createOrderSchema = createOrderSchema;
 const updateOrderStatusSchema = zod_1.z.object({
     body: zod_1.z.object({
-        status: zod_1.z.enum(['PROCESSING', 'COMPLETED']),
+        status: zod_1.z.enum(['PENDING', 'PROCESSING', 'COMPLETED', 'CANCELLED']),
     }),
 });
 exports.updateOrderStatusSchema = updateOrderStatusSchema;

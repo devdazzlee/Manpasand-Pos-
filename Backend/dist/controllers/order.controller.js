@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.cancelOrderByCustomer = exports.cancelOrderByAdmin = exports.updateOrderStatus = exports.getMyOrderById = exports.getMyOrders = exports.getOrder = exports.getOrders = exports.createOrder = void 0;
+exports.reopenOrder = exports.cancelOrderByCustomer = exports.cancelOrderByAdmin = exports.updateOrderStatus = exports.getMyOrderById = exports.getMyOrders = exports.getOrder = exports.getOrders = exports.createOrder = void 0;
 const order_service_1 = require("../services/order.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -56,4 +56,10 @@ const cancelOrderByCustomer = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(result, 'Your order has been cancelled').send(res);
 });
 exports.cancelOrderByCustomer = cancelOrderByCustomer;
+const reopenOrder = (0, asyncHandler_1.default)(async (req, res) => {
+    const { orderId } = req.params;
+    const order = await orderService.reopenOrder(orderId);
+    new apiResponse_1.ApiResponse(order, 'Order re-opened successfully and stock re-allocated').send(res);
+});
+exports.reopenOrder = reopenOrder;
 //# sourceMappingURL=order.controller.js.map

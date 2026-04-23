@@ -33,7 +33,7 @@ router.get('/me', customerAuth_middleware_1.authenticateCustomer, (0, asyncHandl
     new apiResponse_1.ApiResponse(customer, 'Customer fetched').send(res);
 }));
 // Admin routes (protected by admin auth - MUST come after customer routes)
-router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
+router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
 router.post('/', (0, validation_middleware_1.validate)(customer_validation_1.cusRegisterationSchema), customer_controller_1.createShopCustomer);
 router.get('/', customer_controller_1.getCustomers);
 router.put('/:customerId', (0, validation_middleware_1.validate)(customer_validation_1.customerUpdateSchema), customer_controller_1.updateCustomerByAdmin);

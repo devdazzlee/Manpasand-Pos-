@@ -75,7 +75,7 @@ class AuthService {
             },
         });
         if (!user || !(await bcryptjs_1.default.compare(password, user.password))) {
-            throw new apiError_1.AppError(400, 'Invalid email or password');
+            throw new apiError_1.AppError(400, 'Invalid username or password');
         }
         const token = jsonwebtoken_1.default.sign({
             id: user.id,

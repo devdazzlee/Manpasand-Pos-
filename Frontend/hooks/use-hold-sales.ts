@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import apiClient from "@/lib/apiClient";
+import { normalizeBranchId } from "@/lib/branch-utils";
 
 interface CartItem {
   id: string;
@@ -26,14 +27,18 @@ interface HoldSaleRecord {
   createdAt: string;
 }
 
-export function useHoldSales() {
+export function useHoldSales(branchIdOverride?: string) {
   const [holdSales, setHoldSales] = useState<HoldSaleRecord[]>([]);
   const [loading, setLoading] = useState(false);
 
-  const getBranchId = () => {
+  const getBranchId = useCallback(() => {
+    if (branchIdOverride && branchIdOverride.trim()) {
+      return branchIdOverride.trim();
+    }
+
     if (typeof window === "undefined") return "";
-    return localStorage.getItem("branch") || "";
-  };
+    return normalizeBranchId(localStorage.getItem("branch"));
+  }, [branchIdOverride]);
 
   const normalizeItem = (item: any): CartItem => ({
     id: item.id,
@@ -80,7 +85,7 @@ export function useHoldSales() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [getBranchId]);
 
   useEffect(() => {
     refreshHoldSales();
@@ -109,7 +114,7 @@ export function useHoldSales() {
       console.error("Failed to hold sale in DB:", error);
       return false;
     }
-  }, []);
+  }, [getBranchId, refreshHoldSales]);
 
   const retrieveHoldSale = useCallback(async (index: number): Promise<CartItem[] | null> => {
     if (index < 0 || index >= holdSales.length) return null;
@@ -127,7 +132,7 @@ export function useHoldSales() {
       console.error("Failed to retrieve hold sale from DB:", error);
       return null;
     }
-  }, [holdSales]);
+  }, [getBranchId, holdSales]);
 
   const deleteHoldSale = useCallback(async (index: number) => {
     if (index < 0 || index >= holdSales.length) return;
@@ -142,7 +147,7 @@ export function useHoldSales() {
     } catch (error) {
       console.error("Failed to delete hold sale from DB:", error);
     }
-  }, [holdSales]);
+  }, [getBranchId, holdSales]);
 
   const clearAllHoldSales = useCallback(async () => {
     const holdIds = holdSales.map((sale) => sale.id);
@@ -158,7 +163,7 @@ export function useHoldSales() {
       }
     }
     setHoldSales([]);
-  }, [holdSales]);
+  }, [getBranchId, holdSales]);
 
   return {
     holdSales,

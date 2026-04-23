@@ -33,7 +33,7 @@ router.get('/me', authenticateCustomer, asyncHandler(async (req: Request, res: R
 }));
 
 // Admin routes (protected by admin auth - MUST come after customer routes)
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
 router.post('/', validate(cusRegisterationSchema), createShopCustomer);
 router.get('/', getCustomers);
 router.put('/:customerId', validate(customerUpdateSchema), updateCustomerByAdmin);

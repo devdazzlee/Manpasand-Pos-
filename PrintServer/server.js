@@ -468,6 +468,49 @@ app.post('/print-receipt', async (req, res) => {
       return yy + 3 - y;
     }
 
+    const normalizeReceiptAddress = (address) => {
+      const normalized = typeof address === 'string' ? address.trim() : '';
+
+      if (!normalized) {
+        return 'Karachi, Pakistan';
+      }
+
+      if (/pakistan/i.test(normalized)) {
+        return normalized;
+      }
+
+      if (/karachi/i.test(normalized)) {
+        return `${normalized}, Pakistan`;
+      }
+
+      return `${normalized}, Karachi, Pakistan`;
+    };
+
+    const buildReceiptBranchLine = (storeName, address) => {
+      const normalizedStoreName =
+        typeof storeName === 'string' ? storeName.trim() : '';
+      const normalizedAddress = normalizeReceiptAddress(address);
+
+      if (
+        !normalizedStoreName ||
+        ['ADMIN', 'MANPASAND GENERAL STORE'].includes(
+          normalizedStoreName.toUpperCase()
+        )
+      ) {
+        return normalizedAddress;
+      }
+
+      if (
+        normalizedAddress
+          .toLowerCase()
+          .includes(normalizedStoreName.toLowerCase())
+      ) {
+        return normalizedAddress;
+      }
+
+      return `${normalizedStoreName}, ${normalizedAddress}`;
+    };
+
     // ===== HEADER =====
     let y = margins.top;
 
@@ -484,7 +527,10 @@ app.post('/print-receipt', async (req, res) => {
 
     // Address + Tagline
     doc.font(boldFont);
-    const branchAddress = receiptData.address || 'Karachi';
+    const branchAddress = buildReceiptBranchLine(
+      receiptData.storeName,
+      receiptData.address
+    );
     const usedAddrTop = drawFit(branchAddress, margins.left, y, W, {
       maxSize: 11,
       minSize: 8.5,
@@ -637,7 +683,6 @@ app.post('/print-receipt', async (req, res) => {
     y += lineH(usedTy) - 2;
     const footerLines = [
       'Branch: 021 34892110',
-      `Address: ${receiptData.address || 'Karachi'}`,
       'Delivery Hotline WhatsApp: +92 342 3344040',
       'Website: Manpasandstore.com'
     ];
@@ -662,7 +707,7 @@ app.post('/print-receipt', async (req, res) => {
     y += lineH(poweredBy) + 1;
 
     const aceLines = [
-      'Website: acesoface.com | Contact: +92 336 2500357'
+      '+92 336 2500357'
     ];
     for (const line of aceLines) {
       const usedAce = drawFit(line, margins.left, y, W, {

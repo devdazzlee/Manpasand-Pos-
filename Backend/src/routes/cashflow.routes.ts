@@ -25,7 +25,7 @@ import asyncHandler from '../middleware/asyncHandler';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER']));
 router.get('/by-date', validate(getCashFlowByDateSchema), getCashFlowByDate);
 router.post('/opening', validate(createOpeningSchema), createOpening);
 router.post('/expense', validate(createExpenseSchema), addExpense);

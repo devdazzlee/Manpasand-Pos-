@@ -17,7 +17,7 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
 
 router.post('/', validate(createSupplierSchema), createSupplier);
 router.get('/', validate(listSuppliersSchema), listSuppliers);

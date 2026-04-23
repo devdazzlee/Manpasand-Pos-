@@ -43,6 +43,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useHoldSales } from "@/hooks/use-hold-sales";
+import { usePosBranch } from "@/hooks/use-pos-branch";
 
 interface CartItem {
   id: string; // Unique cart item ID (product.id + timestamp for separate entries)
@@ -92,7 +93,17 @@ export function ManualSale() {
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
-  const { holdSales, holdSale, retrieveHoldSale, holdSalesLoading, refreshHoldSales } = useHoldSales();
+  const {
+    adminMode,
+    branchLoading,
+    branches: availableBranches,
+    selectedBranchId,
+    setSelectedBranchId,
+    branchInfo,
+    hasBranch,
+  } = usePosBranch();
+  const { holdSales, holdSale, retrieveHoldSale, holdSalesLoading, refreshHoldSales } =
+    useHoldSales(selectedBranchId);
   const [globalDiscount, setGlobalDiscount] = useState(0);
   const [globalDiscountType, setGlobalDiscountType] = useState<'percentage' | 'amount'>('percentage');
   const [discountInput, setDiscountInput] = useState<string>("");
@@ -118,11 +129,6 @@ export function ManualSale() {
   const [isViewingHeldSales, setIsViewingHeldSales] = useState(false);
   const [resumingHoldIndex, setResumingHoldIndex] = useState<number | null>(null);
 
-
-  const [branchName, setBranchName] = useState({
-    name: "",
-    address: "",
-  });
   // Global store with custom hook
   const {
     products,
@@ -148,7 +154,6 @@ export function ManualSale() {
           fetchProducts(),
           fetchCategories(),
           fetchCustomers(),
-          getBranchName(),
         ]);
       } catch (error) {
         // Error loading data - no toast shown
@@ -435,7 +440,7 @@ export function ManualSale() {
   };
 
   const holdCurrentSale = async () => {
-    if (cart.length === 0) {
+    if (cart.length === 0 || !hasBranch) {
       return;
     }
     setIsHoldingSale(true);
@@ -460,6 +465,8 @@ export function ManualSale() {
         heldSale.map((item) => ({
           ...item,
           discount: Number(item.discount || 0),
+          originalPrice: Number(item.originalPrice ?? item.price ?? 0),
+          actualUnitPrice: Number(item.actualUnitPrice ?? item.price ?? 0),
         }))
       );
     }
@@ -479,35 +486,6 @@ export function ManualSale() {
     const element = document.getElementById('held-sales-list');
     if (element) {
       element.scrollIntoView({ behavior: 'smooth' });
-    }
-  };
-
-  const getBranchName = async () => {
-    try {
-      const branchId = localStorage.getItem("branch");
-      const userRole = localStorage.getItem("role");
-      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
-      
-      // Skip for admin users or if branch is "Not Found"
-      if (!branchId || branchId === "Not Found" || isAdmin) {
-        setBranchName({
-          name: "Admin",
-          address: "",
-        });
-        return;
-      }
-
-      const data = await apiClient.get(`/branches/${branchId}`); // axios-style
-      setBranchName({
-        name: data.data.data.name || "",
-        address: data.data.data.address || "",
-      });
-      // setBranchName(data.data.data.name);
-      console.log("data", data.data);
-      // return data?.name ?? null; // or just `return data` if you need the whole object
-    } catch (err) {
-      console.error("Failed to fetch branch name:", err);
-      return null;
     }
   };
 
@@ -598,6 +576,10 @@ export function ManualSale() {
   };
 
   const startPayment = (method: "Cash" | "Card") => {
+    if (!hasBranch) {
+      return;
+    }
+
     setPaymentMethodPending(method);
     setTenderedAmount(total.toFixed(2));
     setPaymentError("");
@@ -653,16 +635,10 @@ export function ManualSale() {
           price: item.price,
         }));
 
-        // Get branchId from localStorage (key: 'branch')
-        let branchId = "";
-        try {
-          const branchStr = localStorage.getItem("branch");
-          console.log(branchStr);
-          if (branchStr) {
-            branchId = branchStr || "";
-          }
-        } catch (e) {
-          branchId = "";
+        const branchId = selectedBranchId;
+
+        if (!branchId) {
+          throw new Error("A branch must be selected before creating a sale.");
         }
 
         // Prepare payload
@@ -786,12 +762,11 @@ export function ManualSale() {
           
           console.log("🏢 Current Branch:", storedBranchName);
           
-          // Only show branch name and Karachi
-          const fullAddress = `${storedBranchName}, Karachi`
+          const fullAddress = "Karachi, Pakistan";
          
           console.log("fullAddress", fullAddress);
           const receiptDataForServer: ReceiptData = {
-            storeName: storedBranchName || branchName.name || "MANPASAND GENERAL STORE",
+            storeName: storedBranchName || branchInfo.name || "MANPASAND GENERAL STORE",
             tagline: "Quality • Service • Value",
             address: fullAddress,
             transactionId: transactionId,
@@ -1030,7 +1005,11 @@ export function ManualSale() {
             </div>
             <div className="flex flex-wrap items-center gap-2">
               {cart.length > 0 && (
-                <Button variant="outline" onClick={holdCurrentSale} disabled={isHoldingSale}>
+                <Button
+                  variant="outline"
+                  onClick={holdCurrentSale}
+                  disabled={isHoldingSale || branchLoading || !hasBranch}
+                >
                   {isHoldingSale ? "Saving..." : "Hold Sale"}
                 </Button>
               )}
@@ -1045,7 +1024,7 @@ export function ManualSale() {
                   <Button
                     variant="outline"
                     onClick={handleViewHeldSales}
-                    disabled={isViewingHeldSales || holdSalesLoading}
+                    disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !hasBranch}
                   >
                     {isViewingHeldSales || holdSalesLoading ? "Loading..." : "View Held Sales"}
                   </Button>
@@ -1053,6 +1032,34 @@ export function ManualSale() {
               )}
             </div>
           </div>
+          {adminMode && (
+            <div className="mb-4 max-w-sm">
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                POS Branch
+              </label>
+              <Select
+                value={selectedBranchId || "none"}
+                onValueChange={(value) => setSelectedBranchId(value === "none" ? "" : value)}
+              >
+                <SelectTrigger className="bg-white">
+                  <SelectValue placeholder={branchLoading ? "Loading branches..." : "Select branch"} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Select branch</SelectItem>
+                  {availableBranches.map((branch) => (
+                    <SelectItem key={branch.id} value={branch.id}>
+                      {branch.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {!hasBranch && !branchLoading && (
+                <p className="mt-2 text-sm text-amber-700">
+                  Select a branch to use Hold Sale and complete sales.
+                </p>
+              )}
+            </div>
+          )}
           <div className="flex items-center space-x-4">
             <div className="relative flex-1 max-w-md">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-gray-400" />
@@ -1229,7 +1236,7 @@ export function ManualSale() {
                 size="sm"
                 onClick={holdCurrentSale}
                 className="flex-1 min-w-[120px]"
-                disabled={isHoldingSale}
+                disabled={isHoldingSale || branchLoading || !hasBranch}
               >
                 {isHoldingSale ? "Saving..." : "Hold Sale"}
               </Button>
@@ -1242,7 +1249,7 @@ export function ManualSale() {
               size="sm"
               onClick={handleViewHeldSales}
               className="mt-3 w-full justify-between border border-gray-200 bg-white hover:bg-white"
-              disabled={isViewingHeldSales || holdSalesLoading}
+              disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !hasBranch}
             >
               <span className="text-sm font-medium text-gray-700">
                 {isViewingHeldSales || holdSalesLoading
@@ -1732,7 +1739,7 @@ export function ManualSale() {
                 <Button
                   size="sm"
                   onClick={() => startPayment("Cash")}
-                  disabled={paymentLoading}
+                  disabled={paymentLoading || branchLoading || !hasBranch}
                   className="h-10 text-sm"
                 >
                   <DollarSign className="mr-2 h-4 w-4" />
@@ -1742,7 +1749,7 @@ export function ManualSale() {
                   size="sm"
                   variant="outline"
                   onClick={() => startPayment("Card")}
-                  disabled={paymentLoading}
+                  disabled={paymentLoading || branchLoading || !hasBranch}
                   className="h-10 text-sm"
                 >
                   <CreditCard className="mr-2 h-4 w-4" />

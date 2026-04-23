@@ -9,7 +9,7 @@ const supplier_validation_1 = require("../validations/supplier.validation");
 const validation_middleware_1 = require("../middleware/validation.middleware");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = express_1.default.Router();
-router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
+router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
 router.post('/', (0, validation_middleware_1.validate)(supplier_validation_1.createSupplierSchema), supplier_controller_1.createSupplier);
 router.get('/', (0, validation_middleware_1.validate)(supplier_validation_1.listSuppliersSchema), supplier_controller_1.listSuppliers);
 router.get('/:id', (0, validation_middleware_1.validate)(supplier_validation_1.getSupplierSchema), supplier_controller_1.getSupplier);

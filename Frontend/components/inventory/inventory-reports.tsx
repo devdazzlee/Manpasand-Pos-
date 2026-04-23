@@ -33,6 +33,8 @@ export function InventoryReports() {
     startDate: "",
     endDate: "",
   });
+  const [userRole, setUserRole] = useState<string | null>(null);
+  const [userBranchId, setUserBranchId] = useState<string | null>(null);
 
   const fetchReport = useCallback(async () => {
     setLoading(true);
@@ -42,7 +44,7 @@ export function InventoryReports() {
       if (filters.supplierId) params.supplierId = filters.supplierId;
       if (filters.startDate) params.startDate = filters.startDate;
       if (filters.endDate) params.endDate = filters.endDate;
-      const res = await apiClient.get(`${API_BASE}/inventory/reports`, { params });
+      const res = await apiClient.get("/inventory/reports", { params });
       setData(res.data?.data);
     } catch (e: any) {
       toast({
@@ -58,17 +60,39 @@ export function InventoryReports() {
   const fetchMeta = useCallback(async () => {
     try {
       const [bRes, sRes] = await Promise.all([
-        apiClient.get(`${API_BASE}/branches`, { params: { fetch_all: true } }),
-        apiClient.get(`${API_BASE}/suppliers`),
+        apiClient.get("/branches", { params: { fetch_all: true } }),
+        apiClient.get("/suppliers"),
       ]);
       setBranches(bRes.data?.data || bRes.data || []);
       setSuppliers(sRes.data?.data || []);
-    } catch (e) {
+    } catch (e: any) {
+      toast({
+        title: "Error",
+        description: e?.response?.data?.message || "Failed to load metadata",
+        variant: "destructive",
+      });
       console.error(e);
     }
   }, []);
 
   useEffect(() => {
+    const role = localStorage.getItem("role");
+    setUserRole(role);
+    const b = localStorage.getItem("branch");
+    if (b && b !== "Not Found") {
+      let bId = "";
+      try {
+        const obj = JSON.parse(b);
+        bId = obj.id || b;
+      } catch {
+        bId = b;
+      }
+      setUserBranchId(bId);
+      // Only auto-filter for BRANCH_MANAGER. Other managers should see ALL by default.
+      if (role === "BRANCH_MANAGER") {
+        setFilters(prev => ({ ...prev, branchId: bId }));
+      }
+    }
     fetchMeta();
   }, [fetchMeta]);
 
@@ -83,8 +107,9 @@ export function InventoryReports() {
     if (reportType === "valuation" && data.byLocation) {
       const locs = Object.entries(data.byLocation);
       locs.forEach(([bid, loc]: [string, any]) => {
+        const branchName = branches.find(b => b.id === bid)?.name || bid;
         (loc.items || []).forEach((item: any) => {
-          rows.push([item.product?.name, item.product?.sku, bid, item.quantity, item.value]);
+          rows.push([item.product?.name, item.product?.sku, branchName, item.quantity, item.value]);
         });
       });
       headers = ["Product", "SKU", "Branch", "Qty", "Value"];
@@ -178,12 +203,22 @@ export function InventoryReports() {
             <SelectValue placeholder="All Branches" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
-            {branches.filter((b) => b.id).map((b) => (
-              <SelectItem key={b.id} value={b.id}>
-                {b.name}
-              </SelectItem>
-            ))}
+            {userRole === "ADMIN" || userRole === "SUPER_ADMIN" || userRole === "WAREHOUSE_MANAGER" || userRole === "PURCHASE_MANAGER" ? (
+              <>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.filter((b) => b.id).map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </>
+            ) : (
+              branches.filter(b => b.id === userBranchId).map(b => (
+                <SelectItem key={b.id} value={b.id}>
+                  {b.name}
+                </SelectItem>
+              ))
+            )}
           </SelectContent>
         </Select>
         {reportType === "purchase" && (
@@ -232,9 +267,11 @@ export function InventoryReports() {
           ) : reportType === "valuation" && data?.byLocation ? (
             <div className="space-y-4">
               <p className="text-lg font-semibold">Total Value: {formatCurrency(data.total || 0)}</p>
-              {Object.entries(data.byLocation).map(([bid, loc]: [string, any]) => (
-                <div key={bid}>
-                  <p className="font-medium mb-2">Branch: {bid}</p>
+              {Object.entries(data.byLocation).map(([bid, loc]: [string, any]) => {
+                const branchName = branches.find(b => b.id === bid)?.name || bid;
+                return (
+                  <div key={bid}>
+                    <p className="font-medium mb-2">Branch: {branchName}</p>
                   <Table>
                     <TableHeader>
                       <TableRow>
@@ -254,8 +291,9 @@ export function InventoryReports() {
                     </TableBody>
                   </Table>
                 </div>
-              ))}
-            </div>
+              )
+            })}
+          </div>
           ) : Array.isArray(data) && data.length > 0 ? (
             <div className="overflow-x-auto">
               <Table>

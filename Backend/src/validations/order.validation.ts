@@ -14,7 +14,7 @@ const createOrderSchema = z.object({
 
 const updateOrderStatusSchema = z.object({
   body: z.object({
-    status: z.enum(['PROCESSING', 'COMPLETED']),
+    status: z.enum(['PENDING', 'PROCESSING', 'COMPLETED', 'CANCELLED']),
   }),
 });
 

@@ -11,7 +11,7 @@ const validation_middleware_1 = require("../middleware/validation.middleware");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const router = express_1.default.Router();
-router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
+router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER']));
 router.get('/by-date', (0, validation_middleware_1.validate)(cashflow_validation_1.getCashFlowByDateSchema), cashflow_controller_1.getCashFlowByDate);
 router.post('/opening', (0, validation_middleware_1.validate)(cashflow_validation_1.createOpeningSchema), cashflow_controller_1.createOpening);
 router.post('/expense', (0, validation_middleware_1.validate)(cashflow_validation_1.createExpenseSchema), cashflow_controller_1.addExpense);

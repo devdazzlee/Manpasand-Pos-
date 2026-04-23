@@ -80,7 +80,7 @@ class AuthService {
     });
 
     if (!user || !(await bcrypt.compare(password, user.password))) {
-      throw new AppError(400, 'Invalid email or password');
+      throw new AppError(400, 'Invalid username or password');
     }
 
     const token = jwt.sign(

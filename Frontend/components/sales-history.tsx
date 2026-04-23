@@ -101,6 +101,38 @@ interface BranchInfo {
   address: string;
 }
 
+const normalizeReceiptAddress = (address?: string): string => {
+  const normalized = typeof address === "string" ? address.trim() : "";
+
+  if (!normalized) {
+    return "Karachi, Pakistan";
+  }
+
+  if (/pakistan/i.test(normalized)) {
+    return normalized;
+  }
+
+  if (/karachi/i.test(normalized)) {
+    return `${normalized}, Pakistan`;
+  }
+
+  return `${normalized}, Karachi, Pakistan`;
+};
+
+const buildReceiptBranchLine = (
+  storeName?: string,
+  _address?: string
+): string => {
+  const name = typeof storeName === "string" ? storeName.trim() : "";
+  
+  if (!name || ["ADMIN", "MANPASAND GENERAL STORE"].includes(name.toUpperCase())) {
+    return "Karachi, Pakistan";
+  }
+
+  // Strictly follow: [Branch Name], Karachi, Pakistan
+  return `${name}, Karachi, Pakistan`;
+};
+
 export function SalesHistory() {
   const { toast } = useToast();
   const [sales, setSales] = useState<Sale[]>([]);
@@ -404,11 +436,11 @@ export function SalesHistory() {
       .join("");
     
     const promoHtml = data.promo ? `<div class="promo">Promo: ${data.promo}</div>` : "";
+    const branchLine = buildReceiptBranchLine(data.storeName, data.address);
     
     // Footer lines matching PrintServer
     const footerLines = [
       'Branch: 021 34892110',
-      `Address: ${data.address || "Karachi"}`,
       'Delivery Hotline WhatsApp: +92 342 3344040',
       'Website: Manpasandstore.com'
     ];
@@ -419,7 +451,7 @@ export function SalesHistory() {
     const aceHtml = `
 <div class="divider-thin"></div>
 <div class="powered-by">Powered by Ace Studios</div>
-<div class="ace-line">Website: acesoface.com | Contact: +92 336 2500357</div>`;
+<div class="ace-line">+92 336 2500357</div>`;
     
     return `
 <div class="receipt">
@@ -429,7 +461,7 @@ export function SalesHistory() {
   alt="Logo" 
   class="logo-img" />
 </div>
-<div class="store-name">${data.address || "Karachi"}</div>
+<div class="store-name">${branchLine}</div>
 <div class="tagline">${data.tagline || "Quality - Service - Value"}</div>
 ${data.strn ? `<div class="strn">${data.strn}</div>` : ''}
 

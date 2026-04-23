@@ -1,10 +1,11 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { DashboardHome } from "@/components/dashboard-home";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
+import { getDefaultDashboardTab } from "@/lib/role-utils";
 
 import { Customers } from "@/components/customers";
 import { Reports } from "@/components/reports";
@@ -52,7 +53,7 @@ import Colors from "./color";
 import Sizes from "./sizes";
 import { Salaries } from "./Salaries";
 import { Designation } from "./Designation";
-import BarcodeGenerater from "./barcode-generater";
+import BarcodeGenerator from "./barcode-generator";
 import { NewSale } from "./new-sale";
 import { PrinterSettings } from "./printer-settings";
 import { ProductExport } from "./product-export";
@@ -66,12 +67,20 @@ export function Dashboard({ onLogout }: DashboardProps) {
   const [activeTab, setActiveTab] = useState("dashboard");
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
+  useEffect(() => {
+    const preferredTab = getDefaultDashboardTab(localStorage.getItem("role"));
+
+    if (preferredTab !== "dashboard") {
+      setActiveTab(preferredTab);
+    }
+  }, []);
+
   const renderContent = () => {
     switch (activeTab) {
       case "dashboard":
         return <DashboardHome onNavigate={setActiveTab} />;
-      case "barcode-generater":
-        return <BarcodeGenerater />;
+      case "barcode-generator":
+        return <BarcodeGenerator />;
       case "new-sale":
         return <NewSale />;
       case "orders":

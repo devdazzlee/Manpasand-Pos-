@@ -224,8 +224,13 @@ class OrderService {
         if (!order) {
             throw new apiError_1.AppError(404, 'Order not found');
         }
+        if (order.status === status)
+            return order;
         if (order.status === 'CANCELLED') {
-            throw new apiError_1.AppError(400, 'Cannot update a cancelled order');
+            throw new apiError_1.AppError(400, 'Cancelled orders are terminal. Use the "Re-open" action to restore this order.');
+        }
+        if (order.status === 'COMPLETED') {
+            throw new apiError_1.AppError(400, 'Completed orders are terminal and cannot be modified.');
         }
         return client_2.prisma.order.update({
             where: { id: orderId },
@@ -250,6 +255,55 @@ class OrderService {
         if (order.customer_id !== customerId)
             throw new apiError_1.AppError(403, 'Unauthorized to cancel this order');
         return this.cancelOrderTransactional(orderId);
+    }
+    async reopenOrder(orderId) {
+        return client_2.prisma.$transaction(async (tx) => {
+            const order = await tx.order.findUnique({
+                where: { id: orderId },
+                include: {
+                    items: { include: { product: true } }
+                }
+            });
+            if (!order)
+                throw new apiError_1.AppError(404, "Order not found");
+            if (order.status !== "CANCELLED")
+                throw new apiError_1.AppError(400, "Only cancelled orders can be re-opened");
+            for (const item of order.items) {
+                const stock = await tx.stock.findUnique({
+                    where: { product_id_branch_id: { product_id: item.product_id, branch_id: order.branch_id } }
+                });
+                if (!stock || stock.current_quantity.lt(item.quantity)) {
+                    throw new apiError_1.AppError(400, `Insufficient stock to re-open: ${item.product.name}`);
+                }
+            }
+            for (const item of order.items) {
+                const stock = await tx.stock.findUnique({
+                    where: { product_id_branch_id: { product_id: item.product_id, branch_id: order.branch_id } }
+                });
+                await tx.stock.update({
+                    where: { product_id_branch_id: { product_id: item.product_id, branch_id: order.branch_id } },
+                    data: { current_quantity: { decrement: item.quantity } }
+                });
+                await tx.stockMovement.create({
+                    data: {
+                        product_id: item.product_id,
+                        branch_id: order.branch_id,
+                        movement_type: "SALE",
+                        reference_id: order.id,
+                        reference_type: "order_reopen",
+                        quantity_change: -item.quantity,
+                        previous_qty: stock.current_quantity,
+                        new_qty: stock.current_quantity.minus(item.quantity),
+                        notes: `Order ${order.order_number} re-opened`
+                    }
+                });
+            }
+            return tx.order.update({
+                where: { id: orderId },
+                data: { status: "PENDING" },
+                include: { items: { include: { product: true } } }
+            });
+        });
     }
 }
 exports.OrderService = OrderService;

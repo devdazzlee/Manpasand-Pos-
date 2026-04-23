@@ -53,12 +53,17 @@ const cancelOrderByAdmin = asyncHandler(async (req: Request, res: Response) => {
   const result = await orderService.cancelOrderByAdmin(orderId);
   new ApiResponse(result, 'Order cancelled by admin').send(res);
 });
-
 const cancelOrderByCustomer = asyncHandler(async (req: Request, res: Response) => {
   const orderId = req.params.orderId;
   const customerId = req.customer?.id!;
   const result = await orderService.cancelOrderByCustomer(customerId, orderId);
   new ApiResponse(result, 'Your order has been cancelled').send(res);
+});
+
+const reopenOrder = asyncHandler(async (req: Request, res: Response) => {
+  const { orderId } = req.params;
+  const order = await orderService.reopenOrder(orderId);
+  new ApiResponse(order, 'Order re-opened successfully and stock re-allocated').send(res);
 });
 
 export {
@@ -69,5 +74,6 @@ export {
   getMyOrderById,
   updateOrderStatus,
   cancelOrderByAdmin,
-  cancelOrderByCustomer
+  cancelOrderByCustomer,
+  reopenOrder
 };

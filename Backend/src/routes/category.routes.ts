@@ -21,7 +21,7 @@ import { parseFormData } from '../middleware/parse-formdata.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
 
 router.post('/', upload.array('images', 10), parseFormData, validate(createCategorySchema), createCategory);
 router.delete('/all', deleteAllCategories);

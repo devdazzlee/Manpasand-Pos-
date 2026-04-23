@@ -6,14 +6,26 @@ const validation_middleware_1 = require("../middleware/validation.middleware");
 const sale_controller_1 = require("../controllers/sale.controller");
 const sale_validation_1 = require("../validations/sale.validation");
 const router = (0, express_1.Router)();
-router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(["SUPER_ADMIN", "ADMIN"]));
-router.get("/recent", sale_controller_1.getRecentSaleItemProductNameAndPrice);
-router.get("/today", sale_controller_1.getTodaySalesController);
-router.get("/for-returns", sale_controller_1.getSalesForReturnsController);
+const holdSaleRoles = [
+    "SUPER_ADMIN",
+    "ADMIN",
+    "BRANCH_MANAGER",
+    "WAREHOUSE_MANAGER",
+    "PURCHASE_MANAGER",
+];
+const saleManagementRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER"];
+const metadataRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER", "WAREHOUSE_MANAGER", "PURCHASE_MANAGER"];
+router.use(auth_middleware_1.authenticate);
+router.use("/hold", (0, auth_middleware_1.authorize)(holdSaleRoles));
+// Hold-sale operations should be available to any authenticated staff role.
 router.get("/hold", sale_controller_1.getHoldSalesController);
 router.post("/hold", sale_controller_1.createHoldSaleController);
 router.post("/hold/:holdSaleId/retrieve", sale_controller_1.retrieveHoldSaleController);
 router.delete("/hold/:holdSaleId", sale_controller_1.deleteHoldSaleController);
+router.use((0, auth_middleware_1.authorize)(saleManagementRoles));
+router.get("/recent", (0, auth_middleware_1.authorize)(metadataRoles), sale_controller_1.getRecentSaleItemProductNameAndPrice);
+router.get("/today", sale_controller_1.getTodaySalesController);
+router.get("/for-returns", sale_controller_1.getSalesForReturnsController);
 router.get("/", sale_controller_1.getSalesController);
 router.get("/:saleId", sale_controller_1.getSaleByIdController);
 router.post("/", (0, validation_middleware_1.validate)(sale_validation_1.createSaleSchema), sale_controller_1.createSaleController);

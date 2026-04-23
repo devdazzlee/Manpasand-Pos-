@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { PageLoader } from "@/components/ui/page-loader";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -37,21 +38,14 @@ interface DashboardStats {
 export function InventoryDashboard() {
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
+  const [branches, setBranches] = useState<any[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [userRole, setUserRole] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const fetchStats = async () => {
+  const fetchStats = async (bid?: string) => {
     setLoading(true);
     try {
-      const branchId = localStorage.getItem("branch");
-      let bid: string | undefined;
-      if (branchId && branchId !== "Not Found") {
-        try {
-          const b = JSON.parse(branchId);
-          bid = b?.id;
-        } catch {
-          bid = branchId;
-        }
-      }
       const res = await apiClient.get(`${API_BASE}/inventory/dashboard`, {
         params: bid ? { branchId: bid } : {},
       });
@@ -67,8 +61,41 @@ export function InventoryDashboard() {
     }
   };
 
+  const fetchBranches = async () => {
+    try {
+      const res = await apiClient.get(`${API_BASE}/branches`, { params: { fetch_all: true } });
+      setBranches(res.data?.data || res.data || []);
+    } catch (e) {
+      console.error("Failed to load branches", e);
+    }
+  };
+
   useEffect(() => {
-    fetchStats();
+    const role = localStorage.getItem("role");
+    setUserRole(role);
+    const b = localStorage.getItem("branch");
+    let initialBranchId = "";
+
+    if (b && b !== "Not Found") {
+      try {
+        const obj = JSON.parse(b);
+        initialBranchId = obj.id || b;
+      } catch {
+        initialBranchId = b;
+      }
+    }
+
+    // Administrators and Managers should see All Branches by default.
+    // Branch Managers only see their assigned branch.
+    if (role === "BRANCH_MANAGER" && initialBranchId) {
+      setSelectedBranchId(initialBranchId);
+      fetchStats(initialBranchId);
+    } else {
+      setSelectedBranchId("");
+      fetchStats();
+    }
+    
+    fetchBranches();
   }, []);
 
   if (loading && !stats) {
@@ -89,10 +116,34 @@ export function InventoryDashboard() {
             Stock flow, warehouse value, and alerts
           </p>
         </div>
-        <Button variant="outline" onClick={fetchStats}>
-          <RefreshCw className="h-4 w-4 mr-2" />
-          Refresh
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          {(userRole === "SUPER_ADMIN" || userRole === "ADMIN" || userRole === "WAREHOUSE_MANAGER" || userRole === "PURCHASE_MANAGER") && (
+            <Select
+              value={selectedBranchId || "all"}
+              onValueChange={(v) => {
+                const bid = v === "all" ? "" : v;
+                setSelectedBranchId(bid);
+                fetchStats(bid);
+              }}
+            >
+              <SelectTrigger className="w-48 bg-white">
+                <SelectValue placeholder="All Branches" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          )}
+          <Button variant="outline" onClick={() => fetchStats(selectedBranchId)}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">

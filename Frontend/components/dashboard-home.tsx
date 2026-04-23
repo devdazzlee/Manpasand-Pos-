@@ -11,6 +11,17 @@ import { useToast } from "@/hooks/use-toast"
 import { DollarSign, ShoppingCart, Users, Package, TrendingUp, TrendingDown, RefreshCw, Download, Truck, Plus } from "lucide-react"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import apiClient from "@/lib/apiClient"
+import { normalizeUserRole, type UserRole } from "@/lib/role-utils"
+
+const PURCHASE_ENTRY_ROLES: UserRole[] = ["SUPER_ADMIN", "ADMIN"]
+const TRANSFER_ENTRY_ROLES: UserRole[] = ["SUPER_ADMIN", "ADMIN"]
+const STOCK_OUT_ENTRY_ROLES: UserRole[] = ["SUPER_ADMIN", "ADMIN"]
+const INVENTORY_NAV_ROLES: UserRole[] = [
+  "SUPER_ADMIN",
+  "ADMIN",
+  "WAREHOUSE_MANAGER",
+  "PURCHASE_MANAGER",
+]
 
 interface TopProduct {
   id: string
@@ -49,10 +60,12 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [recentSales, setRecentSales] = useState<RecentSale[]>([])
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
+  const [role, setRole] = useState<UserRole | null>(null)
 
   const { loading: refreshLoading, withLoading: withRefreshLoading } = useLoading()
   const { loading: exportLoading, withLoading: withExportLoading } = useLoading()
   const { toast } = useToast()
+  const canOpenInventory = role ? INVENTORY_NAV_ROLES.includes(role) : false
 
   const getTopProducts = async () => {
     try {
@@ -130,6 +143,7 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
   }
 
   useEffect(() => {
+    setRole(normalizeUserRole(localStorage.getItem("role")))
     loadAllData()
   }, [])
 
@@ -348,8 +362,14 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
             </Card>
 
             <Card
-              className="hover:shadow-md transition-shadow cursor-pointer"
-              onClick={() => onNavigate?.("inventory-dashboard")}
+              className={`transition-shadow ${
+                canOpenInventory ? "cursor-pointer hover:shadow-md" : "hover:shadow-md"
+              }`}
+              onClick={() => {
+                if (canOpenInventory) {
+                  onNavigate?.("inventory-dashboard")
+                }
+              }}
             >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
@@ -357,7 +377,7 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-yellow-600">{stats?.lowStockProducts?.length || 0}</div>
-                {onNavigate && (
+                {onNavigate && canOpenInventory && (
                   <p className="text-xs text-blue-600 mt-1">View inventory →</p>
                 )}
               </CardContent>
@@ -366,20 +386,26 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
         )}
       </div>
 
-      {onNavigate && (
+      {onNavigate && role && (
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => onNavigate("purchases")}>
-            <Plus className="h-4 w-4 mr-1" />
-            New Purchase
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => onNavigate("transfers")}>
-            <Truck className="h-4 w-4 mr-1" />
-            New Transfer
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => onNavigate("stock-out")}>
-            <Package className="h-4 w-4 mr-1" />
-            Stock Out
-          </Button>
+          {PURCHASE_ENTRY_ROLES.includes(role) && (
+            <Button variant="outline" size="sm" onClick={() => onNavigate("purchases")}>
+              <Plus className="h-4 w-4 mr-1" />
+              New Purchase
+            </Button>
+          )}
+          {TRANSFER_ENTRY_ROLES.includes(role) && (
+            <Button variant="outline" size="sm" onClick={() => onNavigate("transfers")}>
+              <Truck className="h-4 w-4 mr-1" />
+              New Transfer
+            </Button>
+          )}
+          {STOCK_OUT_ENTRY_ROLES.includes(role) && (
+            <Button variant="outline" size="sm" onClick={() => onNavigate("stock-out")}>
+              <Package className="h-4 w-4 mr-1" />
+              Stock Out
+            </Button>
+          )}
         </div>
       )}
 
