@@ -421,11 +421,6 @@ model Transfer {
   status          TransferStatus @default(PENDING)
   transfer_date   DateTime       @default(now())
   reference_no    String?        @unique
-  reason          String?        @default("Stock Replenishment")
-  carrier_name    String?
-  vehicle_no      String?
-  estimated_arrival DateTime?
-  receiver_name   String?
   notes           String?
   created_by      String
   user            User           @relation(fields: [created_by], references: [id])

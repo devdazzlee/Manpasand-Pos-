@@ -46,6 +46,8 @@ interface Product {
   non_inventory_item?: boolean
   is_deal?: boolean
   is_featured?: boolean
+  is_finished_good?: boolean
+  is_loose_item?: boolean
   pct_or_hs_code?: string
   description?: string
   created_at?: string
@@ -53,15 +55,25 @@ interface Product {
   images?: any[]
 }
 
+interface Branch {
+  id: string
+  name: string
+  location?: string
+  is_active?: boolean
+}
+
 interface Category {
   id: string
   name: string
+  is_active?: boolean
 }
 
 interface Customer {
   id: string
-  email: string
-  name?: string
+  name: string
+  phone?: string
+  email?: string
+  is_active?: boolean
 }
 
 interface StoreState {
@@ -69,21 +81,29 @@ interface StoreState {
   products: Product[]
   categories: Category[]
   customers: Customer[]
+  branches: Branch[]
+  suppliers: any[]
   
   // Loading states
   productsLoading: boolean
   categoriesLoading: boolean
   customersLoading: boolean
+  branchesLoading: boolean
+  suppliersLoading: boolean
   
   // Last fetch timestamps
   lastProductsFetch: number | null
   lastCategoriesFetch: number | null
   lastCustomersFetch: number | null
+  lastBranchesFetch: number | null
+  lastSuppliersFetch: number | null
   
   // Actions
   fetchProducts: (options?: { force?: boolean; search?: string; categoryId?: string }) => Promise<void>
   fetchCategories: (force?: boolean) => Promise<void>
   fetchCustomers: (force?: boolean) => Promise<void>
+  fetchBranches: (force?: boolean) => Promise<void>
+  fetchSuppliers: (force?: boolean) => Promise<void>
   clearStore: () => void
 }
 
@@ -97,12 +117,18 @@ export const useStore = create<StoreState>()(
       products: [],
       categories: [],
       customers: [],
+      branches: [],
+      suppliers: [],
       productsLoading: false,
       categoriesLoading: false,
       customersLoading: false,
+      branchesLoading: false,
+      suppliersLoading: false,
       lastProductsFetch: null,
       lastCategoriesFetch: null,
       lastCustomersFetch: null,
+      lastBranchesFetch: null,
+      lastSuppliersFetch: null,
 
       // Fetch products with caching and full-database search support
       fetchProducts: async (options?: { force?: boolean; search?: string; categoryId?: string }) => {
@@ -119,7 +145,7 @@ export const useStore = create<StoreState>()(
             state.lastProductsFetch &&
             now - state.lastProductsFetch < CACHE_DURATION
           ) {
-            console.log('Using cached products data')
+            // Audit: Cache hit within duration
             return
           }
         }
@@ -283,7 +309,7 @@ export const useStore = create<StoreState>()(
             state.categories.length > 0 && 
             state.lastCategoriesFetch && 
             (now - state.lastCategoriesFetch) < CACHE_DURATION) {
-          console.log('Using cached categories data')
+          // Audit: Cache hit within duration
           return
         }
 
@@ -316,7 +342,7 @@ export const useStore = create<StoreState>()(
             state.customers.length > 0 && 
             state.lastCustomersFetch && 
             (now - state.lastCustomersFetch) < CACHE_DURATION) {
-          console.log('Using cached customers data')
+          // Audit: Cache hit within duration
           return
         }
 
@@ -339,15 +365,90 @@ export const useStore = create<StoreState>()(
         }
       },
 
+      // Fetch branches with caching
+      fetchBranches: async (force = false) => {
+        const state = get()
+        const now = Date.now()
+        
+        if (!force && 
+            state.branches.length > 0 && 
+            state.lastBranchesFetch && 
+            (now - state.lastBranchesFetch) < CACHE_DURATION) {
+          // Audit: Cache hit within duration
+          return
+        }
+
+        set({ branchesLoading: true })
+        
+        try {
+          const res = await apiClient.get("/branches", { params: { fetch_all: true } })
+          const branchesRaw = res.data?.data || res.data || []
+          const branches = branchesRaw.map((b: any) => ({
+             id: b.id,
+             name: b.name,
+             location: b.location,
+             is_active: b.is_active ?? true
+          }))
+          
+          set({ 
+            branches, 
+            branchesLoading: false,
+            lastBranchesFetch: now
+          })
+          
+          console.log(`Loaded ${branches.length} branches`)
+        } catch (error) {
+          console.log('Failed to fetch branches:', error)
+          set({ branchesLoading: false })
+          throw error
+        }
+      },
+
+      // Fetch suppliers with caching
+      fetchSuppliers: async (force = false) => {
+        const state = get()
+        const now = Date.now()
+        
+        if (!force && 
+            state.suppliers.length > 0 && 
+            state.lastSuppliersFetch && 
+            (now - state.lastSuppliersFetch) < CACHE_DURATION) {
+          return
+        }
+
+        set({ suppliersLoading: true })
+        
+        try {
+          const res = await apiClient.get("/suppliers")
+          const suppliers = res.data.data || []
+          
+          set({ 
+            suppliers, 
+            suppliersLoading: false,
+            lastSuppliersFetch: now
+          })
+          
+          console.log(`Loaded ${suppliers.length} suppliers`)
+        } catch (error) {
+          console.log('Failed to fetch suppliers:', error)
+          set({ suppliersLoading: false })
+          throw error
+        }
+      },
+
       // Clear all cached data
       clearStore: () => {
         set({
           products: [],
           categories: [],
           customers: [],
+          branches: [],
+          suppliers: [],
           lastProductsFetch: null,
           lastCategoriesFetch: null,
           lastCustomersFetch: null,
+          lastBranchesFetch: null,
+          lastSuppliersFetch: null,
         })
       },
     }),
@@ -357,10 +458,14 @@ export const useStore = create<StoreState>()(
         products: state.products,
         categories: state.categories,
         customers: state.customers,
+        branches: state.branches,
+        suppliers: state.suppliers,
         lastProductsFetch: state.lastProductsFetch,
         lastCategoriesFetch: state.lastCategoriesFetch,
         lastCustomersFetch: state.lastCustomersFetch,
+        lastBranchesFetch: state.lastBranchesFetch,
+        lastSuppliersFetch: state.lastSuppliersFetch,
       }),
     }
   )
-) 
+)

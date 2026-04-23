@@ -4,9 +4,13 @@ export const createAdjustmentSchema = z.object({
   body: z.object({
     productId: z.string().min(1, 'Product is required'),
     branchId: z.string().min(1, 'Branch is required'),
-    systemQuantity: z.number().min(0, 'System quantity must be >= 0'),
-    physicalCount: z.number().min(0, 'Physical count must be >= 0'),
+    systemQuantity: z.number(),
+    adjustmentType: z.enum(['ADDITION', 'SUBTRACTION', 'RECONCILIATION']),
+    adjustmentCategory: z.enum(['CORRECTION', 'DAMAGE', 'EXPIRED', 'THEFT', 'RETURN_TO_SUPPLIER', 'ADMINISTRATIVE']),
+    physicalCount: z.number().optional(),
+    changeQuantity: z.number().optional(),
     reason: z.string().optional(),
+    referenceNo: z.string().optional(),
   }),
 });
 

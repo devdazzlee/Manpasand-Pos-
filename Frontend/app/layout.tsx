@@ -4,6 +4,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { DataProvider } from "@/components/data-provider"
 import { PWABanner } from "@/components/pwa-banner"
+import { Toaster as ToasterOutlet } from "@/components/ui/sonner"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -46,6 +47,7 @@ export default function RootLayout({
       <body className={inter.className}>
         <DataProvider>
           {children}
+          <ToasterOutlet position="bottom-right" richColors />
         </DataProvider>
         <PWABanner />
         {/* Unregister stale service workers in development to prevent timeout issues */}

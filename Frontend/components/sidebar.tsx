@@ -207,6 +207,12 @@ const menuSections: SidebarMenuSection[] = [
         roles: INVENTORY_ROLES,
       },
       {
+        id: "inventory-audit",
+        label: "Inventory Financial Audit",
+        icon: Shield,
+        roles: INVENTORY_ROLES,
+      },
+      {
         id: "categories",
         label: "Categories",
         icon: Grid3X3,

@@ -6,8 +6,30 @@ const apiError_1 = require("../utils/apiError");
 const helpers_1 = require("../utils/helpers");
 class StockAdjustmentService {
     async createAdjustment(data) {
-        const difference = data.physicalCount - data.systemQuantity;
-        if (difference === 0) {
+        let difference = 0;
+        let newQty = data.systemQuantity;
+        if (data.adjustmentType === 'RECONCILIATION') {
+            if (data.physicalCount === undefined)
+                throw new apiError_1.AppError(400, 'Physical count is required for reconciliation');
+            const physicalCount = data.physicalCount;
+            newQty = physicalCount;
+            difference = physicalCount - data.systemQuantity;
+        }
+        else if (data.adjustmentType === 'ADDITION') {
+            if (data.changeQuantity === undefined)
+                throw new apiError_1.AppError(400, 'Change quantity is required for addition');
+            const changeQuantity = data.changeQuantity;
+            difference = changeQuantity;
+            newQty = data.systemQuantity + difference;
+        }
+        else if (data.adjustmentType === 'SUBTRACTION') {
+            if (data.changeQuantity === undefined)
+                throw new apiError_1.AppError(400, 'Change quantity is required for subtraction');
+            const changeQuantity = data.changeQuantity;
+            difference = -Math.abs(changeQuantity);
+            newQty = data.systemQuantity + difference;
+        }
+        if (difference === 0 && data.adjustmentType === 'RECONCILIATION') {
             throw new apiError_1.AppError(400, 'No difference between system and physical count');
         }
         return client_1.prisma.$transaction(async (tx) => {
@@ -19,7 +41,6 @@ class StockAdjustmentService {
                     },
                 },
             });
-            const newQty = data.physicalCount;
             const previousQty = stock ? (0, helpers_1.asNumber)(stock.current_quantity) : 0;
             if (stock) {
                 await tx.stock.update({
@@ -33,8 +54,8 @@ class StockAdjustmentService {
                 });
             }
             else {
-                if (newQty <= 0) {
-                    throw new apiError_1.AppError(400, 'Cannot adjust to zero or negative when no stock exists');
+                if (newQty < 0) {
+                    throw new apiError_1.AppError(400, 'Resulting stock cannot be negative');
                 }
                 await tx.stock.create({
                     data: {
@@ -53,7 +74,7 @@ class StockAdjustmentService {
                     quantity_change: difference,
                     previous_qty: previousQty,
                     new_qty: newQty,
-                    notes: data.reason || `Physical count reconciliation. System: ${data.systemQuantity}, Physical: ${data.physicalCount}`,
+                    notes: data.reason || `${data.adjustmentType} - ${data.adjustmentCategory}. Ref: ${data.referenceNo || 'N/A'}`,
                     created_by: data.adjustedBy,
                 },
             });
@@ -63,8 +84,12 @@ class StockAdjustmentService {
                     branch_id: data.branchId,
                     system_quantity: data.systemQuantity,
                     physical_count: data.physicalCount,
+                    change_quantity: data.changeQuantity,
                     difference,
+                    adjustment_type: data.adjustmentType,
+                    adjustment_category: data.adjustmentCategory,
                     reason: data.reason,
+                    reference_no: data.referenceNo,
                     adjusted_by: data.adjustedBy,
                 },
                 include: {

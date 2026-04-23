@@ -203,32 +203,30 @@ class StockService {
             return { newQty };
         });
     }
-    async getStockByBranch(branchId, page = 1, limit = 20, search, userRole) {
+    async getStockByBranch(branchId, page = 1, limit = 20, search, userRole, categoryId) {
         const skip = (page - 1) * limit;
         const where = {};
         // Only filter by branch if branchId is provided AND user is not admin
         if (branchId && branchId.trim() !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
             where.branch_id = branchId;
         }
-        if (search && search.trim() !== "") {
-            where.product = {
-                OR: [
-                    {
-                        name: {
-                            contains: search,
-                            mode: 'insensitive'
-                        }
-                    },
-                    {
-                        sku: {
-                            contains: search,
-                            mode: 'insensitive'
-                        }
-                    }
-                ]
-            };
+        else if (branchId && branchId.trim() !== "") {
+            // Admin can still filter by specific branch if they choose
+            where.branch_id = branchId;
         }
-        const [stocks, total] = await Promise.all([
+        if (search && search.trim() !== "" || categoryId) {
+            where.product = {};
+            if (search && search.trim() !== "") {
+                where.product.OR = [
+                    { name: { contains: search, mode: 'insensitive' } },
+                    { sku: { contains: search, mode: 'insensitive' } }
+                ];
+            }
+            if (categoryId && categoryId !== 'all') {
+                where.product.category_id = categoryId;
+            }
+        }
+        const [stocks, total, stats, lowStockCount] = await Promise.all([
             client_1.prisma.stock.findMany({
                 where,
                 include: { product: true, branch: true },
@@ -236,16 +234,20 @@ class StockService {
                 skip,
                 take: limit,
             }),
-            client_1.prisma.stock.count({ where })
+            client_1.prisma.stock.count({ where }),
+            client_1.prisma.stock.aggregate({
+                where,
+                _sum: {
+                    current_quantity: true
+                }
+            }),
+            client_1.prisma.stock.count({
+                where: {
+                    ...where,
+                    current_quantity: { lte: 10 }
+                }
+            })
         ]);
-        console.log('🔍 Stock Service Result:', {
-            requestedLimit: limit,
-            actualReturned: stocks.length,
-            totalInDatabase: total,
-            branchId,
-            userRole,
-            page
-        });
         return {
             data: stocks,
             meta: {
@@ -253,6 +255,8 @@ class StockService {
                 page,
                 limit,
                 totalPages: Math.ceil(total / limit),
+                totalQuantity: Number(stats._sum.current_quantity || 0),
+                lowStockCount
             },
         };
     }

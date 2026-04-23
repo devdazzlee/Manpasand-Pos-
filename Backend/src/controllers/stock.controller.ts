@@ -28,9 +28,10 @@ const getStocksController = asyncHandler(async (req: Request, res: Response) => 
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 20;
     const search = req.query.search as string | undefined;
+    const categoryId = req.query.categoryId as string | undefined;
     const userRole = req.user?.role as string | undefined;
     
-    const result = await stockService.getStockByBranch(branchId || "", page, limit, search, userRole);
+    const result = await stockService.getStockByBranch(branchId || "", page, limit, search, userRole, categoryId);
     new ApiResponse(result.data, "Stocks retrieved successfully", 200, true, result.meta).send(res);
 });
 

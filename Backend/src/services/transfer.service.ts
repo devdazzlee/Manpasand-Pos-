@@ -16,6 +16,11 @@ export class TransferService {
     toBranchId: string;
     notes?: string;
     createdBy: string;
+    reason?: string;
+    carrierName?: string;
+    vehicleNo?: string;
+    estimatedArrival?: string | Date;
+    receiverName?: string;
   }) {
     if (data.fromBranchId === data.toBranchId) {
       throw new AppError(400, 'Cannot transfer to the same location');
@@ -52,6 +57,11 @@ export class TransferService {
           to_branch_id: data.toBranchId,
           status: 'PENDING',
           reference_no: referenceNo,
+          reason: data.reason || 'Stock Replenishment',
+          carrier_name: data.carrierName,
+          vehicle_no: data.vehicleNo,
+          estimated_arrival: data.estimatedArrival,
+          receiver_name: data.receiverName,
           notes: data.notes,
           created_by: data.createdBy,
         },

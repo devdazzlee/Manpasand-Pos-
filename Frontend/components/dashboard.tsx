@@ -41,6 +41,7 @@ import {
   StockAdjustment,
   StockView,
   InventoryReports,
+  InventoryAudit,
 } from "./inventory/index";
 import { Sales } from "./sales";
 import Orders from "./orders";
@@ -124,7 +125,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       case "stock-management":
         return <StockManagement />;
       case "inventory-dashboard":
-        return <InventoryDashboard />;
+        return <InventoryDashboard onNavigate={setActiveTab} />;
       case "purchases":
         return <Purchases />;
       case "transfers":
@@ -139,6 +140,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <StockView />;
       case "inventory-reports":
         return <InventoryReports />;
+      case "inventory-audit":
+        return <InventoryAudit />;
       case "designation":
         return <Designation />;
       case "employees":

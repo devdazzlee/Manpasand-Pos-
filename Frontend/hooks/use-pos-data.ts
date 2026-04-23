@@ -1,49 +1,85 @@
 import { useStore } from '@/lib/store'
-import { useToast } from '@/hooks/use-toast'
+import { toast } from 'sonner'
+import { useCallback, useMemo } from 'react'
 
 export function usePosData() {
-  const store = useStore()
-  const { toast } = useToast()
+  // 1. Atomic selectors for Data
+  const products = useStore(state => state.products)
+  const categories = useStore(state => state.categories)
+  const customers = useStore(state => state.customers)
+  const branches = useStore(state => state.branches)
+  const suppliers = useStore(state => state.suppliers)
+  
+  // 2. Atomic selectors for Loading States
+  const productsLoading = useStore(state => state.productsLoading)
+  const categoriesLoading = useStore(state => state.categoriesLoading)
+  const customersLoading = useStore(state => state.customersLoading)
+  const branchesLoading = useStore(state => state.branchesLoading)
+  const suppliersLoading = useStore(state => state.suppliersLoading)
 
-  const refreshAllData = async () => {
+  // 3. Static Action References
+  const fetchProductsAction = useStore(state => state.fetchProducts)
+  const fetchCategoriesAction = useStore(state => state.fetchCategories)
+  const fetchCustomersAction = useStore(state => state.fetchCustomers)
+  const fetchBranchesAction = useStore(state => state.fetchBranches)
+  const fetchSuppliersAction = useStore(state => state.fetchSuppliers)
+  const clearStoreAction = useStore(state => state.clearStore)
+
+  const isAnyLoading = productsLoading || categoriesLoading || customersLoading || branchesLoading || suppliersLoading
+
+  // 4. Stable Wrapper for Refresh All
+  const refreshAllData = useCallback(async () => {
     try {
       await Promise.all([
-        store.fetchProducts({ force: true }),
-        store.fetchCategories(true),
-        store.fetchCustomers(true)
+        fetchProductsAction({ force: true }),
+        fetchCategoriesAction(true),
+        fetchCustomersAction(true),
+        fetchBranchesAction(true),
+        fetchSuppliersAction(true)
       ])
-      toast({
-        title: "Data Refreshed",
-        description: "All data has been updated successfully",
+      toast.success("Data Refreshed", {
+        description: "All enterprise telemetry has been updated.",
       })
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Refresh Failed",
-        description: "Failed to refresh data",
+      toast.error("Refresh Failed", {
+        description: "Communication error with neural nodes.",
       })
     }
-  }
+  }, [fetchProductsAction, fetchCategoriesAction, fetchCustomersAction, fetchBranchesAction, fetchSuppliersAction])
 
-  const isAnyLoading = store.productsLoading || store.categoriesLoading || store.customersLoading
+  // 5. Stable Wrapper for fetchProducts with options support
+  const fetchProducts = useCallback((options?: { force?: boolean; search?: string; categoryId?: string }) => 
+    fetchProductsAction(options), [fetchProductsAction])
 
-  return {
+  // 6. Memoize final output
+  return useMemo(() => ({
     // Data
-    products: store.products,
-    categories: store.categories,
-    customers: store.customers,
+    products,
+    categories,
+    customers,
+    branches,
+    suppliers,
     
     // Loading states
-    productsLoading: store.productsLoading,
-    categoriesLoading: store.categoriesLoading,
-    customersLoading: store.customersLoading,
+    productsLoading,
+    categoriesLoading,
+    customersLoading,
+    branchesLoading,
+    suppliersLoading,
     isAnyLoading,
     
     // Actions
     refreshAllData,
-    fetchProducts: (options?: { force?: boolean; search?: string; categoryId?: string }) => store.fetchProducts(options),
-    fetchCategories: store.fetchCategories,
-    fetchCustomers: store.fetchCustomers,
-    clearStore: store.clearStore,
-  }
-} 
+    fetchProducts,
+    fetchCategories: fetchCategoriesAction,
+    fetchCustomers: fetchCustomersAction,
+    fetchBranches: fetchBranchesAction,
+    fetchSuppliers: fetchSuppliersAction,
+    clearStore: clearStoreAction,
+  }), [
+    products, categories, customers, branches, suppliers,
+    productsLoading, categoriesLoading, customersLoading, branchesLoading, suppliersLoading,
+    isAnyLoading, refreshAllData, fetchProducts, 
+    fetchCategoriesAction, fetchCustomersAction, fetchBranchesAction, fetchSuppliersAction, clearStoreAction
+  ])
+}

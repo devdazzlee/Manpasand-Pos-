@@ -29,8 +29,9 @@ const getStocksController = (0, asyncHandler_1.default)(async (req, res) => {
     const page = Number(req.query.page) || 1;
     const limit = Number(req.query.limit) || 20;
     const search = req.query.search;
+    const categoryId = req.query.categoryId;
     const userRole = req.user?.role;
-    const result = await stockService.getStockByBranch(branchId || "", page, limit, search, userRole);
+    const result = await stockService.getStockByBranch(branchId || "", page, limit, search, userRole, categoryId);
     new apiResponse_1.ApiResponse(result.data, "Stocks retrieved successfully", 200, true, result.meta).send(res);
 });
 exports.getStocksController = getStocksController;

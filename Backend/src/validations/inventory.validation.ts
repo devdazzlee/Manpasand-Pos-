@@ -14,11 +14,12 @@ export const listMovementsSchema = z.object({
 
 export const reportsSchema = z.object({
   query: z.object({
-    type: z.enum(['valuation', 'purchase', 'transfer', 'stockout', 'lowstock']),
+    type: z.enum(['valuation', 'purchase', 'transfer', 'stockout', 'lowstock', 'aging', 'movement_summary', 'financial_audit']),
     branchId: z.string().optional(),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
     supplierId: z.string().optional(),
     productId: z.string().optional(),
+    categoryId: z.string().optional(),
   }),
 });

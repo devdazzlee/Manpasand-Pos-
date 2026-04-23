@@ -252,7 +252,7 @@ class StockService {
         });
     }
 
-    async getStockByBranch(branchId: string, page: number = 1, limit: number = 20, search?: string, userRole?: string) {
+    async getStockByBranch(branchId: string, page: number = 1, limit: number = 20, search?: string, userRole?: string, categoryId?: string) {
         const skip = (page - 1) * limit;
         
         const where: any = {};
@@ -260,28 +260,27 @@ class StockService {
         // Only filter by branch if branchId is provided AND user is not admin
         if (branchId && branchId.trim() !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
             where.branch_id = branchId;
+        } else if (branchId && branchId.trim() !== "") {
+            // Admin can still filter by specific branch if they choose
+             where.branch_id = branchId;
         }
         
-        if (search && search.trim() !== "") {
-            where.product = {
-                OR: [
-                    {
-                        name: {
-                            contains: search,
-                            mode: 'insensitive' as any
-                        }
-                    },
-                    {
-                        sku: {
-                            contains: search,
-                            mode: 'insensitive' as any
-                        }
-                    }
-                ]
-            };
+        if (search && search.trim() !== "" || categoryId) {
+            where.product = {};
+            
+            if (search && search.trim() !== "") {
+                where.product.OR = [
+                    { name: { contains: search, mode: 'insensitive' as any } },
+                    { sku: { contains: search, mode: 'insensitive' as any } }
+                ];
+            }
+            
+            if (categoryId && categoryId !== 'all') {
+                where.product.category_id = categoryId;
+            }
         }
         
-        const [stocks, total] = await Promise.all([
+        const [stocks, total, stats, lowStockCount] = await Promise.all([
             prisma.stock.findMany({
                 where,
                 include: { product: true, branch: true },
@@ -289,17 +288,20 @@ class StockService {
                 skip,
                 take: limit,
             }),
-            prisma.stock.count({ where })
+            prisma.stock.count({ where }),
+            prisma.stock.aggregate({
+                where,
+                _sum: {
+                    current_quantity: true
+                }
+            }),
+            prisma.stock.count({
+                where: {
+                    ...where,
+                    current_quantity: { lte: 10 }
+                }
+            })
         ]);
-        
-        console.log('🔍 Stock Service Result:', {
-            requestedLimit: limit,
-            actualReturned: stocks.length,
-            totalInDatabase: total,
-            branchId,
-            userRole,
-            page
-        });
         
         return {
             data: stocks,
@@ -308,6 +310,8 @@ class StockService {
                 page,
                 limit,
                 totalPages: Math.ceil(total / limit),
+                totalQuantity: Number(stats._sum.current_quantity || 0),
+                lowStockCount
             },
         };
     }

@@ -15,12 +15,13 @@ exports.listMovementsSchema = zod_1.z.object({
 });
 exports.reportsSchema = zod_1.z.object({
     query: zod_1.z.object({
-        type: zod_1.z.enum(['valuation', 'purchase', 'transfer', 'stockout', 'lowstock']),
+        type: zod_1.z.enum(['valuation', 'purchase', 'transfer', 'stockout', 'lowstock', 'aging', 'movement_summary', 'financial_audit']),
         branchId: zod_1.z.string().optional(),
         startDate: zod_1.z.string().optional(),
         endDate: zod_1.z.string().optional(),
         supplierId: zod_1.z.string().optional(),
         productId: zod_1.z.string().optional(),
+        categoryId: zod_1.z.string().optional(),
     }),
 });
 //# sourceMappingURL=inventory.validation.js.map
