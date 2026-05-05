@@ -1,7 +1,7 @@
 import nodemailer from 'nodemailer';
 import { EMAIL_USER, EMAIL_PASS, EMAIL_HOST, EMAIL_PORT } from '../config/env';
 
-const ADMIN_EMAIL = 'muhammadkonain8@gmail.com';
+const ADMIN_EMAIL = 'order@manpasandstore.com';
 
 // Create reusable transporter
 const transporter = nodemailer.createTransport({

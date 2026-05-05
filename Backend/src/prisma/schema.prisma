@@ -670,6 +670,13 @@ model Order {
   branch         Branch?        @relation(fields: [branch_id], references: [id])
   customer_id    String?
   customer       Customer?      @relation(fields: [customer_id], references: [id])
+  customer_name  String?
+  customer_email String?
+  customer_phone String?
+  delivery_address String?
+  delivery_city  String?
+  delivery_postal_code String?
+  order_notes    String?
   order_number   String         @unique
   items          OrderItem[]
   total_amount   Decimal

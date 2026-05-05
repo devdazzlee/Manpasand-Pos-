@@ -35,6 +35,13 @@ interface WebsiteOrder {
   created_at: string; 
   items: OrderItem[];
   payment_method: string;
+  customer_name?: string;
+  customer_email?: string;
+  customer_phone?: string;
+  delivery_address?: string;
+  delivery_city?: string;
+  delivery_postal_code?: string;
+  order_notes?: string;
 }
 
 const ORDER_STATUS_OPTIONS = ["PENDING", "PROCESSING", "COMPLETED", "CANCELLED"] as const;
@@ -109,6 +116,18 @@ const WebsiteOrders: React.FC = () => {
       status: raw?.status || fallback?.status || "PENDING",
       created_at: raw?.created_at || fallback?.created_at || new Date().toISOString(),
       payment_method: raw?.payment_method || fallback?.payment_method || "CASH",
+      customer_name:
+        raw?.customer_name ||
+        (raw?.customer ? `${raw.customer.firstName || ""} ${raw.customer.lastName || ""}`.trim() : "") ||
+        fallback?.customer_name ||
+        "",
+      customer_email: raw?.customer_email || raw?.customer?.email || fallback?.customer_email || "",
+      customer_phone: raw?.customer_phone || raw?.customer?.phone || fallback?.customer_phone || "",
+      delivery_address: raw?.delivery_address || raw?.shipping?.address || fallback?.delivery_address || "",
+      delivery_city: raw?.delivery_city || raw?.shipping?.city || fallback?.delivery_city || "",
+      delivery_postal_code:
+        raw?.delivery_postal_code || raw?.shipping?.postalCode || fallback?.delivery_postal_code || "",
+      order_notes: raw?.order_notes || raw?.orderNotes || fallback?.order_notes || "",
       items: normalizedItems.length > 0 ? normalizedItems : fallbackItems,
     };
   };
@@ -342,7 +361,8 @@ const WebsiteOrders: React.FC = () => {
       params.pageSize = '100'; // Get more orders for website orders
       
       const res = await apiClient.get(`${API_BASE}/guest/order`, { params });
-      setOrders(res.data.data.data || []);
+      const rawOrders = res.data?.data?.data || [];
+      setOrders(rawOrders.map((order: any) => normalizeOrder(order)));
     } catch (err: any) {
       console.log("Website orders load failed", err);
       
@@ -885,6 +905,44 @@ const WebsiteOrders: React.FC = () => {
                     <div className="md:col-span-2">
                       <Label className="text-sm font-medium text-gray-500">Total Amount</Label>
                       <p className="text-2xl font-bold text-green-600 mt-1">Rs. {(Number(selectedOrder.total_amount) || 0).toFixed(2)}</p>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-lg">Delivery Details</CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div>
+                      <Label className="text-sm font-medium text-gray-500">Customer Name</Label>
+                      <p className="text-base mt-1">{selectedOrder.customer_name || "N/A"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-gray-500">Phone</Label>
+                      <p className="text-base mt-1">{selectedOrder.customer_phone || "N/A"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-gray-500">Email</Label>
+                      <p className="text-base mt-1">{selectedOrder.customer_email || "N/A"}</p>
+                    </div>
+                    <div>
+                      <Label className="text-sm font-medium text-gray-500">Postal Code</Label>
+                      <p className="text-base mt-1">{selectedOrder.delivery_postal_code || "N/A"}</p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label className="text-sm font-medium text-gray-500">Delivery Address</Label>
+                      <p className="text-base mt-1">
+                        {selectedOrder.delivery_address
+                          ? `${selectedOrder.delivery_address}${selectedOrder.delivery_city ? `, ${selectedOrder.delivery_city}` : ""}`
+                          : "N/A"}
+                      </p>
+                    </div>
+                    <div className="md:col-span-2">
+                      <Label className="text-sm font-medium text-gray-500">Order Notes</Label>
+                      <p className="text-base mt-1">{selectedOrder.order_notes || "N/A"}</p>
                     </div>
                   </div>
                 </CardContent>

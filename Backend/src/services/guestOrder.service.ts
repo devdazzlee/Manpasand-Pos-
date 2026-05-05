@@ -31,6 +31,27 @@ interface GuestOrderData {
 }
 
 class GuestOrderService {
+  private formatGuestOrder(order: any) {
+    const fullName = order.customer_name || '';
+    const [firstName, ...lastNameParts] = fullName.trim().split(' ').filter(Boolean);
+
+    return {
+      ...order,
+      customer: {
+        firstName: firstName || '',
+        lastName: lastNameParts.join(' ') || '',
+        email: order.customer_email || '',
+        phone: order.customer_phone || '',
+      },
+      shipping: {
+        address: order.delivery_address || '',
+        city: order.delivery_city || '',
+        postalCode: order.delivery_postal_code || '',
+      },
+      orderNotes: order.order_notes || '',
+    };
+  }
+
   async createGuestOrder(data: GuestOrderData) {
     return prisma.$transaction(async (tx) => {
       const productIds = data.items
@@ -132,6 +153,13 @@ class GuestOrderService {
         data: {
           order_number: orderNumber,
           customer_id: null, // Guest order - no customer
+          customer_name: `${data.customer.firstName} ${data.customer.lastName}`.trim(),
+          customer_email: data.customer.email,
+          customer_phone: data.customer.phone,
+          delivery_address: data.shipping.address,
+          delivery_city: data.shipping.city,
+          delivery_postal_code: data.shipping.postalCode,
+          order_notes: data.orderNotes,
           total_amount: totalAmount,
           status: 'PENDING',
           payment_method: data.paymentMethod.toUpperCase() as any,
@@ -171,7 +199,7 @@ class GuestOrderService {
         console.error('Failed to send order confirmation emails:', err);
       });
 
-      return order;
+      return this.formatGuestOrder(order);
     }, {
       maxWait: 10000,
       timeout: 15000,
@@ -205,7 +233,7 @@ class GuestOrderService {
     ]);
 
     return {
-      data: orders,
+      data: orders.map((order) => this.formatGuestOrder(order)),
       total,
       page,
       pageSize,
@@ -232,7 +260,7 @@ class GuestOrderService {
       throw new AppError(404, 'Guest order not found');
     }
 
-    return order;
+    return this.formatGuestOrder(order);
   }
 }
 
