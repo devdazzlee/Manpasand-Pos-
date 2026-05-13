@@ -22,7 +22,7 @@ const EXPORT_COLUMNS = [
   { key: "product_code", label: "Product Code" },
   { key: "product_name", label: "Product Name" },
   { key: "sku", label: "SKU" },
-  { key: "barcode", label: "Barcode (Real SKU only)" },
+  { key: "barcode", label: "Barcode (9-digit SKU)" },
   { key: "description", label: "Description" },
   { key: "hs_code", label: "PCT / HS Code" },
   { key: "purchase_rate", label: "Purchase Rate" },

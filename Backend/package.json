@@ -14,6 +14,7 @@
     "prisma:push": "prisma db push --schema=src/prisma/schema.prisma",
     "prisma:reset": "prisma migrate reset --force --schema=src/prisma/schema.prisma",
     "prisma:validate": "prisma validate --schema=src/prisma/schema.prisma",
+    "migrate:skus-nine-digit": "ts-node scripts/migrate-product-skus-to-nine-digit.ts",
     "seed:users": "ts-node seeders/seed-users.ts",
     "seed:customers": "ts-node seeders/seed-customers.ts",
     "seed:dried-fruits-nuts": "ts-node seeders/seed-dried-fruits-nuts.ts",

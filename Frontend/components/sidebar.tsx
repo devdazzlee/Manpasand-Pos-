@@ -27,7 +27,6 @@ import {
   CreditCard,
   Clock,
   Shield,
-  ListOrdered,
   StoreIcon,
   Barcode,
   X,
@@ -35,6 +34,8 @@ import {
   Globe,
   Printer as PrinterIcon,
   Download,
+  LineChart,
+  Tags,
   type LucideIcon,
 } from "lucide-react";
 
@@ -110,7 +111,7 @@ const menuSections: SidebarMenuSection[] = [
   },
   {
     id: "sales",
-    label: "Sales & Transactions",
+    label: "Sales & Checkout",
     expandable: true,
     items: [
       { id: "new-sale", label: "Sales", icon: ShoppingCart, roles: SALES_ROLES },
@@ -119,13 +120,6 @@ const menuSections: SidebarMenuSection[] = [
         label: "Sales History",
         icon: History,
         roles: SALES_ROLES,
-      },
-      { id: "orders", label: "Orders", icon: ListOrdered, roles: ADMIN_ROLES },
-      {
-        id: "website-orders",
-        label: "Website Orders",
-        icon: Globe,
-        roles: STAFF_ROLES,
       },
       {
         id: "returns",
@@ -142,8 +136,21 @@ const menuSections: SidebarMenuSection[] = [
     ],
   },
   {
-    id: "inventory",
-    label: "Inventory Management",
+    id: "website-orders",
+    label: "Website Orders",
+    expandable: true,
+    items: [
+      {
+        id: "website-orders",
+        label: "Website Orders",
+        icon: Globe,
+        roles: STAFF_ROLES,
+      },
+    ],
+  },
+  {
+    id: "inv-overview",
+    label: "Inventory Overview",
     expandable: true,
     items: [
       {
@@ -158,6 +165,13 @@ const menuSections: SidebarMenuSection[] = [
         icon: Package,
         roles: INVENTORY_ROLES,
       },
+    ],
+  },
+  {
+    id: "inv-stock",
+    label: "Stock & Movements",
+    expandable: true,
+    items: [
       {
         id: "stock-management",
         label: "Stock Management",
@@ -167,13 +181,13 @@ const menuSections: SidebarMenuSection[] = [
       {
         id: "stock-view",
         label: "Stock by Location",
-        icon: Warehouse,
+        icon: Grid3X3,
         roles: INVENTORY_ROLES,
       },
       {
         id: "purchases",
         label: "Stock In (Purchases)",
-        icon: Package,
+        icon: Truck,
         roles: PURCHASE_ROLES,
       },
       {
@@ -200,10 +214,17 @@ const menuSections: SidebarMenuSection[] = [
         icon: History,
         roles: INVENTORY_ROLES,
       },
+    ],
+  },
+  {
+    id: "inv-insights",
+    label: "Inventory Reports & Audit",
+    expandable: true,
+    items: [
       {
         id: "inventory-reports",
         label: "Inventory Reports",
-        icon: BarChart3,
+        icon: LineChart,
         roles: INVENTORY_ROLES,
       },
       {
@@ -212,6 +233,13 @@ const menuSections: SidebarMenuSection[] = [
         icon: Shield,
         roles: INVENTORY_ROLES,
       },
+    ],
+  },
+  {
+    id: "inv-master",
+    label: "Catalog & Master Data",
+    expandable: true,
+    items: [
       {
         id: "categories",
         label: "Categories",
@@ -221,13 +249,13 @@ const menuSections: SidebarMenuSection[] = [
       {
         id: "sub-categories",
         label: "Sub-Categories",
-        icon: Grid3X3,
+        icon: Tags,
         roles: ADMIN_ROLES,
       },
       {
         id: "branches",
         label: "Branches",
-        icon: Grid3X3,
+        icon: Store,
         roles: BRANCH_DATA_ROLES,
       },
       { id: "units", label: "Units", icon: Package, roles: ADMIN_ROLES },
@@ -243,11 +271,18 @@ const menuSections: SidebarMenuSection[] = [
     ],
   },
   {
-    id: "people",
-    label: "Customer & Staff",
+    id: "customers",
+    label: "Customers",
     expandable: true,
     items: [
       { id: "customers", label: "Customers", icon: Users, roles: SALES_ROLES },
+    ],
+  },
+  {
+    id: "staff",
+    label: "Staff & HR",
+    expandable: true,
+    items: [
       { id: "employees", label: "Employees", icon: UserCheck, roles: ADMIN_ROLES },
       { id: "shifts", label: "Shift Management", icon: Clock, roles: ADMIN_ROLES },
       { id: "salaries", label: "Salaries", icon: CreditCard, roles: ADMIN_ROLES },
@@ -317,8 +352,13 @@ export function Sidebar({
 }: SidebarProps) {
   const [expandedSections, setExpandedSections] = useState<string[]>([
     "sales",
-    "inventory",
-    "people",
+    "website-orders",
+    "inv-overview",
+    "inv-stock",
+    "inv-insights",
+    "inv-master",
+    "customers",
+    "staff",
     "system",
   ]);
   const [role, setRole] = useState<UserRole | null>(null);

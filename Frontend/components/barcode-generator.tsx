@@ -28,8 +28,8 @@ import { usePosData } from "@/hooks/use-pos-data";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/apiClient";
 import { isKioskMode, silentPrint, enableKioskMode } from "@/utils/kiosk-printing";
-import { printBarcodeLabelsViaServer } from "@/lib/print-server";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
+import { encodeLabelBarcodeValue } from "@/lib/labelBarcode";
 
 interface Product {
   id: string;
@@ -651,11 +651,12 @@ export default function BarcodeGenerator() {
       
       y += labelFontSize * 1.5 + mmToPt(0.3); // Less spacing - barcode will be positioned at bottom
       
-      // Barcode - MUCH LARGER to use bottom space and better scanning
-      // Sanitize SKU/code to remove special characters that might cause scanning issues
-      const rawCode = sp.product.sku || sp.product.code || 'PROD';
-      const sanitizedCode = rawCode.replace(/[^A-Za-z0-9]/g, ''); // Remove all non-alphanumeric characters
-      const barcodeValue = `${sanitizedCode}-${price}`;
+      // Barcode: 9-digit numeric SKU only; legacy products use SANITIZED-PRICE until SKU is migrated
+      const barcodeValue = encodeLabelBarcodeValue(
+        sp.product.sku,
+        sp.product.code,
+        price
+      );
       
       try {
         // Generate barcode - LARGER width and height, VERY DARK, with LARGER number
@@ -855,12 +856,9 @@ export default function BarcodeGenerator() {
         </head>
         <body>
           ${selectedProducts.map((sp) => {
-            // Sanitize SKU/code to remove special characters
-            const rawCode = sp.product.sku || sp.product.code || 'PROD';
-            const sanitizedCode = rawCode.replace(/[^A-Za-z0-9]/g, ''); // Remove all non-alphanumeric characters
-            const barcodeValue = `${sanitizedCode}-${Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)))}`;
-            const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
             const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
+            const barcodeValue = encodeLabelBarcodeValue(sp.product.sku, sp.product.code, price);
+            const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
             
             return `
               <div class="label">
@@ -954,9 +952,9 @@ export default function BarcodeGenerator() {
       </head>
       <body>
         ${selectedProducts.map((sp) => {
-          const barcodeValue = `${sp.product.sku || sp.product.code || 'PROD'}-${Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)))}`;
-          const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
           const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
+          const barcodeValue = encodeLabelBarcodeValue(sp.product.sku, sp.product.code, price);
+          const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
           
           return `
             <div class="label">
@@ -1337,16 +1335,18 @@ export default function BarcodeGenerator() {
                         <div className="flex justify-center bg-white p-2 rounded">
                           <img
                             src={generateBarcodeDataURL(
-                              `${
-                                item.product.sku || item.product.code || "PROD"
-                              }-${Math.round(
-                                Number(
-                                  calculatePriceByWeight(
-                                    item.netWeight,
-                                    item.product.sales_rate_exc_dis_and_tax
+                              encodeLabelBarcodeValue(
+                                item.product.sku,
+                                item.product.code,
+                                Math.round(
+                                  Number(
+                                    calculatePriceByWeight(
+                                      item.netWeight,
+                                      item.product.sales_rate_exc_dis_and_tax
+                                    )
                                   )
                                 )
-                              )}`
+                              )
                             )}
                             alt="Barcode Preview"
                             className="max-w-full h-10 object-contain"

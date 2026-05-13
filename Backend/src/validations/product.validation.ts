@@ -9,7 +9,17 @@ const productBaseSchema = z.object({
     sales_rate_inc_dis_and_tax: z.number().min(0, 'Sales rate must be positive'),
     description: z.string().optional(),
     pct_or_hs_code: z.string().optional(),
-    sku: z.string().optional(),
+    sku: z
+        .string()
+        .optional()
+        .refine(
+            (val) =>
+                val === undefined ||
+                val === null ||
+                String(val).trim() === '' ||
+                /^\d{9}$/.test(String(val).trim()),
+            { message: 'SKU must be exactly 9 digits (numbers only), or omit to auto-generate' }
+        ),
     discount_amount: z.number().min(0).optional(),
     tax_id: z.string().optional(),
     subcategory_id: z.string().optional(),

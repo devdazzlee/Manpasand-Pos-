@@ -5,6 +5,7 @@ import path from 'path';
 import PDFDocument from 'pdfkit';
 import { print } from 'pdf-to-printer';
 import * as bwipjs from 'bwip-js';
+import { encodeLabelBarcodeValue } from '../utils/numericBarcodeSku';
 
 type PaperSize = '3x2inch' | '50x30mm' | '60x40mm';
 type Dpi = 203 | 300;
@@ -12,7 +13,11 @@ type Dpi = 203 | 300;
 export interface LabelItem {
   id: string;
   name: string;
+  /** Encoded payload for Code128 (legacy callers may send this alone). */
   barcode: string;
+  /** When set with optional `code` / `price`, barcode image uses same rules as POS labels (9-digit SKU). */
+  sku?: string;
+  code?: string;
   netWeight?: string;
   price?: number;
   packageDateISO?: string;
@@ -136,11 +141,19 @@ export async function printBarcodeLabels(input: PrintLabelsInput) {
 
       // ---- BARCODE ----
       try {
+        const priceInt = Math.round(Number(it.price ?? 0));
+        const hasSkuOrCode =
+          (it.sku !== undefined && it.sku !== null && String(it.sku).trim() !== '') ||
+          (it.code !== undefined && it.code !== null && String(it.code).trim() !== '');
+        const barcodeText = hasSkuOrCode
+          ? encodeLabelBarcodeValue(it.sku, it.code, priceInt)
+          : String(it.barcode);
+
         const png: Buffer = await new Promise((res, rej) => {
           bwipjs.toBuffer(
             { 
               bcid: 'code128', 
-              text: String(it.barcode), 
+              text: barcodeText, 
               scale: SCALE, 
               height: BAR_H_MM, 
               includetext: human, 

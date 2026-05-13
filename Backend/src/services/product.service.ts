@@ -7,6 +7,7 @@ import { startOfMonth } from 'date-fns';
 import { imageService } from './common/cloudinaryService';
 import { randomUUID } from 'crypto';
 import { asNumber } from '../utils/helpers';
+import { generateUniqueNumericSku, isNineDigitNumericSku } from '../utils/numericBarcodeSku';
 
 
 type RelationField =
@@ -275,25 +276,26 @@ export class ProductService {
         }
     }
 
-    private async generateSKU(productName: string): Promise<string> {
-        // Generate a simple SKU based on product name and timestamp
-        const timestamp = Date.now().toString().slice(-6);
-        const namePrefix = productName.substring(0, 3).toUpperCase().replace(/\s/g, '');
-        const sku = `${namePrefix}${timestamp}`;
-        
-        // Check if SKU already exists
-        const existingSku = await prisma.product.findUnique({
-            where: { sku },
-            select: { id: true }
-        });
-
-        if (existingSku) {
-            // If exists, add a random suffix
-            const randomSuffix = Math.random().toString(36).substring(2, 5).toUpperCase();
-            return `${sku}${randomSuffix}`;
+    /** SKU = 9-digit numeric barcode; must be unique. Auto-generates when omitted. */
+    private async resolveSkuForCreate(
+        data: CreateProductInput,
+        tx: Prisma.TransactionClient
+    ): Promise<string> {
+        const trimmed = data.sku?.trim();
+        if (trimmed) {
+            if (!isNineDigitNumericSku(trimmed)) {
+                throw new AppError(400, 'SKU must be exactly 9 digits (numbers only) for barcode use');
+            }
+            const clash = await tx.product.findUnique({
+                where: { sku: trimmed },
+                select: { id: true },
+            });
+            if (clash) {
+                throw new AppError(400, 'Product with this SKU already exists');
+            }
+            return trimmed;
         }
-
-        return sku;
+        return generateUniqueNumericSku(tx);
     }
 
     private buildProductData(data: CreateProductInput, code: string) {
@@ -368,19 +370,6 @@ export class ProductService {
     }
 
     async createProduct(data: CreateProductInput): Promise<Product> {
-        // Generate SKU if not provided
-        const sku = data.sku || await this.generateSKU(data.name);
-
-        // Check SKU uniqueness
-        const existingSku = await prisma.product.findUnique({
-            where: { sku },
-                select: { id: true }
-        });
-
-        if (existingSku) {
-            throw new AppError(400, 'Product with this SKU already exists');
-        }
-
         // Get last product code
         const lastProduct = await prisma.product.findFirst({
             orderBy: { created_at: 'desc' },
@@ -392,6 +381,8 @@ export class ProductService {
         // Start transaction for atomic operations
         return await prisma.$transaction(async (tx) => {
             console.log('🚀 Starting transaction for product creation...');
+
+            const sku = await this.resolveSkuForCreate(data, tx);
             
             // First, ensure all "Unknown" entries exist
             const unknownEntries = await this.ensureUnknownEntriesExist(tx);
@@ -798,6 +789,13 @@ export class ProductService {
     async updateProduct(id: string, data: UpdateProductInput) {
         // Verify product exists
         const product = await this.getProductById(id);
+
+        if (data.sku !== undefined && data.sku !== null && String(data.sku).trim() !== '') {
+            const nextSku = String(data.sku).trim();
+            if (!isNineDigitNumericSku(nextSku)) {
+                throw new AppError(400, 'SKU must be exactly 9 digits (numbers only) for barcode use');
+            }
+        }
 
         // Check if new SKU conflicts with existing
         if (data.sku && data.sku !== product.sku) {
@@ -1292,31 +1290,48 @@ export class ProductService {
             });
         }
 
-        // Generate SKU if not provided and product doesn't exist
-        let sku: string | undefined = data.sku;
-        if (!sku) {
-            if (existingProduct) {
-                sku = existingProduct.sku; // Use existing SKU
-            } else {
-                sku = await this.generateSKU(data.name); // Generate new SKU
-            }
-        }
-
-        // Get product code
         let productCode: string;
         if (existingProduct) {
             productCode = existingProduct.code;
         } else {
             const lastProduct = await prisma.product.findFirst({
                 orderBy: { created_at: 'desc' },
-                select: { code: true }
+                select: { code: true },
             });
-            productCode = lastProduct ? (parseInt(lastProduct.code) + 1).toString() : '1000';
+            productCode = lastProduct ? (parseInt(lastProduct.code, 10) + 1).toString() : '1000';
         }
 
         // Start transaction for atomic operations
         return await prisma.$transaction(async (tx) => {
             console.log(existingProduct ? '🔄 Starting transaction for bulk product update...' : '🚀 Starting transaction for bulk product creation...');
+
+            let sku: string | undefined = typeof data.sku === 'string' ? data.sku.trim() : undefined;
+            if (sku) {
+                if (!isNineDigitNumericSku(sku)) {
+                    throw new AppError(400, 'SKU must be exactly 9 digits (numbers only) for barcode use');
+                }
+                if (!existingProduct) {
+                    const clash = await tx.product.findUnique({
+                        where: { sku },
+                        select: { id: true },
+                    });
+                    if (clash) {
+                        throw new AppError(400, 'Product with this SKU already exists');
+                    }
+                } else if (sku !== existingProduct.sku) {
+                    const clash = await tx.product.findUnique({
+                        where: { sku },
+                        select: { id: true },
+                    });
+                    if (clash && clash.id !== existingProduct.id) {
+                        throw new AppError(400, 'Product with this SKU already exists');
+                    }
+                }
+            } else if (existingProduct) {
+                sku = existingProduct.sku;
+            } else {
+                sku = await generateUniqueNumericSku(tx);
+            }
             
             // Build product data
             const productData = existingProduct 

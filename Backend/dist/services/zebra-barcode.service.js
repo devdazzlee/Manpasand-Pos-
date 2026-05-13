@@ -13,6 +13,7 @@ const path_1 = __importDefault(require("path"));
 const util_1 = __importDefault(require("util"));
 const child_process_1 = require("child_process");
 const execFileAsync = util_1.default.promisify(child_process_1.execFile);
+const numericBarcodeSku_1 = require("../utils/numericBarcodeSku");
 class BarcodeService {
     // ---- Discover printers - Platform agnostic ----
     async getAvailablePrinters() {
@@ -127,7 +128,7 @@ class BarcodeService {
 ^FO${dims.w - 160},10^FB150,1,0,R,0^FD${price}^FS
 ^BY2,2,60
 ^FO10,80^BCN,60,${HRI},N,N
-^FD${it.barcode}^FS
+^FD${(0, numericBarcodeSku_1.encodeLabelBarcodeValue)(it.sku, it.code, Math.round(Number(it.price ?? 0)))}^FS
 ^CF0,20
 ^FO10,150^FD${wt}^FS
 ^CF0,18
@@ -209,7 +210,7 @@ async function printZplRaw(printerName, zpl) {
 }
 function buildLabelsZpl(items) {
     return items.map((it) => buildZplLabel({
-        code: `${it.sku || it.code || "PROD"}-${Math.round(it.price)}`,
+        code: (0, numericBarcodeSku_1.encodeLabelBarcodeValue)(it.sku, it.code, Math.round(it.price)),
         title: it.name.toUpperCase().slice(0, 28),
         netWt: it.netWeight,
         price: Math.round(it.price).toString(),

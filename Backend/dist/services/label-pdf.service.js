@@ -44,6 +44,7 @@ const path_1 = __importDefault(require("path"));
 const pdfkit_1 = __importDefault(require("pdfkit"));
 const pdf_to_printer_1 = require("pdf-to-printer");
 const bwipjs = __importStar(require("bwip-js"));
+const numericBarcodeSku_1 = require("../utils/numericBarcodeSku");
 const mm = (n) => n * 2.83464567;
 function pageSize(p) {
     // Physical label size AS IT FEEDS through printer
@@ -133,10 +134,16 @@ async function printBarcodeLabels(input) {
             y += doc.heightOfString('Ag') + mm(1.5);
             // ---- BARCODE ----
             try {
+                const priceInt = Math.round(Number(it.price ?? 0));
+                const hasSkuOrCode = (it.sku !== undefined && it.sku !== null && String(it.sku).trim() !== '') ||
+                    (it.code !== undefined && it.code !== null && String(it.code).trim() !== '');
+                const barcodeText = hasSkuOrCode
+                    ? (0, numericBarcodeSku_1.encodeLabelBarcodeValue)(it.sku, it.code, priceInt)
+                    : String(it.barcode);
                 const png = await new Promise((res, rej) => {
                     bwipjs.toBuffer({
                         bcid: 'code128',
-                        text: String(it.barcode),
+                        text: barcodeText,
                         scale: SCALE,
                         height: BAR_H_MM,
                         includetext: human,

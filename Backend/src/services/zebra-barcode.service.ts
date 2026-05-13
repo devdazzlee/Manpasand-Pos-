@@ -5,6 +5,7 @@ import path from 'path';
 import util from 'util';
 import { execFile } from 'child_process';
 const execFileAsync = util.promisify(execFile);
+import { encodeLabelBarcodeValue } from '../utils/numericBarcodeSku';
 
 export interface PrinterInfo {
   name: string;
@@ -149,7 +150,7 @@ export class BarcodeService {
 ^FO${dims.w-160},10^FB150,1,0,R,0^FD${price}^FS
 ^BY2,2,60
 ^FO10,80^BCN,60,${HRI},N,N
-^FD${it.barcode}^FS
+^FD${encodeLabelBarcodeValue(it.sku, it.code, Math.round(Number(it.price ?? 0)))}^FS
 ^CF0,20
 ^FO10,150^FD${wt}^FS
 ^CF0,18
@@ -242,7 +243,7 @@ export function buildLabelsZpl(items: Array<{
 }>) {
   return items.map((it) =>
     buildZplLabel({
-      code: `${it.sku || it.code || "PROD"}-${Math.round(it.price)}`,
+      code: encodeLabelBarcodeValue(it.sku, it.code, Math.round(it.price)),
       title: it.name.toUpperCase().slice(0, 28),
       netWt: it.netWeight,
       price: Math.round(it.price).toString(),
