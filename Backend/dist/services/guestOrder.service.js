@@ -25,140 +25,155 @@ class GuestOrderService {
             orderNotes: order.order_notes || '',
         };
     }
-    async createGuestOrder(data) {
-        return client_2.prisma.$transaction(async (tx) => {
-            const productIds = data.items
-                .map((item) => item.id || item.productId)
-                .filter((id) => Boolean(id));
-            if (productIds.length !== data.items.length) {
-                throw new apiError_1.AppError(400, 'Product ID is missing in one or more items');
-            }
-            // Verify products exist and are active
-            const products = await tx.product.findMany({
-                where: {
-                    id: { in: productIds },
-                    is_active: true,
-                },
-            });
-            if (products.length !== data.items.length) {
-                throw new apiError_1.AppError(400, 'One or more products not found or inactive');
-            }
-            // Check stock availability (but allow orders even with insufficient stock)
-            const stockRecords = await tx.stock.findMany({
-                where: {
-                    product_id: { in: productIds },
-                },
-            });
-            // Note: We allow orders even with insufficient stock
-            // Stock will be decremented, potentially going negative
-            // Create order items
-            const orderItems = [];
-            const stockUpdates = [];
-            const stockMovements = [];
-            for (const item of data.items) {
-                const productId = item.id || item.productId;
-                const product = products.find((p) => p.id === productId);
-                if (!product) {
-                    throw new apiError_1.AppError(400, `Product not found for item: ${item.name}`);
+    resolveItemProductId(item) {
+        const raw = (item.productId || item.id)?.trim();
+        if (!raw)
+            return undefined;
+        const uuidMatch = raw.match(/^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i);
+        return uuidMatch ? uuidMatch[1] : raw;
+    }
+    async applyStockUpdatesBestEffort(items, products) {
+        const productIds = items
+            .map((item) => this.resolveItemProductId(item))
+            .filter((id) => Boolean(id));
+        const stockRecords = await client_2.prisma.stock.findMany({
+            where: { product_id: { in: productIds } },
+        });
+        for (const item of items) {
+            const productId = this.resolveItemProductId(item);
+            if (!productId)
+                continue;
+            const product = products.find((p) => p.id === productId);
+            const stock = stockRecords.find((s) => s.product_id === productId);
+            if (!stock || !product) {
+                if (product) {
+                    console.warn(`No stock record found for product ${product.name} (${product.id}). Order will proceed without stock update.`);
                 }
-                const price = new client_1.Prisma.Decimal(product.sales_rate_inc_dis_and_tax || item.price);
-                const itemTotal = price.times(item.quantity);
-                orderItems.push({
-                    product: { connect: { id: product.id } },
-                    quantity: item.quantity,
-                    price: price,
-                    total_price: itemTotal,
-                });
-                // Try to update stock if record exists, otherwise skip
-                const stock = stockRecords.find((s) => s.product_id === product.id);
-                if (stock) {
-                    // Decrement stock (allows negative stock)
-                    stockUpdates.push(tx.stock.update({
+                continue;
+            }
+            const qty = new client_1.Prisma.Decimal(item.quantity);
+            try {
+                await client_2.prisma.$transaction([
+                    client_2.prisma.stock.update({
                         where: {
                             product_id_branch_id: {
                                 product_id: product.id,
                                 branch_id: stock.branch_id,
                             },
                         },
-                        data: {
-                            current_quantity: { decrement: item.quantity },
-                        },
-                    }));
-                    // Record stock movement
-                    stockMovements.push(tx.stockMovement.create({
+                        data: { current_quantity: { decrement: qty } },
+                    }),
+                    client_2.prisma.stockMovement.create({
                         data: {
                             product: { connect: { id: product.id } },
                             branch: { connect: { id: stock.branch_id } },
                             movement_type: 'SALE',
-                            quantity_change: -item.quantity,
+                            quantity_change: qty.negated(),
                             previous_qty: stock.current_quantity,
-                            new_qty: stock.current_quantity.minus(item.quantity),
+                            new_qty: stock.current_quantity.minus(qty),
                         },
-                    }));
-                }
-                else {
-                    // No stock record found - log warning but allow order
-                    console.warn(`No stock record found for product ${product.name} (${product.id}). Order will proceed without stock update.`);
-                }
+                    }),
+                ]);
             }
-            if (orderItems.length === 0) {
-                throw new apiError_1.AppError(400, 'No valid order items found');
+            catch (err) {
+                console.warn(`Stock update skipped for ${product.name} (${product.id}):`, err instanceof Error ? err.message : err);
             }
-            await Promise.all([...stockUpdates, ...stockMovements]);
-            // Create order without customer (guest order)
-            const orderNumber = `MP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-            const totalAmount = new client_1.Prisma.Decimal(data.total);
-            const order = await tx.order.create({
-                data: {
-                    order_number: orderNumber,
-                    customer_id: null, // Guest order - no customer
-                    customer_name: `${data.customer.firstName} ${data.customer.lastName}`.trim(),
-                    customer_email: data.customer.email,
-                    customer_phone: data.customer.phone,
-                    delivery_address: data.shipping.address,
-                    delivery_city: data.shipping.city,
-                    delivery_postal_code: data.shipping.postalCode ?? null,
-                    order_notes: data.orderNotes,
-                    total_amount: totalAmount,
-                    status: 'PENDING',
-                    payment_method: data.paymentMethod.toUpperCase(),
-                    items: { create: orderItems },
-                },
-                include: {
-                    items: { include: { product: true } },
-                },
-            });
-            if (!order.items || order.items.length === 0) {
-                throw new apiError_1.AppError(500, 'Order created without item details');
-            }
-            // Send confirmation emails
-            const emailData = {
-                orderNumber,
-                customerName: `${data.customer.firstName} ${data.customer.lastName}`,
-                customerEmail: data.customer.email,
-                customerPhone: data.customer.phone,
-                shippingAddress: data.shipping,
-                items: data.items.map(item => ({
-                    name: item.name,
-                    quantity: item.quantity,
-                    price: item.price,
-                    total: item.price * item.quantity,
-                })),
-                subtotal: data.subtotal,
-                shipping: data.shippingCost,
-                total: data.total,
-                paymentMethod: data.paymentMethod,
-                orderNotes: data.orderNotes,
-            };
-            // Send emails asynchronously (don't wait)
-            email_service_1.EmailService.sendOrderConfirmationEmails(emailData).catch(err => {
-                console.error('Failed to send order confirmation emails:', err);
-            });
-            return this.formatGuestOrder(order);
-        }, {
-            maxWait: 10000,
-            timeout: 15000,
+        }
+    }
+    async createGuestOrder(data) {
+        const productIds = data.items
+            .map((item) => this.resolveItemProductId(item))
+            .filter((id) => Boolean(id));
+        if (productIds.length !== data.items.length) {
+            throw new apiError_1.AppError(400, 'Product ID is missing in one or more items');
+        }
+        const uniqueProductIds = [...new Set(productIds)];
+        const products = await client_2.prisma.product.findMany({
+            where: {
+                id: { in: uniqueProductIds },
+                is_active: true,
+            },
         });
+        if (products.length !== uniqueProductIds.length) {
+            throw new apiError_1.AppError(400, 'One or more products not found or inactive');
+        }
+        const orderItems = [];
+        for (const item of data.items) {
+            const productId = this.resolveItemProductId(item);
+            if (!productId) {
+                throw new apiError_1.AppError(400, `Product ID is missing for item: ${item.name}`);
+            }
+            const product = products.find((p) => p.id === productId);
+            if (!product) {
+                throw new apiError_1.AppError(400, `Product not found for item: ${item.name}`);
+            }
+            const qty = new client_1.Prisma.Decimal(item.quantity);
+            const unitPrice = new client_1.Prisma.Decimal(item.price);
+            const lineTotal = unitPrice.times(qty);
+            orderItems.push({
+                product: { connect: { id: product.id } },
+                display_name: item.name,
+                grams_per_unit: item.gramsPerUnit != null && item.gramsPerUnit > 0
+                    ? new client_1.Prisma.Decimal(item.gramsPerUnit)
+                    : undefined,
+                unit_name: item.unitName?.trim() || undefined,
+                quantity: qty,
+                price: unitPrice,
+                total_price: lineTotal,
+            });
+        }
+        if (orderItems.length === 0) {
+            throw new apiError_1.AppError(400, 'No valid order items found');
+        }
+        const orderNumber = `MP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const totalAmount = new client_1.Prisma.Decimal(data.total);
+        const order = await client_2.prisma.order.create({
+            data: {
+                order_number: orderNumber,
+                customer_id: null,
+                customer_name: `${data.customer.firstName} ${data.customer.lastName}`.trim(),
+                customer_email: data.customer.email,
+                customer_phone: data.customer.phone,
+                delivery_address: data.shipping.address,
+                delivery_city: data.shipping.city,
+                delivery_postal_code: data.shipping.postalCode ?? null,
+                order_notes: data.orderNotes,
+                total_amount: totalAmount,
+                status: 'PENDING',
+                payment_method: data.paymentMethod.toUpperCase(),
+                items: { create: orderItems },
+            },
+            include: {
+                items: { include: { product: { include: { unit: true } } } },
+            },
+        });
+        if (!order.items?.length) {
+            throw new apiError_1.AppError(500, 'Order created without item details');
+        }
+        // Stock is optional — never block checkout
+        void this.applyStockUpdatesBestEffort(data.items, products);
+        const emailData = {
+            orderNumber,
+            customerName: `${data.customer.firstName} ${data.customer.lastName}`,
+            customerEmail: data.customer.email,
+            customerPhone: data.customer.phone,
+            shippingAddress: data.shipping,
+            items: data.items.map((item) => ({
+                name: item.name,
+                quantity: item.quantity,
+                price: item.price,
+                total: item.price * item.quantity,
+            })),
+            subtotal: data.subtotal,
+            shipping: data.shippingCost,
+            total: data.total,
+            paymentMethod: data.paymentMethod,
+            orderNotes: data.orderNotes,
+        };
+        email_service_1.EmailService.sendOrderConfirmationEmails(emailData).catch((err) => {
+            console.error('Failed to send order confirmation emails:', err);
+        });
+        return this.formatGuestOrder(order);
     }
     async getGuestOrders(status, page = 1, pageSize = 10) {
         const where = {
@@ -176,7 +191,7 @@ class GuestOrderService {
                 include: {
                     items: {
                         include: {
-                            product: true,
+                            product: { include: { unit: true } },
                         },
                     },
                 },
@@ -200,7 +215,7 @@ class GuestOrderService {
             include: {
                 items: {
                     include: {
-                        product: true,
+                        product: { include: { unit: true } },
                     },
                 },
             },

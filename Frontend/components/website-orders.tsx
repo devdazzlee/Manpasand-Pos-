@@ -21,10 +21,111 @@ interface OrderItem {
   productId?: string;
   product_id?: string;
   quantity: number; 
-  product?: { name: string; id: string } | null;
+  product?: { name: string; id: string; unit?: { name?: string } | null } | null;
+  display_name?: string;
+  grams_per_unit?: string | number;
+  unit_name?: string;
   name?: string;
   price?: string | number;
   total_price?: string | number;
+}
+
+function getWeightInGramsFromText(weightText?: string): number | undefined {
+  if (!weightText) return undefined;
+  const normalized = weightText.replace(/\s+/g, " ").trim();
+  let match = normalized.match(
+    /(\d+(?:\.\d+)?)\s*(kg|kgs|kilogram|kilograms|g|gm|gram|grams|gms)\b/i,
+  );
+  if (!match) {
+    match = normalized.match(/\.(\d+(?:\.\d+)?)\s*(g|gm|gram|grams|gms|kg|kgs)\b/i);
+  }
+  if (!match) return undefined;
+  const value = parseFloat(match[1]);
+  const unit = match[2].toLowerCase();
+  if (Number.isNaN(value) || value <= 0) return undefined;
+  if (["kg", "kgs", "kilogram", "kilograms"].includes(unit)) return value * 1000;
+  return value;
+}
+
+function formatGramsLabel(grams: number, unitName?: string): string {
+  const unit = unitName?.toLowerCase().trim() ?? "";
+  if (["kg", "kgs", "kilogram", "kilograms"].includes(unit)) {
+    const kg = grams / 1000;
+    return kg >= 1 && Number.isInteger(kg)
+      ? `${kg} Kg`
+      : `${kg.toFixed(2).replace(/\.?0+$/, "")} Kg`;
+  }
+  if (grams >= 1000) {
+    const kg = grams / 1000;
+    return `${kg} Kg`;
+  }
+  return Number.isInteger(grams) ? `${grams} gms` : `${grams.toFixed(1)} gms`;
+}
+
+/** Parse Prisma Decimal / string / number for order line quantity. */
+function parseOrderQuantity(value: unknown): number {
+  if (value == null) return 0;
+  if (typeof value === "number" && !Number.isNaN(value)) return value;
+  if (typeof value === "string") {
+    const parsed = parseFloat(value);
+    return Number.isNaN(parsed) ? 0 : parsed;
+  }
+  if (typeof value === "object") {
+    const maybe = value as { toNumber?: () => number; toString?: () => string };
+    if (typeof maybe.toNumber === "function") {
+      const n = maybe.toNumber();
+      return Number.isNaN(n) ? 0 : n;
+    }
+    if (typeof maybe.toString === "function") {
+      const parsed = parseFloat(maybe.toString());
+      return Number.isNaN(parsed) ? 0 : parsed;
+    }
+  }
+  return 0;
+}
+
+function getOrderItemLabel(item: OrderItem): string {
+  return (
+    item.display_name ||
+    item.name ||
+    item.product?.name ||
+    "Unknown Product"
+  );
+}
+
+function resolveLineGrams(item: OrderItem): number | undefined {
+  const stored = parseOrderQuantity(item.grams_per_unit);
+  if (stored > 0) return stored;
+  return getWeightInGramsFromText(getOrderItemLabel(item));
+}
+
+/** Human-readable quantity: weight (10 gms), packs (2 × 250 gms), or count. */
+function formatOrderItemQuantity(item: OrderItem): string {
+  const packQty = parseOrderQuantity(item.quantity);
+  const label = getOrderItemLabel(item);
+  const grams = resolveLineGrams(item);
+  const unitName = item.unit_name || item.product?.unit?.name;
+
+  if (grams && grams > 0) {
+    const weightLabel = formatGramsLabel(grams, unitName);
+    if (packQty <= 1) return weightLabel;
+    return `${formatQuantityValue(packQty)} × ${weightLabel}`;
+  }
+
+  const variantMatch = label.match(/\s-\s(.+)$/);
+  if (variantMatch && packQty > 0) {
+    const variant = variantMatch[1].trim();
+    if (packQty === 1) return variant;
+    return `${formatQuantityValue(packQty)} × ${variant}`;
+  }
+
+  return formatQuantityValue(packQty);
+}
+
+function formatQuantityValue(qty: number): string {
+  if (!Number.isFinite(qty) || qty <= 0) return "0";
+  if (Number.isInteger(qty)) return String(qty);
+  return qty.toFixed(3).replace(/\.?0+$/, "");
 }
 
 interface WebsiteOrder { 
@@ -91,17 +192,32 @@ const WebsiteOrders: React.FC = () => {
 
   const normalizeOrderItems = (items: any[]): OrderItem[] => {
     if (!Array.isArray(items)) return [];
-    return items.map((item: any) => ({
-      productId: item.productId || item.product_id || item.product?.id || "",
-      product_id: item.product_id || item.productId || item.product?.id || "",
-      quantity: Number(item.quantity) || 0,
-      product: item.product
-        ? { id: item.product.id, name: item.product.name || item.name || "Unknown Product" }
-        : null,
-      name: item.name || item.product?.name || "Unknown Product",
-      price: item.price ?? 0,
-      total_price: item.total_price ?? (Number(item.price || 0) * Number(item.quantity || 0)),
-    }));
+    return items.map((item: any) => {
+      const quantity = parseOrderQuantity(item.quantity);
+      const price = parseOrderQuantity(item.price);
+      const totalFromApi = parseOrderQuantity(item.total_price);
+      const total_price =
+        totalFromApi > 0 ? totalFromApi : price * Math.max(quantity, 0);
+
+      return {
+        productId: item.productId || item.product_id || item.product?.id || "",
+        product_id: item.product_id || item.productId || item.product?.id || "",
+        quantity,
+        product: item.product
+          ? {
+              id: item.product.id,
+              name: item.product.name || item.name || "Unknown Product",
+              unit: item.product.unit ?? null,
+            }
+          : null,
+        display_name: item.display_name || item.name || item.product?.name || "Unknown Product",
+        name: item.display_name || item.name || item.product?.name || "Unknown Product",
+        grams_per_unit: item.grams_per_unit ?? item.gramsPerUnit,
+        unit_name: item.unit_name || item.unitName || item.product?.unit?.name,
+        price,
+        total_price,
+      };
+    });
   };
 
   const normalizeOrder = (raw: any, fallback: WebsiteOrder | null = null): WebsiteOrder => {
@@ -134,10 +250,10 @@ const WebsiteOrders: React.FC = () => {
 
   const buildReceiptData = (order: WebsiteOrder): ReceiptData => {
     const items = (order.items || []).map((item) => {
-      const qty = Number(item.quantity || 0);
-      const unitPrice = Number(item.price || 0);
+      const qty = parseOrderQuantity(item.quantity);
+      const unitPrice = parseOrderQuantity(item.price);
       return {
-        name: item.product?.name || item.name || "Unknown Product",
+        name: getOrderItemLabel(item),
         quantity: qty,
         price: unitPrice,
       };
@@ -168,10 +284,10 @@ const WebsiteOrders: React.FC = () => {
   const buildReceiptHtml = (order: WebsiteOrder): string => {
     const itemsHtml = (order.items || [])
       .map((item) => {
-        const name = item.product?.name || item.name || "Unknown Product";
-        const qty = Number(item.quantity) || 0;
-        const unitPrice = Number(item.price) || 0;
-        const lineTotal = Number(item.total_price) || unitPrice * qty;
+        const name = getOrderItemLabel(item);
+        const qty = parseOrderQuantity(item.quantity);
+        const unitPrice = parseOrderQuantity(item.price);
+        const lineTotal = parseOrderQuantity(item.total_price) || unitPrice * qty;
         return `
           <tr>
             <td>${name}</td>
@@ -313,14 +429,14 @@ const WebsiteOrders: React.FC = () => {
 
       doc.setFont("helvetica", "normal");
       for (const item of order.items || []) {
-        const name = item.product?.name || item.name || "Unknown Product";
-        const qty = Number(item.quantity) || 0;
-        const unitPrice = Number(item.price) || 0;
-        const lineTotal = Number(item.total_price) || unitPrice * qty;
+        const name = getOrderItemLabel(item);
+        const qty = parseOrderQuantity(item.quantity);
+        const unitPrice = parseOrderQuantity(item.price);
+        const lineTotal = parseOrderQuantity(item.total_price) || unitPrice * qty;
 
         const splitName = doc.splitTextToSize(name, 90);
         doc.text(splitName, 15, y);
-        doc.text(String(qty), 115, y, { align: "right" });
+        doc.text(formatOrderItemQuantity(item), 115, y, { align: "right" });
         doc.text(`Rs. ${unitPrice.toFixed(2)}`, 150, y, { align: "right" });
         doc.text(`Rs. ${lineTotal.toFixed(2)}`, 195, y, { align: "right" });
         y += Math.max(6, splitName.length * 5);
@@ -964,19 +1080,19 @@ const WebsiteOrders: React.FC = () => {
                       <div className="space-y-3 md:hidden">
                         {selectedOrder.items.map((item, idx) => (
                           <div key={`${item.productId || item.product_id || idx}-${idx}`} className="rounded-lg border p-3 bg-gray-50">
-                            <p className="font-semibold text-base mb-2">{item.product?.name || item.name || "Unknown Product"}</p>
+                            <p className="font-semibold text-base mb-2">{getOrderItemLabel(item)}</p>
                             <div className="grid grid-cols-2 gap-2 text-sm">
                               <div>
                                 <p className="text-gray-500">Quantity</p>
-                                <p className="font-medium">{item.quantity}</p>
+                                <p className="font-medium">{formatOrderItemQuantity(item)}</p>
                               </div>
                               <div className="text-right">
                                 <p className="text-gray-500">Unit Price</p>
-                                <p className="font-medium">Rs. {(Number(item.price) || 0).toFixed(2)}</p>
+                                <p className="font-medium">Rs. {parseOrderQuantity(item.price).toFixed(2)}</p>
                               </div>
                               <div className="col-span-2 text-right pt-1 border-t mt-1">
                                 <p className="text-gray-500">Total</p>
-                                <p className="font-semibold">Rs. {(Number(item.total_price) || 0).toFixed(2)}</p>
+                                <p className="font-semibold">Rs. {parseOrderQuantity(item.total_price).toFixed(2)}</p>
                               </div>
                             </div>
                           </div>
@@ -1003,10 +1119,10 @@ const WebsiteOrders: React.FC = () => {
                       <TableBody>
                         {selectedOrder.items.map((item, idx) => (
                               <TableRow key={`${item.productId || item.product_id || idx}-${idx}`}>
-                                <TableCell className="font-medium">{item.product?.name || item.name || "Unknown Product"}</TableCell>
-                            <TableCell className="text-center">{item.quantity}</TableCell>
-                            <TableCell className="text-right">Rs. {(Number(item.price) || 0).toFixed(2)}</TableCell>
-                            <TableCell className="text-right font-semibold">Rs. {(Number(item.total_price) || 0).toFixed(2)}</TableCell>
+                                <TableCell className="font-medium">{getOrderItemLabel(item)}</TableCell>
+                            <TableCell className="text-center">{formatOrderItemQuantity(item)}</TableCell>
+                            <TableCell className="text-right">Rs. {parseOrderQuantity(item.price).toFixed(2)}</TableCell>
+                            <TableCell className="text-right font-semibold">Rs. {parseOrderQuantity(item.total_price).toFixed(2)}</TableCell>
                           </TableRow>
                         ))}
                         <TableRow className="bg-gray-50">

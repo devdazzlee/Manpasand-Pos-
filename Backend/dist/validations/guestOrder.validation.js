@@ -8,7 +8,9 @@ const orderItemSchema = zod_1.z
     productId: zod_1.z.string().trim().min(1).optional(),
     name: zod_1.z.string().trim().min(1, 'Product name is required'),
     price: zod_1.z.number().min(0, 'Price must be positive'),
-    quantity: zod_1.z.number().int().min(1, 'Quantity must be at least 1'),
+    quantity: zod_1.z.coerce.number().positive('Quantity must be greater than zero'),
+    gramsPerUnit: zod_1.z.coerce.number().positive().optional(),
+    unitName: zod_1.z.string().trim().optional(),
     image: zod_1.z.string().optional(),
 })
     .refine((val) => Boolean(val.id || val.productId), {

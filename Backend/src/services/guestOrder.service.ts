@@ -10,6 +10,8 @@ interface GuestOrderData {
     name: string;
     price: number;
     quantity: number;
+    gramsPerUnit?: number;
+    unitName?: string;
     image?: string;
   }>;
   customer: {
@@ -52,158 +54,185 @@ class GuestOrderService {
     };
   }
 
-  async createGuestOrder(data: GuestOrderData) {
-    return prisma.$transaction(async (tx) => {
-      const productIds = data.items
-        .map((item) => item.id || item.productId)
-        .filter((id): id is string => Boolean(id));
+  private resolveItemProductId(item: GuestOrderData['items'][number]): string | undefined {
+    const raw = (item.productId || item.id)?.trim();
+    if (!raw) return undefined;
+    const uuidMatch = raw.match(
+      /^([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/i,
+    );
+    return uuidMatch ? uuidMatch[1] : raw;
+  }
 
-      if (productIds.length !== data.items.length) {
-        throw new AppError(400, 'Product ID is missing in one or more items');
-      }
+  private async applyStockUpdatesBestEffort(
+    items: GuestOrderData['items'],
+    products: Array<{ id: string; name: string }>,
+  ): Promise<void> {
+    const productIds = items
+      .map((item) => this.resolveItemProductId(item))
+      .filter((id): id is string => Boolean(id));
 
-      // Verify products exist and are active
-      const products = await tx.product.findMany({
-        where: {
-          id: { in: productIds },
-          is_active: true,
-        },
-      });
+    const stockRecords = await prisma.stock.findMany({
+      where: { product_id: { in: productIds } },
+    });
 
-      if (products.length !== data.items.length) {
-        throw new AppError(400, 'One or more products not found or inactive');
-      }
+    for (const item of items) {
+      const productId = this.resolveItemProductId(item);
+      if (!productId) continue;
 
-      // Check stock availability (but allow orders even with insufficient stock)
-      const stockRecords = await tx.stock.findMany({
-        where: {
-          product_id: { in: productIds },
-        },
-      });
-
-      // Note: We allow orders even with insufficient stock
-      // Stock will be decremented, potentially going negative
-
-      // Create order items
-      const orderItems: Prisma.OrderItemCreateWithoutOrderInput[] = [];
-      const stockUpdates: Promise<any>[] = [];
-      const stockMovements: Promise<any>[] = [];
-
-      for (const item of data.items) {
-        const productId = item.id || item.productId;
-        const product = products.find((p) => p.id === productId);
-        if (!product) {
-          throw new AppError(400, `Product not found for item: ${item.name}`);
+      const product = products.find((p) => p.id === productId);
+      const stock = stockRecords.find((s) => s.product_id === productId);
+      if (!stock || !product) {
+        if (product) {
+          console.warn(
+            `No stock record found for product ${product.name} (${product.id}). Order will proceed without stock update.`,
+          );
         }
+        continue;
+      }
 
-        const price = new Prisma.Decimal(product.sales_rate_inc_dis_and_tax || item.price);
-        const itemTotal = price.times(item.quantity);
-
-        orderItems.push({
-          product: { connect: { id: product.id } },
-          quantity: item.quantity,
-          price: price,
-          total_price: itemTotal,
-        });
-
-        // Try to update stock if record exists, otherwise skip
-        const stock = stockRecords.find((s) => s.product_id === product.id);
-        if (stock) {
-          // Decrement stock (allows negative stock)
-          stockUpdates.push(tx.stock.update({
+      const qty = new Prisma.Decimal(item.quantity);
+      try {
+        await prisma.$transaction([
+          prisma.stock.update({
             where: {
               product_id_branch_id: {
                 product_id: product.id,
                 branch_id: stock.branch_id,
               },
             },
-            data: {
-              current_quantity: { decrement: item.quantity },
-            },
-          }));
-
-          // Record stock movement
-          stockMovements.push(tx.stockMovement.create({
+            data: { current_quantity: { decrement: qty } },
+          }),
+          prisma.stockMovement.create({
             data: {
               product: { connect: { id: product.id } },
               branch: { connect: { id: stock.branch_id } },
               movement_type: 'SALE',
-              quantity_change: -item.quantity,
+              quantity_change: qty.negated(),
               previous_qty: stock.current_quantity,
-              new_qty: stock.current_quantity.minus(item.quantity),
+              new_qty: stock.current_quantity.minus(qty),
             },
-          }));
-        } else {
-          // No stock record found - log warning but allow order
-          console.warn(`No stock record found for product ${product.name} (${product.id}). Order will proceed without stock update.`);
-        }
+          }),
+        ]);
+      } catch (err) {
+        console.warn(
+          `Stock update skipped for ${product.name} (${product.id}):`,
+          err instanceof Error ? err.message : err,
+        );
       }
+    }
+  }
 
-      if (orderItems.length === 0) {
-        throw new AppError(400, 'No valid order items found');
-      }
+  async createGuestOrder(data: GuestOrderData) {
+    const productIds = data.items
+      .map((item) => this.resolveItemProductId(item))
+      .filter((id): id is string => Boolean(id));
 
-      await Promise.all([...stockUpdates, ...stockMovements]);
+    if (productIds.length !== data.items.length) {
+      throw new AppError(400, 'Product ID is missing in one or more items');
+    }
 
-      // Create order without customer (guest order)
-      const orderNumber = `MP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
-      const totalAmount = new Prisma.Decimal(data.total);
+    const uniqueProductIds = [...new Set(productIds)];
 
-      const order = await tx.order.create({
-        data: {
-          order_number: orderNumber,
-          customer_id: null, // Guest order - no customer
-          customer_name: `${data.customer.firstName} ${data.customer.lastName}`.trim(),
-          customer_email: data.customer.email,
-          customer_phone: data.customer.phone,
-          delivery_address: data.shipping.address,
-          delivery_city: data.shipping.city,
-          delivery_postal_code: data.shipping.postalCode ?? null,
-          order_notes: data.orderNotes,
-          total_amount: totalAmount,
-          status: 'PENDING',
-          payment_method: data.paymentMethod.toUpperCase() as any,
-          items: { create: orderItems },
-        },
-        include: {
-          items: { include: { product: true } },
-        },
-      });
-
-      if (!order.items || order.items.length === 0) {
-        throw new AppError(500, 'Order created without item details');
-      }
-
-      // Send confirmation emails
-      const emailData = {
-        orderNumber,
-        customerName: `${data.customer.firstName} ${data.customer.lastName}`,
-        customerEmail: data.customer.email,
-        customerPhone: data.customer.phone,
-        shippingAddress: data.shipping,
-        items: data.items.map(item => ({
-          name: item.name,
-          quantity: item.quantity,
-          price: item.price,
-          total: item.price * item.quantity,
-        })),
-        subtotal: data.subtotal,
-        shipping: data.shippingCost,
-        total: data.total,
-        paymentMethod: data.paymentMethod,
-        orderNotes: data.orderNotes,
-      };
-
-      // Send emails asynchronously (don't wait)
-      EmailService.sendOrderConfirmationEmails(emailData).catch(err => {
-        console.error('Failed to send order confirmation emails:', err);
-      });
-
-      return this.formatGuestOrder(order);
-    }, {
-      maxWait: 10000,
-      timeout: 15000,
+    const products = await prisma.product.findMany({
+      where: {
+        id: { in: uniqueProductIds },
+        is_active: true,
+      },
     });
+
+    if (products.length !== uniqueProductIds.length) {
+      throw new AppError(400, 'One or more products not found or inactive');
+    }
+
+    const orderItems: Prisma.OrderItemCreateWithoutOrderInput[] = [];
+
+    for (const item of data.items) {
+      const productId = this.resolveItemProductId(item);
+      if (!productId) {
+        throw new AppError(400, `Product ID is missing for item: ${item.name}`);
+      }
+      const product = products.find((p) => p.id === productId);
+      if (!product) {
+        throw new AppError(400, `Product not found for item: ${item.name}`);
+      }
+
+      const qty = new Prisma.Decimal(item.quantity);
+      const unitPrice = new Prisma.Decimal(item.price);
+      const lineTotal = unitPrice.times(qty);
+
+      orderItems.push({
+        product: { connect: { id: product.id } },
+        display_name: item.name,
+        grams_per_unit:
+          item.gramsPerUnit != null && item.gramsPerUnit > 0
+            ? new Prisma.Decimal(item.gramsPerUnit)
+            : undefined,
+        unit_name: item.unitName?.trim() || undefined,
+        quantity: qty,
+        price: unitPrice,
+        total_price: lineTotal,
+      });
+    }
+
+    if (orderItems.length === 0) {
+      throw new AppError(400, 'No valid order items found');
+    }
+
+    const orderNumber = `MP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const totalAmount = new Prisma.Decimal(data.total);
+
+    const order = await prisma.order.create({
+      data: {
+        order_number: orderNumber,
+        customer_id: null,
+        customer_name: `${data.customer.firstName} ${data.customer.lastName}`.trim(),
+        customer_email: data.customer.email,
+        customer_phone: data.customer.phone,
+        delivery_address: data.shipping.address,
+        delivery_city: data.shipping.city,
+        delivery_postal_code: data.shipping.postalCode ?? null,
+        order_notes: data.orderNotes,
+        total_amount: totalAmount,
+        status: 'PENDING',
+        payment_method: data.paymentMethod.toUpperCase() as Prisma.OrderCreateInput['payment_method'],
+        items: { create: orderItems },
+      },
+      include: {
+        items: { include: { product: { include: { unit: true } } } },
+      },
+    });
+
+    if (!order.items?.length) {
+      throw new AppError(500, 'Order created without item details');
+    }
+
+    // Stock is optional — never block checkout
+    void this.applyStockUpdatesBestEffort(data.items, products);
+
+    const emailData = {
+      orderNumber,
+      customerName: `${data.customer.firstName} ${data.customer.lastName}`,
+      customerEmail: data.customer.email,
+      customerPhone: data.customer.phone,
+      shippingAddress: data.shipping,
+      items: data.items.map((item) => ({
+        name: item.name,
+        quantity: item.quantity,
+        price: item.price,
+        total: item.price * item.quantity,
+      })),
+      subtotal: data.subtotal,
+      shipping: data.shippingCost,
+      total: data.total,
+      paymentMethod: data.paymentMethod,
+      orderNotes: data.orderNotes,
+    };
+
+    EmailService.sendOrderConfirmationEmails(emailData).catch((err) => {
+      console.error('Failed to send order confirmation emails:', err);
+    });
+
+    return this.formatGuestOrder(order);
   }
 
   async getGuestOrders(status?: string, page: number = 1, pageSize: number = 10) {
@@ -224,7 +253,7 @@ class GuestOrderService {
         include: {
           items: {
             include: {
-              product: true,
+              product: { include: { unit: true } },
             },
           },
         },
@@ -250,7 +279,7 @@ class GuestOrderService {
       include: {
         items: {
           include: {
-            product: true,
+            product: { include: { unit: true } },
           },
         },
       },

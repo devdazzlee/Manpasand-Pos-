@@ -6,7 +6,9 @@ const orderItemSchema = z
     productId: z.string().trim().min(1).optional(),
     name: z.string().trim().min(1, 'Product name is required'),
     price: z.number().min(0, 'Price must be positive'),
-    quantity: z.number().int().min(1, 'Quantity must be at least 1'),
+    quantity: z.coerce.number().positive('Quantity must be greater than zero'),
+    gramsPerUnit: z.coerce.number().positive().optional(),
+    unitName: z.string().trim().optional(),
     image: z.string().optional(),
   })
   .refine((val) => Boolean(val.id || val.productId), {

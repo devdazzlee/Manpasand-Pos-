@@ -692,15 +692,18 @@ model Order {
 }
 
 model OrderItem {
-  id          String   @id @default(uuid())
-  order_id    String
-  order       Order    @relation(fields: [order_id], references: [id])
-  product_id  String
-  product     Product  @relation(fields: [product_id], references: [id])
-  quantity    Decimal
-  price       Decimal
-  total_price Decimal
-  created_at  DateTime @default(now())
+  id           String   @id @default(uuid())
+  order_id     String
+  order        Order    @relation(fields: [order_id], references: [id])
+  product_id   String
+  product      Product  @relation(fields: [product_id], references: [id])
+  display_name    String?
+  grams_per_unit  Decimal?
+  unit_name       String?
+  quantity        Decimal
+  price           Decimal
+  total_price     Decimal
+  created_at   DateTime @default(now())
 
   @@index([order_id])
   @@index([product_id])
