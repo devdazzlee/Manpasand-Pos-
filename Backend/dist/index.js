@@ -46,6 +46,7 @@ const shift_route_1 = __importDefault(require("./routes/shift.route"));
 const shiftAssignment_routes_1 = __importDefault(require("./routes/shiftAssignment.routes"));
 const barcode_routes_1 = __importDefault(require("./routes/barcode.routes"));
 const guestOrder_routes_1 = __importDefault(require("./routes/guestOrder.routes"));
+const web_routes_1 = __importDefault(require("./routes/web.routes"));
 const node_cron_1 = __importDefault(require("node-cron"));
 const vAPI = process.env.vAPI || '/api/v1';
 const app = (0, express_1.default)();
@@ -116,6 +117,8 @@ app.use(`${vAPI}/salaries`, salary_route_1.default);
 app.use(`${vAPI}/shifts`, shift_route_1.default);
 app.use(`${vAPI}/shift-assignment`, shiftAssignment_routes_1.default);
 app.use(`${vAPI}/barcode-generator`, barcode_routes_1.default);
+// Website Routes (paginated, server-side filtered, Redis-cached)
+app.use(`${vAPI}/web`, web_routes_1.default);
 // App Routes
 app.use(`${vAPI}/customer/app`, app_routes_1.default);
 app.use(`${vAPI}/customer`, customer_routes_1.default);

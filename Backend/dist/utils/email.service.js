@@ -60,7 +60,7 @@ class EmailService {
               <div class="order-info">
                 <h2>Shipping Address</h2>
                 <p>${orderData.shippingAddress.address}</p>
-                <p>${orderData.shippingAddress.city}, ${orderData.shippingAddress.postalCode}</p>
+                <p>${orderData.shippingAddress.city}${orderData.shippingAddress.postalCode ? `, ${orderData.shippingAddress.postalCode}` : ''}</p>
                 <p><strong>Phone:</strong> ${orderData.customerPhone}</p>
               </div>
 
@@ -159,7 +159,7 @@ class EmailService {
               <div class="order-info">
                 <h2>Shipping Address</h2>
                 <p>${orderData.shippingAddress.address}</p>
-                <p>${orderData.shippingAddress.city}, ${orderData.shippingAddress.postalCode}</p>
+                <p>${orderData.shippingAddress.city}${orderData.shippingAddress.postalCode ? `, ${orderData.shippingAddress.postalCode}` : ''}</p>
               </div>
 
               <div class="order-info">

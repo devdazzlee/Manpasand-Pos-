@@ -117,7 +117,7 @@ class GuestOrderService {
                     customer_phone: data.customer.phone,
                     delivery_address: data.shipping.address,
                     delivery_city: data.shipping.city,
-                    delivery_postal_code: data.shipping.postalCode,
+                    delivery_postal_code: data.shipping.postalCode ?? null,
                     order_notes: data.orderNotes,
                     total_amount: totalAmount,
                     status: 'PENDING',

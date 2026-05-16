@@ -41,6 +41,7 @@ import shiftRoutes  from './routes/shift.route';
 import shiftAssignmentRoutes  from './routes/shiftAssignment.routes';
 import barcodeRoutes from './routes/barcode.routes';
 import guestOrderRoutes from './routes/guestOrder.routes';
+import webRoutes from './routes/web.routes';
 import cron from 'node-cron';
 
 const vAPI = process.env.vAPI || '/api/v1';
@@ -118,6 +119,9 @@ app.use(`${vAPI}/salaries`, salaryRoutes);
 app.use(`${vAPI}/shifts`, shiftRoutes);
 app.use(`${vAPI}/shift-assignment`, shiftAssignmentRoutes);
 app.use(`${vAPI}/barcode-generator`, barcodeRoutes);
+
+// Website Routes (paginated, server-side filtered, Redis-cached)
+app.use(`${vAPI}/web`, webRoutes);
 
 // App Routes
 app.use(`${vAPI}/customer/app`, appRoutes);
