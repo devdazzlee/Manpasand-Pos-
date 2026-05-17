@@ -2241,7 +2241,7 @@ export function NewSale() {
                         placeholder="0"
                         value={globalDiscountValue} 
                         onChange={(e) => setGlobalDiscountValue(e.target.value)} 
-                        className="h-7 w-full px-2 text-xs text-right"
+                        className="h-7 w-full px-2 text-xs text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                       />
                     </div>
                   </div>
