@@ -5,10 +5,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Eye, RefreshCcw, Search, ShoppingBag, DollarSign, Clock, Globe, Download, Printer, CheckCircle2, Filter } from "lucide-react";
+import { Loader2, Eye, RefreshCcw, Search, ShoppingBag, DollarSign, Clock, Globe, Download, Printer, CheckCircle2, Filter, Trash2 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
@@ -185,6 +195,8 @@ const WebsiteOrders: React.FC = () => {
   const [isPrinting, setIsPrinting] = useState(false);
   const [isDownloadingPdf, setIsDownloadingPdf] = useState(false);
   const [statusUpdatingIds, setStatusUpdatingIds] = useState<Record<string, boolean>>({});
+  const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   useEffect(() => {
     fetchOrders();
@@ -463,6 +475,34 @@ const WebsiteOrders: React.FC = () => {
       });
     } finally {
       setIsDownloadingPdf(false);
+    }
+  };
+
+  const confirmDelete = (id: string) => {
+    setOrderToDelete(id);
+  };
+
+  const executeDelete = async () => {
+    if (!orderToDelete) return;
+
+    setIsDeleting(true);
+    try {
+      await apiClient.delete(`${API_BASE}/order/${orderToDelete}`);
+      toast({
+        title: "Success",
+        description: "Order deleted successfully",
+      });
+      setOrders((prev) => prev.filter(o => o.id !== orderToDelete));
+      setOrderToDelete(null);
+    } catch (err: any) {
+      console.log("Order deletion failed", err);
+      toast({
+        title: "Error",
+        description: err.response?.data?.message || "Failed to delete order",
+        variant: "destructive",
+      });
+    } finally {
+      setIsDeleting(false);
     }
   };
 
@@ -771,8 +811,8 @@ const WebsiteOrders: React.FC = () => {
             className="pl-10"
           />
         </div>
-        <div className="flex items-center space-x-2">
-          <Label htmlFor="status-filter">Status:</Label>
+        <div className="flex flex-wrap items-center gap-2">
+          <Label htmlFor="status-filter" className="mr-1">Status:</Label>
           <Select
             value={statusFilter || "ALL"}
             onValueChange={(value) => setStatusFilter(value === "ALL" ? "" : value)}
@@ -843,87 +883,194 @@ const WebsiteOrders: React.FC = () => {
               <p className="text-gray-600">No website orders found</p>
             </div>
           ) : (
-            <div className="overflow-x-auto -mx-4 md:mx-0">
-              <div className="inline-block min-w-full align-middle">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[120px]">Order #</TableHead>
-                      <TableHead className="min-w-[100px]">Total</TableHead>
-                      <TableHead className="min-w-[120px]">Payment</TableHead>
-                      <TableHead className="min-w-[120px]">Status</TableHead>
-                      <TableHead className="min-w-[110px]">Items</TableHead>
-                      <TableHead className="min-w-[120px]">Date</TableHead>
-                      <TableHead className="min-w-[140px]">Time</TableHead>
-                      <TableHead className="min-w-[120px]">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {filtered.map(o => (
-                      <TableRow key={o.id}>
-                        <TableCell className="font-medium">{o.order_number}</TableCell>
-                        <TableCell className="font-medium">Rs. {(Number(o.total_amount) || 0).toFixed(2)}</TableCell>
-                        <TableCell className="text-sm">{o.payment_method || 'CASH'}</TableCell>
-                        <TableCell>
-                          {(() => {
-                            const allowedStatusOptions = getAllowedStatusOptions(o.status);
-                            const isTerminal = isTerminalOrderStatus(o.status);
+            <>
+              {/* Mobile Cards */}
+              <div className="grid grid-cols-1 gap-4 md:hidden">
+                {filtered.map(o => {
+                  const allowedStatusOptions = getAllowedStatusOptions(o.status);
+                  const isTerminal = isTerminalOrderStatus(o.status);
 
-                            return (
-                            <>
-                            <div className="flex items-center gap-2">
-                              <Select
-                                value={o.status} 
-                                onValueChange={(value) => handleStatusUpdate(o.id, value)}
-                                disabled={!!statusUpdatingIds[o.id] || isTerminal}
-                              >
-                                <SelectTrigger className="h-8 w-[140px] text-sm font-medium">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {allowedStatusOptions.map((status) => (
-                                    <SelectItem key={status} value={status}>
-                                      {status}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              {isTerminal && (
-                                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 uppercase">
-                                  Terminal
+                  return (
+                    <div key={o.id} className="bg-white border rounded-xl p-4 shadow-sm flex flex-col gap-3">
+                      <div className="flex justify-between items-start">
+                        <div>
+                          <span className="text-sm text-gray-500">Order #</span>
+                          <p className="font-semibold text-gray-900">{o.order_number}</p>
+                        </div>
+                        <div className="text-right">
+                          <span className="text-sm text-gray-500">Total</span>
+                          <p className="font-bold text-green-600 text-lg">Rs. {(Number(o.total_amount) || 0).toFixed(2)}</p>
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-2 text-sm">
+                        <div>
+                          <span className="text-gray-500 block">Payment</span>
+                          <span className="font-medium text-gray-800">{o.payment_method || 'CASH'}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 block">Items</span>
+                          <span className="font-medium text-gray-800">{o.items?.length || 0}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 block">Date</span>
+                          <span className="font-medium text-gray-800">{new Date(o.created_at).toLocaleDateString()}</span>
+                        </div>
+                        <div>
+                          <span className="text-gray-500 block">Time</span>
+                          <span className="font-medium text-gray-800">{new Date(o.created_at).toLocaleTimeString()}</span>
+                        </div>
+                      </div>
+
+                      <div>
+                        <span className="text-gray-500 text-sm block mb-1">Status</span>
+                        <div className="flex items-center gap-2">
+                          <Select
+                            value={o.status} 
+                            onValueChange={(value) => handleStatusUpdate(o.id, value)}
+                            disabled={!!statusUpdatingIds[o.id] || isTerminal}
+                          >
+                            <SelectTrigger className="h-9 w-full text-sm font-medium">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {allowedStatusOptions.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {status}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          {isTerminal && (
+                            <span className="inline-flex items-center px-2 py-1 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 uppercase whitespace-nowrap">
+                              Terminal
+                            </span>
+                          )}
+                        </div>
+                        {statusUpdatingIds[o.id] && !o.status.includes('CANCELLED') && (
+                          <span className="inline-flex items-center text-xs text-blue-600 mt-1">
+                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                            Updating...
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2 mt-1">
+                        <Button 
+                          className="flex-1 flex items-center justify-center gap-2"
+                          variant="outline" 
+                          onClick={() => viewOrderDetail(o.id)}
+                        >
+                          <Eye className="w-4 h-4"/>
+                          View
+                        </Button>
+                        <Button
+                          className="flex-1 flex items-center justify-center gap-2 text-red-600 hover:text-red-700"
+                          variant="outline"
+                          onClick={() => confirmDelete(o.id)}
+                          disabled={!!statusUpdatingIds[o.id]}
+                        >
+                          <Trash2 className="w-4 h-4" />
+                          Delete
+                        </Button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Desktop Table */}
+              <div className="hidden md:block overflow-x-auto">
+                <div className="inline-block min-w-full align-middle">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead className="min-w-[120px]">Order #</TableHead>
+                        <TableHead className="min-w-[100px]">Total</TableHead>
+                        <TableHead className="min-w-[120px]">Payment</TableHead>
+                        <TableHead className="min-w-[120px]">Status</TableHead>
+                        <TableHead className="min-w-[110px]">Items</TableHead>
+                        <TableHead className="min-w-[120px]">Date</TableHead>
+                        <TableHead className="min-w-[140px]">Time</TableHead>
+                        <TableHead className="min-w-[120px]">Actions</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filtered.map(o => (
+                        <TableRow key={o.id}>
+                          <TableCell className="font-medium">{o.order_number}</TableCell>
+                          <TableCell className="font-medium">Rs. {(Number(o.total_amount) || 0).toFixed(2)}</TableCell>
+                          <TableCell className="text-sm">{o.payment_method || 'CASH'}</TableCell>
+                          <TableCell>
+                            {(() => {
+                              const allowedStatusOptions = getAllowedStatusOptions(o.status);
+                              const isTerminal = isTerminalOrderStatus(o.status);
+
+                              return (
+                              <>
+                              <div className="flex items-center gap-2">
+                                <Select
+                                  value={o.status} 
+                                  onValueChange={(value) => handleStatusUpdate(o.id, value)}
+                                  disabled={!!statusUpdatingIds[o.id] || isTerminal}
+                                >
+                                  <SelectTrigger className="h-8 w-[140px] text-sm font-medium">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {allowedStatusOptions.map((status) => (
+                                      <SelectItem key={status} value={status}>
+                                        {status}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                                {isTerminal && (
+                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 uppercase">
+                                    Terminal
+                                  </span>
+                                )}
+                              </div>
+                              {statusUpdatingIds[o.id] && !o.status.includes('CANCELLED') && (
+                                <span className="inline-flex items-center text-xs text-blue-600 mt-1">
+                                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                  Updating...
                                 </span>
                               )}
-                            </div>
-                            {statusUpdatingIds[o.id] && !o.status.includes('CANCELLED') && (
-                              <span className="inline-flex items-center text-xs text-blue-600 mt-1">
-                                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                                Updating...
-                              </span>
-                            )}
-                            </>
-                          );
-                        })()}
-                      </TableCell>
-                        <TableCell>{o.items?.length || 0}</TableCell>
-                        <TableCell>{new Date(o.created_at).toLocaleDateString()}</TableCell>
-                        <TableCell className="text-sm text-gray-500">{new Date(o.created_at).toLocaleTimeString()}</TableCell>
-                        <TableCell className="flex space-x-2">
-                          <Button 
-                            size="sm" 
-                            variant="outline" 
-                            onClick={() => viewOrderDetail(o.id)}
-                            className="flex items-center gap-1"
-                          >
-                            <Eye className="w-4 h-4"/>
-                            <span className="hidden sm:inline">View</span>
-                          </Button>
+                              </>
+                            );
+                          })()}
                         </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
+                          <TableCell>{o.items?.length || 0}</TableCell>
+                          <TableCell>{new Date(o.created_at).toLocaleDateString()}</TableCell>
+                          <TableCell className="text-sm text-gray-500">{new Date(o.created_at).toLocaleTimeString()}</TableCell>
+                          <TableCell className="flex space-x-2">
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              onClick={() => viewOrderDetail(o.id)}
+                              className="flex items-center gap-1"
+                            >
+                              <Eye className="w-4 h-4"/>
+                              <span className="hidden sm:inline">View</span>
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => confirmDelete(o.id)}
+                              className="flex items-center gap-1 text-red-600 hover:text-red-700"
+                              disabled={!!statusUpdatingIds[o.id]}
+                            >
+                              <Trash2 className="w-4 h-4" />
+                            </Button>
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
               </div>
-            </div>
+            </>
           )}
         </CardContent>
       </Card>
@@ -939,7 +1086,7 @@ const WebsiteOrders: React.FC = () => {
           }
         }}
       >
-        <DialogContent className="w-screen max-w-none h-[100dvh] rounded-none border-0 p-4 overflow-y-auto sm:w-[95vw] sm:max-w-4xl sm:h-[92vh] sm:rounded-lg sm:border sm:p-6">
+        <DialogContent className="w-[95vw] max-h-[90vh] sm:max-w-4xl rounded-xl p-4 sm:p-6 overflow-y-auto">
           <DialogHeader>
             <DialogTitle className="text-xl font-bold flex items-center gap-2">
               <Globe className="h-5 w-5 text-blue-600" />
@@ -1205,6 +1352,38 @@ const WebsiteOrders: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Alert Dialog */}
+      <AlertDialog open={!!orderToDelete} onOpenChange={(open) => !open && !isDeleting && setOrderToDelete(null)}>
+        <AlertDialogContent className="w-[95vw] max-w-md rounded-xl p-5 sm:p-6">
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the order and remove its data from our servers.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={(e) => {
+                e.preventDefault();
+                executeDelete();
+              }} 
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Order"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

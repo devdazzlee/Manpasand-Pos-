@@ -12,11 +12,6 @@ const config = {
     jwtSecret: process.env.JWT_SECRET || 'your-secret-key',
     jwtExpiresIn: process.env.JWT_EXPIRES_IN || '1d',
     cookieExpiresIn: parseInt(process.env.COOKIE_EXPIRES_IN || '86400000'),
-    redisServiceUri: process.env.REDIS_SERVICE_URI || 'redis://localhost:6379',
-    redisHost: process.env.REDIS_HOST || 'localhost',
-    redisPort: parseInt(process.env.REDIS_PORT || '6379'),
-    redisPassword: process.env.REDIS_PASSWORD || '',
-    redisDb: parseInt(process.env.REDIS_DB || '0'),
 };
 exports.config = config;
 //# sourceMappingURL=app.js.map

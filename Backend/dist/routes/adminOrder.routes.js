@@ -12,6 +12,6 @@ router.get('/', order_controller_1.getOrders);
 router.get('/:orderId', order_controller_1.getOrder);
 router.patch('/:orderId/status', (0, validation_middleware_1.validate)(order_validation_1.updateOrderStatusSchema), order_controller_1.updateOrderStatus);
 router.patch('/:orderId/reopen', order_controller_1.reopenOrder);
-router.delete('/:orderId', order_controller_1.cancelOrderByAdmin);
+router.delete('/:orderId', order_controller_1.deleteOrder);
 exports.default = router;
 //# sourceMappingURL=adminOrder.routes.js.map

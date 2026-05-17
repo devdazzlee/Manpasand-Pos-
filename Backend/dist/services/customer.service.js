@@ -7,7 +7,6 @@ const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const app_1 = require("../config/app");
-const redis_1 = require("../config/redis");
 const bcryptjs_1 = __importDefault(require("bcryptjs"));
 class CustomerService {
     generateToken(cusId, email) {
@@ -41,8 +40,6 @@ class CustomerService {
             },
         });
         const token = this.generateToken(customer.id, customer.email);
-        // Store session in Redis without expiration (token valid until logout)
-        await (0, redis_1.safeRedisOperation)(async (redis) => redis.set(`session:customer:${customer.id}`, token), null);
         return {
             email: customer.email,
             token,
@@ -72,8 +69,6 @@ class CustomerService {
             throw new apiError_1.AppError(401, 'Invalid credentials');
         }
         const token = this.generateToken(customer.id, customer.email);
-        // Save session to Redis without expiration (token valid until logout)
-        await (0, redis_1.safeRedisOperation)(async (redis) => redis.set(`session:customer:${customer.id}`, token), null);
         return {
             email: customer.email,
             token,
@@ -129,12 +124,12 @@ class CustomerService {
         await client_1.prisma.customer.delete({
             where: { id: customerId },
         });
-        // Remove session from Redis if exists
-        await (0, redis_1.safeRedisOperation)(async (redis) => redis.del(`session:customer:${customerId}`), 0);
         return { message: 'Customer deleted successfully' };
     }
-    async logoutCustomer(customerId) {
-        await (0, redis_1.safeRedisOperation)(async (redis) => redis.del(`session:customer:${customerId}`), 0);
+    // No server-side session to invalidate — the token is the session and is
+    // discarded by the client. Method kept so the existing /customer/logout
+    // route stays valid.
+    async logoutCustomer(_customerId) {
         return { message: 'Logged out successfully' };
     }
 }

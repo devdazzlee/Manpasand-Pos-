@@ -3,7 +3,6 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/app';
-import { safeRedisOperation } from '../config/redis';
 import bcrypt from 'bcryptjs';
 
 class CustomerService {
@@ -48,12 +47,6 @@ class CustomerService {
 
         const token = this.generateToken(customer.id, customer.email!);
 
-        // Store session in Redis without expiration (token valid until logout)
-        await safeRedisOperation(
-          async (redis) => redis.set(`session:customer:${customer.id}`, token),
-          null
-        );
-
         return {
             email: customer.email,
             token,
@@ -90,12 +83,6 @@ class CustomerService {
         }
 
         const token = this.generateToken(customer.id, customer.email!);
-
-        // Save session to Redis without expiration (token valid until logout)
-        await safeRedisOperation(
-          async (redis) => redis.set(`session:customer:${customer.id}`, token),
-          null
-        );
 
         return {
             email: customer.email,
@@ -168,20 +155,13 @@ class CustomerService {
             where: { id: customerId },
         });
 
-        // Remove session from Redis if exists
-        await safeRedisOperation(
-          async (redis) => redis.del(`session:customer:${customerId}`),
-          0
-        );
-
         return { message: 'Customer deleted successfully' };
     }
 
-    public async logoutCustomer(customerId: Customer['id']) {
-        await safeRedisOperation(
-          async (redis) => redis.del(`session:customer:${customerId}`),
-          0
-        );
+    // No server-side session to invalidate — the token is the session and is
+    // discarded by the client. Method kept so the existing /customer/logout
+    // route stays valid.
+    public async logoutCustomer(_customerId: Customer['id']) {
         return { message: 'Logged out successfully' };
     }
 }

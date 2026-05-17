@@ -66,6 +66,12 @@ const reopenOrder = asyncHandler(async (req: Request, res: Response) => {
   new ApiResponse(order, 'Order re-opened successfully and stock re-allocated').send(res);
 });
 
+const deleteOrder = asyncHandler(async (req: Request, res: Response) => {
+  const { orderId } = req.params;
+  await orderService.deleteOrder(orderId);
+  new ApiResponse(null, 'Order permanently deleted').send(res);
+});
+
 export {
   createOrder,
   getOrders,
@@ -75,5 +81,6 @@ export {
   updateOrderStatus,
   cancelOrderByAdmin,
   cancelOrderByCustomer,
-  reopenOrder
+  reopenOrder,
+  deleteOrder
 };

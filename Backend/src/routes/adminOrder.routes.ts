@@ -4,7 +4,8 @@ import {
   getOrder,
   updateOrderStatus,
   cancelOrderByAdmin,
-  reopenOrder
+  reopenOrder,
+  deleteOrder
 } from '../controllers/order.controller';
 import { validate } from '../middleware/validation.middleware';
 import { updateOrderStatusSchema } from '../validations/order.validation';
@@ -19,6 +20,6 @@ router.get('/', getOrders);
 router.get('/:orderId', getOrder);
 router.patch('/:orderId/status', validate(updateOrderStatusSchema), updateOrderStatus);
 router.patch('/:orderId/reopen', reopenOrder);
-router.delete('/:orderId', cancelOrderByAdmin);
+router.delete('/:orderId', deleteOrder);
 
 export default router;

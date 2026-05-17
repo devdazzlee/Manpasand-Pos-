@@ -7,7 +7,6 @@ import { prisma } from './prisma/client';
 import { errorHandler } from './middleware/error.middleware';
 import { notFoundHandler } from './middleware/not-found.middleware';
 import { connectDB } from './config/db';
-import { connectRedis } from './config/redis';
 import authRoutes from './routes/auth.routes';
 import categoryRoutes from './routes/category.routes';
 import subcategoryRoutes from './routes/subcategory.routes';
@@ -48,7 +47,6 @@ const vAPI = process.env.vAPI || '/api/v1';
 const app = express();
 
 connectDB();
-connectRedis();
 
 // Middleware
 app.use(cors({
@@ -120,7 +118,7 @@ app.use(`${vAPI}/shifts`, shiftRoutes);
 app.use(`${vAPI}/shift-assignment`, shiftAssignmentRoutes);
 app.use(`${vAPI}/barcode-generator`, barcodeRoutes);
 
-// Website Routes (paginated, server-side filtered, Redis-cached)
+// Website Routes (paginated, server-side filtered)
 app.use(`${vAPI}/web`, webRoutes);
 
 // App Routes

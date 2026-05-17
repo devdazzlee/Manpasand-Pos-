@@ -1,10 +1,9 @@
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { prisma } from '../prisma/client';
-import { safeRedisOperation } from '../config/redis';
 import { config } from '../config/app';
 import { AppError } from '../utils/apiError';
-import { Role, Branch } from '@prisma/client'; 
+import { Role, Branch } from '@prisma/client';
 
 class AuthService {
   async register(data: { email: string; password: string; role?: Role }) {
@@ -83,6 +82,8 @@ class AuthService {
       throw new AppError(400, 'Invalid username or password');
     }
 
+    // Pure-JWT auth: the signed token (no expiry) IS the session. No Redis,
+    // no server-side store. Logout becomes a client-side localStorage wipe.
     const token = jwt.sign(
       {
         id: user.id,
@@ -90,13 +91,6 @@ class AuthService {
         branch_id: user.branch_id,
       },
       config.jwtSecret,
-      // No expiration - token remains valid until user logs out
-    );
-
-    // Store session in Redis without expiration (token valid until logout)
-    await safeRedisOperation(
-      async (redis) => redis.set(`session:${user.id}`, token),
-      null
     );
 
     // Omit password from returned user object
@@ -108,12 +102,11 @@ class AuthService {
     };
   }
 
-  async logout(userId: string) {
-    // Delete session from Redis to invalidate token
-    await safeRedisOperation(
-      async (redis) => redis.del(`session:${userId}`),
-      0
-    );
+  // Logout is intentionally a no-op on the server: there is no session to
+  // invalidate. The frontend clears its localStorage token; that's it. We
+  // keep the method so the existing /auth/logout route stays valid.
+  async logout(_userId: string) {
+    return;
   }
 }
 

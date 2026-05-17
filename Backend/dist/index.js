@@ -12,7 +12,6 @@ const client_1 = require("./prisma/client");
 const error_middleware_1 = require("./middleware/error.middleware");
 const not_found_middleware_1 = require("./middleware/not-found.middleware");
 const db_1 = require("./config/db");
-const redis_1 = require("./config/redis");
 const auth_routes_1 = __importDefault(require("./routes/auth.routes"));
 const category_routes_1 = __importDefault(require("./routes/category.routes"));
 const subcategory_routes_1 = __importDefault(require("./routes/subcategory.routes"));
@@ -51,7 +50,6 @@ const node_cron_1 = __importDefault(require("node-cron"));
 const vAPI = process.env.vAPI || '/api/v1';
 const app = (0, express_1.default)();
 (0, db_1.connectDB)();
-(0, redis_1.connectRedis)();
 // Middleware
 app.use((0, cors_1.default)({
     origin: function (origin, callback) {
@@ -117,7 +115,7 @@ app.use(`${vAPI}/salaries`, salary_route_1.default);
 app.use(`${vAPI}/shifts`, shift_route_1.default);
 app.use(`${vAPI}/shift-assignment`, shiftAssignment_routes_1.default);
 app.use(`${vAPI}/barcode-generator`, barcode_routes_1.default);
-// Website Routes (paginated, server-side filtered, Redis-cached)
+// Website Routes (paginated, server-side filtered)
 app.use(`${vAPI}/web`, web_routes_1.default);
 // App Routes
 app.use(`${vAPI}/customer/app`, app_routes_1.default);

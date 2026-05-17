@@ -27,26 +27,17 @@ apiClient.interceptors.request.use(
   }
 );
 
-// Response interceptor to handle auth errors
+// Response interceptor.
+//
+// Intentionally does NOT auto-logout on 401. The backend issues JWTs with no
+// expiration (see auth.service.ts / customer.service.ts), so the user should
+// remain signed in until they explicitly click Logout. A spurious 401 from a
+// single endpoint — Redis blip, a misconfigured route, etc. — must not wipe
+// the session and reload the whole app. The 401 still bubbles up to the
+// caller so individual screens can render their own error states.
 apiClient.interceptors.response.use(
-  (response: AxiosResponse) => {
-    return response;
-  },
-  (error) => {
-    if (error.response?.status === 401) {
-      const token = localStorage.getItem("token");
-      if (token) {
-        localStorage.removeItem("token");
-        localStorage.removeItem("role");
-        localStorage.removeItem("branch");
-        localStorage.removeItem("branchName");
-        localStorage.removeItem("branchAddress");
-        window.location.reload();
-      }
-    }
-
-    return Promise.reject(error);
-  }
+  (response: AxiosResponse) => response,
+  (error) => Promise.reject(error),
 );
 
 export default apiClient;
