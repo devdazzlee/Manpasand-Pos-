@@ -28,8 +28,6 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   Search,
-  Plus,
-  Minus,
   Trash2,
   CreditCard,
   DollarSign,
@@ -100,8 +98,6 @@ export function NewSale() {
   const [priceInputs, setPriceInputs] = useState<Record<string, string>>({});
   const [quantityInputs, setQuantityInputs] = useState<Record<string, string>>({});
   const [quantityModes, setQuantityModes] = useState<Record<string, "preset" | "custom">>({});
-  const [amountInputs, setAmountInputs] = useState<Record<string, string>>({});
-  const [showAmountEditors, setShowAmountEditors] = useState<Record<string, boolean>>({});
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
@@ -829,24 +825,12 @@ export function NewSale() {
       delete next[id];
       return next;
     });
-    setAmountInputs((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
-    setShowAmountEditors((prev) => {
-      const next = { ...prev };
-      delete next[id];
-      return next;
-    });
   };
 
   const clearCart = () => {
     setCart([]);
     setQuantityInputs({});
     setQuantityModes({});
-    setAmountInputs({});
-    setShowAmountEditors({});
     setGlobalDiscountValue("");
   };
 
@@ -1845,29 +1829,29 @@ export function NewSale() {
       </div>
 
       {/* Cart Section */}
-      <div className="w-full lg:w-[400px] bg-white lg:border-l border-gray-200 flex flex-col">
-        <div className="border-b border-gray-200 bg-slate-50/60 p-4">
-          <div className="flex items-start justify-between gap-3">
+      <div className="w-full lg:w-[320px] bg-white lg:border-l border-gray-200 flex flex-col">
+        <div className="border-b border-gray-200 bg-slate-50/60 p-2.5">
+          <div className="flex items-start justify-between gap-2">
             <div>
-              <h2 className="text-xl font-semibold text-gray-900">Sale Summary</h2>
+              <h2 className="text-sm font-semibold text-gray-900">Sale Summary</h2>
               {cart.length === 0 && (
-                <p className="mt-1 text-xs text-gray-500">
+                <p className="mt-0.5 text-[10px] text-gray-500">
                   Scan a product or search to start a new sale.
                 </p>
               )}
             </div>
-            <div className="rounded-full bg-white px-3 py-1 text-xs font-medium text-gray-600 shadow-sm">
+            <div className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-gray-600 shadow-sm">
               {cart.length} item{cart.length === 1 ? "" : "s"}
             </div>
           </div>
 
           {cart.length > 0 && (
-            <div className="mt-3 flex flex-wrap gap-2">
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={clearCart}
-                className="flex-1 min-w-[120px] border-dashed"
+                className="h-7 flex-1 min-w-[100px] border-dashed text-[11px]"
               >
                 Clear Cart
               </Button>
@@ -1875,10 +1859,10 @@ export function NewSale() {
                 variant="default"
                 size="sm"
                 onClick={holdCurrentSale}
-                className="flex-1 min-w-[120px]"
+                className="h-7 flex-1 min-w-[100px] text-[11px]"
                 disabled={isHoldingSale || branchLoading || !hasBranch}
               >
-                {isHoldingSale ? "Saving..." : "Hold Sale (Save)"}
+                {isHoldingSale ? "Saving..." : "Hold Sale"}
               </Button>
             </div>
           )}
@@ -1969,20 +1953,7 @@ export function NewSale() {
               <div className="space-y-2">
                 {cart.map((item) => {
                   const unitName = item.unitName || item.unit;
-                  const presetOptions = getQuantityPresetOptions(unitName);
-                  const matchedPresetValue = getPresetValueForQuantity(item.quantity, unitName);
-                  const quantityMode = quantityModes[item.id] === "custom" ? "custom" : "preset";
-                  const selectedPresetValue =
-                    quantityMode === "custom"
-                      ? "custom"
-                      : matchedPresetValue === "custom"
-                        ? presetOptions[0]?.value || "custom"
-                        : matchedPresetValue;
                   const minQuantity = isPieceUnit(unitName) ? 1 : 0.01;
-                  const minControlQuantity =
-                    quantityMode === "preset" && isWeightUnit(unitName)
-                      ? presetOptions[0]?.quantity ?? minQuantity
-                      : minQuantity;
                   const effectiveUnitPrice = getSellingPrice(item);
 
                   return (
@@ -1991,16 +1962,16 @@ export function NewSale() {
                     ref={(el) => {
                       cartItemRefs.current[item.id] = el;
                     }}
-                    className="rounded-lg border border-gray-200 bg-white p-3 shadow-sm"
+                    className="rounded-md border border-gray-200 bg-white p-2 shadow-sm"
                   >
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="space-y-1">
-                        <h4 className="text-sm font-semibold text-gray-900 leading-snug flex items-center gap-2">
-                          <span>{item.name}</span>
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="space-y-0.5 min-w-0">
+                        <h4 className="text-[11px] font-semibold text-gray-900 leading-snug flex items-center gap-1 flex-wrap">
+                          <span className="truncate">{item.name}</span>
                           {isPriceOverridden(item) && (
-                            <Badge variant="outline" className="text-[10px] border-amber-300 text-amber-700 bg-amber-50">
-                              <Pencil className="h-3 w-3 mr-1" />
-                              Custom Price
+                            <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-700 bg-amber-50">
+                              <Pencil className="h-2.5 w-2.5 mr-0.5" />
+                              Custom
                             </Badge>
                           )}
                         </h4>
@@ -2009,17 +1980,17 @@ export function NewSale() {
                         size="sm"
                         variant="ghost"
                         onClick={() => removeFromCart(item.id)}
-                        className="h-7 w-7 p-0 text-red-500 hover:text-red-600"
+                        className="h-5 w-5 p-0 text-red-500 hover:text-red-600 shrink-0"
                       >
-                        <Trash2 className="h-4 w-4" />
+                        <Trash2 className="h-3 w-3" />
                       </Button>
                     </div>
 
-                    <div className="mt-3 rounded-lg border border-gray-100 bg-slate-50 p-3 space-y-3">
+                    <div className="mt-1.5 rounded-md border border-gray-100 bg-slate-50 p-2 space-y-2">
                       {/* Price editor */}
                       <div>
                         <div className="flex items-center justify-between">
-                          <label className="text-[11px] font-semibold tracking-wide text-gray-600">
+                          <label className="text-[10px] font-semibold tracking-wide text-gray-600">
                             Selling Price (Rs)
                           </label>
                           {isPriceOverridden(item) && (
@@ -2027,7 +1998,7 @@ export function NewSale() {
                               type="button"
                               size="sm"
                               variant="ghost"
-                              className="h-7 px-2 text-[11px] text-amber-700 hover:text-amber-800"
+                              className="h-6 px-1.5 text-[10px] text-amber-700 hover:text-amber-800"
                               onClick={() => {
                                 setCart(
                                   cart.map((cartItem) =>
@@ -2154,229 +2125,86 @@ export function NewSale() {
                               isUserInteractingRef.current = false;
                             }, 300);
                           }}
-                          className={`mt-1 h-10 text-base font-semibold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
+                          className={`mt-1 h-7 text-xs font-semibold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
                             isPriceOverridden(item) ? "border-amber-400 bg-amber-50" : ""
                           }`}
                         />
                       </div>
-                      
+
                       {/* Quantity + amount based auto-calc */}
-                      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
+                      <div className="grid grid-cols-2 gap-2">
                       <div>
-                          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+                          <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">
                             Quantity {unitName ? `(${unitName})` : ""}
                         </label>
-                          <div className="mt-1 space-y-2">
-                            <Select
-                              value={selectedPresetValue}
-                              onValueChange={(value) => {
-                                if (value === "custom") {
-                                  setQuantityModes((prev) => ({ ...prev, [item.id]: "custom" }));
-                                  setQuantityInputs((prev) => ({
-                                    ...prev,
-                                    [item.id]: isPieceUnit(unitName)
-                                      ? String(Math.max(1, Math.round(item.quantity)))
-                                      : item.quantity.toFixed(3),
-                                  }));
-                                  return;
-                                }
-
-                                const selectedPreset = presetOptions.find((preset) => preset.value === value);
-                                if (!selectedPreset) return;
-
-                                setQuantityModes((prev) => ({ ...prev, [item.id]: "preset" }));
-                                setQuantityInputs((prev) => {
-                                  const next = { ...prev };
-                                  delete next[item.id];
-                                  return next;
-                                });
-                                updateQuantityManual(item.id, selectedPreset.quantity, unitName);
-                              }}
-                            >
-                              <SelectTrigger
-                            ref={(el) => {
-                              quantityInputRefs.current[item.id] = el;
-                              if (el) {
-                                    el.setAttribute("data-quantity-select", "true");
-                              }
-                            }}
-                                className="h-10 bg-white text-sm"
-                            onFocus={() => {
-                              isUserInteractingRef.current = true;
-                            }}
-                                onBlur={() => {
-                                  setTimeout(() => {
-                                    isUserInteractingRef.current = false;
-                                  }, 300);
-                                }}
-                              >
-                                <SelectValue placeholder="Select quantity" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {presetOptions.map((preset) => (
-                                  <SelectItem key={`${item.id}-${preset.value}`} value={preset.value}>
-                                    {preset.label}
-                                  </SelectItem>
-                                ))}
-                                <SelectItem value="custom">Custom...</SelectItem>
-                              </SelectContent>
-                            </Select>
-
-                            {quantityMode === "custom" && (
                           <Input
                             ref={(el) => {
                               quantityInputRefs.current[item.id] = el;
                               if (el) {
-                                    el.setAttribute("data-quantity-input", "true");
+                                el.setAttribute("data-quantity-input", "true");
                               }
                             }}
                             type="text"
-                                inputMode={isWeightUnit(unitName) ? "text" : "decimal"}
-                                placeholder={
-                                  isPieceUnit(unitName)
-                                    ? "Type pieces"
-                                    : isWeightUnit(unitName)
-                                      ? "250g or 0.25kg"
-                                      : "Type quantity"
-                                }
-                                value={quantityInputs[item.id] ?? ""}
+                            inputMode={isWeightUnit(unitName) ? "text" : "decimal"}
+                            placeholder={
+                              isPieceUnit(unitName)
+                                ? "Enter pieces"
+                                : isWeightUnit(unitName)
+                                  ? "e.g. 0.25 or 250g"
+                                  : "Enter quantity"
+                            }
+                            value={
+                              quantityInputs[item.id] !== undefined
+                                ? quantityInputs[item.id]
+                                : isPieceUnit(unitName)
+                                  ? String(Math.max(1, Math.round(item.quantity)))
+                                  : String(item.quantity)
+                            }
                             onFocus={() => {
                               isUserInteractingRef.current = true;
                             }}
                             onChange={(e) => {
-                                  const value = e.target.value.trim();
-                                  if (value === "") {
-                                    setQuantityInputs((prev) => ({ ...prev, [item.id]: "" }));
-                                return;
-                              }
-                              
-                                  setQuantityInputs((prev) => ({ ...prev, [item.id]: value }));
-                                  const parsed = parseCustomQuantityInput(value, unitName);
-                                  if (parsed === null) return;
-                                  updateQuantityManual(item.id, parsed, unitName);
-                                }}
-                                onBlur={() => {
-                                  const currentValue = quantityInputs[item.id];
-                                  const parsed = currentValue
-                                    ? parseCustomQuantityInput(currentValue, unitName)
-                                    : null;
-                                  if (!currentValue || parsed === null || parsed <= 0) {
-                                    setQuantityInputs((prev) => ({
-                                      ...prev,
-                                      [item.id]: isPieceUnit(unitName) ? "1" : "0.01",
-                                    }));
-                                    updateQuantityManual(item.id, minQuantity, unitName);
+                              const raw = e.target.value;
+                              setQuantityInputs((prev) => ({ ...prev, [item.id]: raw }));
+                              const trimmed = raw.trim();
+                              if (trimmed === "") return;
+                              const parsed = parseCustomQuantityInput(trimmed, unitName);
+                              if (parsed === null || parsed <= 0) return;
+                              updateQuantityManual(item.id, parsed, unitName);
+                            }}
+                            onBlur={() => {
+                              const currentValue = quantityInputs[item.id];
+                              const parsed = currentValue
+                                ? parseCustomQuantityInput(currentValue, unitName)
+                                : null;
+                              if (!currentValue || parsed === null || parsed <= 0) {
+                                setQuantityInputs((prev) => ({
+                                  ...prev,
+                                  [item.id]: isPieceUnit(unitName) ? "1" : "0.01",
+                                }));
+                                updateQuantityManual(item.id, minQuantity, unitName);
                               } else {
-                                    updateQuantityManual(item.id, parsed, unitName);
-                                  }
+                                updateQuantityManual(item.id, parsed, unitName);
+                              }
                               setTimeout(() => {
                                 isUserInteractingRef.current = false;
                               }, 300);
                             }}
-                                className="h-10 text-sm font-semibold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                              />
-                            )}
-
-                            <div className="flex items-center gap-1.5">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => {
-                                  const currentItem = cart.find((cartItem) => cartItem.id === item.id);
-                                  if (currentItem && currentItem.quantity > minControlQuantity) {
-                                    updateQuantity(item.id, -1);
-                                  }
-                                }}
-                                className="h-10 w-10 p-0"
-                                disabled={item.quantity <= minControlQuantity}
-                              >
-                                <Minus className="h-4 w-4" />
-                              </Button>
-                              <div className="h-10 flex-1 rounded-md border border-gray-200 bg-white px-3 text-sm font-semibold text-gray-800 flex items-center justify-center whitespace-nowrap">
-                                {formatQuantityWithUnit(item.quantity, unitName)}
-                              </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => updateQuantity(item.id, 1)}
-                                className="h-10 w-10 p-0"
-                          >
-                                <Plus className="h-4 w-4" />
-                          </Button>
-                            </div>
-                        </div>
+                            className="mt-1 h-7 text-xs font-semibold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
                       </div>
-                      
-                        <div className="space-y-2">
-                          <label className="text-[11px] font-semibold uppercase tracking-wide text-gray-600">
+
+                        <div>
+                          <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">
                             Total
                           </label>
-                          <div className="rounded-md border border-blue-100 bg-blue-50 px-3 h-10 flex items-center justify-start">
-                            <span className="text-base font-semibold text-blue-900 whitespace-nowrap text-left">
+                          <div className="mt-1 rounded-md border border-blue-100 bg-blue-50 px-2 h-7 flex items-center">
+                            <span className="text-xs font-semibold text-blue-900 whitespace-nowrap">
                               Rs {formatMoney(effectiveUnitPrice * item.quantity)}
                             </span>
                           </div>
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-8 w-full text-xs"
-                            onClick={() =>
-                              setShowAmountEditors((prev) => ({
-                                ...prev,
-                                [item.id]: !prev[item.id],
-                              }))
-                            }
-                          >
-                            {showAmountEditors[item.id] ? "Hide Amount" : "Amount by Rs"}
-                          </Button>
-                          {showAmountEditors[item.id] && (
-                            <div className="rounded-md border border-gray-200 bg-white p-2">
-                              <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">
-                                Amount (Rs)
-                        </label>
-                        <Input
-                                data-amount-input="true"
-                          type="text"
-                          inputMode="decimal"
-                                placeholder="e.g. 500"
-                                value={amountInputs[item.id] ?? ""}
-                          onFocus={() => {
-                            isUserInteractingRef.current = true;
-                          }}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                                  if (value !== "" && !/^(\d*\.?\d*)$/.test(value)) return;
-                                  setAmountInputs((prev) => ({ ...prev, [item.id]: value }));
-
-                                  if (value === "" || value === ".") return;
-
-                                  const amountValue = parseFloat(value);
-                                  if (Number.isNaN(amountValue) || amountValue < 0 || effectiveUnitPrice <= 0) return;
-                                  const computedQuantity = amountValue / effectiveUnitPrice;
-                                  updateQuantityManual(item.id, computedQuantity, unitName);
-                                  setQuantityModes((prev) => ({ ...prev, [item.id]: "custom" }));
-                                  setQuantityInputs((prev) => ({
-                                    ...prev,
-                                    [item.id]: isPieceUnit(unitName)
-                                      ? String(Math.max(1, Math.round(computedQuantity)))
-                                      : computedQuantity.toFixed(3),
-                                  }));
-                          }}
-                          onBlur={() => {
-                            setTimeout(() => {
-                              isUserInteractingRef.current = false;
-                            }, 300);
-                          }}
-                                className="mt-1 h-9 text-sm [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                              <p className="mt-1 text-[10px] text-blue-600 font-medium">
-                                Auto qty: {formatQuantityWithUnit(item.quantity, unitName)}
-                              </p>
+                        </div>
                       </div>
-                          )}
-                    </div>
-                  </div>
                     </div>
                   </div>
                   );
@@ -2437,9 +2265,9 @@ export function NewSale() {
                   size="sm"
                   onClick={() => startPayment("Cash")}
                   disabled={paymentLoading || branchLoading || !hasBranch}
-                  className="h-10 text-sm"
+                  className="h-9 text-xs"
                 >
-                  <DollarSign className="mr-2 h-4 w-4" />
+                  <DollarSign className="mr-1.5 h-3.5 w-3.5" />
                   Cash
                 </Button>
                 <Button
@@ -2447,9 +2275,9 @@ export function NewSale() {
                   variant="outline"
                   onClick={() => startPayment("Card")}
                   disabled={paymentLoading || branchLoading || !hasBranch}
-                  className="h-10 text-sm"
+                  className="h-9 text-xs"
                 >
-                  <CreditCard className="mr-2 h-4 w-4" />
+                  <CreditCard className="mr-1.5 h-3.5 w-3.5" />
                   Card
                 </Button>
               </div>
