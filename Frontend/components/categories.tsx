@@ -8,9 +8,17 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
-import { Checkbox } from "@/components/ui/checkbox"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   Search,
@@ -135,6 +143,8 @@ export function Categories() {
   const [selectedCategoryForProducts, setSelectedCategoryForProducts] = useState<Category | null>(null)
   const [categoryProducts, setCategoryProducts] = useState<any[]>([])
   const [loadingProducts, setLoadingProducts] = useState(false)
+  const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null)
+  const [isDeleting, setIsDeleting] = useState(false)
 
   const [newCategory, setNewCategory] = useState<CreateCategoryData>({
     name: "",
@@ -415,9 +425,20 @@ export function Categories() {
 
     try {
       setLoading(true)
+      // Categories are visible on every branch by default and shown on POS.
+      // The advanced flags were removed from the UI but the backend still
+      // accepts them, so we send sensible defaults explicitly. We intentionally
+      // omit `branch_id` (no single owning branch) — sending "" triggers a
+      // foreign-key violation against the Branch table.
+      const allBranchIds = branches.map((b) => b.id)
+      const { branch_id: _unusedBranchId, ...rest } = newCategory
       const categoryData = {
-        ...newCategory,
+        ...rest,
         slug: newCategory.slug || generateSlug(newCategory.name),
+        display_on_branches: allBranchIds,
+        display_on_pos: true,
+        get_tax_from_item: false,
+        editable_sale_rate: false,
       }
 
       const response = await apiClient.post("/categories", categoryData)
@@ -461,15 +482,15 @@ export function Categories() {
 
     try {
       setLoading(true)
+      // Keep the category visible on every branch on update too. Existing rows
+      // may have a stale subset of branches; this ensures parity with creation.
+      const allBranchIds = branches.map((b) => b.id)
       const response = await apiClient.patch(`/categories/${editingCategory.id}`, {
         name: editingCategory.name,
         slug: editingCategory.slug,
-        display_on_branches: editingCategory.display_on_branches,
+        display_on_branches: allBranchIds,
         image: editingCategory.image,
-        get_tax_from_item: editingCategory.get_tax_from_item,
-        editable_sale_rate: editingCategory.editable_sale_rate,
-        display_on_pos: editingCategory.display_on_pos,
-        branch_id: editingCategory.branch_id,
+        display_on_pos: true,
       })
 
       toast({
@@ -519,20 +540,27 @@ export function Categories() {
     }
   }
 
-  // Delete category
-  const handleDeleteCategory = async (id: string) => {
-    if (!confirm("Are you sure you want to delete this category?")) return
+  // Trigger delete dialog
+  const confirmDelete = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation()
+    setCategoryToDelete(id)
+  }
+
+  // Execute actual deletion
+  const executeDelete = async () => {
+    if (!categoryToDelete) return
 
     try {
-      setLoading(true)
-      await apiClient.delete(`/categories/${id}`)
+      setIsDeleting(true)
+      await apiClient.delete(`/categories/${categoryToDelete}`)
 
       toast({
         title: "Success",
         description: "Category deleted successfully",
       })
 
-      setCategories(categories.filter((c) => c.id !== id))
+      setCategories(categories.filter((c) => c.id !== categoryToDelete))
+      setCategoryToDelete(null)
     } catch (error: any) {
       console.log("Error deleting category:", error)
       toast({
@@ -541,49 +569,11 @@ export function Categories() {
         variant: "destructive",
       })
     } finally {
-      setLoading(false)
+      setIsDeleting(false)
     }
   }
 
-  // Handle branch selection for display_on_branches
-  const handleBranchToggle = (branchId: string, checked: boolean) => {
-    const currentBranches = newCategory.display_on_branches || []
-    if (checked) {
-      setNewCategory({
-        ...newCategory,
-        display_on_branches: [...currentBranches, branchId],
-      })
-    } else {
-      setNewCategory({
-        ...newCategory,
-        display_on_branches: currentBranches.filter((id) => id !== branchId),
-      })
-    }
-  }
 
-  // Handle branch selection for editing
-  const handleEditBranchToggle = (branchId: string, checked: boolean) => {
-    if (!editingCategory) return
-
-    const currentBranches = editingCategory.display_on_branches || []
-    if (checked) {
-      setEditingCategory({
-        ...editingCategory,
-        display_on_branches: [...currentBranches, branchId],
-      })
-    } else {
-      setEditingCategory({
-        ...editingCategory,
-        display_on_branches: currentBranches.filter((id) => id !== branchId),
-      })
-    }
-  }
-
-  // Get branch name by ID
-  const getBranchName = (branchId: string) => {
-    const branch = branches.find((b) => b.id === branchId)
-    return branch ? branch.name : branchId
-  }
 
   // Handle edit dialog open
   const handleEditDialogOpen = (category: Category) => {
@@ -723,92 +713,6 @@ export function Categories() {
                 </Button>
               </div>
 
-              <div>
-                <Label htmlFor="branch">Branch</Label>
-                <Select
-                  value={newCategory.branch_id || ""}
-                  onValueChange={(value) => setNewCategory({ ...newCategory, branch_id: value })}
-                  disabled={branchesLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={branchesLoading ? "Loading branches..." : "Select a branch"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {branches.map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        {branch.name} ({branch.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Display on Branches</Label>
-                {branchesLoading ? (
-                  <div className="flex items-center justify-center py-4">
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Loading branches...
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    {branches.map((branch) => (
-                      <div key={branch.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`branch-${branch.id}`}
-                          checked={(newCategory.display_on_branches || []).includes(branch.id)}
-                          onCheckedChange={(checked) => handleBranchToggle(branch.id, checked as boolean)}
-                        />
-                        <Label htmlFor={`branch-${branch.id}`} className="text-sm">
-                          {branch.name} ({branch.code})
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="get_tax_from_item"
-                    checked={newCategory.get_tax_from_item || false}
-                    onCheckedChange={(checked) =>
-                      setNewCategory({ ...newCategory, get_tax_from_item: checked as boolean })
-                    }
-                  />
-                  <Label htmlFor="get_tax_from_item" className="text-sm">
-                    Get Tax from Item
-                  </Label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="editable_sale_rate"
-                    checked={newCategory.editable_sale_rate || false}
-                    onCheckedChange={(checked) =>
-                      setNewCategory({ ...newCategory, editable_sale_rate: checked as boolean })
-                    }
-                  />
-                  <Label htmlFor="editable_sale_rate" className="text-sm">
-                    Editable Sale Rate
-                  </Label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="display_on_pos"
-                    checked={newCategory.display_on_pos !== false}
-                    onCheckedChange={(checked) =>
-                      setNewCategory({ ...newCategory, display_on_pos: checked as boolean })
-                    }
-                  />
-                  <Label htmlFor="display_on_pos" className="text-sm">
-                    Display on POS
-                  </Label>
-                </div>
-              </div>
-
               <Button onClick={handleAddCategory} className="w-full" disabled={loading}>
                 {loading ? (
                   <>
@@ -888,21 +792,7 @@ export function Categories() {
                   )}
                   <CardTitle className="text-lg">{category.name}</CardTitle>
                 </div>
-                <div className="flex items-center space-x-2">
-                  <Badge
-                    variant={category.status === "active" ? "default" : "secondary"}
-                    className={category.status === "active" ? "bg-green-100 text-green-800" : ""}
-                  >
-                    {category.status || "active"}
-                  </Badge>
-                  <Button size="sm" variant="ghost" onClick={() => handleToggleStatus(category.id)} disabled={loading}>
-                    {category.status === "active" ? (
-                      <ToggleRight className="h-4 w-4 text-green-600" />
-                    ) : (
-                      <ToggleLeft className="h-4 w-4 text-gray-400" />
-                    )}
-                  </Button>
-                </div>
+
               </div>
             </CardHeader>
             <CardContent>
@@ -910,40 +800,6 @@ export function Categories() {
                 <p className="text-sm text-gray-600">
                   <strong>Slug:</strong> {category.slug}
                 </p>
-                {category.branch_id && (
-                  <p className="text-sm text-gray-600">
-                    <strong>Branch:</strong> {getBranchName(category.branch_id)}
-                  </p>
-                )}
-                {category.display_on_branches && category.display_on_branches.length > 0 && (
-                  <div className="text-sm text-gray-600">
-                    <strong>Display on:</strong>
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {category.display_on_branches.map((branchId) => (
-                        <Badge key={branchId} variant="outline" className="text-xs">
-                          {getBranchName(branchId)}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                <div className="flex flex-wrap gap-1">
-                  {category.display_on_pos && (
-                    <Badge variant="outline" className="text-xs">
-                      POS
-                    </Badge>
-                  )}
-                  {category.get_tax_from_item && (
-                    <Badge variant="outline" className="text-xs">
-                      Tax from Item
-                    </Badge>
-                  )}
-                  {category.editable_sale_rate && (
-                    <Badge variant="outline" className="text-xs">
-                      Editable Rate
-                    </Badge>
-                  )}
-                </div>
               </div>
               <div className="flex items-center justify-between mt-4">
                 <div className="flex items-center space-x-2">
@@ -957,7 +813,7 @@ export function Categories() {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleDeleteCategory(category.id)}
+                    onClick={(e) => confirmDelete(e, category.id)}
                     className="text-red-600 hover:text-red-700"
                     disabled={loading}
                   >
@@ -1050,92 +906,6 @@ export function Categories() {
                 </Button>
               </div>
 
-              <div>
-                <Label>Branch</Label>
-                <Select
-                  value={editingCategory.branch_id || ""}
-                  onValueChange={(value) => setEditingCategory({ ...editingCategory, branch_id: value })}
-                  disabled={branchesLoading}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder={branchesLoading ? "Loading branches..." : "Select a branch"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {branches.map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        {branch.name} ({branch.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Label>Display on Branches</Label>
-                {branchesLoading ? (
-                  <div className="flex items-center justify-center py-4">
-                    <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                    Loading branches...
-                  </div>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2 mt-2">
-                    {branches.map((branch) => (
-                      <div key={branch.id} className="flex items-center space-x-2">
-                        <Checkbox
-                          id={`edit-branch-${branch.id}`}
-                          checked={(editingCategory.display_on_branches || []).includes(branch.id)}
-                          onCheckedChange={(checked) => handleEditBranchToggle(branch.id, checked as boolean)}
-                        />
-                        <Label htmlFor={`edit-branch-${branch.id}`} className="text-sm">
-                          {branch.name} ({branch.code})
-                        </Label>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="edit-get_tax_from_item"
-                    checked={editingCategory.get_tax_from_item || false}
-                    onCheckedChange={(checked) =>
-                      setEditingCategory({ ...editingCategory, get_tax_from_item: checked as boolean })
-                    }
-                  />
-                  <Label htmlFor="edit-get_tax_from_item" className="text-sm">
-                    Get Tax from Item
-                  </Label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="edit-editable_sale_rate"
-                    checked={editingCategory.editable_sale_rate || false}
-                    onCheckedChange={(checked) =>
-                      setEditingCategory({ ...editingCategory, editable_sale_rate: checked as boolean })
-                    }
-                  />
-                  <Label htmlFor="edit-editable_sale_rate" className="text-sm">
-                    Editable Sale Rate
-                  </Label>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <Checkbox
-                    id="edit-display_on_pos"
-                    checked={editingCategory.display_on_pos !== false}
-                    onCheckedChange={(checked) =>
-                      setEditingCategory({ ...editingCategory, display_on_pos: checked as boolean })
-                    }
-                  />
-                  <Label htmlFor="edit-display_on_pos" className="text-sm">
-                    Display on POS
-                  </Label>
-                </div>
-              </div>
-
               <Button onClick={handleEditCategory} className="w-full" disabled={loading}>
                 {loading ? (
                   <>
@@ -1212,6 +982,38 @@ export function Categories() {
           )}
         </DialogContent>
       </Dialog>
+
+      {/* Delete Confirmation Alert Dialog */}
+      <AlertDialog open={!!categoryToDelete} onOpenChange={(open) => !open && !isDeleting && setCategoryToDelete(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This action cannot be undone. This will permanently delete the category and remove its data from our servers.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction 
+              onClick={(e) => {
+                e.preventDefault()
+                executeDelete()
+              }} 
+              disabled={isDeleting}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {isDeleting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete Category"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

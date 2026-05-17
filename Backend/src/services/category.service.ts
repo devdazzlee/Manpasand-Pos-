@@ -6,12 +6,11 @@ import { s3Service } from './common/s3BucketService';
 
 export class CategoryService {
   async createCategory(data: CreateCategoryInput) {
-    const [existingSlug, lastCategory] = await Promise.all([
+    const [existingSlug, allCategories] = await Promise.all([
       prisma.category.findUnique({
         where: { slug: data.slug },
       }),
-      prisma.category.findFirst({
-        orderBy: { created_at: 'desc' },
+      prisma.category.findMany({
         select: { code: true },
       }),
     ]);
@@ -20,10 +19,16 @@ export class CategoryService {
       throw new AppError(400, 'Category with this slug already exists');
     }
 
-    // Generate new code
-    const newCode = lastCategory
-      ? (parseInt(lastCategory.code) + 1).toString()
-      : '1000';
+    // Generate new code by finding the highest numeric code
+    let maxCode = 999;
+    allCategories.forEach(cat => {
+      const codeNum = parseInt(cat.code, 10);
+      if (!isNaN(codeNum) && codeNum.toString() === cat.code) {
+        if (codeNum > maxCode) maxCode = codeNum;
+      }
+    });
+    
+    const newCode = (maxCode + 1).toString();
 
     // First create without code
     const category = await prisma.category.create({
