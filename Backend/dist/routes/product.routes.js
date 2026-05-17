@@ -24,5 +24,6 @@ router.get('/best-selling', product_controller_1.getBestSellingProducts);
 router.get('/:id', (0, validation_middleware_1.validate)(product_validation_1.getProductSchema), product_controller_1.getProduct);
 router.patch('/:id', (0, validation_middleware_1.validate)(product_validation_1.updateProductSchema), product_controller_1.updateProduct);
 router.patch('/:id/toggle-status', (0, validation_middleware_1.validate)(product_validation_1.getProductSchema), product_controller_1.toggleProductStatus);
+router.delete('/:id', (0, validation_middleware_1.validate)(product_validation_1.getProductSchema), product_controller_1.deleteProduct);
 exports.default = router;
 //# sourceMappingURL=product.routes.js.map

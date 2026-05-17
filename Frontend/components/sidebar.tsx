@@ -246,12 +246,14 @@ const menuSections: SidebarMenuSection[] = [
         icon: Grid3X3,
         roles: BRANCH_DATA_ROLES,
       },
+      /*
       {
         id: "sub-categories",
         label: "Sub-Categories",
         icon: Tags,
         roles: ADMIN_ROLES,
       },
+      */
       {
         id: "branches",
         label: "Branches",

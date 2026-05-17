@@ -8,15 +8,29 @@ import { PageLoader } from "@/components/ui/page-loader"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Checkbox } from "@/components/ui/checkbox"
+import { ChevronDown } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
-import { Search, Plus, Edit, Package, AlertTriangle, Upload, X, ImageIcon, RefreshCw } from "lucide-react"
+import { Search, Plus, Edit, Package, AlertTriangle, Upload, X, ImageIcon, RefreshCw, Loader2 } from "lucide-react"
 import apiClient from "@/lib/apiClient"
 import { usePosData } from "@/hooks/use-pos-data"
+import { usePosBranch } from "@/hooks/use-pos-branch"
 
 // Image compression utility
 const compressImage = (file: File, quality = 0.7, maxWidth = 800, maxHeight = 600): Promise<File> => {
@@ -163,6 +177,13 @@ const ProductForm = ({
   handleRemoveImage,
   fileInputRef,
   handleImageSelect,
+  stockToAdd,
+  setStockToAdd,
+  stockBranchIds,
+  setStockBranchIds,
+  branchOptions,
+  stockLabel,
+  currentBranchStocks,
 }: {
   onSubmit: () => void
   loading: boolean
@@ -182,8 +203,59 @@ const ProductForm = ({
   handleRemoveImage: (index: number) => void
   fileInputRef: React.RefObject<HTMLInputElement | null>
   handleImageSelect: (event: React.ChangeEvent<HTMLInputElement>) => void
+  stockToAdd: number
+  setStockToAdd: (n: number) => void
+  stockBranchIds: string[]
+  setStockBranchIds: (ids: string[]) => void
+  branchOptions: Array<{ id: string; name: string; code?: string }>
+  stockLabel: string
+  currentBranchStocks?: Record<string, number>
 }) => {
   const hasErrors = Object.values(formErrors).some((error) => !!error)
+
+  // Raw text state for numeric inputs. We keep it independent of formData
+  // so users can naturally type "0.", "1.5", clear to empty, etc., without the
+  // displayed string fighting the numeric model. On blur we drop the raw
+  // entry so the input falls back to displaying the canonical formData value
+  // ("" when zero, the number itself otherwise).
+  const [rawNumberInputs, setRawNumberInputs] = useState<Record<string, string>>({})
+
+  const numberDisplayValue = (field: string, value: number | undefined): string => {
+    if (rawNumberInputs[field] !== undefined) return rawNumberInputs[field]
+    return value && value !== 0 ? String(value) : ""
+  }
+
+  const buildNumberHandlers = (
+    field: keyof ProductFormData,
+    opts: { integer?: boolean } = {},
+  ) => {
+    const pattern = opts.integer ? /^\d*$/ : /^\d*\.?\d*$/
+    return {
+      onChange: (e: React.ChangeEvent<HTMLInputElement>) => {
+        const v = e.target.value
+        if (v !== "" && !pattern.test(v)) return
+        setRawNumberInputs((prev) => ({ ...prev, [field]: v }))
+        if (v === "" || v === ".") {
+          updateFormData(field, 0)
+          return
+        }
+        const n = opts.integer ? parseInt(v, 10) : parseFloat(v)
+        updateFormData(field, Number.isFinite(n) ? n : 0)
+      },
+      onBlur: () => {
+        setRawNumberInputs((prev) => {
+          const next = { ...prev }
+          delete next[field as string]
+          return next
+        })
+      },
+    }
+  }
+
+  // Hides native browser number spinners on text-type inputs and keeps focus
+  // styling consistent with the rest of the form.
+  const numberInputClass =
+    "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
 
   return (
     <div className="space-y-6">
@@ -199,18 +271,6 @@ const ProductForm = ({
               onChange={(e) => updateFormData("name", e.target.value)}
               placeholder="Enter product name"
             />
-          </div>
-          <div>
-            <Label htmlFor="sku">SKU *</Label>
-            <Input
-              id="sku"
-              type="text"
-              value={formData.sku}
-              onChange={(e) => updateFormData("sku", e.target.value)}
-              placeholder="Enter SKU"
-              className={formErrors.sku ? "border-red-500" : ""}
-            />
-            {formErrors.sku && <p className="text-sm text-red-500 mt-1">{formErrors.sku}</p>}
           </div>
           <div>
             <Label htmlFor="unit_id">Unit *</Label>
@@ -261,20 +321,6 @@ const ProductForm = ({
               </SelectContent>
             </Select>
           </div>
-          <div>
-            <Label htmlFor="pct_or_hs_code">PCT/HS Code</Label>
-            <Input
-              id="pct_or_hs_code"
-              type="text"
-              value={formData.pct_or_hs_code || ""}
-              onChange={(e) => updateFormData("pct_or_hs_code", e.target.value)}
-              placeholder="Enter PCT/HS code"
-              className={formErrors.pct_or_hs_code ? "border-red-500" : ""}
-            />
-            {formErrors.pct_or_hs_code && (
-              <p className="text-sm text-red-500 mt-1">{formErrors.pct_or_hs_code}</p>
-            )}
-          </div>
         </div>
         <div>
           <Label htmlFor="description">Description</Label>
@@ -291,73 +337,56 @@ const ProductForm = ({
       {/* Pricing Information */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Pricing Information</h3>
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="purchase_rate">Purchase Rate *</Label>
             <Input
               id="purchase_rate"
-              type="number"
-              step="0.01"
-              value={formData.purchase_rate}
-              onChange={(e) => updateFormData("purchase_rate", Number.parseFloat(e.target.value) || 0)}
+              type="text"
+              inputMode="decimal"
+              value={numberDisplayValue("purchase_rate", formData.purchase_rate)}
+              {...buildNumberHandlers("purchase_rate")}
               placeholder="0.00"
+              className={numberInputClass}
             />
           </div>
           <div>
-            <Label htmlFor="sales_rate_exc_dis_and_tax">Sales Rate (Exc. Discount & Tax) *</Label>
+            <Label htmlFor="sales_rate">Sales Rate *</Label>
             <Input
-              id="sales_rate_exc_dis_and_tax"
-              type="number"
-              step="0.01"
-              value={formData.sales_rate_exc_dis_and_tax}
-              onChange={(e) =>
-                updateFormData("sales_rate_exc_dis_and_tax", Number.parseFloat(e.target.value) || 0)
-              }
+              id="sales_rate"
+              type="text"
+              inputMode="decimal"
+              value={numberDisplayValue(
+                "sales_rate_inc_dis_and_tax",
+                formData.sales_rate_inc_dis_and_tax,
+              )}
+              onChange={(e) => {
+                const v = e.target.value
+                if (v !== "" && !/^\d*\.?\d*$/.test(v)) return
+                setRawNumberInputs((prev) => ({
+                  ...prev,
+                  sales_rate_inc_dis_and_tax: v,
+                  sales_rate_exc_dis_and_tax: v,
+                }))
+                const n = v === "" || v === "." ? 0 : parseFloat(v)
+                const safe = Number.isFinite(n) ? n : 0
+                // Mirror the single user-facing price into both DB columns
+                // so existing queries (POS, reports) that read either field
+                // continue to work without change.
+                updateFormData("sales_rate_inc_dis_and_tax", safe)
+                updateFormData("sales_rate_exc_dis_and_tax", safe)
+              }}
+              onBlur={() => {
+                setRawNumberInputs((prev) => {
+                  const next = { ...prev }
+                  delete next.sales_rate_inc_dis_and_tax
+                  delete next.sales_rate_exc_dis_and_tax
+                  return next
+                })
+              }}
               placeholder="0.00"
+              className={numberInputClass}
             />
-          </div>
-          <div>
-            <Label htmlFor="sales_rate_inc_dis_and_tax">Sales Rate (Inc. Discount & Tax) *</Label>
-            <Input
-              id="sales_rate_inc_dis_and_tax"
-              type="number"
-              step="0.01"
-              value={formData.sales_rate_inc_dis_and_tax}
-              onChange={(e) =>
-                updateFormData("sales_rate_inc_dis_and_tax", Number.parseFloat(e.target.value) || 0)
-              }
-              placeholder="0.00"
-            />
-          </div>
-          <div>
-            <Label htmlFor="discount_amount">Discount Amount</Label>
-            <Input
-              id="discount_amount"
-              type="number"
-              step="0.01"
-              value={formData.discount_amount || 0}
-              onChange={(e) => updateFormData("discount_amount", Number.parseFloat(e.target.value) || 0)}
-              placeholder="0.00"
-            />
-          </div>
-          <div>
-            <Label htmlFor="tax_id">Tax</Label>
-            <Select
-              value={formData.tax_id || ""}
-              onValueChange={(value) => updateFormData("tax_id", value === "none" ? "" : value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select tax" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {taxes.map((tax) => (
-                  <SelectItem key={tax.id} value={tax.id}>
-                    {tax.name} {tax.percentage && `(${tax.percentage}%)`}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
           </div>
         </div>
       </div>
@@ -370,23 +399,203 @@ const ProductForm = ({
             <Label htmlFor="min_qty">Minimum Quantity</Label>
             <Input
               id="min_qty"
-              type="number"
-              value={formData.min_qty || 0}
-              onChange={(e) => updateFormData("min_qty", Number.parseInt(e.target.value) || 0)}
+              type="text"
+              inputMode="numeric"
+              value={numberDisplayValue("min_qty", formData.min_qty)}
+              {...buildNumberHandlers("min_qty", { integer: true })}
               placeholder="0"
+              className={numberInputClass}
             />
           </div>
           <div>
             <Label htmlFor="max_qty">Maximum Quantity</Label>
             <Input
               id="max_qty"
-              type="number"
-              value={formData.max_qty || 0}
-              onChange={(e) => updateFormData("max_qty", Number.parseInt(e.target.value) || 0)}
+              type="text"
+              inputMode="numeric"
+              value={numberDisplayValue("max_qty", formData.max_qty)}
+              {...buildNumberHandlers("max_qty", { integer: true })}
               placeholder="0"
+              className={numberInputClass}
             />
           </div>
         </div>
+
+        {/* Stock — optional. When set, fires a POST /stock after the product
+            save succeeds (adds to existing branch stock + logs a movement). */}
+        {(() => {
+          // Total current stock across the branches the user has selected, so
+          // the "Add Stock" field sits next to a clear "you currently have X"
+          // signal. Without this users couldn't tell why their stock column
+          // showed an unexpected number.
+          const totalCurrent = stockBranchIds.reduce(
+            (sum, id) => sum + (currentBranchStocks?.[id] ?? 0),
+            0,
+          )
+          const hasAnyCurrent =
+            currentBranchStocks && Object.keys(currentBranchStocks).length > 0
+
+          return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <Label htmlFor="stock_to_add">{stockLabel}</Label>
+            <Input
+              id="stock_to_add"
+              type="text"
+              inputMode="decimal"
+              value={
+                rawNumberInputs["stock_to_add"] !== undefined
+                  ? rawNumberInputs["stock_to_add"]
+                  : stockToAdd && stockToAdd !== 0
+                    ? String(stockToAdd)
+                    : ""
+              }
+              onChange={(e) => {
+                const v = e.target.value
+                if (v !== "" && !/^\d*\.?\d*$/.test(v)) return
+                setRawNumberInputs((prev) => ({ ...prev, stock_to_add: v }))
+                const n = v === "" || v === "." ? 0 : parseFloat(v)
+                setStockToAdd(Number.isFinite(n) ? n : 0)
+              }}
+              onBlur={() => {
+                setRawNumberInputs((prev) => {
+                  const next = { ...prev }
+                  delete next["stock_to_add"]
+                  return next
+                })
+              }}
+              placeholder="0"
+              className={numberInputClass}
+            />
+            {hasAnyCurrent ? (
+              <p className="text-xs text-gray-500 mt-1">
+                Current{stockBranchIds.length > 1 ? " (selected branches)" : ""}:{" "}
+                <span className="font-semibold text-gray-700">
+                  {totalCurrent}
+                </span>
+                . Entering a number adds to it.
+              </p>
+            ) : (
+              <p className="text-xs text-gray-500 mt-1">
+                Optional. Leave empty to skip.
+              </p>
+            )}
+          </div>
+          <div>
+            <Label>Branches</Label>
+            {(() => {
+              const allChecked =
+                branchOptions.length > 0 && stockBranchIds.length === branchOptions.length
+              const someChecked = stockBranchIds.length > 0 && !allChecked
+              const triggerLabel =
+                branchOptions.length === 0
+                  ? "No branches available"
+                  : stockBranchIds.length === 0
+                    ? "Select branches"
+                    : allChecked
+                      ? `All branches (${branchOptions.length})`
+                      : stockBranchIds.length === 1
+                        ? branchOptions.find((b) => b.id === stockBranchIds[0])?.name ||
+                          "1 branch"
+                        : `${stockBranchIds.length} branches selected`
+
+              const toggleBranch = (id: string, checked: boolean) => {
+                if (checked) {
+                  if (!stockBranchIds.includes(id)) {
+                    setStockBranchIds([...stockBranchIds, id])
+                  }
+                } else {
+                  setStockBranchIds(stockBranchIds.filter((x) => x !== id))
+                }
+              }
+
+              const toggleAll = (checked: boolean) => {
+                setStockBranchIds(checked ? branchOptions.map((b) => b.id) : [])
+              }
+
+              return (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      disabled={branchOptions.length === 0}
+                      className="w-full justify-between font-normal"
+                    >
+                      <span className="truncate text-left">{triggerLabel}</span>
+                      <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-2" align="start">
+                    <div className="flex items-center gap-2 px-2 py-1.5 border-b mb-1">
+                      <Checkbox
+                        id="stock-branch-all"
+                        checked={allChecked || (someChecked && "indeterminate")}
+                        onCheckedChange={(checked) => toggleAll(checked === true)}
+                      />
+                      <Label
+                        htmlFor="stock-branch-all"
+                        className="text-sm font-semibold cursor-pointer flex-1"
+                      >
+                        All branches
+                      </Label>
+                      <span className="text-xs text-gray-500">
+                        {stockBranchIds.length}/{branchOptions.length}
+                      </span>
+                    </div>
+                    <div className="max-h-56 overflow-y-auto">
+                      {branchOptions.map((b) => {
+                        const checked = stockBranchIds.includes(b.id)
+                        const current = currentBranchStocks?.[b.id]
+                        return (
+                          <div
+                            key={b.id}
+                            className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
+                            onClick={() => toggleBranch(b.id, !checked)}
+                          >
+                            <Checkbox
+                              id={`stock-branch-${b.id}`}
+                              checked={checked}
+                              onCheckedChange={(c) => toggleBranch(b.id, c === true)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <Label
+                              htmlFor={`stock-branch-${b.id}`}
+                              className="text-sm cursor-pointer flex-1 flex items-center justify-between"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <span>
+                                {b.name}
+                                {b.code ? (
+                                  <span className="text-gray-400"> ({b.code})</span>
+                                ) : null}
+                              </span>
+                              {current !== undefined && (
+                                <span
+                                  className={`text-xs ml-2 ${
+                                    current > 0 ? "text-emerald-600" : "text-gray-400"
+                                  }`}
+                                >
+                                  {current}
+                                </span>
+                              )}
+                            </Label>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              )
+            })()}
+            <p className="text-xs text-gray-500 mt-1">
+              Stock is added to each selected branch.
+            </p>
+          </div>
+        </div>
+          )
+        })()}
       </div>
 
       {/* Additional Information */}
@@ -534,46 +743,6 @@ const ProductForm = ({
           </div>
           <div className="flex items-center space-x-2">
             <Switch
-              id="display_on_pos"
-              checked={formData.display_on_pos}
-              onCheckedChange={(checked) => updateFormData("display_on_pos", checked)}
-            />
-            <Label htmlFor="display_on_pos">Display on POS</Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="is_batch"
-              checked={formData.is_batch}
-              onCheckedChange={(checked) => updateFormData("is_batch", checked)}
-            />
-            <Label htmlFor="is_batch">Is Batch</Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="auto_fill_on_demand_sheet"
-              checked={formData.auto_fill_on_demand_sheet}
-              onCheckedChange={(checked) => updateFormData("auto_fill_on_demand_sheet", checked)}
-            />
-            <Label htmlFor="auto_fill_on_demand_sheet">Auto Fill on Demand Sheet</Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="non_inventory_item"
-              checked={formData.non_inventory_item}
-              onCheckedChange={(checked) => updateFormData("non_inventory_item", checked)}
-            />
-            <Label htmlFor="non_inventory_item">Non Inventory Item</Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Switch
-              id="is_deal"
-              checked={formData.is_deal}
-              onCheckedChange={(checked) => updateFormData("is_deal", checked)}
-            />
-            <Label htmlFor="is_deal">Is Deal</Label>
-          </div>
-          <div className="flex items-center space-x-2">
-            <Switch
               id="is_featured"
               checked={formData.is_featured}
               onCheckedChange={(checked) => updateFormData("is_featured", checked)}
@@ -588,7 +757,9 @@ const ProductForm = ({
         <Button
           onClick={onSubmit}
           disabled={
-            loading || !formData.name || !formData.sku || !formData.unit_id || !formData.category_id || hasErrors
+            // SKU is no longer a UI field — the backend auto-generates it on
+            // create. We only require the fields the user actually fills in.
+            loading || !formData.name || !formData.unit_id || !formData.category_id || hasErrors
           }
         >
           {loading ? (
@@ -609,12 +780,16 @@ export default function Inventory() {
   const { toast } = useToast()
 
   // Global store data
-  const { 
-    products: globalProducts, 
-    categories: globalCategories, 
+  const {
+    products: globalProducts,
+    categories: globalCategories,
     isAnyLoading: globalLoading,
-    refreshAllData 
+    refreshAllData
   } = usePosData()
+
+  // Branch context — used for the optional "Add Stock" field in the product
+  // form. Stock is per-branch, so we need to know which branch to write to.
+  const { branches: posBranches, selectedBranchId } = usePosBranch()
 
   // State for products and pagination
   const [products, setProducts] = useState<Product[]>([])
@@ -627,8 +802,12 @@ export default function Inventory() {
 
   // State for filters
   const [searchTerm, setSearchTerm] = useState("")
-  const [selectedCategory, setSelectedCategory] = useState("all")
-  const [selectedSubcategory, setSelectedSubcategory] = useState("all")
+  // Sentinel value for the "no filter" option in the category / subcategory
+  // dropdowns. Must not collide with any real ID — using "all" alone broke
+  // when a record happened to have id="all" and Radix Select treated two items
+  // as selected at once ("All CategoriesAll" in the trigger).
+  const [selectedCategory, setSelectedCategory] = useState("__all__")
+  const [selectedSubcategory, setSelectedSubcategory] = useState("__all__")
 
   // State for dropdown options (these will be loaded from global store)
   const [units, setUnits] = useState<DropdownOption[]>([])
@@ -644,6 +823,31 @@ export default function Inventory() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+
+  // Delete-confirmation modal state. We track the product directly (so we can
+  // show its name in the dialog) and a separate `isDeleting` flag so the
+  // confirm button can show a spinner while the API call is in flight.
+  const [productToDelete, setProductToDelete] = useState<Product | null>(null)
+  const [isDeletingProduct, setIsDeletingProduct] = useState(false)
+
+  // "Add Stock" companion fields — sit alongside the product form. Stock is
+  // a separate table row keyed by (product, branch), so we keep it outside
+  // ProductFormData and call POST /stock after the product save succeeds.
+  // Multi-branch: the user can stock the same quantity to one, several, or
+  // every branch in a single submit.
+  const [stockToAdd, setStockToAdd] = useState<number>(0)
+  const [stockBranchIds, setStockBranchIds] = useState<string[]>([])
+  // Per-branch current stock for the product being edited, keyed by branch_id.
+  // Populated from GET /products/:id so the user can see what's already there
+  // (and decide whether to top it up). Resets to {} for Add Product.
+  const [currentBranchStocks, setCurrentBranchStocks] = useState<
+    Record<string, number>
+  >({})
+
+  // Tracks the GET /products/:id call fired from openEditDialog. While true,
+  // the Edit dialog renders a skeleton instead of the half-populated form so
+  // the user never sees fields blink from empty → filled.
+  const [isLoadingEditProduct, setIsLoadingEditProduct] = useState(false)
   const [formData, setFormData] = useState<ProductFormData>({
     name: "",
     unit_id: "",
@@ -669,44 +873,50 @@ export default function Inventory() {
 
   // API Service Functions
   const apiService = {
-    // Dropdown data fetchers
+    // Dropdown data fetchers.
+    // We request a high `limit` so the full reference list is returned in
+    // one shot. Without this, the backend defaults to limit=10 — meaning the
+    // 11th supplier/brand/color/size never reaches the Edit form, the
+    // <Select> value can't find a matching <SelectItem>, and the trigger
+    // falls back to the "Select X" placeholder even though the product has
+    // a value set.
     async getUnits() {
-      const response = await apiClient.get("/units")
+      const response = await apiClient.get("/units", { params: { limit: 1000 } })
       return response.data
     },
 
     async getTaxes() {
-      const response = await apiClient.get("/taxes")
+      const response = await apiClient.get("/taxes", { params: { limit: 1000 } })
       return response.data
     },
 
     async getCategories() {
-      const response = await apiClient.get("/categories")
+      const response = await apiClient.get("/categories", { params: { limit: 1000 } })
       return response.data
     },
 
     async getSubcategories() {
-      const response = await apiClient.get("/subcategories")
+      const response = await apiClient.get("/subcategories", { params: { limit: 1000 } })
       return response.data
     },
 
     async getSuppliers() {
-      const response = await apiClient.get("/suppliers")
+      const response = await apiClient.get("/suppliers", { params: { limit: 1000 } })
       return response.data
     },
 
     async getBrands() {
-      const response = await apiClient.get("/brands")
+      const response = await apiClient.get("/brands", { params: { limit: 1000 } })
       return response.data
     },
 
     async getColors() {
-      const response = await apiClient.get("/colors")
+      const response = await apiClient.get("/colors", { params: { limit: 1000 } })
       return response.data
     },
 
     async getSizes() {
-      const response = await apiClient.get("/sizes")
+      const response = await apiClient.get("/sizes", { params: { limit: 1000 } })
       return response.data
     },
 
@@ -759,12 +969,44 @@ export default function Inventory() {
       const response = await apiClient.patch(`/products/${id}/toggle-status`)
       return response.data
     },
+
+    async deleteProduct(id: string) {
+      const response = await apiClient.delete(`/products/${id}`)
+      return response.data
+    },
+
+    async addStock(productId: string, branchId: string, quantity: number) {
+      // POST /stock upserts: existing stock row for (product, branch) gets
+      // `quantity` ADDED; if no row exists yet, one is created with that
+      // quantity. Always logs a stock-movement of type PURCHASE.
+      const response = await apiClient.post("/stock", {
+        productId,
+        branchId,
+        quantity,
+      })
+      return response.data
+    },
+
+    async getProductById(id: string) {
+      // Used by the Edit dialog to always work off fresh data instead of the
+      // possibly-stale list cache.
+      const response = await apiClient.get(`/products/${id}`)
+      return response.data
+    },
   }
 
   // Load dropdown data on component mount
   useEffect(() => {
     loadDropdownData()
   }, [])
+
+  // Seed the stock branch selection from the user's current POS branch the
+  // first time we know it. Don't clobber an explicit user pick afterwards.
+  useEffect(() => {
+    if (stockBranchIds.length === 0 && selectedBranchId) {
+      setStockBranchIds([selectedBranchId])
+    }
+  }, [selectedBranchId, stockBranchIds.length])
 
   // Load products when filters change or global products change
   useEffect(() => {
@@ -840,14 +1082,14 @@ export default function Inventory() {
       }
 
       // Apply category filter
-      if (selectedCategory !== "all") {
+      if (selectedCategory !== "__all__") {
         filteredProducts = filteredProducts.filter(product =>
           product.categoryId === selectedCategory
         )
       }
 
       // Apply subcategory filter
-      if (selectedSubcategory !== "all") {
+      if (selectedSubcategory !== "__all__") {
         filteredProducts = filteredProducts.filter(product =>
           product.subcategoryId && product.subcategoryId === selectedSubcategory
         )
@@ -892,6 +1134,14 @@ export default function Inventory() {
         brand: { id: product.brandId, name: product.brandName },
         color: { id: product.colorId, name: product.colorName },
         size: { id: product.sizeId, name: product.sizeName },
+        // Stock totals come pre-aggregated from the global store. Without
+        // these the Stock column always rendered 0 because the table reads
+        // `product.available_stock ?? product.current_stock ?? 0`.
+        available_stock: product.available_stock ?? product.stock ?? 0,
+        current_stock: product.current_stock ?? product.stock ?? 0,
+        reserved_stock: product.reserved_stock ?? 0,
+        minimum_stock: product.minimum_stock ?? 0,
+        maximum_stock: product.maximum_stock ?? 0,
         created_at: product.created_at || new Date().toISOString(),
         updated_at: product.updated_at || new Date().toISOString(),
         images: product.images || [],
@@ -921,7 +1171,29 @@ export default function Inventory() {
       }
 
       // Images are already uploaded — existingImageUrls has all Cloudinary URLs
-      await apiService.createProduct(dataToSubmit, existingImageUrls)
+      const created = await apiService.createProduct(dataToSubmit, existingImageUrls)
+      const createdId = created?.data?.id as string | undefined
+
+      // If the user entered an initial stock value, write it to every chosen
+      // branch. Run them in parallel so saving to N branches is no slower
+      // than saving to one. Failures here are surfaced separately so a
+      // stock-write hiccup doesn't make the user think the product itself
+      // failed to save.
+      if (createdId && stockToAdd > 0 && stockBranchIds.length > 0) {
+        const results = await Promise.allSettled(
+          stockBranchIds.map((bid) =>
+            apiService.addStock(createdId, bid, stockToAdd),
+          ),
+        )
+        const failed = results.filter((r) => r.status === "rejected").length
+        if (failed > 0) {
+          toast({
+            title: "Product saved, but some stock writes failed",
+            description: `${failed} of ${stockBranchIds.length} branch stock writes failed. Try again from the Stock page.`,
+            variant: "destructive",
+          })
+        }
+      }
 
       toast({
         title: "Success",
@@ -930,7 +1202,9 @@ export default function Inventory() {
 
       setIsAddDialogOpen(false)
       resetForm()
-      refreshAllData()
+      // Await so the table re-renders with the new product (and its stock)
+      // before the user can interact with the list.
+      await refreshAllData()
     } catch (error) {
       toast({
         title: "Error",
@@ -955,6 +1229,26 @@ export default function Inventory() {
       // All images are already Cloudinary URLs — no base64, no large payload
       await apiService.updateProduct(editingProduct.id, dataToSubmit, existingImageUrls)
 
+      // Edit-time stock entry is additive (matches POST /stock semantics —
+      // a positive number is added to existing branch stock and a
+      // stock-movement of type PURCHASE is logged). Fan out across the
+      // selected branches in parallel.
+      if (stockToAdd > 0 && stockBranchIds.length > 0) {
+        const results = await Promise.allSettled(
+          stockBranchIds.map((bid) =>
+            apiService.addStock(editingProduct.id, bid, stockToAdd),
+          ),
+        )
+        const failed = results.filter((r) => r.status === "rejected").length
+        if (failed > 0) {
+          toast({
+            title: "Product updated, but some stock writes failed",
+            description: `${failed} of ${stockBranchIds.length} branch stock writes failed. Try again from the Stock page.`,
+            variant: "destructive",
+          })
+        }
+      }
+
       toast({
         title: "Success",
         description: "Product updated successfully",
@@ -963,7 +1257,7 @@ export default function Inventory() {
       setIsEditDialogOpen(false)
       setEditingProduct(null)
       resetForm()
-      refreshAllData()
+      await refreshAllData()
     } catch (error) {
       toast({
         title: "Error",
@@ -992,6 +1286,39 @@ export default function Inventory() {
     }
   }
 
+  // Called by the AlertDialog's confirm button. The dialog stays open and
+  // shows a spinner on the confirm button while the request runs so the user
+  // never wonders whether the click registered.
+  const confirmDeleteProduct = async () => {
+    if (!productToDelete) return
+    const product = productToDelete
+    setIsDeletingProduct(true)
+    try {
+      await apiService.deleteProduct(product.id)
+      toast({
+        title: "Deleted",
+        description: `"${product.name}" has been removed.`,
+      })
+      // Optimistic local update so the user sees the row disappear immediately.
+      setProducts((prev) => prev.filter((p) => p.id !== product.id))
+      setProductToDelete(null)
+      // Refresh the GLOBAL product cache. `loadProducts()` reads from
+      // `globalProducts`, so without this the deleted row would reappear on
+      // the next re-render via the cached copy. `refreshAllData()` re-fetches
+      // from the API, then the effect watching `globalProducts` re-runs
+      // `loadProducts()` automatically with the fresh list.
+      await refreshAllData()
+    } catch (error: any) {
+      toast({
+        title: "Error",
+        description: error?.response?.data?.message || "Failed to delete product",
+        variant: "destructive",
+      })
+    } finally {
+      setIsDeletingProduct(false)
+    }
+  }
+
   const resetForm = () => {
     setFormData({
       name: "",
@@ -1012,59 +1339,117 @@ export default function Inventory() {
     })
     setImagePreviews([])
     setExistingImageUrls([])
+    setStockToAdd(0)
+    // Re-seed the stock branches from the user's current branch so a fresh
+    // Add dialog opens with at least one sensible default checked.
+    setStockBranchIds(selectedBranchId ? [selectedBranchId] : [])
+    setCurrentBranchStocks({})
   }
 
-  const openEditDialog = (product: Product) => {
+  const openEditDialog = async (product: Product) => {
+    // Open the modal in a "loading" state — we DON'T show the form until the
+    // canonical record arrives, so the user never sees fields flash from
+    // empty/"Unknown" to their real values.
     setEditingProduct(product)
-    const existingUrls = product.images?.map((img) => img.image) || []
-    setFormData({
-      name: product.name,
-      unit_id: product.unit?.id || "",
-      pct_or_hs_code: product.pct_or_hs_code || "",
-      description: product.description || "",
-      sku: product.sku,
-      purchase_rate: product.purchase_rate,
-      sales_rate_exc_dis_and_tax: product.sales_rate_exc_dis_and_tax,
-      sales_rate_inc_dis_and_tax: product.sales_rate_inc_dis_and_tax,
-      discount_amount: product.discount_amount || 0,
-      tax_id: product.tax?.id || "",
-      category_id: product.category?.id || "",
-      subcategory_id: product.subcategory?.id || "",
-      min_qty: product.min_qty || 0,
-      max_qty: product.max_qty || 0,
-      supplier_id: product.supplier?.id || "",
-      brand_id: product.brand?.id || "",
-      color_id: product.color?.id || "",
-      size_id: product.size?.id || "",
-      is_active: product.is_active,
-      display_on_pos: product.display_on_pos,
-      is_batch: product.is_batch,
-      auto_fill_on_demand_sheet: product.auto_fill_on_demand_sheet,
-      non_inventory_item: product.non_inventory_item,
-      is_deal: product.is_deal,
-      is_featured: product.is_featured,
-      images: existingUrls,
-    })
-    setImagePreviews(existingUrls)
-    setExistingImageUrls(existingUrls)
     setIsEditDialogOpen(true)
+    setIsLoadingEditProduct(true)
+    setStockToAdd(0)
+
+    const toNum = (v: any): number => {
+      if (v === null || v === undefined || v === "") return 0
+      const n = typeof v === "string" ? parseFloat(v) : Number(v)
+      return Number.isFinite(n) ? n : 0
+    }
+
+    try {
+      const detail = await apiService.getProductById(product.id)
+      const fresh = detail?.data ?? detail
+      if (!fresh) throw new Error("Empty product detail response")
+
+      const existingUrls: string[] =
+        fresh.ProductImage?.map((img: any) => img.image) ||
+        (Array.isArray(fresh.images)
+          ? fresh.images.map((img: any) => (typeof img === "string" ? img : img.image))
+          : []) ||
+        []
+
+      setFormData({
+        name: fresh.name ?? "",
+        unit_id: fresh.unit?.id ?? "",
+        pct_or_hs_code: fresh.pct_or_hs_code ?? "",
+        description: fresh.description ?? "",
+        sku: fresh.sku ?? product.sku,
+        purchase_rate: toNum(fresh.purchase_rate),
+        sales_rate_exc_dis_and_tax: toNum(fresh.sales_rate_exc_dis_and_tax),
+        sales_rate_inc_dis_and_tax: toNum(fresh.sales_rate_inc_dis_and_tax),
+        discount_amount: toNum(fresh.discount_amount),
+        tax_id: fresh.tax?.id ?? "",
+        category_id: fresh.category?.id ?? "",
+        subcategory_id: fresh.subcategory?.id ?? "",
+        min_qty: toNum(fresh.min_qty),
+        max_qty: toNum(fresh.max_qty),
+        supplier_id: fresh.supplier?.id ?? "",
+        brand_id: fresh.brand?.id ?? "",
+        color_id: fresh.color?.id ?? "",
+        size_id: fresh.size?.id ?? "",
+        is_active: fresh.is_active ?? true,
+        display_on_pos: fresh.display_on_pos ?? true,
+        is_batch: fresh.is_batch ?? false,
+        auto_fill_on_demand_sheet: fresh.auto_fill_on_demand_sheet ?? false,
+        non_inventory_item: fresh.non_inventory_item ?? false,
+        is_deal: fresh.is_deal ?? false,
+        is_featured: fresh.is_featured ?? false,
+        images: existingUrls,
+      })
+      setImagePreviews(existingUrls)
+      setExistingImageUrls(existingUrls)
+
+      // Build a per-branch current-stock map so the Branches popover can
+      // display "Current: N" beside each option. Backend may return
+      // current_quantity as a Decimal-string; coerce to number.
+      const branchStockMap: Record<string, number> = {}
+      if (Array.isArray(fresh.stock)) {
+        for (const s of fresh.stock) {
+          if (!s?.branch_id) continue
+          const cur = toNum(s.current_quantity)
+          const res = toNum(s.reserved_quantity)
+          branchStockMap[s.branch_id] = cur - res // available
+        }
+      }
+      setCurrentBranchStocks(branchStockMap)
+
+      // Pre-select branches this product already has stock in (any quantity,
+      // including 0). Falls back to the user's current POS branch when this
+      // product has no stock rows yet.
+      const stockBranches: string[] = Object.keys(branchStockMap)
+      if (stockBranches.length > 0) {
+        setStockBranchIds(Array.from(new Set(stockBranches)))
+      } else if (selectedBranchId) {
+        setStockBranchIds([selectedBranchId])
+      } else {
+        setStockBranchIds([])
+      }
+    } catch {
+      // Hard-fail: close the modal and tell the user. Showing a half-filled
+      // form would be worse — they'd save partial data and overwrite the real
+      // record.
+      setIsEditDialogOpen(false)
+      setEditingProduct(null)
+      toast({
+        title: "Couldn't load product",
+        description: "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingEditProduct(false)
+    }
   }
 
   const updateFormData = (field: keyof ProductFormData, value: any) => {
-    setFormData({ ...formData, [field]: value })
-
-    if (field === "sku" || field === "pct_or_hs_code") {
-      // Basic validation: prevent purely numeric strings that might be misinterpreted as numbers.
-      if (value && /^\d+$/.test(value)) {
-        setFormErrors((prev) => ({ ...prev, [field]: "This field must be a string (e.g., add a letter)." }))
-      } else {
-        setFormErrors((prev) => {
-          const newErrors = { ...prev }
-          delete newErrors[field]
-          return newErrors
-        })
-      }
-    }
+    // Functional setState so two consecutive updates in the same tick (e.g.
+    // mirroring a single Sales Rate into both DB columns) compose correctly
+    // instead of the second call clobbering the first via stale closure.
+    setFormData((prev) => ({ ...prev, [field]: value }))
   }
 
   const handleImageSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
@@ -1126,9 +1511,25 @@ export default function Inventory() {
               <p className="text-xs md:text-sm text-blue-600 mt-1">Loading data from cache...</p>
             )}
           </div>
-          <Dialog open={isAddDialogOpen} onOpenChange={setIsAddDialogOpen}>
+          <Dialog
+            open={isAddDialogOpen}
+            onOpenChange={(open) => {
+              if (open) {
+                // Always start the Add form from a clean slate so values left
+                // behind from a previous Edit can't leak across dialogs.
+                resetForm()
+                setEditingProduct(null)
+              }
+              setIsAddDialogOpen(open)
+            }}
+          >
             <DialogTrigger asChild>
-              <Button>
+              <Button
+                onClick={() => {
+                  resetForm()
+                  setEditingProduct(null)
+                }}
+              >
                 <Plus className="h-4 w-4 mr-2" />
                 Add Product
               </Button>
@@ -1156,6 +1557,13 @@ export default function Inventory() {
                 handleRemoveImage={handleRemoveImage}
                 fileInputRef={fileInputRef}
                 handleImageSelect={handleImageSelect}
+                stockToAdd={stockToAdd}
+                setStockToAdd={setStockToAdd}
+                stockBranchIds={stockBranchIds}
+                setStockBranchIds={setStockBranchIds}
+                branchOptions={posBranches}
+                stockLabel="Initial Stock"
+                currentBranchStocks={currentBranchStocks}
               />
             </DialogContent>
           </Dialog>
@@ -1208,23 +1616,10 @@ export default function Inventory() {
               <SelectValue placeholder="All Categories" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="all">All Categories</SelectItem>
+              <SelectItem value="__all__">All Categories</SelectItem>
               {categories.map((category) => (
                 <SelectItem key={category.id} value={category.id}>
                   {category.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select value={selectedSubcategory} onValueChange={setSelectedSubcategory}>
-            <SelectTrigger className="w-full sm:w-48">
-              <SelectValue placeholder="All Subcategories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Subcategories</SelectItem>
-              {subcategories.map((subcategory) => (
-                <SelectItem key={subcategory.id} value={subcategory.id}>
-                  {subcategory.name}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -1297,7 +1692,10 @@ export default function Inventory() {
                             <div className="font-medium">
                               {product.available_stock ?? product.current_stock ?? 0}
                             </div>
-                            {product.reserved_stock && product.reserved_stock > 0 && (
+                            {/* Guard with a strict `> 0` check — `{0 && <JSX>}`
+                                renders the literal `0`, which was leaking an
+                                extra "0" under every stock value. */}
+                            {(product.reserved_stock ?? 0) > 0 && (
                               <div className="text-xs text-gray-500">
                                 Reserved: {product.reserved_stock}
                               </div>
@@ -1321,14 +1719,10 @@ export default function Inventory() {
                             <Button
                               size="sm"
                               variant="outline"
-                              onClick={() => handleToggleStatus(product.id)}
-                              className={
-                                product.is_active
-                                  ? "text-red-600 hover:text-red-700"
-                                  : "text-green-600 hover:text-green-700"
-                              }
+                              onClick={() => setProductToDelete(product)}
+                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
                             >
-                              {product.is_active ? "Deactivate" : "Activate"}
+                              Delete
                             </Button>
                           </div>
                         </TableCell>
@@ -1461,33 +1855,125 @@ export default function Inventory() {
         </Card>
 
         {/* Edit Product Dialog */}
-        <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+        <Dialog
+          open={isEditDialogOpen}
+          onOpenChange={(open) => {
+            // Wipe form + editingProduct when the Edit dialog closes (Cancel,
+            // ESC, X, click-outside) so the next Add dialog opens empty.
+            if (!open) {
+              resetForm()
+              setEditingProduct(null)
+            }
+            setIsEditDialogOpen(open)
+          }}
+        >
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
               <DialogTitle>Edit Product</DialogTitle>
             </DialogHeader>
-            <ProductForm
-              onSubmit={handleUpdateProduct}
-              loading={formLoading}
-              submitText="Update Product"
-              formData={formData}
-              formErrors={formErrors}
-              updateFormData={updateFormData}
-              units={units}
-              categories={categories}
-              subcategories={subcategories}
-              taxes={taxes}
-              suppliers={suppliers}
-              brands={brands}
-              colors={colors}
-              sizes={sizes}
-              imagePreviews={imagePreviews}
-              handleRemoveImage={handleRemoveImage}
-              fileInputRef={fileInputRef}
-              handleImageSelect={handleImageSelect}
-            />
+            {isLoadingEditProduct ? (
+              // Skeleton roughly mirrors the form layout so the modal doesn't
+              // jump when the data arrives. Anything more elaborate is a CLS
+              // hazard; users care that they know it's loading, not what
+              // shape it'll be.
+              <div className="space-y-6 py-2">
+                <div className="flex items-center gap-2 text-sm text-gray-500">
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                  Loading product details...
+                </div>
+                {[1, 2, 3].map((section) => (
+                  <div key={section} className="space-y-3">
+                    <div className="h-5 w-40 bg-gray-200 animate-pulse rounded" />
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {[1, 2, 3, 4].map((row) => (
+                        <div key={row} className="space-y-1.5">
+                          <div className="h-3 w-24 bg-gray-200 animate-pulse rounded" />
+                          <div className="h-10 w-full bg-gray-100 animate-pulse rounded-md" />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <ProductForm
+                onSubmit={handleUpdateProduct}
+                loading={formLoading}
+                submitText="Update Product"
+                formData={formData}
+                formErrors={formErrors}
+                updateFormData={updateFormData}
+                units={units}
+                categories={categories}
+                subcategories={subcategories}
+                taxes={taxes}
+                suppliers={suppliers}
+                brands={brands}
+                colors={colors}
+                sizes={sizes}
+                imagePreviews={imagePreviews}
+                handleRemoveImage={handleRemoveImage}
+                fileInputRef={fileInputRef}
+                handleImageSelect={handleImageSelect}
+                stockToAdd={stockToAdd}
+                setStockToAdd={setStockToAdd}
+                stockBranchIds={stockBranchIds}
+                setStockBranchIds={setStockBranchIds}
+                branchOptions={posBranches}
+                stockLabel="Add Stock"
+                currentBranchStocks={currentBranchStocks}
+              />
+            )}
           </DialogContent>
         </Dialog>
+
+        {/* Delete-confirmation modal. We don't allow closing while the API
+            call is in flight, otherwise the user could fire it twice. */}
+        <AlertDialog
+          open={productToDelete !== null}
+          onOpenChange={(open) => {
+            if (!open && !isDeletingProduct) setProductToDelete(null)
+          }}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete product</AlertDialogTitle>
+              <AlertDialogDescription>
+                Are you sure you want to delete{" "}
+                <span className="font-semibold text-gray-900">
+                  &quot;{productToDelete?.name}&quot;
+                </span>
+                ? This action cannot be undone and will remove the product
+                along with its stock and history.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={isDeletingProduct}>
+                Cancel
+              </AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => {
+                  // Prevent the default close-on-click; we manage closing
+                  // ourselves so the spinner stays visible until the API
+                  // resolves.
+                  e.preventDefault()
+                  confirmDeleteProduct()
+                }}
+                disabled={isDeletingProduct}
+                className="bg-red-600 hover:bg-red-700 focus-visible:ring-red-600"
+              >
+                {isDeletingProduct ? (
+                  <>
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                    Deleting...
+                  </>
+                ) : (
+                  "Delete"
+                )}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
     </div>
   )

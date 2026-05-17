@@ -90,6 +90,11 @@ export const toggleProductStatus = asyncHandler(async (req: Request, res: Respon
     new ApiResponse(null, 'Product status changed successfully').send(res);
 });
 
+export const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
+    const product = await productService.deleteProduct(req.params.id);
+    new ApiResponse(product, 'Product deleted successfully').send(res);
+});
+
 export const listProducts = asyncHandler(async (req: Request, res: Response) => {
     const {
         page = 1,

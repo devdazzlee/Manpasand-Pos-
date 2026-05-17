@@ -36,7 +36,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteAllProducts = exports.bulkUploadProducts = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.exportProductsToExcel = exports.listProducts = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
+exports.deleteAllProducts = exports.bulkUploadProducts = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.exportProductsToExcel = exports.listProducts = exports.deleteProduct = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
 const product_service_1 = require("../services/product.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -105,6 +105,10 @@ exports.updateProduct = (0, asyncHandler_1.default)(async (req, res) => {
 exports.toggleProductStatus = (0, asyncHandler_1.default)(async (req, res) => {
     await productService.toggleProductStatus(req.params.id);
     new apiResponse_1.ApiResponse(null, 'Product status changed successfully').send(res);
+});
+exports.deleteProduct = (0, asyncHandler_1.default)(async (req, res) => {
+    const product = await productService.deleteProduct(req.params.id);
+    new apiResponse_1.ApiResponse(product, 'Product deleted successfully').send(res);
 });
 exports.listProducts = (0, asyncHandler_1.default)(async (req, res) => {
     const { page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, branch_id, fetch_all, } = req.query;

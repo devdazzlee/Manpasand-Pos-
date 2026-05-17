@@ -10,6 +10,7 @@ import {
   getBestSellingProducts,
   bulkUploadProducts,
   deleteAllProducts,
+  deleteProduct,
   uploadProductImage,
 } from '../controllers/product.controller';
 import {
@@ -45,5 +46,6 @@ router.get('/best-selling', getBestSellingProducts);
 router.get('/:id', validate(getProductSchema), getProduct);
 router.patch('/:id', validate(updateProductSchema), updateProduct);
 router.patch('/:id/toggle-status', validate(getProductSchema), toggleProductStatus);
+router.delete('/:id', validate(getProductSchema), deleteProduct);
 
 export default router;

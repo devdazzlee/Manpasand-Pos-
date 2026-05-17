@@ -370,52 +370,56 @@ export class ProductService {
     }
 
     async createProduct(data: CreateProductInput): Promise<Product> {
-        // Get last product code
+        // Step 1: Resolve the next product code and all "Unknown" fallback
+        // entries OUTSIDE the transaction. These are idempotent lookups that
+        // don't need to be atomic with the insert, and pulling them out of the
+        // transaction is what stops Prisma's P2028 timeout on a slow remote
+        // Postgres (each query was a fresh round-trip costing ~1s).
         const lastProduct = await prisma.product.findFirst({
             orderBy: { created_at: 'desc' },
             select: { code: true }
         });
-
         const newCode = lastProduct ? (parseInt(lastProduct.code) + 1).toString() : '1000';
 
-        // Start transaction for atomic operations
+        const unknownEntries = await this.ensureUnknownEntriesExist(prisma);
+        console.log('✅ Unknown entries ensured:', unknownEntries);
+
+        const verifiedRelations = await this.verifyAndFixRelationsForCreate(
+            data,
+            this.buildRelationsWithUnknownEntries(data, unknownEntries),
+            prisma,
+        );
+        console.log('📦 Relations built:', JSON.stringify(verifiedRelations, null, 2));
+
+        // Step 2: Inside the transaction we only do the SKU collision check
+        // and the actual product.create — fast and atomic.
         return await prisma.$transaction(async (tx) => {
             console.log('🚀 Starting transaction for product creation...');
 
             const sku = await this.resolveSkuForCreate(data, tx);
-            
-            // First, ensure all "Unknown" entries exist
-            const unknownEntries = await this.ensureUnknownEntriesExist(tx);
-            console.log('✅ Unknown entries ensured:', unknownEntries);
-            
-            // Build product data
             const productData = this.buildProductData(data, newCode);
 
-            // Build relations using existing or unknown entries
-            const relations = await this.verifyAndFixRelationsForCreate(data, this.buildRelationsWithUnknownEntries(data, unknownEntries), tx);
-            console.log('📦 Relations built:', JSON.stringify(relations, null, 2));
-
-            // Combine all data
             const finalData = {
                 ...productData,
                 sku,
-                ...relations
+                ...verifiedRelations,
             };
 
             console.log('📤 Final data being sent to Prisma:');
             console.log(JSON.stringify(finalData, null, 2));
 
-            // Create the product
             const product = await tx.product.create({
                 data: finalData,
-                include: this.buildRelationIncludes(data)
+                include: this.buildRelationIncludes(data),
             });
 
             console.log('✅ Product created successfully with ID:', product.id);
             return product;
         }, {
-            maxWait: 20000, // 20 seconds
-            timeout: 15000  // 15 seconds,
+            // Generous budget; the heavy lifting now happens outside the tx so
+            // this is effectively just SKU check + one INSERT.
+            maxWait: 30000,
+            timeout: 30000,
         });
     }
 
@@ -776,6 +780,15 @@ export class ProductService {
                         name: true,
                     },
                 },
+                // Per-branch stock — surfaced so the Edit dialog can
+                // pre-select the branches a product already lives in.
+                stock: {
+                    select: {
+                        branch_id: true,
+                        current_quantity: true,
+                        reserved_quantity: true,
+                    },
+                },
             },
         });
 
@@ -901,6 +914,28 @@ export class ProductService {
             where: { id },
             data: { is_active: !product.is_active },
         });
+    }
+
+    async deleteProduct(id: string) {
+        // Confirm existence first so we return a clean 404 instead of a
+        // generic Prisma P2025.
+        const product = await this.getProductById(id);
+
+        // The Product row has several relations with ON DELETE RESTRICT
+        // (Stock, StockMovement, SaleItem, PurchaseOrderItem, OrderItem,
+        // ProductImage). Walk them in dependency order inside a transaction
+        // so a single failure rolls everything back.
+        await prisma.$transaction(async (tx) => {
+            await tx.productImage.deleteMany({ where: { product_id: id } });
+            await tx.stockMovement.deleteMany({ where: { product_id: id } });
+            await tx.stock.deleteMany({ where: { product_id: id } });
+            await tx.saleItem.deleteMany({ where: { product_id: id } });
+            await tx.purchaseOrderItem.deleteMany({ where: { product_id: id } });
+            await tx.orderItem.deleteMany({ where: { product_id: id } });
+            await tx.product.delete({ where: { id } });
+        }, { maxWait: 20000, timeout: 30000 });
+
+        return product;
     }
 
     async listProducts({
