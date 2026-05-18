@@ -8,11 +8,13 @@ export class ShiftAssignmentService {
         shift_time,
         start_date,
         end_date,
+        break_time,
     }: {
         employee_id: string;
         shift_time: string;
         start_date: Date;
         end_date?: Date | null;
+        break_time?: string;
     }) {
         return await prisma.shiftAssignment.create({
             data: {
@@ -20,6 +22,7 @@ export class ShiftAssignmentService {
                 shift_time,
                 start_date,
                 end_date: end_date ?? null,
+                break_time,
             },
         });
     }
@@ -45,8 +48,8 @@ export class ShiftAssignmentService {
         });
     }
 
-    // End current shift (set end_date)
-    async endCurrentShift(employee_id: Employee['id'], end_date = new Date()) {
+    // End current shift (set end_date and sales)
+    async endCurrentShift(employee_id: Employee['id'], end_date = new Date(), sales?: number) {
         return await prisma.shiftAssignment.updateMany({
             where: {
                 employee_id,
@@ -54,6 +57,7 @@ export class ShiftAssignmentService {
             },
             data: {
                 end_date,
+                sales: sales !== undefined ? sales : undefined,
             },
         });
     }
@@ -67,7 +71,7 @@ export class ShiftAssignmentService {
     }
 
     // Update a shift by ID
-    async updateShift(id: string, data: Partial<{ shift_time: string; start_date: Date; end_date: Date | null; }>) {
+    async updateShift(id: string, data: Partial<{ shift_time: string; start_date: Date; end_date: Date | null; sales: number; break_time: string; }>) {
         return await prisma.shiftAssignment.update({
             where: { id },
             data,

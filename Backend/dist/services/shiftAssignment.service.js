@@ -4,13 +4,14 @@ exports.ShiftAssignmentService = void 0;
 const client_1 = require("../prisma/client");
 class ShiftAssignmentService {
     // Assign a shift to an employee
-    async assignShift({ employee_id, shift_time, start_date, end_date, }) {
+    async assignShift({ employee_id, shift_time, start_date, end_date, break_time, }) {
         return await client_1.prisma.shiftAssignment.create({
             data: {
                 employee_id,
                 shift_time,
                 start_date,
                 end_date: end_date ?? null,
+                break_time,
             },
         });
     }
@@ -33,8 +34,8 @@ class ShiftAssignmentService {
             orderBy: { start_date: 'desc' },
         });
     }
-    // End current shift (set end_date)
-    async endCurrentShift(employee_id, end_date = new Date()) {
+    // End current shift (set end_date and sales)
+    async endCurrentShift(employee_id, end_date = new Date(), sales) {
         return await client_1.prisma.shiftAssignment.updateMany({
             where: {
                 employee_id,
@@ -42,6 +43,7 @@ class ShiftAssignmentService {
             },
             data: {
                 end_date,
+                sales: sales !== undefined ? sales : undefined,
             },
         });
     }

@@ -18,13 +18,15 @@ import {
 } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Search, Clock, Users,  DollarSign, Eye, StopCircle, Edit, Trash2, Loader2, Calendar as CalendarIcon } from "lucide-react"
+import { Plus, Search, Clock, Users, DollarSign, Eye, StopCircle, Edit, Trash2, Loader2, Calendar as CalendarIcon, Sun, Moon, Sunset, CheckCircle, AlertTriangle } from "lucide-react"
 import { PageLoader } from "@/components/ui/page-loader"
 import apiClient from "@/lib/apiClient"
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { z } from "zod";
+import { useToast } from "@/hooks/use-toast";
 
 interface Employee {
   id: string
@@ -56,7 +58,158 @@ interface NewShiftForm {
   breakTime: string
 }
 
+const parseToLocalDate = (dateStr?: string) => {
+    if (!dateStr) return undefined;
+    const datePart = dateStr.split("T")[0];
+    const [year, month, day] = datePart.split("-").map(Number);
+    return new Date(year, month - 1, day);
+};
+
+const getLocalDateString = (d: Date = new Date()) => {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const parseTimeToDecimal = (timeStr: string) => {
+  if (!timeStr) return 0;
+  const cleanStr = timeStr.replace(/\s+/g, "").toUpperCase();
+  const isPM = cleanStr.includes("PM");
+  const isAM = cleanStr.includes("AM");
+  const numericPart = cleanStr.replace(/[AP]M/, "");
+  const [hStr, mStr] = numericPart.split(":");
+  let h = parseInt(hStr, 10) || 0;
+  const m = parseInt(mStr, 10) || 0;
+  
+  if (isPM && h < 12) {
+    h += 12;
+  } else if (isAM && h === 12) {
+    h = 0;
+  }
+  return h + m / 60;
+};
+
+const calculateHours = (startTime: string, endTime: string, breakHours: number) => {
+  const startDecimal = parseTimeToDecimal(startTime);
+  const endDecimal = parseTimeToDecimal(endTime);
+  let diff = endDecimal - startDecimal;
+  if (diff < 0) {
+    diff += 24;
+  }
+  return Math.max(0, diff - breakHours);
+};
+
+const formatTimeTo12Hour = (timeStr: string) => {
+  if (!timeStr) return "-";
+  if (timeStr.toUpperCase().includes("AM") || timeStr.toUpperCase().includes("PM")) {
+    return timeStr;
+  }
+  const [hStr, mStr] = timeStr.split(":");
+  let h = parseInt(hStr, 10);
+  if (isNaN(h)) return timeStr;
+  const ampm = h >= 12 ? "PM" : "AM";
+  h = h % 12;
+  if (h === 0) h = 12;
+  const formattedHour = String(h).padStart(2, "0");
+  return `${formattedHour}:${mStr || "00"} ${ampm}`;
+};
+
+function TimePicker({ value, onChange, disabled }: { value: string; onChange: (val: string) => void; disabled?: boolean }) {
+  const parseTime = (timeStr: string) => {
+    if (!timeStr) return { hour: "09", minute: "00", ampm: "AM" };
+    const [hStr, mStr] = timeStr.split(":");
+    const h = parseInt(hStr, 10);
+    const minute = mStr || "00";
+    if (isNaN(h)) return { hour: "09", minute: "00", ampm: "AM" };
+    
+    let ampm = "AM";
+    let hourNum = h;
+    if (h >= 12) {
+      ampm = "PM";
+      if (h > 12) hourNum = h - 12;
+    } else if (h === 0) {
+      hourNum = 12;
+    }
+    
+    const hour = String(hourNum).padStart(2, "0");
+    return { hour, minute, ampm };
+  };
+
+  const { hour, minute, ampm } = parseTime(value);
+
+  const handleTimeChange = (newHour: string, newMinute: string, newAmpm: string) => {
+    let hNum = parseInt(newHour, 10);
+    if (newAmpm === "PM" && hNum < 12) {
+      hNum += 12;
+    } else if (newAmpm === "AM" && hNum === 12) {
+      hNum = 0;
+    }
+    const formattedHour = String(hNum).padStart(2, "0");
+    onChange(`${formattedHour}:${newMinute}`);
+  };
+
+  const hours = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
+  const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"));
+
+  return (
+    <div className="flex items-center space-x-1 bg-white border border-gray-200 rounded-lg p-1 shadow-sm w-full max-w-[240px]">
+      <Select
+        disabled={disabled}
+        value={hour}
+        onValueChange={(val) => handleTimeChange(val, minute, ampm)}
+      >
+        <SelectTrigger className="w-[62px] h-8 border-none bg-transparent hover:bg-gray-100/50 transition-colors focus:ring-0 px-2 py-0 text-sm">
+          <SelectValue placeholder="HH" />
+        </SelectTrigger>
+        <SelectContent className="max-h-[220px]">
+          {hours.map((h) => (
+            <SelectItem key={h} value={h}>{h}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <span className="text-gray-400 font-medium select-none">:</span>
+      <Select
+        disabled={disabled}
+        value={minute}
+        onValueChange={(val) => handleTimeChange(hour, val, ampm)}
+      >
+        <SelectTrigger className="w-[62px] h-8 border-none bg-transparent hover:bg-gray-100/50 transition-colors focus:ring-0 px-2 py-0 text-sm">
+          <SelectValue placeholder="MM" />
+        </SelectTrigger>
+        <SelectContent className="max-h-[220px] overflow-y-auto">
+          {minutes.map((m) => (
+            <SelectItem key={m} value={m}>{m}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <Select
+        disabled={disabled}
+        value={ampm}
+        onValueChange={(val) => handleTimeChange(hour, minute, val)}
+      >
+        <SelectTrigger className="w-[72px] h-8 border-none bg-transparent hover:bg-gray-100/50 transition-colors focus:ring-0 px-2 py-0 text-sm">
+          <SelectValue placeholder="AM/PM" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="AM">AM</SelectItem>
+          <SelectItem value="PM">PM</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
+const shiftFormSchema = z.object({
+  employeeId: z.string().min(1, "Employee selection is required"),
+  date: z.string().min(1, "Date selection is required"),
+  startTime: z.string().min(1, "Start time is required"),
+  endTime: z.string().min(1, "End time is required"),
+  breakTime: z.coerce.number().min(0, "Break time cannot be negative"),
+});
+
 export function Shifts() {
+  const { toast } = useToast()
   const [employees, setEmployees] = useState<Employee[]>([])
   const [shifts, setShifts] = useState<Shift[]>([])
 
@@ -64,6 +217,8 @@ export function Shifts() {
   const [isViewShiftOpen, setIsViewShiftOpen] = useState(false)
   const [isEditShiftOpen, setIsEditShiftOpen] = useState(false)
   const [isEndShiftOpen, setIsEndShiftOpen] = useState(false)
+  const [isDeleteOpen, setIsDeleteOpen] = useState(false)
+  const [shiftToDelete, setShiftToDelete] = useState<Shift | null>(null)
   const [selectedShift, setSelectedShift] = useState<Shift | null>(null)
   const [editingShift, setEditingShift] = useState<Shift | null>(null)
   const [searchTerm, setSearchTerm] = useState("")
@@ -84,7 +239,24 @@ export function Shifts() {
     breakTime: "1",
   })
 
-  const [date, setDate] = useState<Date | undefined>(undefined);
+  const [createDate, setCreateDate] = useState<Date | undefined>(undefined);
+  const [editDate, setEditDate] = useState<Date | undefined>(undefined);
+
+  // Sync createDate to newShift.date
+  useEffect(() => {
+    if (createDate) {
+      setNewShift(prev => ({ ...prev, date: format(createDate, "yyyy-MM-dd") }));
+    } else {
+      setNewShift(prev => ({ ...prev, date: "" }));
+    }
+  }, [createDate]);
+
+  // Sync editDate to editingShift.date
+  useEffect(() => {
+    if (editDate && editingShift) {
+      setEditingShift(prev => prev ? ({ ...prev, date: format(editDate, "yyyy-MM-dd") }) : null);
+    }
+  }, [editDate]);
 
   // Fetch employees from API
   const getEmployees = async () => {
@@ -105,19 +277,43 @@ export function Shifts() {
   const getAllShifts = async () => {
     try {
       const res = await apiClient.get("/shift-assignment");
-      const apiShifts = res.data.data.map((shift: any) => ({
-        id: shift.id,
-        employee: shift.employee?.name || "",
-        employeeId: shift.employee_id,
-        date: shift.start_date?.split("T")[0] || "",
-        startTime: shift.shift_time?.split("-")[0]?.trim() || "",
-        endTime: shift.shift_time?.split("-")[1]?.trim() || "",
-        breakTime: shift.break_time || "1 hour",
-        totalHours: shift.total_hours || 0,
-        status: shift.status || "scheduled",
-        sales: shift.sales || 0,
-        hourlyRate: shift.hourly_rate || 15,
-      }));
+      const apiShifts = res.data.data.map((shift: any) => {
+        const startTime = shift.shift_time?.split("-")[0]?.trim() || "";
+        const endTime = shift.shift_time?.split("-")[1]?.trim() || "";
+        const breakTimeStr = shift.break_time || "1 hour";
+        const breakHours = parseFloat(breakTimeStr) || 0;
+        
+        // Compute totalHours dynamically
+        const totalHours = calculateHours(startTime, endTime, breakHours);
+
+        // Derive status dynamically from database properties
+        let derivedStatus = "scheduled";
+        if (shift.end_date) {
+          derivedStatus = "completed";
+        } else {
+          const shiftDateStr = shift.start_date?.split("T")[0] || "";
+          const todayDateStr = getLocalDateString();
+          if (shiftDateStr <= todayDateStr) {
+            derivedStatus = "active";
+          } else {
+            derivedStatus = "scheduled";
+          }
+        }
+
+        return {
+          id: shift.id,
+          employee: shift.employee?.name || "",
+          employeeId: shift.employee_id,
+          date: shift.start_date?.split("T")[0] || "",
+          startTime,
+          endTime,
+          breakTime: breakTimeStr,
+          totalHours,
+          status: derivedStatus,
+          sales: shift.sales || 0,
+          hourlyRate: shift.hourly_rate || 15,
+        };
+      });
       setShifts(apiShifts);
     } catch (error) {
       console.log("Error fetching shifts:", error);
@@ -136,33 +332,35 @@ export function Shifts() {
     loadData()
   }, [])
 
-  const getStatusColor = (status: string) => "bg-gray-100 text-gray-800";
-
-  const calculateHours = (startTime: string, endTime: string, breakHours: number) => {
-    const start = new Date(`2000-01-01T${startTime}:00`)
-    const end = new Date(`2000-01-01T${endTime}:00`)
-    let diff = (end.getTime() - start.getTime()) / (1000 * 60 * 60)
-
-    // Handle overnight shifts
-    if (diff < 0) {
-      diff += 24
+  const getStatusColor = (status: string) => {
+    if (!status) return "bg-gray-50 text-gray-600 border border-gray-100 hover:bg-gray-50";
+    switch (status.toLowerCase()) {
+      case "scheduled":
+        return "bg-blue-50 text-blue-700 border border-blue-100 hover:bg-blue-50 hover:text-blue-700 font-semibold uppercase tracking-wider text-[10px] py-0.5 px-2";
+      case "active":
+        return "bg-emerald-50 text-emerald-700 border border-emerald-100 hover:bg-emerald-50 hover:text-emerald-700 font-semibold uppercase tracking-wider text-[10px] py-0.5 px-2";
+      case "completed":
+        return "bg-indigo-50 text-indigo-700 border border-indigo-100 hover:bg-indigo-50 hover:text-indigo-700 font-semibold uppercase tracking-wider text-[10px] py-0.5 px-2";
+      case "cancelled":
+        return "bg-rose-50 text-rose-700 border border-rose-100 hover:bg-rose-50 hover:text-rose-700 font-semibold uppercase tracking-wider text-[10px] py-0.5 px-2";
+      default:
+        return "bg-gray-50 text-gray-700 border border-gray-100 hover:bg-gray-50 hover:text-gray-700 font-semibold uppercase tracking-wider text-[10px] py-0.5 px-2";
     }
-
-    return Math.max(0, diff - breakHours)
-  }
+  };
 
   const handleShiftTypeChange = (type: string) => {
-    setNewShift({ ...newShift, shiftType: type })
-
     switch (type) {
       case "morning":
-        setNewShift((prev) => ({ ...prev, startTime: "09:00", endTime: "17:00" }))
+        setNewShift((prev) => ({ ...prev, shiftType: type, startTime: "09:00", endTime: "17:00" }))
         break
       case "evening":
-        setNewShift((prev) => ({ ...prev, startTime: "13:00", endTime: "21:00" }))
+        setNewShift((prev) => ({ ...prev, shiftType: type, startTime: "13:00", endTime: "21:00" }))
         break
       case "night":
-        setNewShift((prev) => ({ ...prev, startTime: "21:00", endTime: "05:00" }))
+        setNewShift((prev) => ({ ...prev, shiftType: type, startTime: "21:00", endTime: "05:00" }))
+        break
+      case "custom":
+        setNewShift((prev) => ({ ...prev, shiftType: type, startTime: "09:00", endTime: "17:00" }))
         break
       default:
         break
@@ -171,32 +369,60 @@ export function Shifts() {
 
   // Add (Assign) Shift
   const handleCreateShift = async () => {
-    if (newShift.employeeId && newShift.date && newShift.startTime && newShift.endTime) {
-      setLoading(true)
-      try {
-        const shift_time = `${newShift.startTime} - ${newShift.endTime}`
-        const startDateTime = new Date(`${newShift.date}T${newShift.startTime}:00`).toISOString()
-        await apiClient.post("/shift-assignment", {
-          employee_id: newShift.employeeId,
-          shift_time,
-          start_date: startDateTime,
-        })
-        setIsCreateShiftOpen(false)
-        setNewShift({
-          employee: "",
-          employeeId: "",
-          date: "",
-          shiftType: "",
-          startTime: "",
-          endTime: "",
-          breakTime: "1",
-        })
-        await getAllShifts()
-      } catch (error) {
-        console.log("Error assigning shift:", error)
-      } finally {
-        setLoading(false)
-      }
+    const result = shiftFormSchema.safeParse({
+      employeeId: newShift.employeeId,
+      date: newShift.date,
+      startTime: newShift.startTime,
+      endTime: newShift.endTime,
+      breakTime: parseFloat(newShift.breakTime) || 0,
+    });
+    
+    if (!result.success) {
+      const errorMsg = result.error.errors[0]?.message || "Validation failed";
+      toast({
+        title: "Validation Error",
+        description: errorMsg,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLoading(true)
+    try {
+      const shift_time = `${newShift.startTime} - ${newShift.endTime}`
+      const startDateTime = new Date(`${newShift.date}T${newShift.startTime}:00`).toISOString()
+      await apiClient.post("/shift-assignment", {
+        employee_id: newShift.employeeId,
+        shift_time,
+        start_date: startDateTime,
+        break_time: `${newShift.breakTime} hour${newShift.breakTime !== "1" ? "s" : ""}`,
+      })
+      setIsCreateShiftOpen(false)
+      setNewShift({
+        employee: "",
+        employeeId: "",
+        date: "",
+        shiftType: "morning",
+        startTime: "09:00",
+        endTime: "17:00",
+        breakTime: "1",
+      })
+      setCreateDate(undefined)
+      toast({
+        title: "Success",
+        description: "Shift scheduled successfully",
+      })
+      await getAllShifts()
+    } catch (error: any) {
+      console.log("Error assigning shift:", error)
+      const errMsg = error.response?.data?.message || error.response?.data?.error || "Failed to schedule shift. Please try again.";
+      toast({
+        title: "Error Scheduling Shift",
+        description: errMsg,
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false)
     }
   }
 
@@ -218,35 +444,75 @@ export function Shifts() {
 
   const handleEditShift = (shift: Shift) => {
     setEditingShift({ ...shift })
+    setEditDate(shift.date ? parseToLocalDate(shift.date) : undefined);
     setIsEditShiftOpen(true)
   }
 
   // Edit Shift
   const handleUpdateShift = async () => {
-    if (editingShift) {
-      setLoading(true);
-      try {
-        const shift_time = `${editingShift.startTime} - ${editingShift.endTime}`;
-        await apiClient.patch(`/shift-assignment/${editingShift.id}`, {
-          shift_time,
-          start_date: editingShift.date,
-          // Add other fields as needed
-        });
-        setIsEditShiftOpen(false);
-        setEditingShift(null);
-        await getAllShifts();
-      } catch (error) {
-        console.log("Error updating shift:", error);
-      } finally {
-        setLoading(false);
+    if (!editingShift) return;
+
+    const result = shiftFormSchema.safeParse({
+      employeeId: editingShift.employeeId,
+      date: editingShift.date,
+      startTime: editingShift.startTime,
+      endTime: editingShift.endTime,
+      breakTime: parseFloat(editingShift.breakTime) || 0,
+    });
+    
+    if (!result.success) {
+      const errorMsg = result.error.errors[0]?.message || "Validation failed";
+      toast({
+        title: "Validation Error",
+        description: errorMsg,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const shift_time = `${editingShift.startTime} - ${editingShift.endTime}`;
+      
+      let end_date = undefined;
+      if (editingShift.status === "completed") {
+        end_date = new Date().toISOString();
+      } else if (editingShift.status === "scheduled" || editingShift.status === "active") {
+        end_date = null;
       }
+
+      await apiClient.patch(`/shift-assignment/${editingShift.id}`, {
+        shift_time,
+        start_date: editingShift.date,
+        end_date,
+        sales: editingShift.sales,
+        break_time: editingShift.breakTime,
+      });
+      setIsEditShiftOpen(false);
+      setEditingShift(null);
+      setEditDate(undefined);
+      toast({
+        title: "Success",
+        description: "Shift updated successfully",
+      })
+      await getAllShifts();
+    } catch (error: any) {
+      console.log("Error updating shift:", error);
+      const errMsg = error.response?.data?.message || error.response?.data?.error || "Failed to update shift. Please try again.";
+      toast({
+        title: "Error Updating Shift",
+        description: errMsg,
+        variant: "destructive",
+      })
+    } finally {
+      setLoading(false);
     }
   };
 
   // End Shift
   const handleEndShift = (shift: Shift) => {
     setSelectedShift(shift)
-    setEndShiftSales(shift.sales.toString())
+    setEndShiftSales(shift.sales === 0 ? "" : shift.sales.toString())
     setIsEndShiftOpen(true)
   }
 
@@ -255,27 +521,58 @@ export function Shifts() {
     if (selectedShift) {
       setLoading(true)
       try {
-        await apiClient.patch(`/shift-assignment/end/${selectedShift.employeeId}`)
-        setIsEndShiftOpen(false)
-        setSelectedShift(null)
+        await apiClient.patch(`/shift-assignment/end/${selectedShift.employeeId}`, {
+          sales: parseFloat(endShiftSales) || 0,
+        })
+        setIsEndShiftOpen(false);
+        setSelectedShift(null);
         setEndShiftSales("")
+        toast({
+          title: "Success",
+          description: "Shift ended successfully",
+        })
         await getAllShifts()
-      } catch (error) {
+      } catch (error: any) {
         console.log("Error ending shift:", error)
+        const errMsg = error.response?.data?.message || error.response?.data?.error || "Failed to end shift. Please try again.";
+        toast({
+          title: "Error Ending Shift",
+          description: errMsg,
+          variant: "destructive",
+        })
       } finally {
         setLoading(false)
       }
     }
   }
 
-  // Delete Shift
-  const handleDeleteShift = async (shiftId: string) => {
+  // Delete Shift Dialog Trigger
+  const handleDeleteShift = (shift: Shift) => {
+    setShiftToDelete(shift);
+    setIsDeleteOpen(true);
+  };
+
+  // Confirm Delete Action with Loading
+  const handleConfirmDelete = async () => {
+    if (!shiftToDelete) return;
     setLoading(true);
     try {
-      await apiClient.delete(`/shift-assignment/${shiftId}`);
+      await apiClient.delete(`/shift-assignment/${shiftToDelete.id}`);
+      setIsDeleteOpen(false);
+      setShiftToDelete(null);
+      toast({
+        title: "Success (Kamyabi)",
+        description: "Shift deleted successfully (Shift delete ho gayi hai)",
+      })
       await getAllShifts();
-    } catch (error) {
+    } catch (error: any) {
       console.log("Error deleting shift:", error);
+      const errMsg = error.response?.data?.message || error.response?.data?.error || "Failed to delete shift.";
+      toast({
+        title: "Error (Ghalti)",
+        description: errMsg,
+        variant: "destructive",
+      })
     } finally {
       setLoading(false);
     }
@@ -288,8 +585,8 @@ export function Shifts() {
     if (status) {
       switch (status) {
         case "today":
-          const today = new Date().toISOString().split("T")[0]
-          filtered = filtered.filter((shift) => shift.date === today)
+          const todayStr = getLocalDateString()
+          filtered = filtered.filter((shift) => shift.date === todayStr)
           break
         case "week":
           const weekAgo = new Date()
@@ -324,7 +621,7 @@ export function Shifts() {
   }
 
   // Calculate statistics
-  const today = new Date().toISOString().split("T")[0]
+  const today = getLocalDateString()
   const todayShifts = shifts.filter((shift) => shift.date === today)
   const todayHours = todayShifts.reduce((sum, shift) => {
     // Parse start and end times
@@ -341,13 +638,9 @@ export function Shifts() {
 
     return sum + hours;
   }, 0);
-  const activeShifts = shifts.filter((shift) => shift.status === "active" || shift.status === "scheduled").length;
-  const tomorrowShifts = shifts.filter((shift) => {
-    const tomorrow = new Date()
-    tomorrow.setDate(tomorrow.getDate() + 1)
-    return shift.date === tomorrow.toISOString().split("T")[0] && shift.status === "scheduled"
-  }).length
+  const activeStaffCount = shifts.filter((shift) => shift.status === "active").length;
   const todayLaborCost = todayShifts.reduce((sum, shift) => sum + shift.totalHours * shift.hourlyRate, 0)
+  const todaySales = todayShifts.reduce((sum, shift) => sum + shift.sales, 0);
 
   if (isInitialLoading) {
     return <PageLoader message="Loading shifts..." />
@@ -369,43 +662,53 @@ export function Shifts() {
             </TableRow>
           </TableHeader>
       <TableBody>
-        {shiftData.map((shift) => (
-          <TableRow key={shift.id}>
-            <TableCell className="font-medium">{shift.id}</TableCell>
-            <TableCell>{shift.employee}</TableCell>
-            <TableCell>{shift.date}</TableCell>
-            <TableCell>{shift.startTime}</TableCell>
-            <TableCell>{shift.endTime}</TableCell>
-            <TableCell>
-              <Badge className={getStatusColor(shift.status)}>{shift.status}</Badge>
-            </TableCell>
-            <TableCell>
-              <div className="flex gap-1">
-                <Button variant="outline" size="sm" onClick={() => handleViewShift(shift)}>
-                  <Eye className="h-3 w-3" />
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleEditShift(shift)}>
-                  <Edit className="h-3 w-3" />
-                </Button>
-                {shift.status === "active" && (
-                  <Button variant="outline" size="sm" onClick={() => handleEndShift(shift)}>
-                    <StopCircle className="h-3 w-3" />
-                  </Button>
-                )}
-                {shift.status === "scheduled" && (
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => handleDeleteShift(shift.id)}
-                    className="text-red-600 hover:text-red-700"
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                )}
+        {shiftData.length === 0 ? (
+          <TableRow>
+            <TableCell colSpan={7} className="h-28 text-center text-gray-500 font-medium">
+              <div className="flex flex-col items-center justify-center space-y-2 py-4">
+                <Search className="h-8 w-8 text-gray-400 animate-pulse" />
+                <p className="text-gray-600 font-semibold">No shifts found matching your search</p>
+                <p className="text-sm text-gray-400">(Koi shift nahi mili - search ya filter tabdeel karein)</p>
               </div>
             </TableCell>
           </TableRow>
-        ))}
+        ) : (
+          shiftData.map((shift) => (
+            <TableRow key={shift.id}>
+              <TableCell className="font-medium text-gray-800">{shift.id}</TableCell>
+              <TableCell className="font-semibold text-gray-900">{shift.employee}</TableCell>
+              <TableCell className="text-gray-600">{shift.date}</TableCell>
+              <TableCell className="font-medium text-gray-800">{formatTimeTo12Hour(shift.startTime)}</TableCell>
+              <TableCell className="font-medium text-gray-800">{formatTimeTo12Hour(shift.endTime)}</TableCell>
+              <TableCell>
+                <Badge className={getStatusColor(shift.status)}>{shift.status}</Badge>
+              </TableCell>
+              <TableCell>
+                <div className="flex gap-1">
+                  <Button variant="outline" size="sm" onClick={() => handleViewShift(shift)}>
+                    <Eye className="h-3 w-3" />
+                  </Button>
+                  <Button variant="outline" size="sm" onClick={() => handleEditShift(shift)}>
+                    <Edit className="h-3 w-3" />
+                  </Button>
+                  {shift.status === "active" && (
+                    <Button variant="outline" size="sm" onClick={() => handleEndShift(shift)}>
+                      <StopCircle className="h-3 w-3" />
+                    </Button>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => handleDeleteShift(shift)}
+                    className="text-red-600 hover:text-red-700 hover:bg-red-50 border-red-100 hover:border-red-200"
+                  >
+                    <Trash2 className="h-3 w-3" />
+                  </Button>
+                </div>
+              </TableCell>
+            </TableRow>
+          ))
+        )}
       </TableBody>
     </Table>
       </div>
@@ -421,23 +724,40 @@ export function Shifts() {
         </div>
 
         {/* Create Shift Dialog */}
-        <Dialog open={isCreateShiftOpen} onOpenChange={setIsCreateShiftOpen}>
+        <Dialog 
+          open={isCreateShiftOpen} 
+          onOpenChange={(open) => {
+            setIsCreateShiftOpen(open);
+            if (open) {
+              setNewShift({
+                employee: "",
+                employeeId: "",
+                date: "",
+                shiftType: "morning",
+                startTime: "09:00",
+                endTime: "17:00",
+                breakTime: "1",
+              });
+              setCreateDate(new Date()); // default to current date when opened
+            }
+          }}
+        >
           <DialogTrigger asChild>
             <Button>
               <Plus className="w-4 h-4 mr-2" />
               Schedule Shift
             </Button>
           </DialogTrigger>
-          <DialogContent>
+          <DialogContent className="sm:max-w-[480px]">
             <DialogHeader>
               <DialogTitle>Schedule New Shift</DialogTitle>
               <DialogDescription>Create a new shift for an employee</DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="space-y-4 pt-2">
               <div className="space-y-2">
                 <Label htmlFor="employee">Employee</Label>
                 <Select value={newShift.employeeId} onValueChange={handleEmployeeSelect}>
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full bg-white border-gray-300">
                     <SelectValue placeholder="Select employee" />
                   </SelectTrigger>
                   <SelectContent>
@@ -449,64 +769,85 @@ export function Shifts() {
                   </SelectContent>
                 </Select>
               </div>
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="date">Date</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}
-                        disabled={loading}
+
+              <div className="space-y-2">
+                <Label htmlFor="date">Date</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className={cn("w-full justify-start text-left font-normal bg-white border-gray-300", !createDate && "text-muted-foreground")}
+                      disabled={loading}
+                    >
+                      <CalendarIcon className="mr-2 h-4 w-4" />
+                      {createDate ? format(createDate, "PPP") : <span>Pick a date</span>}
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <Calendar
+                      mode="single"
+                      selected={createDate}
+                      onSelect={(d) => setCreateDate(d)}
+                      initialFocus
+                    />
+                  </PopoverContent>
+                </Popover>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Shift Type</Label>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { id: "morning", name: "Morning", time: "9AM - 5PM", icon: Sun, color: "text-amber-500 bg-amber-50 border-amber-200" },
+                    { id: "evening", name: "Evening", time: "1PM - 9PM", icon: Sunset, color: "text-orange-500 bg-orange-50 border-orange-200" },
+                    { id: "night", name: "Night", time: "9PM - 5AM", icon: Moon, color: "text-indigo-500 bg-indigo-50 border-indigo-200" },
+                    { id: "custom", name: "Custom", time: "Flexible", icon: Clock, color: "text-gray-500 bg-gray-50 border-gray-200" }
+                  ].map((type) => {
+                    const Icon = type.icon;
+                    const isSelected = newShift.shiftType === type.id;
+                    return (
+                      <button
+                        key={type.id}
+                        type="button"
+                        onClick={() => handleShiftTypeChange(type.id)}
+                        className={cn(
+                          "flex flex-col items-start p-3 border rounded-xl text-left transition-all duration-200 hover:shadow-sm focus:outline-none w-full",
+                          isSelected 
+                            ? "border-blue-600 bg-blue-50/40 ring-1 ring-blue-500" 
+                            : "border-gray-200 bg-white hover:border-gray-300"
+                        )}
                       >
-                        <CalendarIcon className="mr-2 h-4 w-4" />
-                        {date ? format(date, "PPP") : <span>Pick a date</span>}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0">
-                      <Calendar
-                        mode="single"
-                        selected={date}
-                        onSelect={(date) => setDate(date)}
-                        initialFocus
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="shift-type">Shift Type</Label>
-                  <Select value={newShift.shiftType} onValueChange={handleShiftTypeChange}>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="morning">Morning (9AM-5PM)</SelectItem>
-                      <SelectItem value="evening">Evening (1PM-9PM)</SelectItem>
-                      <SelectItem value="night">Night (9PM-5AM)</SelectItem>
-                      <SelectItem value="custom">Custom</SelectItem>
-                    </SelectContent>
-                  </Select>
+                        <div className={cn("p-1 rounded-lg mb-1 border", type.color)}>
+                          <Icon className="h-4 w-4" />
+                        </div>
+                        <span className="font-semibold text-xs text-gray-900">{type.name}</span>
+                        <span className="text-[10px] text-gray-500">{type.time}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-4">
+
+              <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
-                  <Label htmlFor="start-time">Start Time</Label>
-                  <Input
-                    type="time"
+                  <Label>Start Time</Label>
+                  <TimePicker
                     value={newShift.startTime}
-                    onChange={(e) => setNewShift({ ...newShift, startTime: e.target.value })}
-                    disabled={loading}
+                    onChange={(val) => setNewShift({ ...newShift, startTime: val })}
+                    disabled={loading || newShift.shiftType !== "custom"}
                   />
                 </div>
                 <div className="space-y-2">
-                  <Label htmlFor="end-time">End Time</Label>
-                  <Input
-                    type="time"
+                  <Label>End Time</Label>
+                  <TimePicker
                     value={newShift.endTime}
-                    onChange={(e) => setNewShift({ ...newShift, endTime: e.target.value })}
-                    disabled={loading}
+                    onChange={(val) => setNewShift({ ...newShift, endTime: val })}
+                    disabled={loading || newShift.shiftType !== "custom"}
                   />
                 </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4 items-center">
                 <div className="space-y-2">
                   <Label htmlFor="break-time">Break (hours)</Label>
                   <Input
@@ -516,22 +857,24 @@ export function Shifts() {
                     onChange={(e) => setNewShift({ ...newShift, breakTime: e.target.value })}
                     placeholder="1"
                     disabled={loading}
+                    className="bg-white border-gray-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                   />
                 </div>
+                {newShift.startTime && newShift.endTime && (
+                  <div className="pt-6 text-sm font-semibold text-gray-700">
+                    Total Hours:{" "}
+                    <span className="text-blue-600 bg-blue-50 px-2.5 py-1 rounded-md ml-1 border border-blue-100">
+                      {calculateHours(
+                        newShift.startTime,
+                        newShift.endTime,
+                        Number.parseFloat(newShift.breakTime) || 0,
+                      ).toFixed(1)}h
+                    </span>
+                  </div>
+                )}
               </div>
-              {newShift.startTime && newShift.endTime && (
-                <div className="text-sm text-gray-600">
-                  Total Hours:{" "}
-                  {calculateHours(
-                    newShift.startTime,
-                    newShift.endTime,
-                    Number.parseFloat(newShift.breakTime) || 0,
-                  ).toFixed(1)}
-                  h
-                </div>
-              )}
             </div>
-            <DialogFooter>
+            <DialogFooter className="pt-2">
               <Button variant="outline" onClick={() => setIsCreateShiftOpen(false)} disabled={loading}>
                 Cancel
               </Button>
@@ -550,70 +893,109 @@ export function Shifts() {
         </Dialog>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        <Card>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+        <Card className="border-l-4 border-l-amber-500 hover:shadow-md transition-shadow duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Shifts</CardTitle>
-            <Clock className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-semibold text-gray-700">Active Staff (Kaam Par)</CardTitle>
+            <Users className="h-4 w-4 text-amber-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{activeShifts}</div>
-            <p className="text-xs text-muted-foreground">Currently working</p>
+            <div className="text-2xl font-bold text-gray-900">{activeStaffCount}</div>
+            <p className="text-xs text-gray-500">Currently working now</p>
           </CardContent>
         </Card>
-        <Card>
+        
+        <Card className="border-l-4 border-l-blue-500 hover:shadow-md transition-shadow duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Today's Hours</CardTitle>
-            <Users className="h-4 w-4 text-muted-foreground" />
+            <CardTitle className="text-sm font-semibold text-gray-700">Today's Hours (Aaj ke Ghante)</CardTitle>
+            <Clock className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{todayHours}</div>
-            <p className="text-xs text-muted-foreground">Total hours worked</p>
+            <div className="text-2xl font-bold text-gray-900">{todayHours.toFixed(1)}h</div>
+            <p className="text-xs text-gray-500">Total shift hours today</p>
           </CardContent>
         </Card>
-        <Card>
+
+        <Card className="border-l-4 border-l-green-500 hover:shadow-md transition-shadow duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Scheduled</CardTitle>
-            {/* <Calendar className="h-4 w-4 text-muted-foreground" /> */}
+            <CardTitle className="text-sm font-semibold text-gray-700">Today's Expense (Aaj ka Kharch)</CardTitle>
+            <DollarSign className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold">{tomorrowShifts}</div>
-            <p className="text-xs text-muted-foreground">Tomorrow's shifts</p>
+            <div className="text-2xl font-bold text-gray-900">Rs {todayLaborCost.toLocaleString()}</div>
+            <p className="text-xs text-gray-500">Estimated salary cost</p>
+          </CardContent>
+        </Card>
+
+        <Card className="border-l-4 border-l-purple-500 hover:shadow-md transition-shadow duration-200">
+          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+            <CardTitle className="text-sm font-semibold text-gray-700">Today's Sales (Aaj ki Sale)</CardTitle>
+            <DollarSign className="h-4 w-4 text-purple-500" />
+          </CardHeader>
+          <CardContent>
+            <div className="text-2xl font-bold text-gray-900">Rs {todaySales.toLocaleString()}</div>
+            <p className="text-xs text-gray-500">Sales from active/done shifts</p>
           </CardContent>
         </Card>
       </div>
 
       <Tabs defaultValue="today" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="today">Today</TabsTrigger>
-          <TabsTrigger value="week">This Week</TabsTrigger>
-          <TabsTrigger value="scheduled">Scheduled</TabsTrigger>
-          <TabsTrigger value="completed">Completed</TabsTrigger>
+        <TabsList className="bg-gray-100 p-1 rounded-xl h-auto flex flex-wrap md:inline-flex gap-1 border border-gray-200">
+          <TabsTrigger value="today" className="rounded-lg py-2.5 px-4 text-xs md:text-sm font-semibold flex items-center gap-2 transition-all duration-200 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <Sun className="h-4 w-4 text-amber-500" />
+            <span>Today (Aaj)</span>
+          </TabsTrigger>
+          <TabsTrigger value="week" className="rounded-lg py-2.5 px-4 text-xs md:text-sm font-semibold flex items-center gap-2 transition-all duration-200 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <CalendarIcon className="h-4 w-4 text-blue-500" />
+            <span>This Week (Hafta)</span>
+          </TabsTrigger>
+          <TabsTrigger value="scheduled" className="rounded-lg py-2.5 px-4 text-xs md:text-sm font-semibold flex items-center gap-2 transition-all duration-200 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <Clock className="h-4 w-4 text-indigo-500" />
+            <span>Upcoming (Aane Wale)</span>
+          </TabsTrigger>
+          <TabsTrigger value="completed" className="rounded-lg py-2.5 px-4 text-xs md:text-sm font-semibold flex items-center gap-2 transition-all duration-200 data-[state=active]:bg-white data-[state=active]:shadow-sm">
+            <CheckCircle className="h-4 w-4 text-green-500" />
+            <span>Completed (Purane)</span>
+          </TabsTrigger>
         </TabsList>
 
-        <div className="flex gap-4">
+        <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
             <Input
-              placeholder="Search shifts..."
-              className="pl-10"
+              placeholder="Search by Employee name, Shift ID or Status..."
+              className="pl-10 h-10 rounded-lg border-gray-200 focus-visible:ring-indigo-500"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
-          <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
-            <SelectTrigger className="w-48">
-              <SelectValue placeholder="Filter by employee" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Employees</SelectItem>
-              {employees.map((emp) => (
-                <SelectItem key={emp.id} value={emp.id}>
-                  {emp.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <div className="flex gap-2 items-center">
+            <Select value={employeeFilter} onValueChange={setEmployeeFilter}>
+              <SelectTrigger className="w-48 h-10 rounded-lg border-gray-200">
+                <SelectValue placeholder="Filter by employee" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Employees (Sab Staff)</SelectItem>
+                {employees.map((emp) => (
+                  <SelectItem key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {(searchTerm !== "" || employeeFilter !== "all") && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setSearchTerm("");
+                  setEmployeeFilter("all");
+                }}
+                className="h-10 text-red-600 hover:text-red-700 hover:bg-red-50 font-medium px-3 rounded-lg border border-red-100 transition-colors"
+              >
+                Clear (Saaf karein)
+              </Button>
+            )}
+          </div>
         </div>
 
         <TabsContent value="today">
@@ -695,54 +1077,63 @@ export function Shifts() {
           <DialogHeader>
             <DialogTitle>Shift Details</DialogTitle>
           </DialogHeader>
-          {selectedShift && (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Shift ID</Label>
-                  <p className="text-lg font-semibold">{selectedShift.id}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Employee</Label>
-                  <p className="text-lg font-semibold">{selectedShift.employee}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Date</Label>
-                  <p>{selectedShift.date}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Status</Label>
-                  <Badge className={getStatusColor(selectedShift.status)}>{selectedShift.status}</Badge>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Start Time</Label>
-                  <p>{selectedShift.startTime}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">End Time</Label>
-                  <p>{selectedShift.endTime}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Break Time</Label>
-                  <p>{selectedShift.breakTime}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Total Hours</Label>
-                  <p className="text-lg font-semibold">{selectedShift.totalHours}h</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Sales</Label>
-                  <p className="text-lg font-semibold">Rs {selectedShift.sales.toLocaleString()}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium text-gray-500">Labor Cost</Label>
-                  <p className="text-lg font-semibold">
-                    Rs {(selectedShift.totalHours * selectedShift.hourlyRate).toLocaleString()}
-                  </p>
+          {selectedShift && (() => {
+            const viewBreakHours = parseFloat(selectedShift.breakTime) || 0;
+            const viewTotalHours = calculateHours(selectedShift.startTime, selectedShift.endTime, viewBreakHours);
+            const viewLaborCost = viewTotalHours * (selectedShift.hourlyRate || 15);
+            return (
+              <div className="space-y-4">
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Shift ID</Label>
+                    <p className="text-base font-semibold truncate select-all text-gray-800" title={selectedShift.id}>
+                      {selectedShift.id}
+                    </p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Employee</Label>
+                    <p className="text-lg font-semibold">{selectedShift.employee}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Date</Label>
+                    <p className="text-base">{selectedShift.date}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Status</Label>
+                    <div>
+                      <Badge className={getStatusColor(selectedShift.status)}>{selectedShift.status}</Badge>
+                    </div>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Start Time</Label>
+                    <p className="text-lg font-semibold">{formatTimeTo12Hour(selectedShift.startTime)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">End Time</Label>
+                    <p className="text-lg font-semibold">{formatTimeTo12Hour(selectedShift.endTime)}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Break Time</Label>
+                    <p className="text-base">{selectedShift.breakTime}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Total Hours</Label>
+                    <p className="text-lg font-semibold text-blue-600">{viewTotalHours.toFixed(1)}h</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Sales</Label>
+                    <p className="text-lg font-semibold">Rs {selectedShift.sales.toLocaleString()}</p>
+                  </div>
+                  <div>
+                    <Label className="text-sm font-medium text-gray-500">Labor Cost</Label>
+                    <p className="text-lg font-semibold text-green-600">
+                      Rs {viewLaborCost.toLocaleString()}
+                    </p>
+                  </div>
                 </div>
               </div>
-            </div>
-          )}
+            );
+          })()}
           <DialogFooter>
             <Button onClick={() => setIsViewShiftOpen(false)} disabled={loading}>
               Close
@@ -752,31 +1143,40 @@ export function Shifts() {
       </Dialog>
 
       {/* Edit Shift Dialog */}
-      <Dialog open={isEditShiftOpen} onOpenChange={setIsEditShiftOpen}>
-        <DialogContent>
+      <Dialog 
+        open={isEditShiftOpen} 
+        onOpenChange={(open) => {
+          setIsEditShiftOpen(open);
+          if (!open) {
+            setEditingShift(null);
+            setEditDate(undefined);
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-[480px]">
           <DialogHeader>
             <DialogTitle>Edit Shift</DialogTitle>
           </DialogHeader>
           {editingShift && (
-            <div className="space-y-4">
+            <div className="space-y-4 pt-2">
               <div className="space-y-2">
                 <Label>Date</Label>
                 <Popover>
                   <PopoverTrigger asChild>
                     <Button
                       variant="outline"
-                      className={cn("w-full justify-start text-left font-normal", !date && "text-muted-foreground")}
+                      className={cn("w-full justify-start text-left font-normal bg-white border-gray-300", !editDate && "text-muted-foreground")}
                       disabled={loading}
                     >
                       <CalendarIcon className="mr-2 h-4 w-4" />
-                      {date ? format(date, "PPP") : <span>Pick a date</span>}
+                      {editDate ? format(editDate, "PPP") : <span>Pick a date</span>}
                     </Button>
                   </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0">
+                  <PopoverContent className="w-auto p-0" align="start">
                     <Calendar
                       mode="single"
-                      selected={date}
-                      onSelect={(date) => setDate(date)}
+                      selected={editDate}
+                      onSelect={(d) => setEditDate(d)}
                       initialFocus
                     />
                   </PopoverContent>
@@ -785,19 +1185,17 @@ export function Shifts() {
               <div className="grid grid-cols-2 gap-4">
                 <div className="space-y-2">
                   <Label>Start Time</Label>
-                  <Input
-                    type="time"
+                  <TimePicker
                     value={editingShift.startTime}
-                    onChange={(e) => setEditingShift({ ...editingShift, startTime: e.target.value })}
+                    onChange={(val) => setEditingShift({ ...editingShift, startTime: val })}
                     disabled={loading}
                   />
                 </div>
                 <div className="space-y-2">
                   <Label>End Time</Label>
-                  <Input
-                    type="time"
+                  <TimePicker
                     value={editingShift.endTime}
-                    onChange={(e) => setEditingShift({ ...editingShift, endTime: e.target.value })}
+                    onChange={(val) => setEditingShift({ ...editingShift, endTime: val })}
                     disabled={loading}
                   />
                 </div>
@@ -807,7 +1205,7 @@ export function Shifts() {
                 <Input
                   type="number"
                   step="0.5"
-                  value={editingShift.breakTime.split(" ")[0]}
+                  value={editingShift.breakTime ? editingShift.breakTime.split(" ")[0] : "1"}
                   onChange={(e) =>
                     setEditingShift({
                       ...editingShift,
@@ -815,6 +1213,7 @@ export function Shifts() {
                     })
                   }
                   disabled={loading}
+                  className="bg-white border-gray-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                 />
               </div>
               <div className="space-y-2">
@@ -824,7 +1223,7 @@ export function Shifts() {
                   onValueChange={(value: Shift["status"]) => setEditingShift({ ...editingShift, status: value })}
                   disabled={loading}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger className="w-full bg-white border-gray-300">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -835,9 +1234,27 @@ export function Shifts() {
                   </SelectContent>
                 </Select>
               </div>
+              {editingShift.status === "completed" && (
+                <div className="space-y-2">
+                  <Label>Sales Amount (Rs)</Label>
+                  <Input
+                    type="number"
+                    value={editingShift.sales === 0 ? "" : editingShift.sales}
+                    onChange={(e) =>
+                      setEditingShift({
+                        ...editingShift,
+                        sales: e.target.value === "" ? 0 : (parseFloat(e.target.value) || 0),
+                      })
+                    }
+                    disabled={loading}
+                    className="bg-white border-gray-300 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                    placeholder="Enter sales amount"
+                  />
+                </div>
+              )}
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="pt-2">
             <Button variant="outline" onClick={() => setIsEditShiftOpen(false)} disabled={loading}>
               Cancel
             </Button>
@@ -897,6 +1314,72 @@ export function Shifts() {
                 </>
               ) : (
                 "End Shift"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={isDeleteOpen} onOpenChange={setIsDeleteOpen}>
+        <DialogContent className="sm:max-w-[420px] rounded-2xl border border-red-100 shadow-lg">
+          <DialogHeader className="flex flex-col items-center text-center space-y-3">
+            <div className="w-12 h-12 rounded-full bg-red-50 flex items-center justify-center border border-red-100 animate-bounce">
+              <AlertTriangle className="h-6 w-6 text-red-600" />
+            </div>
+            <DialogTitle className="text-xl font-bold text-gray-900">
+              Delete Shift Assignment?
+            </DialogTitle>
+            <DialogDescription className="text-sm text-gray-500">
+              Kya aap waqai is employee ki shift ko delete karna chahte hain? This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+
+          {shiftToDelete && (
+            <div className="bg-red-50/50 border border-red-100/50 rounded-xl p-4 my-2 space-y-2.5">
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 font-medium">Employee (Staff):</span>
+                <span className="text-gray-900 font-bold">{shiftToDelete.employee}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 font-medium">Shift Date (Tareekh):</span>
+                <span className="text-gray-900 font-semibold">{shiftToDelete.date}</span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 font-medium">Shift Time (Waqt):</span>
+                <span className="text-gray-900 font-semibold">
+                  {formatTimeTo12Hour(shiftToDelete.startTime)} - {formatTimeTo12Hour(shiftToDelete.endTime)}
+                </span>
+              </div>
+              <div className="flex justify-between text-sm">
+                <span className="text-gray-500 font-medium">Shift ID:</span>
+                <span className="text-gray-400 font-mono text-xs">{shiftToDelete.id}</span>
+              </div>
+            </div>
+          )}
+
+          <DialogFooter className="flex gap-2 sm:gap-0 mt-4">
+            <Button
+              variant="outline"
+              onClick={() => setIsDeleteOpen(false)}
+              disabled={loading}
+              className="flex-1 h-11 border-gray-200 text-gray-700 font-semibold rounded-xl hover:bg-gray-50 transition-colors"
+            >
+              Cancel (Wapas)
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmDelete}
+              disabled={loading}
+              className="flex-1 h-11 bg-red-600 hover:bg-red-700 text-white font-semibold rounded-xl transition-all shadow-sm flex items-center justify-center gap-2"
+            >
+              {loading ? (
+                <>
+                  Deleting...
+                  <Loader2 className="animate-spin h-4 w-4" />
+                </>
+              ) : (
+                "Delete Shift"
               )}
             </Button>
           </DialogFooter>

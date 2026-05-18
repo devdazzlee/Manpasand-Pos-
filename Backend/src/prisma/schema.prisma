@@ -868,6 +868,8 @@ model ShiftAssignment {
   shift_time  String
   start_date  DateTime
   end_date    DateTime?
+  sales       Float     @default(0)
+  break_time  String?   @default("1 hour")
 
   employee Employee @relation(fields: [employee_id], references: [id])
 

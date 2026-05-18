@@ -15,11 +15,16 @@ exports.createEmployeeSchema = zod_1.z.object({
 });
 exports.updateEmployeeSchema = zod_1.z.object({
     body: zod_1.z.object({
-        name: zod_1.z.string().optional(),
-        email: zod_1.z.string().email().optional(),
-        phone_number: zod_1.z.string().optional(),
-        cnic: zod_1.z.string().optional(),
-        gender: zod_1.z.string().optional(),
+        // When `name` is sent, it must still be a real name. Without a length
+        // check the backend silently accepts "" and the row's name disappears.
+        name: zod_1.z.string().trim().min(2, 'Full name must be at least 2 characters').optional(),
+        // Optional fields accept `null` so clearing them on the UI actually
+        // clears them in the database (the columns are `String?` in Prisma).
+        // For email we still validate format when a string is provided.
+        email: zod_1.z.string().email().nullable().optional(),
+        phone_number: zod_1.z.string().nullable().optional(),
+        cnic: zod_1.z.string().nullable().optional(),
+        gender: zod_1.z.string().nullable().optional(),
         join_date: zod_1.z.string().datetime().optional(),
         employee_type_id: zod_1.z.string().uuid().optional(),
     }),

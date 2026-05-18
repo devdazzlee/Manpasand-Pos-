@@ -5,6 +5,9 @@ import "./globals.css"
 import { DataProvider } from "@/components/data-provider"
 import { PWABanner } from "@/components/pwa-banner"
 import { Toaster as ToasterOutlet } from "@/components/ui/sonner"
+// shadcn Toaster — kept mounted so the many existing `useToast()` callers
+// across the app render their notifications too.
+import { Toaster as ShadcnToaster } from "@/components/ui/toaster"
 
 const inter = Inter({ subsets: ["latin"] })
 
@@ -48,6 +51,7 @@ export default function RootLayout({
         <DataProvider>
           {children}
           <ToasterOutlet position="bottom-right" richColors />
+          <ShadcnToaster />
         </DataProvider>
         <PWABanner />
         {/* Unregister stale service workers in development to prevent timeout issues */}

@@ -14,11 +14,16 @@ export const createEmployeeSchema = z.object({
 
 export const updateEmployeeSchema = z.object({
   body: z.object({
-    name: z.string().optional(),
-    email: z.string().email().optional(),
-    phone_number: z.string().optional(),
-    cnic: z.string().optional(),
-    gender: z.string().optional(),
+    // When `name` is sent, it must still be a real name. Without a length
+    // check the backend silently accepts "" and the row's name disappears.
+    name: z.string().trim().min(2, 'Full name must be at least 2 characters').optional(),
+    // Optional fields accept `null` so clearing them on the UI actually
+    // clears them in the database (the columns are `String?` in Prisma).
+    // For email we still validate format when a string is provided.
+    email: z.string().email().nullable().optional(),
+    phone_number: z.string().nullable().optional(),
+    cnic: z.string().nullable().optional(),
+    gender: z.string().nullable().optional(),
     join_date: z.string().datetime().optional(),
     employee_type_id: z.string().uuid().optional(),
   }),
