@@ -374,9 +374,12 @@ export default function BarcodeGenerator() {
   };
 
   const filteredProducts = useMemo(() => {
-    if (!searchTerm) return products;
+    // Inactive products are kept out of the barcode generator — there's no
+    // point printing barcodes for items that can't be sold.
+    const activeProducts = products.filter((p) => p.is_active !== false);
+    if (!searchTerm) return activeProducts;
 
-    return products.filter(
+    return activeProducts.filter(
       (product) =>
         product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
         (product.sku &&

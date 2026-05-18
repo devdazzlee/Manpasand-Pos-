@@ -944,8 +944,8 @@ export class ProductService {
         search,
         category_id,
         subcategory_id,
-        is_active = true,
-        display_on_pos = true,
+        is_active,
+        display_on_pos,
         branch_id,
         fetchAll = false,
     }: {
@@ -954,6 +954,11 @@ export class ProductService {
         search?: string;
         category_id?: string;
         subcategory_id?: string;
+        // Both flags are OPT-IN filters now. Defaulting them to `true` made
+        // inactive products invisible from the admin Products tab, which the
+        // user perceived as deletion. Callers that genuinely want only
+        // active / POS-visible products (POS sale screen, website API)
+        // must pass these explicitly.
         is_active?: boolean;
         display_on_pos?: boolean;
         branch_id?: string;

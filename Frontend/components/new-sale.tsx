@@ -370,6 +370,11 @@ export function NewSale() {
   // Client-side filtering for instant search results
   // This provides instant feedback without API calls
   const filteredProducts = products.filter((product) => {
+    // Hide inactive products from the POS sale screen. The global product
+    // list now returns inactive items too (so the admin Products tab can
+    // manage them), but they must never be sellable from here.
+    if (product.is_active === false) return false;
+
     // Filter by category
     const matchesCategory =
       selectedCategory === "all" || product.categoryId === selectedCategory;
@@ -378,12 +383,12 @@ export function NewSale() {
     const matchesSearch = !searchTerm || (() => {
       const searchLower = searchTerm.toLowerCase().trim();
       if (searchLower.length === 0) return true;
-      
+
       // Search in name, barcode, SKU
       const nameMatch = product.name?.toLowerCase().includes(searchLower);
       const barcodeMatch = product.barcode?.toLowerCase().includes(searchLower);
       const skuMatch = product.sku?.toLowerCase().includes(searchLower);
-      
+
       return nameMatch || barcodeMatch || skuMatch;
     })();
 

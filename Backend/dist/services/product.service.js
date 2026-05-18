@@ -851,7 +851,7 @@ class ProductService {
         }, { maxWait: 20000, timeout: 30000 });
         return product;
     }
-    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active = true, display_on_pos = true, branch_id, fetchAll = false, }) {
+    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, branch_id, fetchAll = false, }) {
         const where = {};
         if (search) {
             where.OR = [

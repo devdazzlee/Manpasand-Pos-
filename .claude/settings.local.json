@@ -4,7 +4,9 @@
       "Bash(npx tsc *)",
       "Bash(echo \"EXIT=$?\")",
       "Bash(awk '/Selling Price \\\\\\(Rs\\\\\\)/{print NR; exit}' components/new-sale.tsx)",
-      "Bash(./node_modules/.bin/tsc --noEmit)"
+      "Bash(./node_modules/.bin/tsc --noEmit)",
+      "Bash(echo \"BACKEND_EXIT=$?\")",
+      "Bash(echo \"FRONTEND_EXIT=$?\")"
     ]
   }
 }
