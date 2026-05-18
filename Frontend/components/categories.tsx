@@ -1,7 +1,7 @@
 "use client"
 
 import type React from "react"
-
+import { z } from "zod"
 import { useState, useEffect, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -19,6 +19,8 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
   Search,
@@ -28,15 +30,40 @@ import {
   Grid3X3,
   Package,
   Loader2,
-  ToggleLeft,
-  ToggleRight,
   Upload,
   X,
   ImageIcon,
+  CheckCircle2,
+  XCircle,
+  Layers,
 } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { PageLoader } from "@/components/ui/page-loader"
 import apiClient from "@/lib/apiClient"
+
+// Zod validation schemas
+const addCategorySchema = z.object({
+  name: z.string().min(1, "Category name is required").max(100, "Name must be at most 100 characters"),
+  slug: z.string().min(1, "Slug is required").max(100, "Slug must be at most 100 characters"),
+})
+
+const editCategorySchema = z.object({
+  name: z.string().min(1, "Category name is required").max(100, "Name must be at most 100 characters"),
+  slug: z.string().min(1, "Slug is required").max(100, "Slug must be at most 100 characters"),
+})
+
+// Direct backend error extractor
+const extractApiError = (err: any, fallback = "Something went wrong"): string => {
+  const data = err?.response?.data
+  if (!data) return err?.message || fallback
+  if (Array.isArray(data.errors) && data.errors.length > 0) {
+    const first = data.errors[0]
+    if (typeof first === "string") return first
+    if (first?.message) return String(first.message)
+  }
+  if (typeof data.message === "string") return data.message
+  return fallback
+}
 
 // Image compression utility
 const compressImage = (file: File, quality = 0.7, maxWidth = 800, maxHeight = 600): Promise<File> => {
@@ -103,7 +130,24 @@ interface Category {
   productCount?: number
   color?: string
   status?: "active" | "inactive"
+  is_active?: boolean
   createdDate?: string
+}
+
+function getCategoryIsActive(category: Pick<Category, "status" | "is_active">): boolean {
+  if (typeof category.is_active === "boolean") return category.is_active
+  if (category.status === "active") return true
+  if (category.status === "inactive") return false
+  return true
+}
+
+function normalizeCategory(raw: Record<string, unknown>): Category {
+  const isActive = getCategoryIsActive(raw as Category)
+  return {
+    ...(raw as Category),
+    is_active: isActive,
+    status: isActive ? "active" : "inactive",
+  }
 }
 
 interface CreateCategoryData {
@@ -130,6 +174,8 @@ export function Categories() {
   const [categories, setCategories] = useState<Category[]>([])
   const [branches, setBranches] = useState<Branch[]>([])
   const [searchTerm, setSearchTerm] = useState("")
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all")
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest" | "az" | "za">("newest")
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingCategory, setEditingCategory] = useState<Category | null>(null)
   const [loading, setLoading] = useState(false)
@@ -145,6 +191,16 @@ export function Categories() {
   const [loadingProducts, setLoadingProducts] = useState(false)
   const [categoryToDelete, setCategoryToDelete] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Active status for add/edit forms
+  const [addIsActive, setAddIsActive] = useState(true)
+  const [editIsActive, setEditIsActive] = useState(true)
+
+  // Form validation errors (shown inside dialog)
+  const [addErrors, setAddErrors] = useState<Record<string, string>>({})
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({})
+  const [addApiError, setAddApiError] = useState("")
+  const [editApiError, setEditApiError] = useState("")
 
   const [newCategory, setNewCategory] = useState<CreateCategoryData>({
     name: "",
@@ -337,16 +393,16 @@ export function Categories() {
             
             const productsResponse = await apiClient.get("/products", { params });
             const products = productsResponse.data?.data || [];
-            return {
+            return normalizeCategory({
               ...category,
               productCount: Array.isArray(products) ? products.length : 0,
-            };
+            } as Record<string, unknown>);
           } catch (error) {
             console.error(`Error fetching products for category ${category.id}:`, error);
-            return {
+            return normalizeCategory({
               ...category,
               productCount: 0,
-            };
+            } as Record<string, unknown>);
           }
         })
       );
@@ -414,31 +470,39 @@ export function Categories() {
 
   // Create category
   const handleAddCategory = async () => {
-    if (!newCategory.name.trim()) {
-      toast({
-        title: "Error",
-        description: "Category name is required",
-        variant: "destructive",
+    setAddErrors({})
+    setAddApiError("")
+    
+    // Zod validation
+    const payloadToValidate = {
+      name: newCategory.name,
+      slug: newCategory.slug || generateSlug(newCategory.name),
+    }
+
+    const validationResult = addCategorySchema.safeParse(payloadToValidate)
+    if (!validationResult.success) {
+      const fieldErrors: Record<string, string> = {}
+      validationResult.error.errors.forEach(err => {
+        if (err.path[0]) {
+          fieldErrors[err.path[0].toString()] = err.message
+        }
       })
+      setAddErrors(fieldErrors)
       return
     }
 
     try {
       setLoading(true)
-      // Categories are visible on every branch by default and shown on POS.
-      // The advanced flags were removed from the UI but the backend still
-      // accepts them, so we send sensible defaults explicitly. We intentionally
-      // omit `branch_id` (no single owning branch) — sending "" triggers a
-      // foreign-key violation against the Branch table.
       const allBranchIds = branches.map((b) => b.id)
       const { branch_id: _unusedBranchId, ...rest } = newCategory
       const categoryData = {
         ...rest,
-        slug: newCategory.slug || generateSlug(newCategory.name),
+        ...validationResult.data, // Uses validated name & slug
         display_on_branches: allBranchIds,
         display_on_pos: true,
         get_tax_from_item: false,
         editable_sale_rate: false,
+        is_active: addIsActive, // Support for is_active
       }
 
       const response = await apiClient.post("/categories", categoryData)
@@ -448,7 +512,7 @@ export function Categories() {
         description: "Category created successfully",
       })
 
-      setCategories([...categories, response.data.data])
+      setCategories([...categories, normalizeCategory(response.data.data)])
       setNewCategory({
         name: "",
         slug: "",
@@ -466,9 +530,11 @@ export function Categories() {
       setIsAddDialogOpen(false)
     } catch (error: any) {
       console.log("Error creating category:", error)
+      const errMsg = extractApiError(error, "Failed to create category")
+      setAddApiError(errMsg)
       toast({
         title: "Error",
-        description: error.response?.data?.message || "Failed to create category",
+        description: errMsg,
         variant: "destructive",
       })
     } finally {
@@ -479,18 +545,36 @@ export function Categories() {
   // Update category
   const handleEditCategory = async () => {
     if (!editingCategory) return
+    setEditErrors({})
+    setEditApiError("")
+
+    // Zod validation
+    const payloadToValidate = {
+      name: editingCategory.name,
+      slug: editingCategory.slug,
+    }
+
+    const validationResult = editCategorySchema.safeParse(payloadToValidate)
+    if (!validationResult.success) {
+      const fieldErrors: Record<string, string> = {}
+      validationResult.error.errors.forEach(err => {
+        if (err.path[0]) {
+          fieldErrors[err.path[0].toString()] = err.message
+        }
+      })
+      setEditErrors(fieldErrors)
+      return
+    }
 
     try {
       setLoading(true)
-      // Keep the category visible on every branch on update too. Existing rows
-      // may have a stale subset of branches; this ensures parity with creation.
       const allBranchIds = branches.map((b) => b.id)
       const response = await apiClient.patch(`/categories/${editingCategory.id}`, {
-        name: editingCategory.name,
-        slug: editingCategory.slug,
+        ...validationResult.data,
         display_on_branches: allBranchIds,
         image: editingCategory.image,
         display_on_pos: true,
+        is_active: editIsActive,
       })
 
       toast({
@@ -498,14 +582,20 @@ export function Categories() {
         description: "Category updated successfully",
       })
 
-      setCategories(categories.map((c) => (c.id === editingCategory.id ? response.data.data : c)))
+      setCategories(
+        categories.map((c) =>
+          c.id === editingCategory.id ? normalizeCategory(response.data.data) : c,
+        ),
+      )
       setEditingCategory(null)
       setEditImagePreview(null)
     } catch (error: any) {
       console.log("Error updating category:", error)
+      const errMsg = extractApiError(error, "Failed to update category")
+      setEditApiError(errMsg)
       toast({
         title: "Error",
-        description: error.response?.data?.message || "Failed to update category",
+        description: errMsg,
         variant: "destructive",
       })
     } finally {
@@ -524,9 +614,20 @@ export function Categories() {
         description: "Category status updated successfully",
       })
 
-      // Since API returns data: null, manually toggle the status locally
+      const updated = response.data?.data
+        ? normalizeCategory(response.data.data)
+        : null
+
       setCategories(
-        categories.map((c) => (c.id === id ? { ...c, status: c.status === "active" ? "inactive" : "active" } : c)),
+        categories.map((c) => {
+          if (c.id !== id) return c
+          if (updated) return { ...c, ...updated }
+          const nextActive = !getCategoryIsActive(c)
+          return normalizeCategory({
+            ...c,
+            is_active: nextActive,
+          } as Record<string, unknown>)
+        }),
       )
     } catch (error: any) {
       console.log("Error toggling category status:", error)
@@ -563,9 +664,10 @@ export function Categories() {
       setCategoryToDelete(null)
     } catch (error: any) {
       console.log("Error deleting category:", error)
+      const errMsg = extractApiError(error, "Failed to delete category")
       toast({
         title: "Error",
-        description: error.response?.data?.message || "Failed to delete category",
+        description: errMsg,
         variant: "destructive",
       })
     } finally {
@@ -578,7 +680,10 @@ export function Categories() {
   // Handle edit dialog open
   const handleEditDialogOpen = (category: Category) => {
     setEditingCategory(category)
+    setEditIsActive(getCategoryIsActive(category))
     setEditImagePreview(category.image || null)
+    setEditErrors({})
+    setEditApiError("")
   }
 
   // Handle edit dialog close
@@ -604,16 +709,48 @@ export function Categories() {
     }
   }, [newCategory.name])
 
+  useEffect(() => {
+    if (editingCategory && editingCategory.name) {
+      setEditingCategory((prev) => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          slug: generateSlug(prev.name),
+        }
+      })
+    }
+  }, [editingCategory?.name])
+
   const filteredCategories = categories.filter(
-    (category) =>
-      category.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-      (category.description && category.description.toLowerCase().includes(searchTerm.toLowerCase())),
-  )
+    (category) => {
+      const searchMatch = category.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
+                          (category.description && category.description.toLowerCase().includes(searchTerm.toLowerCase()));
+      const isActive = getCategoryIsActive(category);
+      
+      const statusMatch = statusFilter === "all" ? true :
+                          statusFilter === "active" ? isActive :
+                          !isActive;
+                          
+      return searchMatch && statusMatch;
+    }
+  ).sort((a, b) => {
+    if (sortOrder === "newest") {
+      return new Date(b.createdDate || 0).getTime() - new Date(a.createdDate || 0).getTime();
+    }
+    if (sortOrder === "oldest") {
+      return new Date(a.createdDate || 0).getTime() - new Date(b.createdDate || 0).getTime();
+    }
+    if (sortOrder === "az") {
+      return a.name.localeCompare(b.name);
+    }
+    if (sortOrder === "za") {
+      return b.name.localeCompare(a.name);
+    }
+    return 0;
+  });
 
   // Count active categories - check both status field and is_active field
-  const activeCategories = categories.filter((c) => 
-    c.status === "active" || (c as any).is_active === true
-  ).length
+  const activeCategories = categories.filter((c) => getCategoryIsActive(c)).length
   const totalProducts = categories.reduce((sum, c) => sum + (c.productCount || 0), 0)
 
   if (isLoading) {
@@ -645,19 +782,42 @@ export function Categories() {
                   <Input
                     id="name"
                     value={newCategory.name}
-                    onChange={(e) => setNewCategory({ ...newCategory, name: e.target.value })}
+                    onChange={(e) => {
+                      setNewCategory({ ...newCategory, name: e.target.value })
+                      if (addErrors.name) setAddErrors({ ...addErrors, name: "" })
+                      setAddApiError("")
+                    }}
                     placeholder="Enter category name"
+                    className={addErrors.name ? "border-red-500 mt-1" : "mt-1"}
+                    disabled={loading}
                   />
+                  {addErrors.name && <p className="text-xs text-red-600 mt-1">{addErrors.name}</p>}
                 </div>
                 <div>
                   <Label htmlFor="slug">Slug *</Label>
                   <Input
                     id="slug"
                     value={newCategory.slug}
-                    onChange={(e) => setNewCategory({ ...newCategory, slug: e.target.value })}
+                    onChange={(e) => {
+                      setNewCategory({ ...newCategory, slug: e.target.value })
+                      if (addErrors.slug) setAddErrors({ ...addErrors, slug: "" })
+                      setAddApiError("")
+                    }}
                     placeholder="category-slug"
+                    className={addErrors.slug ? "border-red-500 mt-1" : "mt-1"}
+                    disabled={loading}
                   />
+                  {addErrors.slug && <p className="text-xs text-red-600 mt-1">{addErrors.slug}</p>}
                 </div>
+              </div>
+
+              {/* Active Switch Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-lg border border-gray-100 bg-gray-50/50">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-semibold text-gray-900">Active Status</Label>
+                  <p className="text-xs text-gray-500">Enable or disable this category in system workflows</p>
+                </div>
+                <Switch checked={addIsActive} onCheckedChange={setAddIsActive} disabled={loading} />
               </div>
 
               {/* Image Upload Section */}
@@ -713,7 +873,13 @@ export function Categories() {
                 </Button>
               </div>
 
-              <Button onClick={handleAddCategory} className="w-full" disabled={loading}>
+              {addApiError && (
+                <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-lg text-xs font-semibold animate-pulse">
+                  ⚠️ {addApiError}
+                </div>
+              )}
+
+              <Button onClick={handleAddCategory} className="w-full mt-2" disabled={loading}>
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -728,46 +894,94 @@ export function Categories() {
         </Dialog>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Categories</CardTitle>
-            <Grid3X3 className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{categories.length}</div>
+      {/* Dynamic Analytical Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="bg-gradient-to-br from-indigo-50/40 to-white border-indigo-100/50 shadow-sm">
+          <CardContent className="p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Total Categories</p>
+              <p className="text-3xl font-extrabold text-gray-900">{categories.length}</p>
+              <p className="text-[10px] text-gray-500">Categories registered in master</p>
+            </div>
+            <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
+              <Layers className="h-6 w-6" />
+            </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Active Categories</CardTitle>
-            <Grid3X3 className="h-4 w-4 text-green-600" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold text-green-600">{activeCategories}</div>
+
+        <Card className="bg-gradient-to-br from-emerald-50/40 to-white border-emerald-100/50 shadow-sm">
+          <CardContent className="p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Active Categories</p>
+              <p className="text-3xl font-extrabold text-gray-900">{activeCategories}</p>
+              <p className="text-[10px] text-gray-500">Available in system operations</p>
+            </div>
+            <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
           </CardContent>
         </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-medium">Total Products</CardTitle>
-            <Package className="h-4 w-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalProducts}</div>
+
+        <Card className="bg-gradient-to-br from-rose-50/40 to-white border-rose-100/50 shadow-sm">
+          <CardContent className="p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-rose-600 uppercase tracking-wider">Inactive Categories</p>
+              <p className="text-3xl font-extrabold text-gray-900">{categories.length - activeCategories}</p>
+              <p className="text-[10px] text-gray-500">Disabled or hidden categories</p>
+            </div>
+            <div className="w-12 h-12 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
+              <XCircle className="h-6 w-6" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-amber-50/40 to-white border-amber-100/50 shadow-sm">
+          <CardContent className="p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-amber-600 uppercase tracking-wider">Total Products</p>
+              <p className="text-3xl font-extrabold text-gray-900">{totalProducts}</p>
+              <p className="text-[10px] text-gray-500">Products linked to categories</p>
+            </div>
+            <div className="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">
+              <Package className="h-6 w-6" />
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      {/* Search */}
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-        <Input
-          placeholder="Search categories..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          className="pl-10"
-        />
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+          <Input
+            placeholder="Search categories..."
+            value={searchTerm}
+            onChange={(e) => setSearchTerm(e.target.value)}
+            className="pl-10"
+          />
+        </div>
+        <div className="flex items-center gap-3">
+          <Select value={sortOrder} onValueChange={(val: any) => setSortOrder(val)}>
+            <SelectTrigger className="w-[160px] text-gray-700 font-medium bg-background shadow-sm hover:border-gray-300 transition-colors">
+              <SelectValue placeholder="Sort By" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Newest First</SelectItem>
+              <SelectItem value="oldest">Oldest First</SelectItem>
+              <SelectItem value="az">Name (A-Z)</SelectItem>
+              <SelectItem value="za">Name (Z-A)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={(val: any) => setStatusFilter(val)}>
+            <SelectTrigger className="w-[160px] text-gray-700 font-medium bg-background shadow-sm hover:border-gray-300 transition-colors">
+              <SelectValue placeholder="Select Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="active">Active Only</SelectItem>
+              <SelectItem value="inactive">Inactive Only</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
       {/* Categories Grid */}
@@ -792,7 +1006,17 @@ export function Categories() {
                   )}
                   <CardTitle className="text-lg">{category.name}</CardTitle>
                 </div>
-
+                <div>
+                  {getCategoryIsActive(category) ? (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Active
+                    </span>
+                  ) : (
+                    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                      <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> Inactive
+                    </span>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent>
@@ -840,17 +1064,40 @@ export function Categories() {
                   <Input
                     id="edit-name"
                     value={editingCategory.name}
-                    onChange={(e) => setEditingCategory({ ...editingCategory, name: e.target.value })}
+                    onChange={(e) => {
+                      setEditingCategory({ ...editingCategory, name: e.target.value })
+                      if (editErrors.name) setEditErrors({ ...editErrors, name: "" })
+                      setEditApiError("")
+                    }}
+                    className={editErrors.name ? "border-red-500 mt-1" : "mt-1"}
+                    disabled={loading}
                   />
+                  {editErrors.name && <p className="text-xs text-red-600 mt-1">{editErrors.name}</p>}
                 </div>
                 <div>
                   <Label htmlFor="edit-slug">Slug</Label>
                   <Input
                     id="edit-slug"
                     value={editingCategory.slug}
-                    onChange={(e) => setEditingCategory({ ...editingCategory, slug: e.target.value })}
+                    onChange={(e) => {
+                      setEditingCategory({ ...editingCategory, slug: e.target.value })
+                      if (editErrors.slug) setEditErrors({ ...editErrors, slug: "" })
+                      setEditApiError("")
+                    }}
+                    className={editErrors.slug ? "border-red-500 mt-1" : "mt-1"}
+                    disabled={loading}
                   />
+                  {editErrors.slug && <p className="text-xs text-red-600 mt-1">{editErrors.slug}</p>}
                 </div>
+              </div>
+
+              {/* Active Switch Toggle */}
+              <div className="flex items-center justify-between p-3 rounded-lg border border-gray-100 bg-gray-50/50">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-semibold text-gray-900">Active Status</Label>
+                  <p className="text-xs text-gray-500">Enable or disable this category in system workflows</p>
+                </div>
+                <Switch checked={editIsActive} onCheckedChange={setEditIsActive} disabled={loading} />
               </div>
 
               {/* Edit Image Upload Section */}
@@ -906,7 +1153,13 @@ export function Categories() {
                 </Button>
               </div>
 
-              <Button onClick={handleEditCategory} className="w-full" disabled={loading}>
+              {editApiError && (
+                <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-lg text-xs font-semibold animate-pulse">
+                  ⚠️ {editApiError}
+                </div>
+              )}
+
+              <Button onClick={handleEditCategory} className="w-full mt-2" disabled={loading}>
                 {loading ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -967,11 +1220,15 @@ export function Categories() {
                           {product.available_stock ?? product.current_stock ?? 0}
                         </TableCell>
                         <TableCell>
-                          <Badge
-                            className={product.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}
-                          >
-                            {product.is_active ? "Active" : "Inactive"}
-                          </Badge>
+                          {product.is_active ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Active
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> Inactive
+                            </span>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

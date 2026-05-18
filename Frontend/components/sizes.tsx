@@ -45,6 +45,7 @@ const Sizes: React.FC = () => {
   const [sizes, setSizes] = useState<Size[]>([]);
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [sortOrder, setSortOrder] = useState<"newest" | "oldest" | "az" | "za">("newest");
   const [loading, setLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -189,6 +190,20 @@ const Sizes: React.FC = () => {
       ? s.is_active === true
       : s.is_active === false;
     return matchesSearch && matchesStatus;
+  }).sort((a, b) => {
+    if (sortOrder === "newest") {
+      return new Date(b.created_at || 0).getTime() - new Date(a.created_at || 0).getTime();
+    }
+    if (sortOrder === "oldest") {
+      return new Date(a.created_at || 0).getTime() - new Date(b.created_at || 0).getTime();
+    }
+    if (sortOrder === "az") {
+      return a.name.localeCompare(b.name);
+    }
+    if (sortOrder === "za") {
+      return b.name.localeCompare(a.name);
+    }
+    return 0;
   });
 
   if (isInitialLoading) {
@@ -273,16 +288,29 @@ const Sizes: React.FC = () => {
             className="pl-10"
           />
         </div>
-        <Select value={statusFilter} onValueChange={(val: any) => setStatusFilter(val)}>
-          <SelectTrigger className="w-[180px] text-gray-700 font-medium bg-background shadow-sm hover:border-gray-300 transition-colors">
-            <SelectValue placeholder="Select Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Statuses</SelectItem>
-            <SelectItem value="active">Active Only</SelectItem>
-            <SelectItem value="inactive">Inactive Only</SelectItem>
-          </SelectContent>
-        </Select>
+        <div className="flex items-center gap-3">
+          <Select value={sortOrder} onValueChange={(val: any) => setSortOrder(val)}>
+            <SelectTrigger className="w-[160px] text-gray-700 font-medium bg-background shadow-sm hover:border-gray-300 transition-colors">
+              <SelectValue placeholder="Sort By" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="newest">Newest First</SelectItem>
+              <SelectItem value="oldest">Oldest First</SelectItem>
+              <SelectItem value="az">Name (A-Z)</SelectItem>
+              <SelectItem value="za">Name (Z-A)</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={statusFilter} onValueChange={(val: any) => setStatusFilter(val)}>
+            <SelectTrigger className="w-[160px] text-gray-700 font-medium bg-background shadow-sm hover:border-gray-300 transition-colors">
+              <SelectValue placeholder="Select Status" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Statuses</SelectItem>
+              <SelectItem value="active">Active Only</SelectItem>
+              <SelectItem value="inactive">Inactive Only</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
       </div>
 
 

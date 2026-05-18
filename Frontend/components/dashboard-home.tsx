@@ -439,7 +439,7 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
                         <div className="font-medium">{formatCurrency(sale.price)}</div>
                         <Badge
                           variant="default"
-                          className="bg-green-100 text-green-800"
+                          className="bg-green-100 text-green-800 hover:bg-neutral-500"
                         >
                           completed
                         </Badge>
