@@ -102,8 +102,10 @@ export function Designation() {
         await apiClient.put(`/employee/type/${editType.id}`, form)
         toast({ title: "Updated", description: "Employee type updated successfully" })
       } else {
-        // Create
-        await apiClient.post("/employee/type", { name: form.name })
+        // Create — send the full form (name + is_active). Previously this
+        // dropped `is_active`, so toggling the switch off had no effect and
+        // every new type came back as Active.
+        await apiClient.post("/employee/type", form)
         toast({ title: "Created", description: "Employee type created successfully" })
       }
       setModalOpen(false)
@@ -260,8 +262,15 @@ return (
                     <TableCell>{type.name}</TableCell>
                     <TableCell>
                       <Badge
-                        variant={type.is_active ? "default" : "secondary"}
-                        className={type.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}
+                        // Use `secondary` for both so we don't inherit the
+                        // `variant="default"` hover-darkening that washed the
+                        // green/red out on row hover.
+                        variant="secondary"
+                        className={
+                          type.is_active
+                            ? "bg-green-100 text-green-800 hover:bg-green-100"
+                            : "bg-red-100 text-red-800 hover:bg-red-100"
+                        }
                       >
                         {type.is_active ? "Active" : "Inactive"}
                       </Badge>

@@ -13,6 +13,6 @@ router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SU
 router.post('/', (0, validation_middleware_1.validate)(salary_validation_1.createSalarySchema), salary_controller_1.createSalary);
 router.get('/', (0, validation_middleware_1.validate)(salary_validation_1.listSalariesSchema), salary_controller_1.listSalaries);
 router.put('/:id', (0, validation_middleware_1.validate)(salary_validation_1.salaryIdParamSchema), salary_controller_1.updateSalary);
-router.put('/:id', (0, validation_middleware_1.validate)(salary_validation_1.salaryIdParamSchema), salary_controller_1.deleteSalary);
+router.delete('/:id', (0, validation_middleware_1.validate)(salary_validation_1.salaryIdParamSchema), salary_controller_1.deleteSalary);
 exports.default = router;
 //# sourceMappingURL=salary.route.js.map

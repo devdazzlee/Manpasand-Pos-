@@ -45,6 +45,9 @@ export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>['body'];
 export const createEmployeeTypeSchema = z.object({
   body: z.object({
     name: z.string().min(2),
+    // Optional on the wire — when present, the service honors it. When
+    // absent, Prisma falls back to the model's @default(true).
+    is_active: z.boolean().optional(),
   }),
 });
 

@@ -41,6 +41,9 @@ exports.listEmployeeSchema = zod_1.z.object({
 exports.createEmployeeTypeSchema = zod_1.z.object({
     body: zod_1.z.object({
         name: zod_1.z.string().min(2),
+        // Optional on the wire — when present, the service honors it. When
+        // absent, Prisma falls back to the model's @default(true).
+        is_active: zod_1.z.boolean().optional(),
     }),
 });
 exports.updateEmployeeTypeSchema = zod_1.z.object({

@@ -27,7 +27,7 @@ export class ExpenseService {
         };
     }
 
-    async create(data: { name: string }) {
+    async create(data: { name: string; is_active?: boolean }) {
         return prisma.employeeType.create({ data });
     }
 

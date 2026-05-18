@@ -21,7 +21,7 @@ export const listSalariesSchema = z.object({
 
 export const salaryIdParamSchema = z.object({
   params: z.object({
-    salary_id: z.string().uuid(),
+    id: z.string().uuid(),
   }),
 });
 

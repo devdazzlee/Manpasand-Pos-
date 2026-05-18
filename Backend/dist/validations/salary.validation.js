@@ -21,7 +21,7 @@ exports.listSalariesSchema = zod_1.z.object({
 });
 exports.salaryIdParamSchema = zod_1.z.object({
     params: zod_1.z.object({
-        salary_id: zod_1.z.string().uuid(),
+        id: zod_1.z.string().uuid(),
     }),
 });
 //# sourceMappingURL=salary.validation.js.map

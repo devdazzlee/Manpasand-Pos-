@@ -17,6 +17,18 @@ import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
 import { Badge } from "@/components/ui/badge";
 import { DollarSign, CheckCircle2, XCircle, Users } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
+import { useToast } from "@/hooks/use-toast";
+import { z } from "zod";
+
+const salarySchema = z.object({
+    employee_id: z.string({ required_error: "Employee is required" }).min(1, "Employee is required"),
+    month: z.number({ required_error: "Month is required" }).min(1, "Month is required").max(12, "Month is required"),
+    year: z.number({ required_error: "Year is required" }).min(2020, "Year must be 2020 or later"),
+    amount: z.number({ required_error: "Amount is required" }).min(1, "Amount must be greater than 0"),
+    is_paid: z.boolean().optional(),
+    paid_date: z.string().optional().nullable(),
+    notes: z.string().optional().nullable(),
+});
 
 interface Employee {
     id: string;
@@ -40,22 +52,33 @@ const months = [
     "July", "August", "September", "October", "November", "December"
 ];
 
+const parseToLocalDate = (dateStr?: string) => {
+    if (!dateStr) return undefined;
+    const datePart = dateStr.split("T")[0];
+    const [year, month, day] = datePart.split("-").map(Number);
+    return new Date(year, month - 1, day);
+};
+
 export function Salaries() {
+    const { toast } = useToast();
     const [salaries, setSalaries] = useState<Salary[]>([]);
     const [employees, setEmployees] = useState<Employee[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [isInitialLoading, setIsInitialLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+    const [isAddYearOpen, setIsAddYearOpen] = useState(false);
+    const [isEditYearOpen, setIsEditYearOpen] = useState(false);
     const [form, setForm] = useState<Partial<Salary>>({});
     const [editId, setEditId] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [deleteId, setDeleteId] = useState<string | null>(null);
+    const [searchTerm, setSearchTerm] = useState("");
     
     // Calculate years inside component to avoid hydration issues
     const [currentYear] = useState(() => new Date().getFullYear());
-    const years = Array.from({ length: (currentYear + 2) - 2020 + 1 }, (_, i) => 2020 + i);
+    const years = Array.from({ length: (currentYear + 10) - 2015 + 1 }, (_, i) => 2015 + i);
 
     // Fetch employees for dropdown
     useEffect(() => {
@@ -79,30 +102,71 @@ export function Salaries() {
     };
     useEffect(() => { fetchSalaries(); }, []);
 
+    const getBackendErrorMessage = (e: any): string => {
+        if (e?.response?.data?.errors && Array.isArray(e.response.data.errors) && e.response.data.errors.length > 0) {
+            return e.response.data.errors.map((err: any) => err.message || JSON.stringify(err)).join(", ");
+        }
+        if (e?.response?.data?.message) {
+            return e.response.data.message;
+        }
+        return e?.message || "Failed to complete request";
+    };
+
     // Add salary
     const handleAddSalary = async () => {
         setIsSubmitting(true);
         setError(null);
-        if (!form.year || form.year < 2020) {
-            setError("Year must be 2020 or later");
+
+        // Zod Validation
+        const validationResult = salarySchema.safeParse({
+            employee_id: form.employee_id,
+            month: form.month ? Number(form.month) : undefined,
+            year: form.year ? Number(form.year) : undefined,
+            amount: form.amount ? Number(form.amount) : undefined,
+            is_paid: form.is_paid,
+            paid_date: form.paid_date,
+            notes: form.notes,
+        });
+
+        if (!validationResult.success) {
+            const firstError = validationResult.error.errors.map(err => err.message).join(", ");
+            setError(firstError);
+            toast({
+                variant: "destructive",
+                title: "Validation Error",
+                description: firstError,
+            });
             setIsSubmitting(false);
             return;
         }
+
+        const validatedData = validationResult.data;
+
         try {
             await apiClient.post("/salaries", {
-                employee_id: form.employee_id,
-                month: Number(form.month),
-                year: Number(form.year),
-                amount: Number(form.amount),
-                is_paid: form.is_paid || false,
-                paid_date: form.paid_date || undefined,
-                notes: form.notes || undefined,
+                employee_id: validatedData.employee_id,
+                month: validatedData.month,
+                year: validatedData.year,
+                amount: validatedData.amount,
+                is_paid: validatedData.is_paid || false,
+                paid_date: validatedData.paid_date || undefined,
+                notes: validatedData.notes || undefined,
             });
             setIsDialogOpen(false);
             setForm({});
             fetchSalaries();
+            toast({
+                title: "Success",
+                description: "Salary added successfully",
+            });
         } catch (e: any) {
-            setError(e?.response?.data?.message || "Failed to add salary");
+            const backendError = getBackendErrorMessage(e);
+            setError(backendError);
+            toast({
+                variant: "destructive",
+                title: "Error adding salary",
+                description: backendError,
+            });
         } finally {
             setIsSubmitting(false);
         }
@@ -113,27 +177,58 @@ export function Salaries() {
         if (!editId) return;
         setIsSubmitting(true);
         setError(null);
-        if (!form.year || form.year < 2020) {
-            setError("Year must be 2020 or later");
+
+        // Zod Validation
+        const validationResult = salarySchema.safeParse({
+            employee_id: form.employee_id,
+            month: form.month ? Number(form.month) : undefined,
+            year: form.year ? Number(form.year) : undefined,
+            amount: form.amount ? Number(form.amount) : undefined,
+            is_paid: form.is_paid,
+            paid_date: form.paid_date,
+            notes: form.notes,
+        });
+
+        if (!validationResult.success) {
+            const firstError = validationResult.error.errors.map(err => err.message).join(", ");
+            setError(firstError);
+            toast({
+                variant: "destructive",
+                title: "Validation Error",
+                description: firstError,
+            });
             setIsSubmitting(false);
             return;
         }
+
+        const validatedData = validationResult.data;
+
         try {
             await apiClient.put(`/salaries/${editId}`, {
-                employee_id: form.employee_id,
-                month: Number(form.month),
-                year: Number(form.year),
-                amount: Number(form.amount),
-                is_paid: form.is_paid || false,
-                paid_date: form.paid_date || undefined,
-                notes: form.notes || undefined,
+                employee_id: validatedData.employee_id,
+                month: validatedData.month,
+                year: validatedData.year,
+                amount: validatedData.amount,
+                is_paid: validatedData.is_paid || false,
+                paid_date: validatedData.paid_date || undefined,
+                notes: validatedData.notes || undefined,
             });
             setIsEditDialogOpen(false);
             setForm({});
             setEditId(null);
             fetchSalaries();
+            toast({
+                title: "Success",
+                description: "Salary updated successfully",
+            });
         } catch (e: any) {
-            setError(e?.response?.data?.message || "Failed to update salary");
+            const backendError = getBackendErrorMessage(e);
+            setError(backendError);
+            toast({
+                variant: "destructive",
+                title: "Error updating salary",
+                description: backendError,
+            });
         } finally {
             setIsSubmitting(false);
         }
@@ -146,8 +241,17 @@ export function Salaries() {
         try {
             await apiClient.delete(`/salaries/${deleteId}`);
             fetchSalaries();
-        } catch (e) {
-            // Optionally show error
+            toast({
+                title: "Success",
+                description: "Salary deleted successfully",
+            });
+        } catch (e: any) {
+            const backendError = getBackendErrorMessage(e);
+            toast({
+                variant: "destructive",
+                title: "Error deleting salary",
+                description: backendError,
+            });
         } finally {
             setIsLoading(false);
             setDeleteId(null);
@@ -163,7 +267,7 @@ export function Salaries() {
             year: salary.year,
             amount: salary.amount,
             is_paid: salary.is_paid,
-            paid_date: salary.paid_date ? salary.paid_date.slice(0, 10) : undefined,
+            paid_date: salary.paid_date,
             notes: salary.notes,
         });
         setIsEditDialogOpen(true);
@@ -178,6 +282,20 @@ export function Salaries() {
         .filter(s => !s.is_paid)
         .reduce((sum, s) => sum + (Number(s.amount) || 0), 0);
 
+    // Filtered salaries list
+    const filteredSalaries = salaries.filter(sal => {
+        const employeeName = sal.employee?.name?.toLowerCase() || "";
+        const notes = sal.notes?.toLowerCase() || "";
+        const monthName = months[(sal.month || 1) - 1]?.toLowerCase() || "";
+        const yearStr = String(sal.year);
+        const search = searchTerm.toLowerCase();
+        
+        return employeeName.includes(search) || 
+               notes.includes(search) || 
+               monthName.includes(search) || 
+               yearStr.includes(search);
+    });
+
     if (isInitialLoading) {
         return <PageLoader message="Loading salaries data..." />
     }
@@ -190,7 +308,15 @@ export function Salaries() {
                     <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Salary Management</h1>
                     <p className="text-sm md:text-base text-gray-600">Manage employee salary records</p>
                 </div>
-                <Dialog open={isDialogOpen} onOpenChange={setIsDialogOpen}>
+                <Dialog 
+                    open={isDialogOpen} 
+                    onOpenChange={(open) => {
+                        setIsDialogOpen(open);
+                        if (open) {
+                            setForm({}); // Clear the form when opening the Add dialog
+                        }
+                    }}
+                >
                     <DialogTrigger asChild>
                         <Button>
                             <Plus className="h-4 w-4 mr-2" /> Add Salary
@@ -234,20 +360,42 @@ export function Salaries() {
                                 </Select>
                             </div>
                             <div>
-                                <label>Year</label>
-                                <Select
-                                    value={form.year ? String(form.year) : ""}
-                                    onValueChange={val => setForm(f => ({ ...f, year: Number(val) }))}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select year" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {years.map((y) => (
-                                            <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
+                                <label className="block mb-1 font-medium">Year</label>
+                                <Popover open={isAddYearOpen} onOpenChange={setIsAddYearOpen}>
+                                    <PopoverTrigger asChild>
+                                        <Button
+                                            variant="outline"
+                                            className="w-full justify-between text-left font-normal border-gray-300"
+                                        >
+                                            <span>{form.year ? String(form.year) : "Select year"}</span>
+                                            <span className="text-gray-400 font-sans text-xs">▼</span>
+                                        </Button>
+                                    </PopoverTrigger>
+                                    <PopoverContent className="w-64 p-3" align="start">
+                                        <div 
+                                            className="max-h-48 overflow-y-auto pr-1"
+                                            onWheel={(e) => e.stopPropagation()}
+                                            onTouchMove={(e) => e.stopPropagation()}
+                                        >
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {years.map((y) => (
+                                                    <Button
+                                                        key={y}
+                                                        variant={form.year === y ? "default" : "outline"}
+                                                        size="sm"
+                                                        className="w-full"
+                                                        onClick={() => {
+                                                            setForm(f => ({ ...f, year: y }));
+                                                            setIsAddYearOpen(false);
+                                                        }}
+                                                    >
+                                                        {y}
+                                                    </Button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </PopoverContent>
+                                </Popover>
                             </div>
                             <div>
                                 <label>Amount</label>
@@ -256,15 +404,20 @@ export function Salaries() {
                                     value={form.amount || ""}
                                     onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))}
                                     placeholder="Amount"
+                                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                                 />
                             </div>
-                            <div>
-                                <label>Paid</label>
+                            <div className="flex items-center space-x-3 py-2.5 border rounded-lg px-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
                                 <input
                                     type="checkbox"
+                                    id="add-paid-checkbox"
                                     checked={!!form.is_paid}
                                     onChange={e => setForm(f => ({ ...f, is_paid: e.target.checked }))}
+                                    className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                                 />
+                                <label htmlFor="add-paid-checkbox" className="text-base font-semibold text-gray-900 cursor-pointer select-none">
+                                    Paid
+                                </label>
                             </div>
                             <div>
                                 <label className="block mb-1 font-medium">Paid Date</label>
@@ -274,14 +427,21 @@ export function Salaries() {
                                             variant={form.paid_date ? "default" : "outline"}
                                             className="w-full justify-start text-left font-normal"
                                         >
-                                            {form.paid_date ? format(new Date(form.paid_date), "yyyy-MM-dd") : "Pick a date"}
+                                            {form.paid_date ? form.paid_date.split("T")[0] : "Pick a date"}
                                         </Button>
                                     </PopoverTrigger>
                                     <PopoverContent className="w-auto p-0">
                                         <Calendar
                                             mode="single"
-                                            selected={form.paid_date ? new Date(form.paid_date) : undefined}
-                                            onSelect={date => setForm(f => ({ ...f, paid_date: date ? new Date(date.setHours(0,0,0,0)).toISOString() : undefined }))}
+                                            selected={form.paid_date ? parseToLocalDate(form.paid_date) : undefined}
+                                            onSelect={date => {
+                                                if (!date) {
+                                                    setForm(f => ({ ...f, paid_date: undefined }));
+                                                    return;
+                                                }
+                                                const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+                                                setForm(f => ({ ...f, paid_date: utcDate.toISOString() }));
+                                            }}
                                             initialFocus
                                         />
                                     </PopoverContent>
@@ -349,16 +509,29 @@ export function Salaries() {
 
             {/* Table with Loader */}
             <Card>
-                <CardHeader>
-                    <CardTitle>Salaries ({salaries.length})</CardTitle>
+                <CardHeader className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4 pb-4 border-b">
+                    <CardTitle>Salaries ({filteredSalaries.length})</CardTitle>
+                    <div className="w-full sm:w-80">
+                        <Input
+                            placeholder="Search salaries..."
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full bg-white border-gray-300"
+                        />
+                    </div>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="pt-6">
                     {isLoading ? (
                         <PageLoader message="Loading salaries..." />
                     ) : salaries.length === 0 ? (
                         <div className="text-center py-10">
                             <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
                             <p className="text-gray-600">No salaries found</p>
+                        </div>
+                    ) : filteredSalaries.length === 0 ? (
+                        <div className="text-center py-10">
+                            <Users className="h-12 w-12 text-gray-400 mx-auto mb-4" />
+                            <p className="text-gray-600">No matching salaries found for "{searchTerm}"</p>
                         </div>
                     ) : (
                         <div className="overflow-x-auto -mx-4 md:mx-0">
@@ -377,7 +550,7 @@ export function Salaries() {
                                         </TableRow>
                                     </TableHeader>
                             <TableBody>
-                                {salaries.map(sal => (
+                                {filteredSalaries.map(sal => (
                                     <TableRow key={sal.id}>
                                         <TableCell>{sal.employee?.name || "-"}</TableCell>
                                         <TableCell>{months[(sal.month || 1) - 1]}</TableCell>
@@ -385,8 +558,10 @@ export function Salaries() {
                                         <TableCell>Rs {sal.amount}</TableCell>
                                         <TableCell>
                                             <Badge
-                                                variant={sal.is_paid ? "default" : "secondary"}
-                                                className={sal.is_paid ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}
+                                                variant="outline"
+                                                className={sal.is_paid 
+                                                    ? "bg-green-100 text-green-800 border-none hover:bg-green-200 hover:text-green-900 transition-colors cursor-default" 
+                                                    : "bg-red-100 text-red-800 border-none hover:bg-red-200 hover:text-red-900 transition-colors cursor-default"}
                                             >
                                                 {sal.is_paid ? "Paid" : "Unpaid"}
                                             </Badge>
@@ -410,7 +585,7 @@ export function Salaries() {
                                                         </AlertDialogHeader>
                                                         <AlertDialogFooter>
                                                             <AlertDialogCancel onClick={() => setDeleteId(null)}>Cancel</AlertDialogCancel>
-                                                            <AlertDialogAction onClick={handleDeleteSalary}>Yes, Delete</AlertDialogAction>
+                                                            <AlertDialogAction onClick={handleDeleteSalary} className="bg-red-600 hover:bg-red-700 text-white">Yes, Delete</AlertDialogAction>
                                                         </AlertDialogFooter>
                                                     </AlertDialogContent>
                                                 </AlertDialog>
@@ -427,7 +602,16 @@ export function Salaries() {
             </Card>
 
             {/* Edit Salary Dialog */}
-            <Dialog open={isEditDialogOpen} onOpenChange={setIsEditDialogOpen}>
+            <Dialog 
+                open={isEditDialogOpen} 
+                onOpenChange={(open) => {
+                    setIsEditDialogOpen(open);
+                    if (!open) {
+                        setForm({}); // Clear the form when closing the Edit dialog
+                        setEditId(null);
+                    }
+                }}
+            >
                 <DialogContent>
                     <DialogHeader>
                         <DialogTitle>Edit Salary</DialogTitle>
@@ -466,20 +650,42 @@ export function Salaries() {
                             </Select>
                         </div>
                         <div>
-                            <label>Year</label>
-                            <Select
-                                value={form.year ? String(form.year) : ""}
-                                onValueChange={val => setForm(f => ({ ...f, year: Number(val) }))}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select year" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {years.map((y) => (
-                                        <SelectItem key={y} value={String(y)}>{y}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
+                            <label className="block mb-1 font-medium">Year</label>
+                            <Popover open={isEditYearOpen} onOpenChange={setIsEditYearOpen}>
+                                <PopoverTrigger asChild>
+                                    <Button
+                                        variant="outline"
+                                        className="w-full justify-between text-left font-normal border-gray-300"
+                                    >
+                                        <span>{form.year ? String(form.year) : "Select year"}</span>
+                                        <span className="text-gray-400 font-sans text-xs">▼</span>
+                                    </Button>
+                                </PopoverTrigger>
+                                <PopoverContent className="w-64 p-3" align="start">
+                                    <div 
+                                        className="max-h-48 overflow-y-auto pr-1"
+                                        onWheel={(e) => e.stopPropagation()}
+                                        onTouchMove={(e) => e.stopPropagation()}
+                                    >
+                                        <div className="grid grid-cols-3 gap-2">
+                                            {years.map((y) => (
+                                                <Button
+                                                    key={y}
+                                                    variant={form.year === y ? "default" : "outline"}
+                                                    size="sm"
+                                                    className="w-full"
+                                                    onClick={() => {
+                                                        setForm(f => ({ ...f, year: y }));
+                                                        setIsEditYearOpen(false);
+                                                    }}
+                                                >
+                                                    {y}
+                                                </Button>
+                                            ))}
+                                        </div>
+                                    </div>
+                                </PopoverContent>
+                            </Popover>
                         </div>
                         <div>
                             <label>Amount</label>
@@ -488,15 +694,20 @@ export function Salaries() {
                                 value={form.amount || ""}
                                 onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))}
                                 placeholder="Amount"
+                                className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                             />
                         </div>
-                        <div>
-                            <label>Paid</label>
+                        <div className="flex items-center space-x-3 py-2.5 border rounded-lg px-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
                             <input
                                 type="checkbox"
+                                id="edit-paid-checkbox"
                                 checked={!!form.is_paid}
                                 onChange={e => setForm(f => ({ ...f, is_paid: e.target.checked }))}
+                                className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                             />
+                            <label htmlFor="edit-paid-checkbox" className="text-base font-semibold text-gray-900 cursor-pointer select-none">
+                                Paid
+                            </label>
                         </div>
                         <div>
                             <label className="block mb-1 font-medium">Paid Date</label>
@@ -506,14 +717,21 @@ export function Salaries() {
                                         variant={form.paid_date ? "default" : "outline"}
                                         className="w-full justify-start text-left font-normal"
                                     >
-                                        {form.paid_date ? format(new Date(form.paid_date), "yyyy-MM-dd") : "Pick a date"}
+                                        {form.paid_date ? form.paid_date.split("T")[0] : "Pick a date"}
                                     </Button>
                                 </PopoverTrigger>
                                 <PopoverContent className="w-auto p-0">
                                     <Calendar
                                         mode="single"
-                                        selected={form.paid_date ? new Date(form.paid_date) : undefined}
-                                        onSelect={date => setForm(f => ({ ...f, paid_date: date ? new Date(date.setHours(0,0,0,0)).toISOString() : undefined }))}
+                                        selected={form.paid_date ? parseToLocalDate(form.paid_date) : undefined}
+                                        onSelect={date => {
+                                            if (!date) {
+                                                setForm(f => ({ ...f, paid_date: undefined }));
+                                                return;
+                                            }
+                                            const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+                                            setForm(f => ({ ...f, paid_date: utcDate.toISOString() }));
+                                        }}
                                         initialFocus
                                     />
                                 </PopoverContent>
