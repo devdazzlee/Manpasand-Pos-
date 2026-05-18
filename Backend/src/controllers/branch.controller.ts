@@ -44,3 +44,8 @@ export const getBranchDetails = asyncHandler(async (req: Request, res: Response)
     const branchDetails = await branchService.getBranchDetails(branchId);
     new ApiResponse(branchDetails, 'Branch details retrieved successfully').send(res);
 });
+
+export const deleteBranch = asyncHandler(async (req: Request, res: Response) => {
+    const result = await branchService.deleteBranch(req.params.id);
+    new ApiResponse(null, result.message).send(res);
+});

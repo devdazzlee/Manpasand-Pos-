@@ -1,18 +1,28 @@
 import { z } from 'zod';
 
+// Optional contact fields are .nullable() so the Edit form can send `null`
+// explicitly to clear a previously-set value. On create the frontend omits
+// empty optionals entirely, so this still leaves NULL in the column.
+const optionalString = z.string().nullable().optional();
+const optionalEmail = z
+    .string()
+    .email('Invalid email format')
+    .nullable()
+    .optional();
+
 const supplierBaseSchema = {
     name: z.string().min(1, 'Name is required').max(100),
-    phone_number: z.string().optional(),
-    fax_number: z.string().optional(),
-    mobile_number: z.string().optional(),
-    country: z.string().optional(),
-    city: z.string().optional(),
-    status: z.string().optional(),
-    email: z.string().email('Invalid email format').optional(),
-    ntn: z.string().optional(),
-    strn: z.string().optional(),
-    gov_id: z.string().optional(),
-    address: z.string().optional(),
+    phone_number: optionalString,
+    fax_number: optionalString,
+    mobile_number: optionalString,
+    country: optionalString,
+    city: optionalString,
+    status: optionalString,
+    email: optionalEmail,
+    ntn: optionalString,
+    strn: optionalString,
+    gov_id: optionalString,
+    address: optionalString,
     display_on_pos: z.boolean().optional().default(true),
 };
 
@@ -23,7 +33,7 @@ export const createSupplierSchema = z.object({
 export const updateSupplierSchema = z.object({
     body: z.object({
         ...supplierBaseSchema,
-        name: supplierBaseSchema.name.optional(),
+        name: z.string().min(1, 'Name is required').max(100).optional(),
     }),
     params: z.object({
         id: z.string().min(1, 'Supplier ID is required'),

@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 const branchBaseSchema = {
   name: z.string().min(1, 'Name is required').max(100),
-  address: z.string().min(1, 'Address is required').optional(),
+  address: z.string().optional().nullable(),
   branch_type: z.enum(['WAREHOUSE', 'BRANCH']).optional().default('BRANCH'),
   allow_neg_pos_stock: z.boolean().optional().default(false),
   allow_neg_stock_grrn: z.boolean().optional().default(false),

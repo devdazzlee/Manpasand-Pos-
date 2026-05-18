@@ -5,26 +5,39 @@ import { CreateSupplierInput, UpdateSupplierInput } from '../validations/supplie
 
 export class SupplierService {
     async createSupplier(data: CreateSupplierInput) {
-        const [existingSupplier, lastSupplier] = await Promise.all([
-            prisma.supplier.findFirst({
-                where: {
-                    name: data.name,
-                },
-            }),
-            prisma.supplier.findFirst({
-                orderBy: { created_at: 'desc' },
-                select: { code: true },
-            }),
-        ]);
+        const existingSupplier = await prisma.supplier.findFirst({
+            where: { name: data.name },
+        });
 
         if (existingSupplier) throw new AppError(400, 'Supplier already exists');
 
-        const newCode = lastSupplier ? (parseInt(lastSupplier.code) + 1).toString() : '1000';
+        // Existing rows use a `SUP-XXXXXX` format (random alphanumeric), not a
+        // numeric sequence. The old `parseInt(lastSupplier.code)` approach
+        // returned NaN against those codes — generate a fresh random suffix
+        // and re-roll on the (extremely unlikely) collision.
+        const generateCode = () => {
+            const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+            let suffix = '';
+            for (let i = 0; i < 6; i++) {
+                suffix += alphabet[Math.floor(Math.random() * alphabet.length)];
+            }
+            return `SUP-${suffix}`;
+        };
+
+        let newCode = generateCode();
+        for (let attempt = 0; attempt < 5; attempt++) {
+            const clash = await prisma.supplier.findUnique({ where: { code: newCode } });
+            if (!clash) break;
+            newCode = generateCode();
+        }
 
         const supplier = await prisma.supplier.create({
             data: {
                 ...data,
-                code: newCode
+                code: newCode,
+                // Default to active so a newly-created supplier is immediately
+                // usable. The frontend can still override via the form.
+                status: data.status ?? 'active',
             },
         });
 
@@ -60,6 +73,41 @@ export class SupplierService {
             where: { id },
             data: { status: newStatus },
         });
+    }
+
+    async deleteSupplier(id: string) {
+        const supplier = await prisma.supplier.findUnique({
+            where: { id },
+            include: {
+                _count: {
+                    select: {
+                        products: true,
+                        purchase_orders: true,
+                        purchases: true,
+                    },
+                },
+            },
+        });
+
+        if (!supplier) throw new AppError(404, 'Supplier not found');
+
+        // Prisma would throw a P2003 FK violation on delete — surface a clear,
+        // actionable message instead so the UI can offer "disable" as the
+        // recommended path.
+        const { products, purchase_orders, purchases } = supplier._count;
+        if (products > 0 || purchase_orders > 0 || purchases > 0) {
+            const parts: string[] = [];
+            if (products > 0) parts.push(`${products} product${products === 1 ? '' : 's'}`);
+            if (purchases > 0) parts.push(`${purchases} purchase${purchases === 1 ? '' : 's'}`);
+            if (purchase_orders > 0) parts.push(`${purchase_orders} purchase order${purchase_orders === 1 ? '' : 's'}`);
+            throw new AppError(
+                409,
+                `Cannot delete supplier — it is linked to ${parts.join(', ')}. Disable the supplier instead.`,
+            );
+        }
+
+        await prisma.supplier.delete({ where: { id } });
+        return { message: 'Supplier deleted successfully' };
     }
 
     async listSuppliers({

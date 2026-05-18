@@ -16,5 +16,6 @@ router.get('/', (0, validation_middleware_1.validate)(branch_validation_1.listBr
 router.get('/:id', (0, validation_middleware_1.validate)(branch_validation_1.getBranchSchema), branch_controller_1.getBranchDetails);
 router.patch('/:id', (0, validation_middleware_1.validate)(branch_validation_1.updateBranchSchema), branch_controller_1.updateBranch);
 router.patch('/:id/status', (0, validation_middleware_1.validate)(branch_validation_1.getBranchSchema), branch_controller_1.toggleBranchStatus);
+router.delete('/:id', (0, validation_middleware_1.validate)(branch_validation_1.getBranchSchema), branch_controller_1.deleteBranch);
 exports.default = router;
 //# sourceMappingURL=branch.routes.js.map

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getBranchDetails = exports.listBranches = exports.toggleBranchStatus = exports.updateBranch = exports.getBranch = exports.createBranch = void 0;
+exports.deleteBranch = exports.getBranchDetails = exports.listBranches = exports.toggleBranchStatus = exports.updateBranch = exports.getBranch = exports.createBranch = void 0;
 const branch_service_1 = require("../services/branch.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -39,5 +39,9 @@ exports.getBranchDetails = (0, asyncHandler_1.default)(async (req, res) => {
     const branchId = req.params.id;
     const branchDetails = await branchService.getBranchDetails(branchId);
     new apiResponse_1.ApiResponse(branchDetails, 'Branch details retrieved successfully').send(res);
+});
+exports.deleteBranch = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await branchService.deleteBranch(req.params.id);
+    new apiResponse_1.ApiResponse(null, result.message).send(res);
 });
 //# sourceMappingURL=branch.controller.js.map

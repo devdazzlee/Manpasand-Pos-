@@ -15,5 +15,6 @@ router.get('/', (0, validation_middleware_1.validate)(supplier_validation_1.list
 router.get('/:id', (0, validation_middleware_1.validate)(supplier_validation_1.getSupplierSchema), supplier_controller_1.getSupplier);
 router.put('/:id', (0, validation_middleware_1.validate)(supplier_validation_1.updateSupplierSchema), supplier_controller_1.updateSupplier);
 router.patch('/:id/toggle-status', (0, validation_middleware_1.validate)(supplier_validation_1.getSupplierSchema), supplier_controller_1.toggleSupplierStatus);
+router.delete('/:id', (0, validation_middleware_1.validate)(supplier_validation_1.getSupplierSchema), supplier_controller_1.deleteSupplier);
 exports.default = router;
 //# sourceMappingURL=supplier.routes.js.map

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listSuppliers = exports.toggleSupplierStatus = exports.updateSupplier = exports.getSupplier = exports.createSupplier = void 0;
+exports.listSuppliers = exports.deleteSupplier = exports.toggleSupplierStatus = exports.updateSupplier = exports.getSupplier = exports.createSupplier = void 0;
 const supplier_service_1 = require("../services/supplier.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -23,6 +23,10 @@ exports.updateSupplier = (0, asyncHandler_1.default)(async (req, res) => {
 exports.toggleSupplierStatus = (0, asyncHandler_1.default)(async (req, res) => {
     await supplierService.toggleSupplierStatus(req.params.id);
     new apiResponse_1.ApiResponse(null, 'Supplier status changed successfully').send(res);
+});
+exports.deleteSupplier = (0, asyncHandler_1.default)(async (req, res) => {
+    await supplierService.deleteSupplier(req.params.id);
+    new apiResponse_1.ApiResponse(null, 'Supplier deleted successfully').send(res);
 });
 exports.listSuppliers = (0, asyncHandler_1.default)(async (req, res) => {
     const { page = 1, limit = 10, search } = req.query;

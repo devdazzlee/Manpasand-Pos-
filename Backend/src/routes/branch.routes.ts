@@ -6,6 +6,7 @@ import {
     toggleBranchStatus,
     listBranches,
     getBranchDetails,
+    deleteBranch,
 } from '../controllers/branch.controller';
 import {
     createBranchSchema,
@@ -26,5 +27,6 @@ router.get('/', validate(listBranchesSchema), listBranches);
 router.get('/:id', validate(getBranchSchema), getBranchDetails);
 router.patch('/:id', validate(updateBranchSchema), updateBranch);
 router.patch('/:id/status', validate(getBranchSchema), toggleBranchStatus);
+router.delete('/:id', validate(getBranchSchema), deleteBranch);
 
 export default router;

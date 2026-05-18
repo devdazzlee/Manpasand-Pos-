@@ -2,19 +2,28 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.listSuppliersSchema = exports.getSupplierSchema = exports.updateSupplierSchema = exports.createSupplierSchema = void 0;
 const zod_1 = require("zod");
+// Optional contact fields are .nullable() so the Edit form can send `null`
+// explicitly to clear a previously-set value. On create the frontend omits
+// empty optionals entirely, so this still leaves NULL in the column.
+const optionalString = zod_1.z.string().nullable().optional();
+const optionalEmail = zod_1.z
+    .string()
+    .email('Invalid email format')
+    .nullable()
+    .optional();
 const supplierBaseSchema = {
     name: zod_1.z.string().min(1, 'Name is required').max(100),
-    phone_number: zod_1.z.string().optional(),
-    fax_number: zod_1.z.string().optional(),
-    mobile_number: zod_1.z.string().optional(),
-    country: zod_1.z.string().optional(),
-    city: zod_1.z.string().optional(),
-    status: zod_1.z.string().optional(),
-    email: zod_1.z.string().email('Invalid email format').optional(),
-    ntn: zod_1.z.string().optional(),
-    strn: zod_1.z.string().optional(),
-    gov_id: zod_1.z.string().optional(),
-    address: zod_1.z.string().optional(),
+    phone_number: optionalString,
+    fax_number: optionalString,
+    mobile_number: optionalString,
+    country: optionalString,
+    city: optionalString,
+    status: optionalString,
+    email: optionalEmail,
+    ntn: optionalString,
+    strn: optionalString,
+    gov_id: optionalString,
+    address: optionalString,
     display_on_pos: zod_1.z.boolean().optional().default(true),
 };
 exports.createSupplierSchema = zod_1.z.object({
@@ -23,7 +32,7 @@ exports.createSupplierSchema = zod_1.z.object({
 exports.updateSupplierSchema = zod_1.z.object({
     body: zod_1.z.object({
         ...supplierBaseSchema,
-        name: supplierBaseSchema.name.optional(),
+        name: zod_1.z.string().min(1, 'Name is required').max(100).optional(),
     }),
     params: zod_1.z.object({
         id: zod_1.z.string().min(1, 'Supplier ID is required'),
