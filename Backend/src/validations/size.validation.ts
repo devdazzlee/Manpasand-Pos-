@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 const sizeBaseSchema = {
     name: z.string().min(1, 'Name is required').max(100),
+    is_active: z.boolean().optional(),
+    display_on_pos: z.boolean().optional(),
 };
 
 export const createSizeSchema = z.object({

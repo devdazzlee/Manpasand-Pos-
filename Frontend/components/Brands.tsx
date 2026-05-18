@@ -5,31 +5,44 @@ import apiClient from "@/lib/apiClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Search, Plus, Loader2, Edit, Eye, ToggleRight, ToggleLeft } from "lucide-react";
+import { Search, Plus, Loader2, Edit, Eye, Trash2, AlertTriangle, Layers, CheckCircle2, XCircle, Package } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
 import { LoadingButton } from "@/components/ui/loading-button";
-import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { PageLoader } from "@/components/ui/page-loader";
-
 
 interface Brand {
   id: string;
   code: string;
   name: string;
   is_active: boolean;
-  display_on_pos: boolean;
   product_count: number;
   created_at: string;
 }
+
+// Senior developer utility to retrieve backend validation and database errors directly
+const extractApiError = (err: any, fallback: string = "Something went wrong"): string => {
+  const data = err?.response?.data;
+  if (!data) return err?.message || fallback;
+  if (Array.isArray(data.errors) && data.errors.length > 0) {
+    const first = data.errors[0];
+    if (typeof first === "string") return first;
+    if (first?.message) return String(first.message);
+  }
+  if (typeof data.message === "string") return data.message;
+  return fallback;
+};
 
 const Brands: React.FC = () => {
   const { toast } = useToast();
   const [brands, setBrands] = useState<Brand[]>([]);
   const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
   const [loading, setLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
@@ -39,12 +52,16 @@ const Brands: React.FC = () => {
   const [detailOpen, setDetailOpen] = useState(false);
   const [current, setCurrent] = useState<Brand | null>(null);
 
-  const [form, setForm] = useState({ name: "", is_active: true, display_on_pos: true });
-  const [error, setError] = useState<string>("");
+  // Form states
+  const [formName, setFormName] = useState("");
+  const [formIsActive, setFormIsActive] = useState(true);
 
-  const isFormValid = Object.values(form).every(
-    v => typeof v === 'boolean' ? true : (v && String(v).trim() !== "")
-  );
+  // Delete states
+  const [deleteTarget, setDeleteTarget] = useState<Brand | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+
+  const [error, setError] = useState<string>("");
+  const isFormValid = formName.trim() !== "";
 
   useEffect(() => {
     fetchBrands();
@@ -55,9 +72,9 @@ const Brands: React.FC = () => {
     try {
       const res = await apiClient.get(`${API_BASE}/brands`, { params: { search: q } });
       setBrands(res.data.data);
-    } catch (e) {
-      console.log(e);
-    } finally {
+    } catch (err) {
+      console.log(err);
+    } finally { 
       setLoading(false);
       setIsInitialLoading(false);
     }
@@ -69,14 +86,18 @@ const Brands: React.FC = () => {
   };
 
   const openAdd = () => {
-    setForm({ name: "", is_active: true, display_on_pos: true });
+    setFormName("");
+    setFormIsActive(true);
     setCurrent(null);
+    setError("");
     setAddOpen(true);
   };
 
   const openEdit = (b: Brand) => {
     setCurrent(b);
-    setForm({ name: b.name, is_active: b.is_active, display_on_pos: b.display_on_pos });
+    setFormName(b.name);
+    setFormIsActive(b.is_active !== undefined ? b.is_active : true);
+    setError("");
     setEditOpen(true);
   };
 
@@ -86,7 +107,7 @@ const Brands: React.FC = () => {
   };
 
   const submit = async () => {
-    if (!form.name.trim()) {
+    if (!formName.trim()) {
       toast({
         title: "Validation Error",
         description: "Name is required",
@@ -97,7 +118,10 @@ const Brands: React.FC = () => {
     setSubmitting(true);
     setError("");
     try {
-      const payload = { ...form };
+      const payload = { 
+        name: formName,
+        is_active: formIsActive
+      };
       if (current) {
         await apiClient.patch(`${API_BASE}/brands/${current.id}`, payload);
         setEditOpen(false);
@@ -114,11 +138,12 @@ const Brands: React.FC = () => {
         });
       }
       fetchBrands();
-    } catch (e: any) {
-      setError("Submission failed");
+    } catch (err: any) {
+      const errMsg = extractApiError(err, "Submission failed");
+      setError(errMsg);
       toast({
         title: "Error",
-        description: e?.response?.data?.message || e?.message || "Submission failed",
+        description: errMsg,
         variant: "destructive",
       });
     } finally {
@@ -126,19 +151,43 @@ const Brands: React.FC = () => {
     }
   };
 
-  const toggleDisplay = async (id: string) => {
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
     try {
-      await apiClient.patch(`${API_BASE}/brands/${id}/toggle-display`);
+      const res = await apiClient.delete(`${API_BASE}/brands/${deleteTarget.id}`);
+      toast({
+        title: "Success",
+        description: res.data?.message || "Brand deleted successfully",
+      });
+      setDeleteTarget(null);
       fetchBrands();
-    } catch (e) {
-      console.log(e);
+    } catch (err: any) {
+      const errMsg = extractApiError(err, "Failed to delete brand");
+      toast({
+        title: "Deletion Blocked",
+        description: errMsg,
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteLoading(false);
     }
   };
 
-  const filtered = brands.filter(b =>
-    b.name.toLowerCase().includes(search.toLowerCase()) ||
-    b.code.includes(search)
-  );
+  const totalCount = brands.length;
+  const activeCount = brands.filter(b => b.is_active).length;
+  const inactiveCount = totalCount - activeCount;
+  const totalLinkedProducts = brands.reduce((sum, b) => sum + (b.product_count || 0), 0);
+
+  const filtered = brands.filter(b => {
+    const matchesSearch = b.name.toLowerCase().includes(search.toLowerCase()) || b.code.includes(search);
+    const matchesStatus = statusFilter === "all"
+      ? true
+      : statusFilter === "active"
+      ? b.is_active === true
+      : b.is_active === false;
+    return matchesSearch && matchesStatus;
+  });
 
   if (isInitialLoading) {
     return <PageLoader message="Loading brands..." />
@@ -156,21 +205,86 @@ const Brands: React.FC = () => {
           New Brand
         </Button>
       </div>
-      <div className="relative max-w-md">
-        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
-        <Input
-          placeholder="Search by name or code"
-          value={search}
-          onChange={e => handleSearch(e.target.value)}
-          className="pl-10"
-        />
+
+      {/* Dynamic Analytical Stats Cards */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <Card className="bg-gradient-to-br from-indigo-50/40 to-white border-indigo-100/50 shadow-sm">
+          <CardContent className="p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-indigo-600 uppercase tracking-wider">Total Brands</p>
+              <p className="text-3xl font-extrabold text-gray-900">{totalCount}</p>
+              <p className="text-[10px] text-gray-500">Brands registered in master</p>
+            </div>
+            <div className="w-12 h-12 bg-indigo-50 rounded-xl flex items-center justify-center text-indigo-600">
+              <Layers className="h-6 w-6" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-emerald-50/40 to-white border-emerald-100/50 shadow-sm">
+          <CardContent className="p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-emerald-600 uppercase tracking-wider">Active Brands</p>
+              <p className="text-3xl font-extrabold text-gray-900">{activeCount}</p>
+              <p className="text-[10px] text-gray-500">Available in system operations</p>
+            </div>
+            <div className="w-12 h-12 bg-emerald-50 rounded-xl flex items-center justify-center text-emerald-600">
+              <CheckCircle2 className="h-6 w-6" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-rose-50/40 to-white border-rose-100/50 shadow-sm">
+          <CardContent className="p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-rose-600 uppercase tracking-wider">Inactive Brands</p>
+              <p className="text-3xl font-extrabold text-gray-900">{inactiveCount}</p>
+              <p className="text-[10px] text-gray-500">Disabled or hidden brands</p>
+            </div>
+            <div className="w-12 h-12 bg-rose-50 rounded-xl flex items-center justify-center text-rose-600">
+              <XCircle className="h-6 w-6" />
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="bg-gradient-to-br from-amber-50/40 to-white border-amber-100/50 shadow-sm">
+          <CardContent className="p-5 flex items-center justify-between">
+            <div className="space-y-1">
+              <p className="text-xs font-bold text-amber-600 uppercase tracking-wider">Linked Products</p>
+              <p className="text-3xl font-extrabold text-gray-900">{totalLinkedProducts}</p>
+              <p className="text-[10px] text-gray-500">Linked to operational products</p>
+            </div>
+            <div className="w-12 h-12 bg-amber-50 rounded-xl flex items-center justify-center text-amber-600">
+              <Package className="h-6 w-6" />
+            </div>
+          </CardContent>
+        </Card>
       </div>
-      {/* Error */}
-      {error && (
-        <div className="bg-red-50 border border-red-200 text-red-700 px-4 py-2 rounded">
-          {error}
+
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center justify-between">
+        <div className="relative flex-1 max-w-md">
+          <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+          <Input
+            placeholder="Search by name or code"
+            value={search}
+            onChange={e => handleSearch(e.target.value)}
+            className="pl-10"
+          />
         </div>
-      )}
+        <Select value={statusFilter} onValueChange={(val: any) => setStatusFilter(val)}>
+          <SelectTrigger className="w-[180px] text-gray-700 font-medium bg-background shadow-sm hover:border-gray-300 transition-colors">
+            <SelectValue placeholder="Select Status" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All Statuses</SelectItem>
+            <SelectItem value="active">Active Only</SelectItem>
+            <SelectItem value="inactive">Inactive Only</SelectItem>
+          </SelectContent>
+        </Select>
+      </div>
+
+
+
       <Card>
         <CardHeader><CardTitle>Brand List</CardTitle></CardHeader>
         <CardContent>
@@ -188,88 +302,183 @@ const Brands: React.FC = () => {
                     <TableRow>
                       <TableHead className="min-w-[100px]">Code</TableHead>
                       <TableHead className="min-w-[150px]">Name</TableHead>
-                      <TableHead className="min-w-[80px]">POS</TableHead>
-                      <TableHead className="min-w-[100px]">Active</TableHead>
                       <TableHead className="min-w-[100px]">Products</TableHead>
-                      <TableHead className="min-w-[120px]">Actions</TableHead>
+                      <TableHead className="min-w-[150px]">Status</TableHead>
+                      <TableHead className="min-w-[120px]">Created</TableHead>
+                      <TableHead className="min-w-[150px] text-right">Actions</TableHead>
                     </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filtered.map(b => (
-                  <TableRow key={b.id} className="hover:bg-gray-50">
-                    <TableCell>{b.code}</TableCell>
-                    <TableCell>{b.name}</TableCell>
-                    <TableCell>{b.display_on_pos ? 'Yes' : 'No'}</TableCell>
-                    <TableCell>{b.is_active ? 'Yes' : 'No'}</TableCell>
-                    <TableCell>{b.product_count}</TableCell>
-                    <TableCell className="flex space-x-2">
-                      <Button size="sm" variant="outline" onClick={() => openDetail(b)}><Eye className="h-4 w-4"/></Button>
-                      <Button size="sm" variant="outline" onClick={() => openEdit(b)}><Edit className="h-4 w-4"/></Button>
-                      <Button size="sm" variant="outline" onClick={() => toggleDisplay(b.id)}>
-                        {b.display_on_pos ? 'Hide' : 'Show'}
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {filtered.map(b => (
+                      <TableRow key={b.id} className="hover:bg-gray-50">
+                        <TableCell className="font-mono font-medium text-gray-900">{b.code}</TableCell>
+                        <TableCell className="font-semibold text-gray-900">{b.name}</TableCell>
+                        <TableCell>
+                          <span className="font-mono text-xs bg-gray-100 text-gray-600 px-1.5 py-0.5 rounded border border-gray-200">
+                            {b.product_count} product{b.product_count === 1 ? "" : "s"}
+                          </span>
+                        </TableCell>
+                        <TableCell>
+                          {b.is_active ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-emerald-50 text-emerald-700 border border-emerald-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" /> Active
+                            </span>
+                          ) : (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-[10px] font-bold bg-rose-50 text-rose-700 border border-rose-200">
+                              <span className="w-1.5 h-1.5 rounded-full bg-rose-400" /> Inactive
+                            </span>
+                          )}
+                        </TableCell>
+                        <TableCell className="text-gray-600">{b.created_at.split('T')[0]}</TableCell>
+                        <TableCell className="text-right">
+                          <div className="flex items-center justify-end gap-2">
+                            <Button size="sm" variant="outline" onClick={() => openDetail(b)} title="View Details">
+                              <Eye className="h-4 w-4 text-gray-500"/>
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => openEdit(b)} title="Edit Brand">
+                              <Edit className="h-4 w-4 text-indigo-600"/>
+                            </Button>
+                            <Button size="sm" variant="outline" className="border-rose-100 hover:bg-rose-50" onClick={() => setDeleteTarget(b)} title="Delete Brand">
+                              <Trash2 className="h-4 w-4 text-rose-600"/>
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
             </div>
           )}
         </CardContent>
       </Card>
+
       {/* Add/Edit Dialog */}
-      <Dialog open={addOpen || editOpen} onOpenChange={() => { setAddOpen(false); setEditOpen(false); }}>
+      <Dialog open={addOpen || editOpen} onOpenChange={(open) => { if (!open) { setAddOpen(false); setEditOpen(false); } }}>
         <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>{current ? 'Edit Brand' : 'Create Brand'}</DialogTitle></DialogHeader>
-          <div className="space-y-4">
+          <DialogHeader>
+            <DialogTitle>{current ? 'Edit Brand' : 'Create Brand'}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-5 py-2">
             <div>
               <Label htmlFor="brand-name">Name<span className="text-red-500 ml-1">*</span></Label>
               <Input 
                 id="brand-name" 
-                value={form.name} 
-                onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+                value={formName} 
+                onChange={e => { setFormName(e.target.value); setError(""); }}
                 placeholder="Enter brand name"
-                className={form.name.trim() === "" ? "border-red-500" : ""}
+                className={formName.trim() === "" ? "border-red-500 mt-1" : "mt-1"}
                 disabled={submitting}
               />
-              {form.name.trim() === "" && (
+              {formName.trim() === "" && (
                 <p className="text-xs text-red-600 mt-1">Name is required</p>
               )}
             </div>
-            <div className="flex items-center space-x-2">
-              <input id="active" type="checkbox" checked={form.is_active} onChange={e => setForm(f => ({ ...f, is_active: e.target.checked }))} disabled={submitting} />
-              <Label htmlFor="active">Active</Label>
+
+            {/* Active Switch Toggle */}
+            <div className="flex items-center justify-between p-3 rounded-lg border border-gray-100 bg-gray-50/50">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-semibold text-gray-900">Active Status</Label>
+                <p className="text-xs text-gray-500">Enable or disable this brand in system workflows</p>
+              </div>
+              <Switch checked={formIsActive} onCheckedChange={setFormIsActive} disabled={submitting} />
             </div>
-            <div className="flex items-center space-x-2">
-              <input id="pos" type="checkbox" checked={form.display_on_pos} onChange={e => setForm(f => ({ ...f, display_on_pos: e.target.checked }))} disabled={submitting} />
-              <Label htmlFor="pos">Display on POS</Label>
-            </div>
+
+            {/* Error message inside the modal directly below input/status */}
+            {error && (
+              <div className="bg-red-50 border border-red-100 text-red-600 p-3 rounded-lg text-xs font-semibold animate-pulse">
+                ⚠️ {error}
+              </div>
+            )}
+
             <LoadingButton 
               onClick={submit} 
               loading={submitting} 
-              className="w-full"
+              className="w-full mt-2"
               disabled={submitting || !isFormValid}
             >
-              {current ? 'Update' : 'Create'}
+              {current ? 'Update Brand' : 'Create Brand'}
             </LoadingButton>
           </div>
         </DialogContent>
       </Dialog>
+
       {/* Detail Dialog */}
       <Dialog open={detailOpen} onOpenChange={() => setDetailOpen(false)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader><DialogTitle>Brand Details</DialogTitle></DialogHeader>
+        <DialogContent className="max-w-lg md:max-w-xl w-full">
+          <DialogHeader>
+            <DialogTitle>Brand Details</DialogTitle>
+          </DialogHeader>
           {current && (
-            <div className="space-y-2">
-              <p><strong>Code:</strong> {current.code}</p>
-              <p><strong>Name:</strong> {current.name}</p>
-              <p><strong>Active:</strong> {current.is_active ? 'Yes' : 'No'}</p>
-              <p><strong>Display on POS:</strong> {current.display_on_pos ? 'Yes' : 'No'}</p>
-              <p><strong>Products:</strong> {current.product_count}</p>
-              <p><strong>Created:</strong> {current.created_at.split('T')[0]}</p>
+            <div className="space-y-4 py-2">
+              <div className="grid grid-cols-2 gap-4 border-b border-gray-100 pb-3">
+                <div>
+                  <span className="text-xs text-gray-500 uppercase tracking-wider block font-semibold">Brand Code</span>
+                  <span className="font-mono text-sm font-bold text-gray-900 bg-gray-100 px-2 py-0.5 rounded border break-words block">{current.code}</span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 uppercase tracking-wider block font-semibold">Brand Name</span>
+                  <span className="text-sm font-bold text-gray-900 break-words block whitespace-normal">{current.name}</span>
+                </div>
+              </div>
+              <div className="grid grid-cols-2 gap-4 border-b border-gray-100 pb-3">
+                <div>
+                  <span className="text-xs text-gray-500 uppercase tracking-wider block font-semibold">Linked Products</span>
+                  <span className="text-sm font-medium text-gray-900">{current.product_count} product{current.product_count === 1 ? '' : 's'}</span>
+                </div>
+                <div>
+                  <span className="text-xs text-gray-500 uppercase tracking-wider block font-semibold">Created Date</span>
+                  <span className="text-sm font-medium text-gray-900">{current.created_at.split('T')[0]}</span>
+                </div>
+              </div>
+              <div>
+                <span className="text-xs text-gray-500 uppercase tracking-wider block font-semibold">Active Status</span>
+                {current.is_active ? (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold bg-emerald-50 text-emerald-700 border border-emerald-100 mt-1">Active</span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full text-xs font-semibold bg-rose-50 text-rose-700 border border-rose-100 mt-1">Inactive</span>
+                )}
+              </div>
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      {/* Delete Confirmation Dialog */}
+      <Dialog open={!!deleteTarget} onOpenChange={(open) => { if (!open) setDeleteTarget(null); }}>
+        <DialogContent className="max-w-md">
+          <div className="flex flex-col items-center text-center space-y-4 py-4">
+            <div className="w-12 h-12 rounded-full bg-rose-50 border border-rose-100 flex items-center justify-center text-rose-600 animate-bounce">
+              <AlertTriangle className="h-6 w-6" />
+            </div>
+            
+            <div className="space-y-2">
+              <DialogTitle className="text-xl font-bold text-gray-900">Are you absolutely sure?</DialogTitle>
+              <div className="text-sm text-gray-600 space-y-2">
+                <p>
+                  You are about to permanently delete the brand <strong className="text-rose-600 font-bold">"{deleteTarget?.name}"</strong> (Code: {deleteTarget?.code}).
+                </p>
+                <p className="bg-amber-50 border border-amber-200 text-amber-800 p-2.5 rounded text-xs text-left">
+                  ⚠️ <strong>Important Note / Warning:</strong> If this brand is linked to any active products in the system, deletion will be blocked and you must disable it instead to preserve sales history.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex gap-3 w-full mt-4">
+              <Button variant="outline" className="flex-1" onClick={() => setDeleteTarget(null)} disabled={deleteLoading}>
+                Cancel
+              </Button>
+              <LoadingButton 
+                variant="destructive" 
+                className="flex-1" 
+                onClick={handleDelete} 
+                loading={deleteLoading}
+                disabled={deleteLoading}
+              >
+                Delete brand
+              </LoadingButton>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
     </div>

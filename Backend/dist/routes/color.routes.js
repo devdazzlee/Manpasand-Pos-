@@ -14,5 +14,6 @@ router.post('/', (0, validation_middleware_1.validate)(color_validation_1.create
 router.get('/', (0, validation_middleware_1.validate)(color_validation_1.listColorsSchema), color_controller_1.listColors);
 router.get('/:id', (0, validation_middleware_1.validate)(color_validation_1.getColorSchema), color_controller_1.getColor);
 router.patch('/:id', (0, validation_middleware_1.validate)(color_validation_1.updateColorSchema), color_controller_1.updateColor);
+router.delete('/:id', (0, validation_middleware_1.validate)(color_validation_1.getColorSchema), color_controller_1.deleteColor);
 exports.default = router;
 //# sourceMappingURL=color.routes.js.map

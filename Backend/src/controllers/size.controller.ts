@@ -31,3 +31,8 @@ export const listSizes = asyncHandler(async (req: Request, res: Response) => {
 
     new ApiResponse(result.data, 'Sizes retrieved successfully', 200).send(res);
 });
+
+export const deleteSize = asyncHandler(async (req: Request, res: Response) => {
+    const result = await sizeService.deleteSize(req.params.id);
+    new ApiResponse(null, result.message).send(res);
+});

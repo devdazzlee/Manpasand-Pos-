@@ -5,18 +5,29 @@ import { CreateBrandInput, UpdateBrandInput } from '../validations/brand.validat
 
 export class BrandService {
     async createBrand(data: CreateBrandInput) {
-        const existingBrand = await prisma.brand.findFirst({
-            where: { name: data.name },
-        });
+        const [existingBrand, allBrands] = await Promise.all([
+            prisma.brand.findFirst({
+                where: {
+                    name: {
+                        equals: data.name,
+                        mode: 'insensitive',
+                    },
+                },
+            }),
+            prisma.brand.findMany({
+                select: { code: true },
+            }),
+        ]);
+
         if (existingBrand) {
             throw new AppError(400, 'Brand with this name already exists');
         }
-        const lastBrand = await prisma.brand.findFirst({
-            orderBy: { created_at: 'desc' },
-            select: { code: true },
-        });
 
-        const newCode = lastBrand ? (parseInt(lastBrand.code) + 1).toString() : '1000';
+        const maxCode = allBrands.reduce((max, b) => {
+            const parsed = parseInt(b.code, 10);
+            return Number.isFinite(parsed) && parsed > max ? parsed : max;
+        }, 999);
+        const newCode = (maxCode + 1).toString();
 
         return prisma.brand.create({
             data: {
@@ -70,6 +81,7 @@ export class BrandService {
         if (search) {
             where.OR = [
                 { name: { contains: search, mode: 'insensitive' } },
+                { code: { contains: search, mode: 'insensitive' } },
             ];
         }
 
@@ -101,5 +113,28 @@ export class BrandService {
                 totalPages: Math.ceil(total / limit),
             },
         };
+    }
+
+    async deleteBrand(id: string) {
+        const brand = await prisma.brand.findUnique({
+            where: { id },
+            include: {
+                _count: {
+                    select: { products: true },
+                },
+            },
+        });
+
+        if (!brand) throw new AppError(404, 'Brand not found');
+
+        if (brand._count.products > 0) {
+            throw new AppError(
+                409,
+                `Cannot delete brand — it is linked to ${brand._count.products} product${brand._count.products === 1 ? '' : 's'}. Disable the brand instead.`,
+            );
+        }
+
+        await prisma.brand.delete({ where: { id } });
+        return { message: 'Brand deleted successfully' };
     }
 }

@@ -5,21 +5,27 @@ import { CreateColorInput, UpdateColorInput } from '../validations/color.validat
 
 export class ColorService {
     async createColor(data: CreateColorInput) {
-        const [existingColor, lastColor] = await Promise.all([
+        const [existingColor, allColors] = await Promise.all([
             prisma.color.findFirst({
                 where: {
-                    name: data.name,
+                    name: {
+                        equals: data.name,
+                        mode: 'insensitive',
+                    },
                 },
             }),
-            prisma.color.findFirst({
-                orderBy: { created_at: 'desc' },
+            prisma.color.findMany({
                 select: { code: true },
             }),
         ]);
 
         if (existingColor) throw new AppError(400, 'Color already exists');
 
-        const newCode = lastColor ? (parseInt(lastColor.code) + 1).toString() : '1000';
+        const maxCode = allColors.reduce((max, c) => {
+            const parsed = parseInt(c.code, 10);
+            return Number.isFinite(parsed) && parsed > max ? parsed : max;
+        }, 999);
+        const newCode = (maxCode + 1).toString();
 
         const color = await prisma.color.create({
             data: {
@@ -65,15 +71,9 @@ export class ColorService {
         const where: Prisma.ColorWhereInput = {};
 
         if (search) {
-            // Use OR condition for search
-            where.AND = [
-                { is_active: true }, // Only active colors
-                {
-                    OR: [
-                        { name: { contains: search, mode: 'insensitive' } },
-                        { code: { contains: search, mode: 'insensitive' } },
-                    ],
-                },
+            where.OR = [
+                { name: { contains: search, mode: 'insensitive' } },
+                { code: { contains: search, mode: 'insensitive' } },
             ];
         }
 
@@ -105,5 +105,28 @@ export class ColorService {
                 totalPages: Math.ceil(total / limit),
             },
         };
+    }
+
+    async deleteColor(id: string) {
+        const color = await prisma.color.findUnique({
+            where: { id },
+            include: {
+                _count: {
+                    select: { products: true },
+                },
+            },
+        });
+
+        if (!color) throw new AppError(404, 'Color not found');
+
+        if (color._count.products > 0) {
+            throw new AppError(
+                409,
+                `Cannot delete color — it is linked to ${color._count.products} product${color._count.products === 1 ? '' : 's'}. Disable the color instead.`,
+            );
+        }
+
+        await prisma.color.delete({ where: { id } });
+        return { message: 'Color deleted successfully' };
     }
 }

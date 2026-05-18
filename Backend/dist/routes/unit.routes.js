@@ -14,5 +14,6 @@ router.post('/', (0, validation_middleware_1.validate)(unit_validation_1.createU
 router.get('/', (0, validation_middleware_1.validate)(unit_validation_1.listUnitsSchema), unit_controller_1.listUnits);
 router.get('/:id', (0, validation_middleware_1.validate)(unit_validation_1.getUnitSchema), unit_controller_1.getUnit);
 router.patch('/:id', (0, validation_middleware_1.validate)(unit_validation_1.updateUnitSchema), unit_controller_1.updateUnit);
+router.delete('/:id', (0, validation_middleware_1.validate)(unit_validation_1.getUnitSchema), unit_controller_1.deleteUnit);
 exports.default = router;
 //# sourceMappingURL=unit.routes.js.map

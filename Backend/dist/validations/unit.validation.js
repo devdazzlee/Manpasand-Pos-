@@ -4,6 +4,8 @@ exports.listUnitsSchema = exports.getUnitSchema = exports.updateUnitSchema = exp
 const zod_1 = require("zod");
 const unitBaseSchema = {
     name: zod_1.z.string().min(1, 'Name is required').max(100),
+    is_active: zod_1.z.boolean().optional().default(true),
+    display_on_pos: zod_1.z.boolean().optional().default(true),
 };
 exports.createUnitSchema = zod_1.z.object({
     body: zod_1.z.object(unitBaseSchema),

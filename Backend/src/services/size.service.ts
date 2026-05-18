@@ -5,21 +5,23 @@ import { CreateSizeInput, UpdateSizeInput } from '../validations/size.validation
 
 export class SizeService {
     async createSize(data: CreateSizeInput) {
-        const [existingSize, lastSize] = await Promise.all([
-            prisma.size.findFirst({
-                where: {
-                    name: data.name,
+        const existingSize = await prisma.size.findFirst({
+            where: {
+                name: {
+                    equals: data.name,
+                    mode: 'insensitive',
                 },
-            }),
-            prisma.size.findFirst({
-                orderBy: { created_at: 'desc' },
-                select: { code: true },
-            }),
-        ]);
+            },
+        });
 
         if (existingSize) throw new AppError(400, 'Size already exists');
 
-        const newCode = lastSize ? (parseInt(lastSize.code) + 1).toString() : '1000';
+        const allSizes = await prisma.size.findMany({ select: { code: true } });
+        const maxCode = allSizes.reduce((max, s) => {
+            const parsed = parseInt(s.code, 10);
+            return Number.isFinite(parsed) && parsed > max ? parsed : max;
+        }, 999);
+        const newCode = (maxCode + 1).toString();
 
         const size = await prisma.size.create({
             data: {
@@ -111,5 +113,28 @@ export class SizeService {
                 totalPages: Math.ceil(total / limit),
             },
         };
+    }
+
+    async deleteSize(id: string) {
+        const size = await prisma.size.findUnique({
+            where: { id },
+            include: {
+                _count: {
+                    select: { products: true },
+                },
+            },
+        });
+
+        if (!size) throw new AppError(404, 'Size not found');
+
+        if (size._count.products > 0) {
+            throw new AppError(
+                409,
+                `Cannot delete size — it is linked to ${size._count.products} product${size._count.products === 1 ? '' : 's'}. Disable the size instead.`,
+            );
+        }
+
+        await prisma.size.delete({ where: { id } });
+        return { message: 'Size deleted successfully' };
     }
 }

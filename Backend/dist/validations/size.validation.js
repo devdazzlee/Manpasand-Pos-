@@ -4,6 +4,8 @@ exports.listSizesSchema = exports.getSizeSchema = exports.updateSizeSchema = exp
 const zod_1 = require("zod");
 const sizeBaseSchema = {
     name: zod_1.z.string().min(1, 'Name is required').max(100),
+    is_active: zod_1.z.boolean().optional(),
+    display_on_pos: zod_1.z.boolean().optional(),
 };
 exports.createSizeSchema = zod_1.z.object({
     body: zod_1.z.object(sizeBaseSchema),

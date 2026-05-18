@@ -5,20 +5,26 @@ const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 class ColorService {
     async createColor(data) {
-        const [existingColor, lastColor] = await Promise.all([
+        const [existingColor, allColors] = await Promise.all([
             client_1.prisma.color.findFirst({
                 where: {
-                    name: data.name,
+                    name: {
+                        equals: data.name,
+                        mode: 'insensitive',
+                    },
                 },
             }),
-            client_1.prisma.color.findFirst({
-                orderBy: { created_at: 'desc' },
+            client_1.prisma.color.findMany({
                 select: { code: true },
             }),
         ]);
         if (existingColor)
             throw new apiError_1.AppError(400, 'Color already exists');
-        const newCode = lastColor ? (parseInt(lastColor.code) + 1).toString() : '1000';
+        const maxCode = allColors.reduce((max, c) => {
+            const parsed = parseInt(c.code, 10);
+            return Number.isFinite(parsed) && parsed > max ? parsed : max;
+        }, 999);
+        const newCode = (maxCode + 1).toString();
         const color = await client_1.prisma.color.create({
             data: {
                 ...data,
@@ -50,15 +56,9 @@ class ColorService {
     async listColors({ page = 1, limit = 10, search, }) {
         const where = {};
         if (search) {
-            // Use OR condition for search
-            where.AND = [
-                { is_active: true }, // Only active colors
-                {
-                    OR: [
-                        { name: { contains: search, mode: 'insensitive' } },
-                        { code: { contains: search, mode: 'insensitive' } },
-                    ],
-                },
+            where.OR = [
+                { name: { contains: search, mode: 'insensitive' } },
+                { code: { contains: search, mode: 'insensitive' } },
             ];
         }
         const [colors, total] = await Promise.all([
@@ -88,6 +88,23 @@ class ColorService {
                 totalPages: Math.ceil(total / limit),
             },
         };
+    }
+    async deleteColor(id) {
+        const color = await client_1.prisma.color.findUnique({
+            where: { id },
+            include: {
+                _count: {
+                    select: { products: true },
+                },
+            },
+        });
+        if (!color)
+            throw new apiError_1.AppError(404, 'Color not found');
+        if (color._count.products > 0) {
+            throw new apiError_1.AppError(409, `Cannot delete color — it is linked to ${color._count.products} product${color._count.products === 1 ? '' : 's'}. Disable the color instead.`);
+        }
+        await client_1.prisma.color.delete({ where: { id } });
+        return { message: 'Color deleted successfully' };
     }
 }
 exports.ColorService = ColorService;

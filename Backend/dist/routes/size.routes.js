@@ -14,5 +14,6 @@ router.post('/', (0, validation_middleware_1.validate)(size_validation_1.createS
 router.get('/', (0, validation_middleware_1.validate)(size_validation_1.listSizesSchema), size_controller_1.listSizes);
 router.get('/:id', (0, validation_middleware_1.validate)(size_validation_1.getSizeSchema), size_controller_1.getSize);
 router.patch('/:id', (0, validation_middleware_1.validate)(size_validation_1.updateSizeSchema), size_controller_1.updateSize);
+router.delete('/:id', (0, validation_middleware_1.validate)(size_validation_1.getSizeSchema), size_controller_1.deleteSize);
 exports.default = router;
 //# sourceMappingURL=size.routes.js.map

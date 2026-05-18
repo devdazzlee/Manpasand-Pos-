@@ -2,6 +2,7 @@ import { z } from 'zod';
 
 const colorBaseSchema = {
     name: z.string().min(1, 'Name is required').max(100),
+    is_active: z.boolean().optional(),
 };
 
 export const createColorSchema = z.object({

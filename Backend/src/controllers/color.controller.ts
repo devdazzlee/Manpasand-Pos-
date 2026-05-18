@@ -31,3 +31,8 @@ export const listColors = asyncHandler(async (req: Request, res: Response) => {
 
     new ApiResponse(result.data, 'Colors retrieved successfully', 200).send(res);
 });
+
+export const deleteColor = asyncHandler(async (req: Request, res: Response) => {
+    const result = await colorService.deleteColor(req.params.id);
+    new ApiResponse(null, result.message).send(res);
+});

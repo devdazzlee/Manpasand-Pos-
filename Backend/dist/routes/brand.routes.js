@@ -14,6 +14,7 @@ router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SU
 router.get('/', (0, validation_middleware_1.validate)(brand_validation_1.listBrandsSchema), brand_controller_1.listBrands);
 router.get('/:id', (0, validation_middleware_1.validate)(brand_validation_1.getBrandSchema), brand_controller_1.getBrand);
 router.patch('/:id', (0, validation_middleware_1.validate)(brand_validation_1.updateBrandSchema), brand_controller_1.updateBrand);
+router.delete('/:id', (0, validation_middleware_1.validate)(brand_validation_1.getBrandSchema), brand_controller_1.deleteBrand);
 router.patch('/:id/toggle-display', (0, validation_middleware_1.validate)(brand_validation_1.getBrandSchema), brand_controller_1.toggleBrandDisplay);
 exports.default = router;
 //# sourceMappingURL=brand.routes.js.map

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listColors = exports.updateColor = exports.getColor = exports.createColor = void 0;
+exports.deleteColor = exports.listColors = exports.updateColor = exports.getColor = exports.createColor = void 0;
 const color_service_1 = require("../services/color.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -28,5 +28,9 @@ exports.listColors = (0, asyncHandler_1.default)(async (req, res) => {
         search: search,
     });
     new apiResponse_1.ApiResponse(result.data, 'Colors retrieved successfully', 200).send(res);
+});
+exports.deleteColor = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await colorService.deleteColor(req.params.id);
+    new apiResponse_1.ApiResponse(null, result.message).send(res);
 });
 //# sourceMappingURL=color.controller.js.map

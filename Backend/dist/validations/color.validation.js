@@ -4,6 +4,7 @@ exports.listColorsSchema = exports.getColorSchema = exports.updateColorSchema = 
 const zod_1 = require("zod");
 const colorBaseSchema = {
     name: zod_1.z.string().min(1, 'Name is required').max(100),
+    is_active: zod_1.z.boolean().optional(),
 };
 exports.createColorSchema = zod_1.z.object({
     body: zod_1.z.object(colorBaseSchema),

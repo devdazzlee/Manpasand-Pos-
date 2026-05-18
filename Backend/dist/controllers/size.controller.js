@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listSizes = exports.updateSize = exports.getSize = exports.createSize = void 0;
+exports.deleteSize = exports.listSizes = exports.updateSize = exports.getSize = exports.createSize = void 0;
 const size_service_1 = require("../services/size.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -28,5 +28,9 @@ exports.listSizes = (0, asyncHandler_1.default)(async (req, res) => {
         search: search,
     });
     new apiResponse_1.ApiResponse(result.data, 'Sizes retrieved successfully', 200).send(res);
+});
+exports.deleteSize = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await sizeService.deleteSize(req.params.id);
+    new apiResponse_1.ApiResponse(null, result.message).send(res);
 });
 //# sourceMappingURL=size.controller.js.map

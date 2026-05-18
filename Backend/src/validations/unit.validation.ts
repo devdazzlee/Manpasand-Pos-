@@ -2,6 +2,8 @@ import { z } from 'zod';
 
 const unitBaseSchema = {
     name: z.string().min(1, 'Name is required').max(100),
+    is_active: z.boolean().optional().default(true),
+    display_on_pos: z.boolean().optional().default(true),
 };
 
 export const createUnitSchema = z.object({

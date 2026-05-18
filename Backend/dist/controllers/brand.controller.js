@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listBrands = exports.toggleBrandDisplay = exports.updateBrand = exports.getBrand = exports.createBrand = void 0;
+exports.deleteBrand = exports.listBrands = exports.toggleBrandDisplay = exports.updateBrand = exports.getBrand = exports.createBrand = void 0;
 const brand_service_1 = require("../services/brand.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -32,5 +32,9 @@ exports.listBrands = (0, asyncHandler_1.default)(async (req, res) => {
         search: search,
     });
     new apiResponse_1.ApiResponse(result.data, 'Brands retrieved successfully', 200).send(res);
+});
+exports.deleteBrand = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await brandService.deleteBrand(req.params.id);
+    new apiResponse_1.ApiResponse(null, result.message).send(res);
 });
 //# sourceMappingURL=brand.controller.js.map

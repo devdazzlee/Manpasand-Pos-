@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listUnits = exports.updateUnit = exports.getUnit = exports.createUnit = void 0;
+exports.deleteUnit = exports.listUnits = exports.updateUnit = exports.getUnit = exports.createUnit = void 0;
 const unit_service_1 = require("../services/unit.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -28,5 +28,9 @@ exports.listUnits = (0, asyncHandler_1.default)(async (req, res) => {
         search: search,
     });
     new apiResponse_1.ApiResponse(result.data, 'Units retrieved successfully', 200).send(res);
+});
+exports.deleteUnit = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await unitService.deleteUnit(req.params.id);
+    new apiResponse_1.ApiResponse(null, result.message).send(res);
 });
 //# sourceMappingURL=unit.controller.js.map
