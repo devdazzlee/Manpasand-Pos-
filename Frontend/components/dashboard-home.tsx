@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { PageLoader } from "@/components/ui/page-loader"
 import { useLoading } from "@/hooks/use-loading"
 import { useToast } from "@/hooks/use-toast"
-import { DollarSign, ShoppingCart, Users, Package, TrendingUp, TrendingDown, RefreshCw, Download, Truck, Plus } from "lucide-react"
+import { DollarSign, ShoppingCart, Users, Package, TrendingUp, TrendingDown, RefreshCw, Download, Truck, Plus, Loader2 } from "lucide-react"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import apiClient from "@/lib/apiClient"
 import { normalizeUserRole, type UserRole } from "@/lib/role-utils"
@@ -420,27 +420,36 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {recentSales.slice(0, 5).map((sale, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div>
-                    <div className="font-medium">{sale.productName}</div>
-                  </div>
-                  <div className="text-right">
-                    <div className="font-medium">{formatCurrency(sale.price)}</div>
-                    <Badge
-                      variant="default"
-                      className="bg-green-100 text-green-800"
-                    >
-                      completed
-                    </Badge>
-                  </div>
+              {initialLoading ? (
+                <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                  <span className="text-sm text-gray-500">Loading recent sales...</span>
                 </div>
-              ))}
-              {recentSales.length === 0 && (
-                <div className="text-center text-gray-500">No recent sales</div>
+              ) : (
+                <>
+                  {recentSales.slice(0, 5).map((sale, index) => (
+                    <div
+                      key={index}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <div>
+                        <div className="font-medium">{sale.productName}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="font-medium">{formatCurrency(sale.price)}</div>
+                        <Badge
+                          variant="default"
+                          className="bg-green-100 text-green-800"
+                        >
+                          completed
+                        </Badge>
+                      </div>
+                    </div>
+                  ))}
+                  {recentSales.length === 0 && (
+                    <div className="text-center text-gray-500 py-4">No recent sales</div>
+                  )}
+                </>
               )}
             </div>
           </CardContent>
@@ -456,26 +465,35 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
           </CardHeader>
           <CardContent>
             <div className="space-y-4">
-              {topProducts.slice(0, 5).map((product, index) => (
-                <div
-                  key={product.id}
-                  className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
-                >
-                  <div className="flex items-center space-x-3">
-                    <Badge variant="secondary">#{index + 1}</Badge>
-                    <div>
-                      <div className="font-medium flex items-center space-x-2">
-                        <span>{product.name}</span>
-                        <TrendingUp className="h-3 w-3 text-green-600" />
-                      </div>
-                      <div className="text-sm text-gray-500">{product._count.order_items} orders</div>
-                    </div>
-                  </div>
-                  <div className="font-medium">{formatCurrency(product.sales_rate_inc_dis_and_tax)}</div>
+              {initialLoading ? (
+                <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                  <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                  <span className="text-sm text-gray-500">Loading top products...</span>
                 </div>
-              ))}
-              {topProducts.length === 0 && (
-                <div className="text-center text-gray-500">No top products data</div>
+              ) : (
+                <>
+                  {topProducts.slice(0, 5).map((product, index) => (
+                    <div
+                      key={product.id}
+                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
+                    >
+                      <div className="flex items-center space-x-3">
+                        <Badge variant="secondary">#{index + 1}</Badge>
+                        <div>
+                          <div className="font-medium flex items-center space-x-2">
+                            <span>{product.name}</span>
+                            <TrendingUp className="h-3 w-3 text-green-600" />
+                          </div>
+                          <div className="text-sm text-gray-500">{product._count.order_items} orders</div>
+                        </div>
+                      </div>
+                      <div className="font-medium">{formatCurrency(product.sales_rate_inc_dis_and_tax)}</div>
+                    </div>
+                  ))}
+                  {topProducts.length === 0 && (
+                    <div className="text-center text-gray-500 py-4">No top products data</div>
+                  )}
+                </>
               )}
             </div>
           </CardContent>

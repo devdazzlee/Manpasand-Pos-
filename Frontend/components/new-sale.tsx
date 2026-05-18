@@ -105,6 +105,12 @@ export function NewSale() {
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
+  const [autoPrint, setAutoPrint] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("pos_auto_print") !== "false";
+    }
+    return true;
+  });
   const {
     adminMode,
     branchLoading,
@@ -1091,83 +1097,88 @@ export function NewSale() {
         localStorage.setItem("transactions", JSON.stringify(transactions));
 
         setLastTransactionId(transactionId);
-        setCart([]);
-        setGlobalDiscountValue("");
 
         // Auto-print receipt
-        try {
-          // Get branch name from localStorage (correct source)
-          const storedBranchName = localStorage.getItem("branchName");
-          
-          console.log("🏢 Current Branch:", storedBranchName);
-          
-          // Use DB branch address when available instead of hardcoded city text
-          const fullAddress = "Karachi, Pakistan";
-         
-          console.log("fullAddress", fullAddress);
-          const receiptDataForServer: ReceiptData = {
-            storeName: storedBranchName || branchInfo.name || "MANPASAND GENERAL STORE",
-            tagline: "Quality • Service • Value",
-            address: fullAddress,
-            transactionId: transactionId,
-            timestamp: new Date().toISOString(),
-            cashier: receiptData.cashier || "Walk-in",
-            customerType: selectedCustomer
-              ? customers.find((c) => c.id === selectedCustomer)?.name ||
-                "Walk-in"
-              : "Walk-in",
-            items: cartSnapshot.map((item) => {
-              const unitLabel =
-                (item as any)?.unit?.name ||
-                (item as any)?.unitName ||
-                (item as any)?.unit_name ||
-                (item as any)?.unit ||
-                undefined;
-              return {
-                name: item.name,
-                quantity: item.quantity,
-                price: getSellingPrice(item),
-                unit: unitLabel,
-              };
-            }),
-            subtotal: subtotal,
-            discount: globalDiscountAmount > 0 ? globalDiscountAmount : undefined,
-            total: total,
-            paymentMethod: method === "Cash" ? "CASH" : "CARD",
-            amountPaid,
-            changeAmount: changeAmount > 0 ? changeAmount : undefined,
-            thankYouMessage: "Thank you for shopping!",
-            footerMessage: "Visit us again soon!",
-          };
+        if (autoPrint) {
+          try {
+            // Get branch name from localStorage (correct source)
+            const storedBranchName = localStorage.getItem("branchName");
+            
+            console.log("🏢 Current Branch:", storedBranchName);
+            
+            // Use DB branch address when available instead of hardcoded city text
+            const fullAddress = "Karachi, Pakistan";
+           
+            console.log("fullAddress", fullAddress);
+            const receiptDataForServer: ReceiptData = {
+              storeName: storedBranchName || branchInfo.name || "MANPASAND GENERAL STORE",
+              tagline: "Quality • Service • Value",
+              address: fullAddress,
+              transactionId: transactionId,
+              timestamp: new Date(receiptData.timestamp).toISOString(),
+              cashier: receiptData.cashier || "Walk-in",
+              customerType: selectedCustomer
+                ? customers.find((c) => c.id === selectedCustomer)?.name ||
+                  "Walk-in"
+                : "Walk-in",
+              items: cartSnapshot.map((item) => {
+                const unitLabel =
+                  (item as any)?.unit?.name ||
+                  (item as any)?.unitName ||
+                  (item as any)?.unit_name ||
+                  (item as any)?.unit ||
+                  undefined;
+                return {
+                  name: item.name,
+                  quantity: item.quantity,
+                  price: getSellingPrice(item),
+                  unit: unitLabel,
+                };
+              }),
+              subtotal: subtotal,
+              discount: globalDiscountAmount > 0 ? globalDiscountAmount : undefined,
+              total: total,
+              paymentMethod: method === "Cash" ? "CASH" : "CARD",
+              amountPaid,
+              changeAmount: changeAmount > 0 ? changeAmount : undefined,
+              thankYouMessage: "Thank you for shopping!",
+              footerMessage: "Visit us again soon!",
+            };
 
-          // Get printer from global settings (Printer Settings page)
-          const printerToUse = getReceiptPrinterObj();
-          if (!printerToUse) {
-            throw new Error("No receipt printer configured. Go to Printer Settings to select one.");
+            // Get printer from global settings (Printer Settings page)
+            const printerToUse = getReceiptPrinterObj();
+            if (!printerToUse) {
+              throw new Error("No receipt printer configured. Go to Printer Settings to select one.");
+            }
+
+            const printerObj = {
+              ...printerToUse,
+              columns: printerToUse.receiptProfile?.columns || { fontA: 48, fontB: 64 },
+            };
+
+            const job = {
+              copies: 1,
+              cut: true,
+              openDrawer: false,
+            };
+
+            // Print via print server
+            // Use same API format as backend: printer, receiptData, job
+            await printReceiptViaServer(
+              printerObj,
+              receiptDataForServer,
+              job
+            );
+          } catch (printError) {
+            console.error("Print error:", printError);
+            // Print failed - no toast shown
           }
-
-          const printerObj = {
-            ...printerToUse,
-            columns: printerToUse.receiptProfile?.columns || { fontA: 48, fontB: 64 },
-          };
-
-          const job = {
-            copies: 1,
-            cut: true,
-            openDrawer: false,
-          };
-
-          // Print via print server
-          // Use same API format as backend: printer, receiptData, job
-          await printReceiptViaServer(
-            printerObj,
-            receiptDataForServer,
-            job
-          );
-        } catch (printError) {
-          console.error("Print error:", printError);
-          // Print failed - no toast shown
         }
+
+        setTimeout(() => {
+          setCart([]);
+          setGlobalDiscountValue("");
+        }, 300);
 
         return true;
       } catch (error) {
@@ -2337,6 +2348,22 @@ export function NewSale() {
                 min="0"
                 step="0.01"
               />
+            </div>
+            <div className="flex items-center space-x-2 py-1">
+              <input
+                type="checkbox"
+                id="auto-print"
+                checked={autoPrint}
+                onChange={(e) => {
+                  const val = e.target.checked;
+                  setAutoPrint(val);
+                  localStorage.setItem("pos_auto_print", String(val));
+                }}
+                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+              />
+              <label htmlFor="auto-print" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
+                Print Receipt automatically
+              </label>
             </div>
             {paymentError && (
               <p className="text-sm text-red-600">{paymentError}</p>

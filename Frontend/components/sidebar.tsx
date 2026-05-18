@@ -168,8 +168,8 @@ const menuSections: SidebarMenuSection[] = [
     ],
   },
   {
-    id: "inv-stock",
-    label: "Stock & Movements",
+    id: "inv-stock-ops",
+    label: "Stock Operations",
     expandable: true,
     items: [
       {
@@ -191,16 +191,23 @@ const menuSections: SidebarMenuSection[] = [
         roles: PURCHASE_ROLES,
       },
       {
-        id: "transfers",
-        label: "Transfers",
-        icon: Truck,
-        roles: TRANSFER_ROLES,
-      },
-      {
         id: "stock-out",
         label: "Stock Out",
         icon: Package,
         roles: STOCK_OUT_ROLES,
+      },
+    ],
+  },
+  {
+    id: "inv-movements",
+    label: "Movements & Adjustments",
+    expandable: true,
+    items: [
+      {
+        id: "transfers",
+        label: "Transfers",
+        icon: Truck,
+        roles: TRANSFER_ROLES,
       },
       {
         id: "stock-adjustment",
@@ -236,8 +243,8 @@ const menuSections: SidebarMenuSection[] = [
     ],
   },
   {
-    id: "inv-master",
-    label: "Catalog & Master Data",
+    id: "inv-catalog",
+    label: "Catalog Data",
     expandable: true,
     items: [
       {
@@ -254,16 +261,23 @@ const menuSections: SidebarMenuSection[] = [
         roles: ADMIN_ROLES,
       },
       */
+      { id: "units", label: "Units", icon: Package, roles: ADMIN_ROLES },
+      { id: "brand", label: "Brands", icon: StoreIcon, roles: ADMIN_ROLES },
+      { id: "colors", label: "Colors", icon: Package, roles: ADMIN_ROLES },
+      { id: "sizes", label: "Sizes", icon: Package, roles: ADMIN_ROLES },
+    ],
+  },
+  {
+    id: "inv-master",
+    label: "Master Data",
+    expandable: true,
+    items: [
       {
         id: "branches",
         label: "Branches",
         icon: Store,
         roles: BRANCH_DATA_ROLES,
       },
-      { id: "units", label: "Units", icon: Package, roles: ADMIN_ROLES },
-      { id: "brand", label: "Brands", icon: StoreIcon, roles: ADMIN_ROLES },
-      { id: "colors", label: "Colors", icon: Package, roles: ADMIN_ROLES },
-      { id: "sizes", label: "Sizes", icon: Package, roles: ADMIN_ROLES },
       {
         id: "suppliers",
         label: "Suppliers",

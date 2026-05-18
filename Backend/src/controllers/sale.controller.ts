@@ -122,10 +122,16 @@ const createSaleController = asyncHandler(async (req: Request, res: Response) =>
 });
 
 const refundSaleController = asyncHandler(async (req: Request, res: Response) => {
-    const { customerId, returnedItems = [], exchangedItems = [], notes } = req.body;
+    const { customerId, returnedItems = [], exchangedItems = [], notes, branchId: bodyBranchId } = req.body;
     const originalSaleId = req.params.saleId;
     const createdBy = req.user!.id;
-    const branchId = req.user?.branch_id as string;
+    // Admin/super-admin users have no `branch_id` on their JWT, so we let
+    // them either pass `branchId` in the body or fall back to the original
+    // sale's branch (resolved inside the service).
+    const branchId: string | undefined =
+        (typeof bodyBranchId === 'string' && bodyBranchId) ||
+        req.user?.branch_id ||
+        undefined;
 
     const sale = await saleService.createExchangeOrReturnSale({
         originalSaleId,
@@ -146,7 +152,7 @@ const getTodaySalesController = asyncHandler(async (req: Request, res: Response)
 });
 
 const getRecentSaleItemProductNameAndPrice = asyncHandler(async (req: Request, res: Response) => {
-    const branchId = req.user?.branch_id as string;
+    const branchId = resolveBranchId(req);
     const recentSaleItem = await saleService.getRecentSaleItemsProductNameAndPrice(branchId);
     new ApiResponse(recentSaleItem, "Recent sale item product name and price fetched successfully").send(res);
 });

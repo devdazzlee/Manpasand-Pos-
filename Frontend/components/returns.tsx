@@ -252,6 +252,15 @@ export function Returns() {
     exchangedItems: [],
     notes: "",
   })
+  // Inline validation errors, keyed by field name. Toasts disappear; an
+  // inline message right under the input tells the user exactly what's
+  // wrong, the moment they click "Process Return".
+  const [formErrors, setFormErrors] = useState<{
+    sale?: string
+    refundMethod?: string
+    items?: string
+    exchangeItems?: string
+  }>({})
 
   // Fetch products for exchange
   const fetchProducts = async () => {
@@ -446,6 +455,7 @@ export function Returns() {
         notes: "",
       })
       setSelectedSale(null)
+      setFormErrors({})
     }
   }, [isProcessOpen])
 
@@ -659,54 +669,42 @@ export function Returns() {
   const handleProcessReturn = async () => {
     // Filter out items with quantity 0 before validation
     const validReturnedItems = newReturn.returnedItems.filter(item => item.quantity > 0)
-    
-    if (!newReturn.saleId || (validReturnedItems.length === 0 && newReturn.exchangedItems.length === 0)) {
-      toast({
-        title: "Missing Information",
-        description: "Please select a sale and add items to return or exchange.",
-        variant: "destructive",
-      })
-      return
+
+    // Collect ALL validation problems in one pass and render them inline,
+    // next to the offending field. Toasts vanish; inline errors stay until
+    // the user fixes them.
+    const nextErrors: typeof formErrors = {}
+
+    if (!newReturn.saleId) {
+      nextErrors.sale = "Please select a sale."
     }
 
-    // Validate return type specific requirements
     if (newReturn.returnType === "REFUND" && !newReturn.refundMethod) {
-      toast({
-        title: "Missing Information",
-        description: "Please select a refund method.",
-        variant: "destructive",
-      })
-      return
+      nextErrors.refundMethod = "Please select a refund method."
     }
 
     if (newReturn.returnType === "EXCHANGE" && newReturn.exchangedItems.length === 0) {
-      toast({
-        title: "Missing Information",
-        description: "Please add items for exchange.",
-        variant: "destructive",
-      })
-      return
+      nextErrors.exchangeItems = "Please add at least one item for exchange."
     }
 
-    // Validate return quantities
-    const hasInvalidQuantity = selectedReturnItems.some(item => 
-      item.returnQuantity > item.originalQuantity
-    )
-    
-    if (hasInvalidQuantity) {
-      toast({
-        title: "Invalid Return Quantity",
-        description: "Return quantity cannot exceed original sale quantity.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    // Validate that we have at least one item to return or exchange
     if (validReturnedItems.length === 0 && newReturn.exchangedItems.length === 0) {
+      nextErrors.items = "Please select at least one item to return or exchange."
+    }
+
+    const hasInvalidQuantity = selectedReturnItems.some(item =>
+      item.returnQuantity > item.originalQuantity,
+    )
+    if (hasInvalidQuantity) {
+      nextErrors.items = "Return quantity cannot exceed original sale quantity."
+    }
+
+    setFormErrors(nextErrors)
+    if (Object.keys(nextErrors).length > 0) {
+      // One concise toast as a secondary signal for users who don't look at
+      // the field directly — the inline errors are the primary feedback.
       toast({
-        title: "Missing Information",
-        description: "Please select at least one item to return or add items for exchange.",
+        title: "Please fix the highlighted fields",
+        description: Object.values(nextErrors)[0],
         variant: "destructive",
       })
       return
@@ -746,10 +744,13 @@ export function Returns() {
       
       const response = await apiClient.patch(`/sale/${newReturn.saleId}/refund`, payload)
 
-      // Show success toast
+      // Show success toast — wording follows the chosen mode.
+      const isExchange = newReturn.returnType === "EXCHANGE"
       toast({
-        title: "Return Processed",
-        description: "Return has been processed successfully.",
+        title: isExchange ? "Exchange Processed" : "Refund Processed",
+        description: isExchange
+          ? "Exchange has been processed successfully."
+          : "Refund has been processed successfully.",
         variant: "default",
       })
 
@@ -770,7 +771,12 @@ export function Returns() {
       setExchangeItems([])
       setExchangeProductSearch("")
       setSelectedSale(null)
-      
+      setFormErrors({})
+      // Clear the page-level search so the user lands back on the full
+      // returns list. Leaving the previous term in the input made it look
+      // like the refunded sale ID was auto-filled.
+      setSearchTerm("")
+
       // Refresh data after closing modal (don't await to avoid blocking)
       fetchReturns()
       fetchSales()
@@ -801,7 +807,10 @@ export function Returns() {
       
       toast({
         variant: "destructive",
-        title: "Failed to process return",
+        title:
+          newReturn.returnType === "EXCHANGE"
+            ? "Failed to process exchange"
+            : "Failed to process refund",
         description: errorMessage,
       })
       // Don't close modal on error - let user see the error and try again
@@ -1083,13 +1092,16 @@ export function Returns() {
           <h1 className="text-2xl md:text-3xl font-bold">Returns & Exchange</h1>
           <p className="text-sm md:text-base text-gray-600">Process customer returns and refunds</p>
         </div>
-        <Dialog 
-          open={isProcessOpen} 
+        <Dialog
+          open={isProcessOpen}
           onOpenChange={(open) => {
             // Prevent closing modal while processing
             if (!open && processingReturn) {
               return
             }
+            // Closing the dialog should drop any inline error state so it
+            // doesn't blink on the next open.
+            if (!open) setFormErrors({})
             setIsProcessOpen(open)
           }}
         >
@@ -1101,8 +1113,14 @@ export function Returns() {
           </DialogTrigger>
           <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
             <DialogHeader>
-              <DialogTitle>Process Return</DialogTitle>
-              <DialogDescription>Process a customer return or refund</DialogDescription>
+              <DialogTitle>
+                {newReturn.returnType === "EXCHANGE" ? "Process Exchange" : "Process Refund"}
+              </DialogTitle>
+              <DialogDescription>
+                {newReturn.returnType === "EXCHANGE"
+                  ? "Swap returned items for new ones."
+                  : "Refund a customer for returned items."}
+              </DialogDescription>
             </DialogHeader>
             <div className="space-y-4">
               <div className="space-y-2" ref={saleDropdownRef}>
@@ -1206,6 +1224,8 @@ export function Returns() {
                       setExchangeItems([])
                       setNewReturn((prev) => ({ ...prev, exchangedItems: [] }))
                     }
+                    // Switching mode invalidates the previous mode's errors.
+                    setFormErrors({})
                   }}
                   className="flex gap-6"
                 >
@@ -1230,11 +1250,23 @@ export function Returns() {
                   <Label htmlFor="refund-method">Refund Method *</Label>
                   <Select
                     value={newReturn.refundMethod || ""}
-                    onValueChange={(value) =>
+                    onValueChange={(value) => {
                       setNewReturn((prev) => ({ ...prev, refundMethod: value }))
-                    }
+                      // Clear the inline error as soon as the user picks a method.
+                      if (formErrors.refundMethod) {
+                        setFormErrors((prev) => ({ ...prev, refundMethod: undefined }))
+                      }
+                    }}
                   >
-                    <SelectTrigger id="refund-method">
+                    <SelectTrigger
+                      id="refund-method"
+                      aria-invalid={formErrors.refundMethod ? true : undefined}
+                      className={
+                        formErrors.refundMethod
+                          ? "border-red-500 focus:ring-red-500 focus-visible:ring-red-500"
+                          : ""
+                      }
+                    >
                       <SelectValue placeholder="Select refund method" />
                     </SelectTrigger>
                     <SelectContent>
@@ -1245,7 +1277,23 @@ export function Returns() {
                       <SelectItem value="original_payment">Original Payment Method</SelectItem>
                     </SelectContent>
                   </Select>
+                  {formErrors.refundMethod && (
+                    <p className="text-sm text-red-600 mt-1" role="alert">
+                      {formErrors.refundMethod}
+                    </p>
+                  )}
                 </div>
+              )}
+
+              {formErrors.items && (
+                <p className="text-sm text-red-600" role="alert">
+                  {formErrors.items}
+                </p>
+              )}
+              {formErrors.exchangeItems && (
+                <p className="text-sm text-red-600" role="alert">
+                  {formErrors.exchangeItems}
+                </p>
               )}
 
               {selectedReturnItems.length > 0 && (
@@ -1265,13 +1313,21 @@ export function Returns() {
                             variant="outline"
                             size="sm"
                             onClick={() => handleReturnQuantityChange(item.productId, item.returnQuantity - 1)}
-                            disabled={item.returnQuantity <= 0}
+                            // Minimum return qty is 1 — going to 0 means
+                            // "refund nothing of this item", which doesn't
+                            // make sense for an item that's in the return
+                            // list.
+                            disabled={item.returnQuantity <= 1}
                           >
                             <Minus className="w-3 h-3" />
                           </Button>
                           <Input
                             type="text"
                             inputMode="decimal"
+                            // Lock the input when there's only one valid
+                            // value (originalQuantity === 1). Same logic as
+                            // the - and + buttons being disabled.
+                            disabled={item.originalQuantity <= 1}
                             value={returnQuantityInputs[item.productId] !== undefined ? returnQuantityInputs[item.productId] : (item.returnQuantity === 0 ? "" : String(item.returnQuantity))}
                             onChange={(e) => {
                               const value = e.target.value
@@ -1561,7 +1617,13 @@ export function Returns() {
               </Button>
               <Button onClick={handleProcessReturn} disabled={processingReturn}>
                 {processingReturn && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
-                {processingReturn ? "Processing..." : "Process Return"}
+                {processingReturn
+                  ? newReturn.returnType === "EXCHANGE"
+                    ? "Processing exchange..."
+                    : "Processing refund..."
+                  : newReturn.returnType === "EXCHANGE"
+                    ? "Process Exchange"
+                    : "Process Refund"}
               </Button>
             </DialogFooter>
           </DialogContent>

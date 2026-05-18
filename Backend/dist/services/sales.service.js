@@ -488,13 +488,31 @@ class SaleService {
                 ...exchangedItems.map((item) => item.productId),
             ])];
         const uniqueExchangeProductIds = [...new Set(exchangedItems.map((item) => item.productId))];
-        const [originalSale, branch, customer, exchangeProducts, stocks] = await Promise.all([
-            client_2.prisma.sale.findUnique({
-                where: { id: originalSaleId },
-                include: { sale_items: true },
-            }),
+        // Step 1 — load the original sale first so we can derive the branch when
+        // the caller didn't (or couldn't) provide one. We MUST resolve a real
+        // branch_id before touching prisma.stock.findMany, which rejects null.
+        const originalSale = await client_2.prisma.sale.findUnique({
+            where: { id: originalSaleId },
+            include: { sale_items: true },
+        });
+        if (!originalSale)
+            throw new apiError_1.AppError(400, 'Original sale not found');
+        // Guard against duplicate refunds/exchanges. Without this check the same
+        // sale can be refunded N times — the UI's "Ready for return" panel keeps
+        // showing it because the original sale stays COMPLETED, and stock keeps
+        // getting re-credited on every retry.
+        if (originalSale.status === client_1.SaleStatus.REFUNDED || originalSale.status === client_1.SaleStatus.EXCHANGED) {
+            throw new apiError_1.AppError(400, `This sale has already been ${originalSale.status === client_1.SaleStatus.REFUNDED ? 'refunded' : 'exchanged'}.`);
+        }
+        const resolvedBranchId = (branchId && branchId.trim()) || originalSale.branch_id || null;
+        if (!resolvedBranchId) {
+            throw new apiError_1.AppError(400, 'Branch is required for a refund/exchange. Provide branchId in the request, or assign a branch to the original sale.');
+        }
+        // Step 2 — now that branchId is guaranteed non-null, fan out the
+        // remaining lookups in parallel.
+        const [branch, customer, exchangeProducts, stocks] = await Promise.all([
             client_2.prisma.branch.findUnique({
-                where: { id: branchId },
+                where: { id: resolvedBranchId },
                 select: { id: true },
             }),
             customerId
@@ -513,13 +531,11 @@ class SaleService {
                 ? client_2.prisma.stock.findMany({
                     where: {
                         product_id: { in: uniqueProductIds },
-                        branch_id: branchId,
+                        branch_id: resolvedBranchId,
                     },
                 })
                 : Promise.resolve([]),
         ]);
-        if (!originalSale)
-            throw new apiError_1.AppError(400, 'Original sale not found');
         if (!branch)
             throw new apiError_1.AppError(400, 'Invalid branch');
         if (customerId && !customer)
@@ -616,7 +632,7 @@ class SaleService {
         ops.push(client_2.prisma.sale.create({
             data: {
                 sale_number: `SALE-${Date.now()}`,
-                branch_id: branchId,
+                branch_id: resolvedBranchId,
                 customer_id: customerId,
                 original_sale_id: originalSaleId,
                 notes,
@@ -638,12 +654,26 @@ class SaleService {
                 sale_items: true,
             },
         }));
+        // Flip the ORIGINAL sale into a terminal state so it stops appearing in
+        // "ready for return" lists and the duplicate-refund guard above can
+        // intercept any retry. This is what makes the UI eventually-consistent:
+        // - getSalesForReturns filters by status === COMPLETED → drops it.
+        // - The returns list filters by status in (REFUNDED, EXCHANGED) → includes it.
+        const originalNewStatus = hasReturn && hasExchange
+            ? client_1.SaleStatus.EXCHANGED
+            : hasReturn
+                ? client_1.SaleStatus.REFUNDED
+                : client_1.SaleStatus.EXCHANGED;
+        ops.push(client_2.prisma.sale.update({
+            where: { id: originalSaleId },
+            data: { status: originalNewStatus },
+        }));
         for (const [productId, quantityChange] of stockNetChanges.entries()) {
             ops.push(client_2.prisma.stock.upsert({
                 where: {
                     product_id_branch_id: {
                         product_id: productId,
-                        branch_id: branchId,
+                        branch_id: resolvedBranchId,
                     },
                 },
                 update: {
@@ -653,7 +683,7 @@ class SaleService {
                 },
                 create: {
                     product_id: productId,
-                    branch_id: branchId,
+                    branch_id: resolvedBranchId,
                     current_quantity: quantityChange,
                     minimum_quantity: new client_1.Prisma.Decimal(0),
                     maximum_quantity: new client_1.Prisma.Decimal(1000),
@@ -665,7 +695,7 @@ class SaleService {
             ops.push(client_2.prisma.stockMovement.createMany({
                 data: movementRows.map((movement) => ({
                     product_id: movement.product_id,
-                    branch_id: branchId,
+                    branch_id: resolvedBranchId,
                     movement_type: movement.movement_type,
                     reference_id: originalSaleId,
                     reference_type: movement.reference_type,
@@ -682,7 +712,7 @@ class SaleService {
     }
     async getRecentSaleItemsProductNameAndPrice(branchId) {
         const sale = await client_2.prisma.sale.findFirst({
-            where: { branch_id: branchId },
+            where: branchId ? { branch_id: branchId } : undefined,
             orderBy: { sale_date: 'desc' },
             include: {
                 sale_items: {

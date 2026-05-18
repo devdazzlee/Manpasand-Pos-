@@ -633,7 +633,10 @@ class SaleService {
     createdBy,
   }: {
     originalSaleId: string;
-    branchId: string;
+    // Optional: the controller couldn't know the right branch when an admin
+    // (with no `branch_id` on their JWT) hits this endpoint. We resolve the
+    // branch from the original sale before any stock-touching query runs.
+    branchId?: string | null;
     customerId?: string;
     returnedItems: ReturnItem[];
     exchangedItems: ExchangeItem[];
@@ -650,13 +653,40 @@ class SaleService {
     ])];
     const uniqueExchangeProductIds = [...new Set(exchangedItems.map((item) => item.productId))];
 
-    const [originalSale, branch, customer, exchangeProducts, stocks] = await Promise.all([
-      prisma.sale.findUnique({
-        where: { id: originalSaleId },
-        include: { sale_items: true },
-      }),
+    // Step 1 — load the original sale first so we can derive the branch when
+    // the caller didn't (or couldn't) provide one. We MUST resolve a real
+    // branch_id before touching prisma.stock.findMany, which rejects null.
+    const originalSale = await prisma.sale.findUnique({
+      where: { id: originalSaleId },
+      include: { sale_items: true },
+    });
+    if (!originalSale) throw new AppError(400, 'Original sale not found');
+
+    // Guard against duplicate refunds/exchanges. Without this check the same
+    // sale can be refunded N times — the UI's "Ready for return" panel keeps
+    // showing it because the original sale stays COMPLETED, and stock keeps
+    // getting re-credited on every retry.
+    if (originalSale.status === SaleStatus.REFUNDED || originalSale.status === SaleStatus.EXCHANGED) {
+      throw new AppError(
+        400,
+        `This sale has already been ${originalSale.status === SaleStatus.REFUNDED ? 'refunded' : 'exchanged'}.`,
+      );
+    }
+
+    const resolvedBranchId: string | null =
+      (branchId && branchId.trim()) || originalSale.branch_id || null;
+    if (!resolvedBranchId) {
+      throw new AppError(
+        400,
+        'Branch is required for a refund/exchange. Provide branchId in the request, or assign a branch to the original sale.',
+      );
+    }
+
+    // Step 2 — now that branchId is guaranteed non-null, fan out the
+    // remaining lookups in parallel.
+    const [branch, customer, exchangeProducts, stocks] = await Promise.all([
       prisma.branch.findUnique({
-        where: { id: branchId },
+        where: { id: resolvedBranchId },
         select: { id: true },
       }),
       customerId
@@ -675,13 +705,12 @@ class SaleService {
         ? prisma.stock.findMany({
             where: {
               product_id: { in: uniqueProductIds },
-              branch_id: branchId,
+              branch_id: resolvedBranchId,
             },
           })
         : Promise.resolve([] as Array<{ product_id: string; current_quantity: Prisma.Decimal }>),
     ]);
 
-    if (!originalSale) throw new AppError(400, 'Original sale not found');
     if (!branch) throw new AppError(400, 'Invalid branch');
     if (customerId && !customer) throw new AppError(400, 'Invalid customer');
 
@@ -819,7 +848,7 @@ class SaleService {
       prisma.sale.create({
         data: {
           sale_number: `SALE-${Date.now()}`,
-          branch_id: branchId,
+          branch_id: resolvedBranchId,
           customer_id: customerId,
           original_sale_id: originalSaleId,
           notes,
@@ -844,13 +873,31 @@ class SaleService {
       }),
     );
 
+    // Flip the ORIGINAL sale into a terminal state so it stops appearing in
+    // "ready for return" lists and the duplicate-refund guard above can
+    // intercept any retry. This is what makes the UI eventually-consistent:
+    // - getSalesForReturns filters by status === COMPLETED → drops it.
+    // - The returns list filters by status in (REFUNDED, EXCHANGED) → includes it.
+    const originalNewStatus =
+      hasReturn && hasExchange
+        ? SaleStatus.EXCHANGED
+        : hasReturn
+          ? SaleStatus.REFUNDED
+          : SaleStatus.EXCHANGED;
+    ops.push(
+      prisma.sale.update({
+        where: { id: originalSaleId },
+        data: { status: originalNewStatus },
+      }),
+    );
+
     for (const [productId, quantityChange] of stockNetChanges.entries()) {
       ops.push(
         prisma.stock.upsert({
           where: {
             product_id_branch_id: {
               product_id: productId,
-              branch_id: branchId,
+              branch_id: resolvedBranchId,
             },
           },
           update: {
@@ -860,7 +907,7 @@ class SaleService {
           },
           create: {
             product_id: productId,
-            branch_id: branchId,
+            branch_id: resolvedBranchId,
             current_quantity: quantityChange,
             minimum_quantity: new Prisma.Decimal(0),
             maximum_quantity: new Prisma.Decimal(1000),
@@ -875,7 +922,7 @@ class SaleService {
         prisma.stockMovement.createMany({
           data: movementRows.map((movement) => ({
             product_id: movement.product_id,
-            branch_id: branchId,
+            branch_id: resolvedBranchId,
             movement_type: movement.movement_type,
             reference_id: originalSaleId,
             reference_type: movement.reference_type,
@@ -893,9 +940,9 @@ class SaleService {
     return sale as Prisma.SaleGetPayload<{ include: { sale_items: true } }>;
   }
 
-  async getRecentSaleItemsProductNameAndPrice(branchId: string) {
+  async getRecentSaleItemsProductNameAndPrice(branchId?: string) {
     const sale = await prisma.sale.findFirst({
-      where: { branch_id: branchId },
+      where: branchId ? { branch_id: branchId } : undefined,
       orderBy: { sale_date: 'desc' },
       include: {
         sale_items: {
