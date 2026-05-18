@@ -34,7 +34,10 @@ router.get('/me', customerAuth_middleware_1.authenticateCustomer, (0, asyncHandl
 }));
 // Admin routes (protected by admin auth - MUST come after customer routes)
 router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
-router.post('/', (0, validation_middleware_1.validate)(customer_validation_1.cusRegisterationSchema), customer_controller_1.createShopCustomer);
+// Admin-side create — full form (email + optional name/phone/address/billing).
+// Old route used cusRegisterationSchema which only validated email, letting
+// every other field through unchecked.
+router.post('/', (0, validation_middleware_1.validate)(customer_validation_1.customerCreateByAdminSchema), customer_controller_1.createShopCustomer);
 router.get('/', customer_controller_1.getCustomers);
 router.put('/:customerId', (0, validation_middleware_1.validate)(customer_validation_1.customerUpdateSchema), customer_controller_1.updateCustomerByAdmin);
 router.delete('/:customerId', customer_controller_1.deleteCustomer);

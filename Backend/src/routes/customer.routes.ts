@@ -1,7 +1,12 @@
 import express, { Request, Response } from 'express';
 import { createCustomer, createShopCustomer, deleteCustomer, getCustomerById, getCustomers, loginCustomer, logoutCustomer, updateCustomer, updateCustomerByAdmin } from '../controllers/customer.controller';
 import { validate } from '../middleware/validation.middleware';
-import { cusRegisterationSchema, customerLoginSchema, customerUpdateSchema } from '../validations/customer.validation';
+import {
+  cusRegisterationSchema,
+  customerLoginSchema,
+  customerCreateByAdminSchema,
+  customerUpdateSchema,
+} from '../validations/customer.validation';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { authenticateCustomer } from '../middleware/customerAuth.middleware';
 import asyncHandler from '../middleware/asyncHandler';
@@ -34,7 +39,10 @@ router.get('/me', authenticateCustomer, asyncHandler(async (req: Request, res: R
 
 // Admin routes (protected by admin auth - MUST come after customer routes)
 router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
-router.post('/', validate(cusRegisterationSchema), createShopCustomer);
+// Admin-side create — full form (email + optional name/phone/address/billing).
+// Old route used cusRegisterationSchema which only validated email, letting
+// every other field through unchecked.
+router.post('/', validate(customerCreateByAdminSchema), createShopCustomer);
 router.get('/', getCustomers);
 router.put('/:customerId', validate(customerUpdateSchema), updateCustomerByAdmin);
 router.delete('/:customerId', deleteCustomer);

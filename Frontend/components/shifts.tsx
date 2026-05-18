@@ -561,8 +561,8 @@ export function Shifts() {
       setIsDeleteOpen(false);
       setShiftToDelete(null);
       toast({
-        title: "Success (Kamyabi)",
-        description: "Shift deleted successfully (Shift delete ho gayi hai)",
+        title: "Success",
+        description: "Shift deleted successfully",
       })
       await getAllShifts();
     } catch (error: any) {
@@ -668,7 +668,7 @@ export function Shifts() {
               <div className="flex flex-col items-center justify-center space-y-2 py-4">
                 <Search className="h-8 w-8 text-gray-400 animate-pulse" />
                 <p className="text-gray-600 font-semibold">No shifts found matching your search</p>
-                <p className="text-sm text-gray-400">(Koi shift nahi mili - search ya filter tabdeel karein)</p>
+                <p className="text-sm text-gray-400">No matching shifts — try a different search or filter.</p>
               </div>
             </TableCell>
           </TableRow>
@@ -896,7 +896,7 @@ export function Shifts() {
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         <Card className="border-l-4 border-l-amber-500 hover:shadow-md transition-shadow duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold text-gray-700">Active Staff (Kaam Par)</CardTitle>
+            <CardTitle className="text-sm font-semibold text-gray-700">Active Staff</CardTitle>
             <Users className="h-4 w-4 text-amber-500" />
           </CardHeader>
           <CardContent>
@@ -907,7 +907,7 @@ export function Shifts() {
         
         <Card className="border-l-4 border-l-blue-500 hover:shadow-md transition-shadow duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold text-gray-700">Today's Hours (Aaj ke Ghante)</CardTitle>
+            <CardTitle className="text-sm font-semibold text-gray-700">Today's Hours</CardTitle>
             <Clock className="h-4 w-4 text-blue-500" />
           </CardHeader>
           <CardContent>
@@ -918,7 +918,7 @@ export function Shifts() {
 
         <Card className="border-l-4 border-l-green-500 hover:shadow-md transition-shadow duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold text-gray-700">Today's Expense (Aaj ka Kharch)</CardTitle>
+            <CardTitle className="text-sm font-semibold text-gray-700">Today's Expense</CardTitle>
             <DollarSign className="h-4 w-4 text-green-500" />
           </CardHeader>
           <CardContent>
@@ -929,7 +929,7 @@ export function Shifts() {
 
         <Card className="border-l-4 border-l-purple-500 hover:shadow-md transition-shadow duration-200">
           <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-            <CardTitle className="text-sm font-semibold text-gray-700">Today's Sales (Aaj ki Sale)</CardTitle>
+            <CardTitle className="text-sm font-semibold text-gray-700">Today's Sales</CardTitle>
             <DollarSign className="h-4 w-4 text-purple-500" />
           </CardHeader>
           <CardContent>
@@ -943,19 +943,19 @@ export function Shifts() {
         <TabsList className="bg-gray-100 p-1 rounded-xl h-auto flex flex-wrap md:inline-flex gap-1 border border-gray-200">
           <TabsTrigger value="today" className="rounded-lg py-2.5 px-4 text-xs md:text-sm font-semibold flex items-center gap-2 transition-all duration-200 data-[state=active]:bg-white data-[state=active]:shadow-sm">
             <Sun className="h-4 w-4 text-amber-500" />
-            <span>Today (Aaj)</span>
+            <span>Today</span>
           </TabsTrigger>
           <TabsTrigger value="week" className="rounded-lg py-2.5 px-4 text-xs md:text-sm font-semibold flex items-center gap-2 transition-all duration-200 data-[state=active]:bg-white data-[state=active]:shadow-sm">
             <CalendarIcon className="h-4 w-4 text-blue-500" />
-            <span>This Week (Hafta)</span>
+            <span>This Week</span>
           </TabsTrigger>
           <TabsTrigger value="scheduled" className="rounded-lg py-2.5 px-4 text-xs md:text-sm font-semibold flex items-center gap-2 transition-all duration-200 data-[state=active]:bg-white data-[state=active]:shadow-sm">
             <Clock className="h-4 w-4 text-indigo-500" />
-            <span>Upcoming (Aane Wale)</span>
+            <span>Upcoming</span>
           </TabsTrigger>
           <TabsTrigger value="completed" className="rounded-lg py-2.5 px-4 text-xs md:text-sm font-semibold flex items-center gap-2 transition-all duration-200 data-[state=active]:bg-white data-[state=active]:shadow-sm">
             <CheckCircle className="h-4 w-4 text-green-500" />
-            <span>Completed (Purane)</span>
+            <span>Completed</span>
           </TabsTrigger>
         </TabsList>
 
@@ -975,7 +975,7 @@ export function Shifts() {
                 <SelectValue placeholder="Filter by employee" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All Employees (Sab Staff)</SelectItem>
+                <SelectItem value="all">All Employees</SelectItem>
                 {employees.map((emp) => (
                   <SelectItem key={emp.id} value={emp.id}>
                     {emp.name}
@@ -992,7 +992,7 @@ export function Shifts() {
                 }}
                 className="h-10 text-red-600 hover:text-red-700 hover:bg-red-50 font-medium px-3 rounded-lg border border-red-100 transition-colors"
               >
-                Clear (Saaf karein)
+                Clear
               </Button>
             )}
           </div>
@@ -1331,7 +1331,7 @@ export function Shifts() {
               Delete Shift Assignment?
             </DialogTitle>
             <DialogDescription className="text-sm text-gray-500">
-              Kya aap waqai is employee ki shift ko delete karna chahte hain? This action cannot be undone.
+              Are you sure you want to delete this employee's shift? This action cannot be undone.
             </DialogDescription>
           </DialogHeader>
 

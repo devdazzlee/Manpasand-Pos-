@@ -18,6 +18,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -48,10 +49,13 @@ import {
   Loader2,
   DollarSign,
   UserCheck,
+  UserX,
+  UserPlus,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
-import { useToast } from "@/hooks/use-toast";
+import { toast } from "sonner";
+import { z } from "zod";
 import { PageLoader } from "@/components/ui/page-loader";
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
 
@@ -65,9 +69,66 @@ interface Customer {
   created_at: string;
 }
 
+// Mirrors backend customerCreateByAdminSchema. Optional fields use refine so
+// "" doesn't trip min checks — only a present non-empty value is validated.
+const phoneRegex = /^[0-9+\-\s]+$/;
+
+const customerFormSchema = z.object({
+  email: z
+    .string({ required_error: "Email is required" })
+    .trim()
+    .min(1, "Email is required")
+    .email("Invalid email address"),
+  name: z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => !v || v.length >= 1, { message: "Name is required" }),
+  phone_number: z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => !v || (v.length >= 7 && v.length <= 20), {
+      message: "Phone number must be 7-20 digits",
+    })
+    .refine((v) => !v || phoneRegex.test(v), {
+      message: "Phone number must contain only digits, +, -, or spaces",
+    }),
+  address: z.string().trim().optional(),
+  billing_address: z.string().trim().optional(),
+  is_active: z.boolean().optional(),
+});
+
+type CustomerFormErrors = Partial<
+  Record<"email" | "name" | "phone_number" | "address" | "billing_address", string>
+>;
+
+const zodErrorsToMap = (err: z.ZodError): CustomerFormErrors => {
+  const map: CustomerFormErrors = {};
+  for (const issue of err.errors) {
+    const key = issue.path[0] as keyof CustomerFormErrors | undefined;
+    if (key && !map[key]) map[key] = issue.message;
+  }
+  return map;
+};
+
+const firstZodError = (err: z.ZodError) =>
+  err.errors[0]?.message || "Please fix the highlighted fields";
+
+// Surface the exact backend message verbatim — never hardcode generic copy.
+const extractApiError = (err: any, fallback: string) => {
+  const data = err?.response?.data;
+  if (data?.errors && Array.isArray(data.errors) && data.errors.length > 0) {
+    const first = data.errors[0];
+    if (typeof first === "string") return first;
+    if (first?.message) return first.message;
+  }
+  if (data?.message) return data.message;
+  if (err?.message) return err.message;
+  return fallback;
+};
+
 export function Customers() {
-  const { toast } = useToast();
-  
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -79,28 +140,18 @@ export function Customers() {
   const [editingCustomer, setEditingCustomer] = useState<(Customer & { billing_address?: string }) | null>(null);
   const [deleteTargetCustomer, setDeleteTargetCustomer] = useState<Customer | null>(null);
   const [isDeletingCustomer, setIsDeletingCustomer] = useState(false);
+  const [addErrors, setAddErrors] = useState<CustomerFormErrors>({});
+  const [editErrors, setEditErrors] = useState<CustomerFormErrors>({});
 
   // 1) Fetch customers
   const fetchCustomers = async () => {
     setIsLoading(true);
     try {
       const res = await apiClient.get(`${API_BASE}/customer`);
-      // API shape: { success, message, data: Customer[] }
       setCustomers(res.data.data);
-      toast({
-        title: "Success",
-        description: "Customers loaded successfully",
-      });
     } catch (err: any) {
       console.log(err);
-      let errorMessage = "Failed to load customers";
-      if (err.response?.data?.message) errorMessage = err.response.data.message;
-      else if (err.message) errorMessage = err.message;
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
+      toast.error(extractApiError(err, "Failed to load customers"));
     } finally {
       setIsLoading(false);
     }
@@ -120,33 +171,40 @@ export function Customers() {
 
   // 2) Create customer (all fields)
   const handleAddCustomer = async () => {
-    if (!newCustomer.email) return;
+    console.log("[customer] add submit", newCustomer);
+    const parsed = customerFormSchema.safeParse({
+      email: newCustomer.email ?? "",
+      name: newCustomer.name ?? "",
+      phone_number: newCustomer.phone_number ?? "",
+      address: newCustomer.address ?? "",
+      billing_address: newCustomer.billing_address ?? "",
+      is_active: newCustomer.is_active ?? true,
+    });
+    if (!parsed.success) {
+      const map = zodErrorsToMap(parsed.error);
+      setAddErrors(map);
+      toast.error(firstZodError(parsed.error));
+      return;
+    }
+    setAddErrors({});
     setIsAdding(true);
     try {
+      const data = parsed.data;
       await apiClient.post(`${API_BASE}/customer`, {
-        email: newCustomer.email,
-        name: newCustomer.name,
-        phone_number: newCustomer.phone_number,
-        address: newCustomer.address,
-        billing_address: newCustomer.billing_address,
+        email: data.email,
+        name: data.name || undefined,
+        phone_number: data.phone_number || undefined,
+        address: data.address || undefined,
+        billing_address: data.billing_address || undefined,
+        is_active: data.is_active ?? true,
       });
       setNewCustomer({});
       setIsAddDialogOpen(false);
-      toast({
-        title: "Success",
-        description: "Customer created successfully",
-      });
+      toast.success("Customer created successfully");
       fetchCustomers();
     } catch (err: any) {
       console.log(err);
-      let errorMessage = "Failed to create customer";
-      if (err.response?.data?.message) errorMessage = err.response.data.message;
-      else if (err.message) errorMessage = err.message;
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
+      toast.error(extractApiError(err, "Failed to create customer"));
     } finally {
       setIsAdding(false);
     }
@@ -155,31 +213,41 @@ export function Customers() {
   // Edit customer (all fields, use PUT)
   const handleEditCustomer = async () => {
     if (!editingCustomer) return;
+    console.log("[customer] edit submit", editingCustomer);
+    const parsed = customerFormSchema.safeParse({
+      email: editingCustomer.email ?? "",
+      name: editingCustomer.name ?? "",
+      phone_number: editingCustomer.phone_number ?? "",
+      address: editingCustomer.address ?? "",
+      billing_address: editingCustomer.billing_address ?? "",
+      is_active: editingCustomer.is_active,
+    });
+    if (!parsed.success) {
+      const map = zodErrorsToMap(parsed.error);
+      setEditErrors(map);
+      toast.error(firstZodError(parsed.error));
+      return;
+    }
+    setEditErrors({});
     setIsEditing(true);
     try {
+      const data = parsed.data;
+      // Send null for cleared optional fields so the backend (nullable+optional)
+      // can clear them; otherwise pass the trimmed value.
       await apiClient.put(`${API_BASE}/customer/${editingCustomer.id}`, {
-        email: editingCustomer.email,
-        name: editingCustomer.name,
-        phone_number: editingCustomer.phone_number,
-        address: editingCustomer.address,
-        billing_address: editingCustomer.billing_address,
+        email: data.email,
+        name: data.name ? data.name : null,
+        phone_number: data.phone_number ? data.phone_number : null,
+        address: data.address ? data.address : null,
+        billing_address: data.billing_address ? data.billing_address : null,
+        is_active: data.is_active ?? true,
       });
       setEditingCustomer(null);
-      toast({
-        title: "Success",
-        description: "Customer updated successfully",
-      });
+      toast.success("Customer updated successfully");
       fetchCustomers();
     } catch (err: any) {
       console.log(err);
-      let errorMessage = "Failed to update customer";
-      if (err.response?.data?.message) errorMessage = err.response.data.message;
-      else if (err.message) errorMessage = err.message;
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
+      toast.error(extractApiError(err, "Failed to update customer"));
     } finally {
       setIsEditing(false);
     }
@@ -191,30 +259,27 @@ export function Customers() {
     setIsDeletingCustomer(true);
     try {
       await apiClient.delete(`${API_BASE}/customer/${deleteTargetCustomer.id}`);
-      toast({
-        title: "Success",
-        description: "Customer deleted successfully",
-      });
+      toast.success("Customer deleted successfully");
       setDeleteTargetCustomer(null);
       fetchCustomers();
     } catch (err: any) {
       console.log(err);
-      let errorMessage = "Failed to delete customer";
-      if (err.response?.data?.message) errorMessage = err.response.data.message;
-      else if (err.message) errorMessage = err.message;
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
+      toast.error(extractApiError(err, "Failed to delete customer"));
     } finally {
       setIsDeletingCustomer(false);
     }
   };
 
-  // Stats (total, active, revenue — revenue = 0 since API doesn't return it)
+  // Stats derived from the customer list. Revenue isn't returned by /customer
+  // so we drop it and surface signals that are actually useful from this screen.
   const activeCount = customers.filter((c) => c.is_active).length;
-  const totalRevenue = 0;
+  const inactiveCount = customers.length - activeCount;
+  const monthStart = new Date();
+  monthStart.setDate(1);
+  monthStart.setHours(0, 0, 0, 0);
+  const newThisMonth = customers.filter(
+    (c) => new Date(c.created_at) >= monthStart,
+  ).length;
 
   // Filter by name/email/phone
   const filteredCustomers = customers.filter((customer) =>
@@ -239,7 +304,13 @@ export function Customers() {
         </div>
         <Dialog
           open={isAddDialogOpen}
-          onOpenChange={setIsAddDialogOpen}
+          onOpenChange={(open) => {
+            setIsAddDialogOpen(open);
+            if (!open) {
+              setAddErrors({});
+              setNewCustomer({});
+            }
+          }}
         >
           <DialogTrigger asChild>
             <Button>
@@ -252,21 +323,36 @@ export function Customers() {
               <DialogTitle>Add New Customer</DialogTitle>
             </DialogHeader>
             <div className="space-y-4">
+              {Object.keys(addErrors).length > 0 && (
+                <div
+                  className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                  role="alert"
+                >
+                  Please fix the highlighted fields below.
+                </div>
+              )}
               <div>
-                <Label htmlFor="email">Email</Label>
+                <Label htmlFor="email">
+                  Email <span className="text-red-600">*</span>
+                </Label>
                 <Input
                   id="email"
                   type="email"
                   value={newCustomer.email || ""}
-                  onChange={(e) =>
-                    setNewCustomer({
-                      ...newCustomer,
-                      email: e.target.value,
-                    })
-                  }
+                  onChange={(e) => {
+                    setNewCustomer({ ...newCustomer, email: e.target.value });
+                    if (addErrors.email)
+                      setAddErrors((p) => ({ ...p, email: undefined }));
+                  }}
                   placeholder="Enter customer email"
-                  required
+                  className={addErrors.email ? "border-red-500" : ""}
+                  aria-invalid={!!addErrors.email}
                 />
+                {addErrors.email && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {addErrors.email}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="name">Name</Label>
@@ -274,14 +360,20 @@ export function Customers() {
                   id="name"
                   type="text"
                   value={newCustomer.name || ""}
-                  onChange={(e) =>
-                    setNewCustomer({
-                      ...newCustomer,
-                      name: e.target.value,
-                    })
-                  }
+                  onChange={(e) => {
+                    setNewCustomer({ ...newCustomer, name: e.target.value });
+                    if (addErrors.name)
+                      setAddErrors((p) => ({ ...p, name: undefined }));
+                  }}
                   placeholder="Enter customer name"
+                  className={addErrors.name ? "border-red-500" : ""}
+                  aria-invalid={!!addErrors.name}
                 />
+                {addErrors.name && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {addErrors.name}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="phone_number">Phone Number</Label>
@@ -289,14 +381,23 @@ export function Customers() {
                   id="phone_number"
                   type="tel"
                   value={newCustomer.phone_number || ""}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setNewCustomer({
                       ...newCustomer,
                       phone_number: e.target.value,
-                    })
-                  }
+                    });
+                    if (addErrors.phone_number)
+                      setAddErrors((p) => ({ ...p, phone_number: undefined }));
+                  }}
                   placeholder="Enter phone number"
+                  className={addErrors.phone_number ? "border-red-500" : ""}
+                  aria-invalid={!!addErrors.phone_number}
                 />
+                {addErrors.phone_number && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {addErrors.phone_number}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="address">Address</Label>
@@ -304,14 +405,20 @@ export function Customers() {
                   id="address"
                   type="text"
                   value={newCustomer.address || ""}
-                  onChange={(e) =>
-                    setNewCustomer({
-                      ...newCustomer,
-                      address: e.target.value,
-                    })
-                  }
+                  onChange={(e) => {
+                    setNewCustomer({ ...newCustomer, address: e.target.value });
+                    if (addErrors.address)
+                      setAddErrors((p) => ({ ...p, address: undefined }));
+                  }}
                   placeholder="Enter address"
+                  className={addErrors.address ? "border-red-500" : ""}
+                  aria-invalid={!!addErrors.address}
                 />
+                {addErrors.address && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {addErrors.address}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="billing_address">Billing Address</Label>
@@ -319,19 +426,50 @@ export function Customers() {
                   id="billing_address"
                   type="text"
                   value={newCustomer.billing_address || ""}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setNewCustomer({
                       ...newCustomer,
                       billing_address: e.target.value,
-                    })
-                  }
+                    });
+                    if (addErrors.billing_address)
+                      setAddErrors((p) => ({
+                        ...p,
+                        billing_address: undefined,
+                      }));
+                  }}
                   placeholder="Enter billing address"
+                  className={addErrors.billing_address ? "border-red-500" : ""}
+                  aria-invalid={!!addErrors.billing_address}
+                />
+                {addErrors.billing_address && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {addErrors.billing_address}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="add-is-active" className="text-sm font-medium">
+                    Status
+                  </Label>
+                  <p className="text-xs text-gray-500">
+                    {(newCustomer.is_active ?? true)
+                      ? "Customer is active and can be used in sales"
+                      : "Customer is inactive and hidden from sales selection"}
+                  </p>
+                </div>
+                <Switch
+                  id="add-is-active"
+                  checked={newCustomer.is_active ?? true}
+                  onCheckedChange={(checked) =>
+                    setNewCustomer({ ...newCustomer, is_active: checked })
+                  }
                 />
               </div>
               <Button
                 onClick={handleAddCustomer}
                 className="w-full"
-                disabled={isAdding || !newCustomer.email}
+                disabled={isAdding}
               >
                 {isAdding ? (
                   <>
@@ -348,9 +486,10 @@ export function Customers() {
       </div>
 
       {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         {isLoading ? (
           <>
+            <StatCardSkeleton />
             <StatCardSkeleton />
             <StatCardSkeleton />
             <StatCardSkeleton />
@@ -365,9 +504,10 @@ export function Customers() {
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">
-                  {customers.length}
-                </div>
+                <div className="text-2xl font-bold">{customers.length}</div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  All customers in the system
+                </p>
               </CardContent>
             </Card>
             <Card>
@@ -381,19 +521,45 @@ export function Customers() {
                 <div className="text-2xl font-bold text-green-600">
                   {activeCount}
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Available for new sales
+                </p>
               </CardContent>
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">
-                  Total Revenue
+                  Inactive Customers
                 </CardTitle>
-                {/* <DollarSign className="h-4 w-4 text-blue-600" /> */}
+                <UserX className="h-4 w-4 text-red-600" />
+              </CardHeader>
+              <CardContent>
+                <div className="text-2xl font-bold text-red-600">
+                  {inactiveCount}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Hidden from sales selection
+                </p>
+              </CardContent>
+            </Card>
+            <Card>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                <CardTitle className="text-sm font-medium">
+                  New This Month
+                </CardTitle>
+                <UserPlus className="h-4 w-4 text-blue-600" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold text-blue-600">
-                  Rs {totalRevenue.toFixed(2)}
+                  {newThisMonth}
                 </div>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Added since{" "}
+                  {monthStart.toLocaleDateString(undefined, {
+                    month: "short",
+                    day: "numeric",
+                  })}
+                </p>
               </CardContent>
             </Card>
           </>
@@ -515,7 +681,12 @@ export function Customers() {
       {/* Edit Dialog */}
       <Dialog
         open={!!editingCustomer}
-        onOpenChange={() => setEditingCustomer(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditingCustomer(null);
+            setEditErrors({});
+          }
+        }}
       >
         <DialogContent>
           <DialogHeader>
@@ -523,20 +694,38 @@ export function Customers() {
           </DialogHeader>
           {editingCustomer && (
             <div className="space-y-4">
+              {Object.keys(editErrors).length > 0 && (
+                <div
+                  className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
+                  role="alert"
+                >
+                  Please fix the highlighted fields below.
+                </div>
+              )}
               <div>
-                <Label htmlFor="edit-email">Email</Label>
+                <Label htmlFor="edit-email">
+                  Email <span className="text-red-600">*</span>
+                </Label>
                 <Input
                   id="edit-email"
                   type="email"
-                  value={editingCustomer.email}
-                  onChange={(e) =>
+                  value={editingCustomer.email || ""}
+                  onChange={(e) => {
                     setEditingCustomer({
                       ...editingCustomer,
                       email: e.target.value,
-                    })
-                  }
-                  required
+                    });
+                    if (editErrors.email)
+                      setEditErrors((p) => ({ ...p, email: undefined }));
+                  }}
+                  className={editErrors.email ? "border-red-500" : ""}
+                  aria-invalid={!!editErrors.email}
                 />
+                {editErrors.email && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {editErrors.email}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="edit-name">Name</Label>
@@ -544,14 +733,23 @@ export function Customers() {
                   id="edit-name"
                   type="text"
                   value={editingCustomer.name || ""}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setEditingCustomer({
                       ...editingCustomer,
                       name: e.target.value,
-                    })
-                  }
+                    });
+                    if (editErrors.name)
+                      setEditErrors((p) => ({ ...p, name: undefined }));
+                  }}
                   placeholder="Enter customer name"
+                  className={editErrors.name ? "border-red-500" : ""}
+                  aria-invalid={!!editErrors.name}
                 />
+                {editErrors.name && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {editErrors.name}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="edit-phone">Phone Number</Label>
@@ -559,14 +757,23 @@ export function Customers() {
                   id="edit-phone"
                   type="tel"
                   value={editingCustomer.phone_number || ""}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setEditingCustomer({
                       ...editingCustomer,
                       phone_number: e.target.value,
-                    })
-                  }
+                    });
+                    if (editErrors.phone_number)
+                      setEditErrors((p) => ({ ...p, phone_number: undefined }));
+                  }}
                   placeholder="Enter phone number"
+                  className={editErrors.phone_number ? "border-red-500" : ""}
+                  aria-invalid={!!editErrors.phone_number}
                 />
+                {editErrors.phone_number && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {editErrors.phone_number}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="edit-address">Address</Label>
@@ -574,14 +781,23 @@ export function Customers() {
                   id="edit-address"
                   type="text"
                   value={editingCustomer.address || ""}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setEditingCustomer({
                       ...editingCustomer,
                       address: e.target.value,
-                    })
-                  }
+                    });
+                    if (editErrors.address)
+                      setEditErrors((p) => ({ ...p, address: undefined }));
+                  }}
                   placeholder="Enter address"
+                  className={editErrors.address ? "border-red-500" : ""}
+                  aria-invalid={!!editErrors.address}
                 />
+                {editErrors.address && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {editErrors.address}
+                  </p>
+                )}
               </div>
               <div>
                 <Label htmlFor="edit-billing-address">Billing Address</Label>
@@ -589,13 +805,44 @@ export function Customers() {
                   id="edit-billing-address"
                   type="text"
                   value={editingCustomer.billing_address || ""}
-                  onChange={(e) =>
+                  onChange={(e) => {
                     setEditingCustomer({
                       ...editingCustomer,
                       billing_address: e.target.value,
-                    })
-                  }
+                    });
+                    if (editErrors.billing_address)
+                      setEditErrors((p) => ({
+                        ...p,
+                        billing_address: undefined,
+                      }));
+                  }}
                   placeholder="Enter billing address"
+                  className={editErrors.billing_address ? "border-red-500" : ""}
+                  aria-invalid={!!editErrors.billing_address}
+                />
+                {editErrors.billing_address && (
+                  <p className="text-sm text-red-600 mt-1" role="alert">
+                    {editErrors.billing_address}
+                  </p>
+                )}
+              </div>
+              <div className="flex items-center justify-between rounded-md border p-3">
+                <div className="space-y-0.5">
+                  <Label htmlFor="edit-is-active" className="text-sm font-medium">
+                    Status
+                  </Label>
+                  <p className="text-xs text-gray-500">
+                    {editingCustomer.is_active
+                      ? "Customer is active and can be used in sales"
+                      : "Customer is inactive and hidden from sales selection"}
+                  </p>
+                </div>
+                <Switch
+                  id="edit-is-active"
+                  checked={editingCustomer.is_active}
+                  onCheckedChange={(checked) =>
+                    setEditingCustomer({ ...editingCustomer, is_active: checked })
+                  }
                 />
               </div>
               <Button
