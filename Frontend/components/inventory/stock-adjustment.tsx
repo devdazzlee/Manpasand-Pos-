@@ -34,16 +34,9 @@ import { API_BASE } from "@/config/constants";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { usePosData } from "@/hooks/use-pos-data";
+import { PageLoader } from "@/components/ui/page-loader";
 
-// --- PROFESSIONAL LOADER ---
-function ProfessionalLoader({ message = "Loading Adjustment Ledger..." }: { message?: string }) {
-  return (
-    <div className="min-h-[60vh] flex flex-col items-center justify-center p-8">
-      <div className="h-12 w-12 rounded-full border-4 border-slate-100 border-t-indigo-600 animate-spin mb-4" />
-      <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">{message}</h3>
-    </div>
-  );
-}
+
 
 export function StockAdjustment() {
   const { 
@@ -59,6 +52,10 @@ export function StockAdjustment() {
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [totalAdjustments, setTotalAdjustments] = useState(0);
+  const PAGE_SIZE = 20;
   
   // Custom Search Dropdown States
   const [searchTerm, setSearchTerm] = useState("");
@@ -76,13 +73,18 @@ export function StockAdjustment() {
     reason: "",
   });
 
-  const fetchAdjustments = useCallback(async () => {
+  const fetchAdjustments = useCallback(async (pg: number = page) => {
     try {
       setLoading(true);
       const res = await apiClient.get(`${API_BASE}/stock-adjustments`, {
-        params: { page: 1, limit: 100 },
+        params: { page: pg, limit: PAGE_SIZE },
       });
       setAdjustments(res.data?.data || []);
+      const total = res.data?.meta?.total ?? res.data?.data?.length ?? 0;
+      setTotalAdjustments(total);
+      setTotalPages(
+        res.data?.meta?.totalPages ?? Math.max(1, Math.ceil(total / PAGE_SIZE)),
+      );
     } catch (e: any) {
       toast({
         title: "Sync Error",
@@ -92,7 +94,7 @@ export function StockAdjustment() {
     } finally {
       setTimeout(() => setLoading(false), 500);
     }
-  }, [toast]);
+  }, [page]);
 
   const fetchStockLevels = useCallback(async () => {
     try {
@@ -109,11 +111,15 @@ export function StockAdjustment() {
   }, []);
 
   useEffect(() => {
-    fetchAdjustments();
     fetchStockLevels();
     fetchProducts();
     fetchBranches();
-  }, [fetchAdjustments, fetchStockLevels, fetchProducts, fetchBranches]);
+  }, [fetchStockLevels, fetchProducts, fetchBranches]);
+
+  // Refetch adjustments whenever the page changes.
+  useEffect(() => {
+    fetchAdjustments();
+  }, [fetchAdjustments]);
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -198,7 +204,9 @@ export function StockAdjustment() {
          referenceNo: "", reason: "" 
       });
       setSearchTerm("");
-      fetchAdjustments();
+      // Jump back to page 1 so the newly-created adjustment is visible.
+      if (page !== 1) setPage(1);
+      else fetchAdjustments(1);
       fetchStockLevels();
     } catch (e: any) {
       const backendMessage = e?.response?.data?.message || e?.message || "Failed to execute stock adjustment";
@@ -244,314 +252,401 @@ export function StockAdjustment() {
     return { totalCount, shrink: shrink.toFixed(2), gain: gain.toFixed(2) };
   }, [adjustments]);
 
-  if (loading && adjustments.length === 0) return <ProfessionalLoader />;
+  if (loading && adjustments.length === 0) return <PageLoader message="Loading stock adjustments..." />;
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-6">
-      
-      {/* PROFESSIONAL HEADER */}
+    <div className="p-6 max-w-[1600px] mx-auto space-y-6 text-black">
+      {/* Header */}
       <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div>
-           <h1 className="text-2xl font-black text-slate-800 tracking-tight">STOCK ADJUSTMENTS</h1>
-           <p className="text-xs font-bold text-slate-400 uppercase tracking-widest mt-0.5 italic">Physical Inventory Reconciliation & Operational Correction Ledger</p>
+          <h1 className="text-2xl font-bold text-black">Stock Adjustments</h1>
+          <p className="text-sm text-gray-600 mt-1">
+            Physical inventory reconciliation & operational corrections
+          </p>
         </div>
 
-        <div className="flex items-center gap-3">
-           <Button variant="outline" onClick={exportCSV} className="border-slate-200 h-10 font-bold text-xs gap-2 text-slate-600 shadow-sm">
-             <Download className="h-4 w-4" /> Export CSV
-           </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            onClick={exportCSV}
+            size="sm"
+            className="text-sm text-black"
+          >
+            <Download className="h-4 w-4 mr-2" /> Export CSV
+          </Button>
 
-           <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-              <DialogTrigger asChild>
-                <Button className="h-10 px-6 bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs gap-2 shadow-lg shadow-blue-200 tracking-wider">
-                  <Plus className="h-4 w-4" /> NEW ADJUSTMENT
-                </Button>
-              </DialogTrigger>
-              <DialogContent className="max-w-xl p-0 overflow-hidden border-none shadow-2xl rounded-2xl">
-                <DialogHeader className="p-6 bg-slate-900 border-b border-slate-800">
-                  <DialogTitle className="text-white text-lg font-black tracking-tight">INVENTORY CORRECTION FORM</DialogTitle>
-                  <DialogDescription className="text-slate-400 text-[10px] font-bold uppercase tracking-widest">Submit formal stock level adjustments and audit notes</DialogDescription>
-                </DialogHeader>
-                
-                <div className="p-6 space-y-6 bg-white overflow-y-auto max-h-[80vh]">
-                   <div className="grid grid-cols-2 gap-4">
-                      {/* PRODUCT SEARCH */}
-                      <div className="space-y-1.5 relative" ref={dropdownRef}>
-                         <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Asset Selection</Label>
-                         <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-slate-400" />
-                            <Input 
-                              placeholder="Search SKU or Name..."
-                              className="h-10 pl-9 rounded-xl border-slate-100 bg-slate-50 font-bold text-slate-700 text-xs"
-                              value={form.productId ? selectedProduct?.name : searchTerm}
-                              onFocus={() => {
-                                setProductDropdownOpen(true);
-                                if (form.productId) {
-                                  setSearchTerm("");
-                                  setForm(f => ({ ...f, productId: "" }));
-                                }
-                              }}
-                              onChange={(e) => {
-                                setSearchTerm(e.target.value);
-                                setProductDropdownOpen(true);
-                              }}
-                            />
-                            {form.productId && (
-                              <button 
-                                onClick={() => {
-                                  setForm(f => ({ ...f, productId: "" }));
-                                  setSearchTerm("");
-                                }}
-                                className="absolute right-3 top-1/2 -translate-y-1/2"
-                              >
-                                <X className="h-4 w-4 text-slate-400" />
-                              </button>
-                            )}
-                         </div>
+          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+            <DialogTrigger asChild>
+              <Button size="sm" className="text-sm">
+                <Plus className="h-4 w-4 mr-2" /> New Adjustment
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl">
+              <DialogHeader>
+                <DialogTitle className="text-lg font-semibold text-black">
+                  Inventory Correction Form
+                </DialogTitle>
+                <DialogDescription className="text-sm text-gray-600">
+                  Submit stock level adjustments and audit notes
+                </DialogDescription>
+              </DialogHeader>
 
-                         {productDropdownOpen && (
-                            <div className="absolute left-0 right-0 z-50 mt-1 max-h-48 overflow-y-auto rounded-xl border border-slate-100 bg-white shadow-xl">
-                               {filteredProducts.length === 0 ? (
-                                  <div className="p-3 text-center text-[10px] text-slate-400 font-bold uppercase">No Products Found</div>
-                               ) : (
-                                  filteredProducts.map(p => (
-                                    <button
-                                      key={p.id}
-                                      onClick={() => {
-                                        setForm(f => ({ ...f, productId: p.id }));
-                                        setProductDropdownOpen(false);
-                                        setSearchTerm(p.name);
-                                      }}
-                                      className="w-full px-4 py-3 text-left hover:bg-slate-50 transition-colors border-b last:border-none border-slate-50"
-                                    >
-                                       <span className="block font-bold text-slate-800 text-[11px] uppercase truncate">{p.name}</span>
-                                       <span className="block text-[9px] font-medium text-slate-400 uppercase">SKU: {p.sku || "N/A"}</span>
-                                    </button>
-                                  ))
-                               )}
-                            </div>
-                         )}
-                      </div>
-
-                      <div className="space-y-1.5">
-                         <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Operation Branch</Label>
-                         <Select value={form.branchId} onValueChange={(v) => setForm(f => ({...f, branchId: v}))}>
-                           <SelectTrigger className="h-10 rounded-xl border-slate-100 bg-slate-50 text-xs font-bold">
-                             <SelectValue placeholder="Select Branch" />
-                           </SelectTrigger>
-                           <SelectContent>
-                             {branches.map(b => <SelectItem key={b.id} value={b.id} className="text-xs">{b.name}</SelectItem>)}
-                           </SelectContent>
-                         </Select>
-                      </div>
-                   </div>
-
-                   <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                         <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Adjustment Type</Label>
-                         <Select value={form.adjustmentType} onValueChange={(v) => setForm(f => ({...f, adjustmentType: v}))}>
-                            <SelectTrigger className="h-10 rounded-xl border-slate-100 bg-slate-100/50 text-xs font-bold">
-                               <SelectValue placeholder="Select Type" />
-                            </SelectTrigger>
-                            <SelectContent>
-                               <SelectItem value="RECONCILIATION">Reconciliation (Reset)</SelectItem>
-                               <SelectItem value="ADDITION">Addition (+)</SelectItem>
-                               <SelectItem value="SUBTRACTION">Subtraction (-)</SelectItem>
-                            </SelectContent>
-                         </Select>
-                      </div>
-
-                      <div className="space-y-1.5">
-                         <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Operational Category</Label>
-                         <Select value={form.adjustmentCategory} onValueChange={(v) => setForm(f => ({...f, adjustmentCategory: v}))}>
-                            <SelectTrigger className="h-10 rounded-xl border-slate-100 bg-slate-100/50 text-xs font-bold text-blue-600">
-                               <SelectValue placeholder="Select Category" />
-                            </SelectTrigger>
-                            <SelectContent>
-                               <SelectItem value="CORRECTION">Standard Correction</SelectItem>
-                               <SelectItem value="DAMAGE">Damaged / Broken</SelectItem>
-                               <SelectItem value="EXPIRED">Expired Stock</SelectItem>
-                               <SelectItem value="THEFT">Missing / Theft</SelectItem>
-                               <SelectItem value="RETURN_TO_SUPPLIER">Return to Supplier</SelectItem>
-                               <SelectItem value="ADMINISTRATIVE">Administrative Change</SelectItem>
-                            </SelectContent>
-                         </Select>
-                      </div>
-                   </div>
-
-                   <div className="p-4 rounded-xl border border-slate-100 bg-slate-50/50 grid grid-cols-2 gap-6 items-center">
-                       <div className="space-y-0.5">
-                          <p className="text-[10px] font-bold uppercase text-slate-400">Current System Qty</p>
-                          <h4 className="text-xl font-black text-slate-900 tracking-tighter">{form.productId && form.branchId ? systemQty : "—"} <span className="text-[10px] text-slate-400 font-bold uppercase">Units</span></h4>
-                       </div>
-                       
-                       <div className="space-y-1.5">
-                          <Label className="text-[10px] font-black uppercase text-blue-600">
-                             {form.adjustmentType === 'RECONCILIATION' ? 'New Physical Count' : 'Quantity Change'}
-                          </Label>
-                          <Input 
-                            type="number"
-                            className="h-10 rounded-xl border-blue-100 bg-white shadow-sm text-sm font-black text-blue-600 text-center"
-                            placeholder="0"
-                            value={form.adjustmentType === 'RECONCILIATION' ? form.physicalCount : form.changeQuantity}
-                            onChange={(e) => {
-                               if (form.adjustmentType === 'RECONCILIATION') setForm(f => ({...f, physicalCount: e.target.value}));
-                               else setForm(f => ({...f, changeQuantity: e.target.value}));
-                            }}
-                          />
-                       </div>
-                   </div>
-
-                   <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-1.5">
-                         <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Reference / Batch ID</Label>
-                         <Input 
-                           className="h-10 rounded-xl border-slate-100 bg-slate-50/50 text-xs font-bold italic"
-                           placeholder="REF-XXXXX"
-                           value={form.referenceNo}
-                           onChange={(e) => setForm(f => ({...f, referenceNo: e.target.value}))}
-                         />
-                      </div>
-                      
-                      <div className="space-y-1.5 opacity-60">
-                         <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Stock Variance</Label>
-                         <div className={`h-10 rounded-xl flex items-center px-4 font-black text-xs uppercase tracking-tight ${Number(difference) >= 0 ? "text-emerald-600" : "text-rose-600"}`}>
-                            {difference !== null ? (
-                               <>{difference > 0 ? "+" : ""}{difference} Units</>
-                            ) : "Pending Input"}
-                         </div>
-                      </div>
-                   </div>
-
-                   <div className="space-y-1.5">
-                      <Label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Internal Remarks / Reason</Label>
-                      <Textarea 
-                        className="rounded-xl border-slate-100 bg-slate-50/30 text-xs text-slate-600 min-h-[60px] resize-none"
-                        placeholder="Detailed explanation for audit log..."
-                        value={form.reason}
-                        onChange={(e) => setForm(f => ({...f, reason: e.target.value}))}
+              <div className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
+                <div className="grid grid-cols-2 gap-4">
+                  {/* Product search */}
+                  <div className="space-y-1.5 relative" ref={dropdownRef}>
+                    <Label className="text-sm text-black">Product</Label>
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                      <Input
+                        placeholder="Search SKU or name..."
+                        className="h-9 pl-9 text-sm text-black"
+                        value={form.productId ? selectedProduct?.name : searchTerm}
+                        onFocus={() => {
+                          setProductDropdownOpen(true);
+                          if (form.productId) {
+                            setSearchTerm("");
+                            setForm((f) => ({ ...f, productId: "" }));
+                          }
+                        }}
+                        onChange={(e) => {
+                          setSearchTerm(e.target.value);
+                          setProductDropdownOpen(true);
+                        }}
                       />
-                   </div>
+                      {form.productId && (
+                        <button
+                          onClick={() => {
+                            setForm((f) => ({ ...f, productId: "" }));
+                            setSearchTerm("");
+                          }}
+                          className="absolute right-3 top-1/2 -translate-y-1/2"
+                        >
+                          <X className="h-4 w-4 text-gray-400" />
+                        </button>
+                      )}
+                    </div>
 
-                   <Button onClick={handleSubmit} disabled={submitting} className="w-full h-12 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-black text-xs uppercase tracking-[0.1em] shadow-lg shadow-blue-200">
-                      {submitting ? <Loader2 className="h-5 w-5 animate-spin" /> : "SUBMIT ADJUSTMENT"}
-                   </Button>
+                    {productDropdownOpen && (
+                      <div className="mt-1 max-h-56 overflow-y-auto rounded-md border border-gray-200 bg-white">
+                        {filteredProducts.length === 0 ? (
+                          <div className="p-3 text-center text-sm text-gray-500">
+                            No products found
+                          </div>
+                        ) : (
+                          filteredProducts.map((p) => (
+                            <button
+                              key={p.id}
+                              onClick={() => {
+                                setForm((f) => ({ ...f, productId: p.id }));
+                                setProductDropdownOpen(false);
+                                setSearchTerm(p.name);
+                              }}
+                              className="w-full px-3 py-2 text-left hover:bg-gray-50 border-b last:border-none border-gray-100"
+                            >
+                              <span className="block text-sm text-black truncate">{p.name}</span>
+                              <span className="block text-xs text-gray-500">SKU: {p.sku || "N/A"}</span>
+                            </button>
+                          ))
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-sm text-black">Branch</Label>
+                    <Select value={form.branchId} onValueChange={(v) => setForm((f) => ({ ...f, branchId: v }))}>
+                      <SelectTrigger className="h-9 text-sm text-black">
+                        <SelectValue placeholder="Select branch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {branches.map((b) => (
+                          <SelectItem key={b.id} value={b.id} className="text-sm">
+                            {b.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
                 </div>
-              </DialogContent>
-           </Dialog>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm text-black">Adjustment Type</Label>
+                    <Select value={form.adjustmentType} onValueChange={(v) => setForm((f) => ({ ...f, adjustmentType: v }))}>
+                      <SelectTrigger className="h-9 text-sm text-black">
+                        <SelectValue placeholder="Select type" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="RECONCILIATION">Reconciliation (Reset)</SelectItem>
+                        <SelectItem value="ADDITION">Addition (+)</SelectItem>
+                        <SelectItem value="SUBTRACTION">Subtraction (-)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-sm text-black">Category</Label>
+                    <Select value={form.adjustmentCategory} onValueChange={(v) => setForm((f) => ({ ...f, adjustmentCategory: v }))}>
+                      <SelectTrigger className="h-9 text-sm text-black">
+                        <SelectValue placeholder="Select category" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="CORRECTION">Standard correction</SelectItem>
+                        <SelectItem value="DAMAGE">Damaged / broken</SelectItem>
+                        <SelectItem value="EXPIRED">Expired stock</SelectItem>
+                        <SelectItem value="THEFT">Missing / theft</SelectItem>
+                        <SelectItem value="RETURN_TO_SUPPLIER">Return to supplier</SelectItem>
+                        <SelectItem value="ADMINISTRATIVE">Administrative</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+
+                <div className="p-4 border border-gray-200 rounded-md grid grid-cols-2 gap-4 items-center">
+                  <div>
+                    <p className="text-sm text-black">Current System Qty</p>
+                    <p className="text-lg text-black">
+                      {form.productId && form.branchId ? systemQty : "—"}{" "}
+                      <span className="text-sm text-gray-500">Units</span>
+                    </p>
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-sm text-black">
+                      {form.adjustmentType === "RECONCILIATION" ? "New Physical Count" : "Quantity Change"}
+                    </Label>
+                    <Input
+                      type="number"
+                      className="h-9 text-sm text-black text-center"
+                      placeholder="0"
+                      value={form.adjustmentType === "RECONCILIATION" ? form.physicalCount : form.changeQuantity}
+                      onChange={(e) => {
+                        if (form.adjustmentType === "RECONCILIATION")
+                          setForm((f) => ({ ...f, physicalCount: e.target.value }));
+                        else setForm((f) => ({ ...f, changeQuantity: e.target.value }));
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label className="text-sm text-black">Reference / Batch ID</Label>
+                    <Input
+                      className="h-9 text-sm text-black"
+                      placeholder="REF-XXXXX"
+                      value={form.referenceNo}
+                      onChange={(e) => setForm((f) => ({ ...f, referenceNo: e.target.value }))}
+                    />
+                  </div>
+
+                  <div className="space-y-1.5">
+                    <Label className="text-sm text-black">Stock Variance</Label>
+                    <div className="h-9 rounded-md flex items-center px-3 text-sm text-black bg-gray-50 border border-gray-200">
+                      {difference !== null ? (
+                        <>
+                          {difference > 0 ? "+" : ""}
+                          {difference} Units
+                        </>
+                      ) : (
+                        "Pending input"
+                      )}
+                    </div>
+                  </div>
+                </div>
+
+                <div className="space-y-1.5">
+                  <Label className="text-sm text-black">Remarks / Reason</Label>
+                  <Textarea
+                    className="text-sm text-black min-h-[60px] resize-none"
+                    placeholder="Detailed explanation for audit log..."
+                    value={form.reason}
+                    onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
+                  />
+                </div>
+
+                <Button onClick={handleSubmit} disabled={submitting} size="sm" className="w-full text-sm">
+                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit Adjustment"}
+                </Button>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
 
-      {/* COMPACT KPI CARDS */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
-          <Card className="rounded-2xl border-none shadow-sm bg-white p-5 border border-slate-100">
-             <div className="flex items-center gap-4">
-                <div className="bg-indigo-50 p-3 rounded-xl text-indigo-600"><History className="h-5 w-5" /></div>
-                <div>
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Active Audit Cycles</p>
-                   <h3 className="text-xl font-black text-slate-800">{stats.totalCount}</h3>
-                </div>
-             </div>
-          </Card>
-          <Card className="rounded-2xl border-none shadow-sm bg-white p-5 border border-slate-100">
-             <div className="flex items-center gap-4">
-                <div className="bg-rose-50 p-3 rounded-xl text-rose-600"><TrendingDown className="h-5 w-5" /></div>
-                <div>
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Inventory Shrinkage</p>
-                   <h3 className="text-xl font-black text-rose-600">-{stats.shrink}</h3>
-                </div>
-             </div>
-          </Card>
-          <Card className="rounded-2xl border-none shadow-sm bg-white p-5 border border-slate-100">
-             <div className="flex items-center gap-4">
-                <div className="bg-emerald-50 p-3 rounded-xl text-emerald-600"><TrendingUp className="h-5 w-5" /></div>
-                <div>
-                   <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Procedural Gains</p>
-                   <h3 className="text-xl font-black text-emerald-600">+{stats.gain}</h3>
-                </div>
-             </div>
-          </Card>
+      {/* KPI cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <Card className="p-4 border border-gray-200">
+          <div className="flex items-center gap-3">
+            <div className="bg-blue-100 p-2 rounded-md text-blue-600">
+              <History className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Active Audit Cycles</p>
+              <h3 className="text-xl font-semibold text-black">{stats.totalCount}</h3>
+            </div>
+          </div>
+        </Card>
+        <Card className="p-4 border border-gray-200">
+          <div className="flex items-center gap-3">
+            <div className="bg-red-100 p-2 rounded-md text-red-600">
+              <TrendingDown className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Inventory Shrinkage</p>
+              <h3 className="text-xl font-semibold text-red-600">-{stats.shrink}</h3>
+            </div>
+          </div>
+        </Card>
+        <Card className="p-4 border border-gray-200">
+          <div className="flex items-center gap-3">
+            <div className="bg-green-100 p-2 rounded-md text-green-600">
+              <TrendingUp className="h-5 w-5" />
+            </div>
+            <div>
+              <p className="text-sm text-gray-600">Procedural Gains</p>
+              <h3 className="text-xl font-semibold text-green-600">+{stats.gain}</h3>
+            </div>
+          </div>
+        </Card>
       </div>
 
-      {/* PROFESSIONAL HISTORY TABLE */}
-      <Card className="rounded-2xl border-none shadow-sm overflow-hidden bg-white border border-slate-100">
-        <div className="p-0 overflow-x-auto">
+      {/* History table */}
+      <Card className="border border-gray-200 overflow-hidden">
+        <div className="overflow-x-auto">
           <Table>
-            <TableHeader className="bg-slate-50/50">
-              <TableRow className="hover:bg-transparent border-slate-100">
-                <TableHead className="px-6 py-4 font-black text-[9px] uppercase tracking-widest text-slate-500">Execution Date</TableHead>
-                <TableHead className="py-4 font-black text-[9px] uppercase tracking-widest text-slate-500">Adjustment SKU / Item</TableHead>
-                <TableHead className="py-4 font-black text-[9px] uppercase tracking-widest text-slate-500">Location</TableHead>
-                <TableHead className="py-4 font-black text-[9px] uppercase tracking-widest text-slate-500">Type / Category</TableHead>
-                <TableHead className="py-4 font-black text-[9px] uppercase tracking-widest text-slate-500 text-right">Variance</TableHead>
-                <TableHead className="py-4 font-black text-[9px] uppercase tracking-widest text-slate-500 text-right">Audit Status / Remarks</TableHead>
-                <TableHead className="px-6 py-4 font-black text-[9px] uppercase tracking-widest text-slate-500 text-right">Staff</TableHead>
+            <TableHeader className="bg-gray-50">
+              <TableRow className="border-gray-200 hover:bg-transparent">
+                <TableHead className="px-6 py-4 text-sm font-medium text-black">Date</TableHead>
+                <TableHead className="py-4 text-sm font-medium text-black">Product</TableHead>
+                <TableHead className="py-4 text-sm font-medium text-black">Location</TableHead>
+                <TableHead className="py-4 text-sm font-medium text-black">Type / Category</TableHead>
+                <TableHead className="py-4 text-sm font-medium text-black text-right">Variance</TableHead>
+                <TableHead className="py-4 text-sm font-medium text-black text-right">Remarks</TableHead>
+                <TableHead className="px-6 py-4 text-sm font-medium text-black text-right">Staff</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {adjustments.map((a) => {
-                const isLoss = Number(a.difference) < 0;
-                return (
-                  <TableRow key={a.id} className="border-slate-50 hover:bg-slate-50/50 transition-colors">
-                    <TableCell className="px-6 py-4">
-                       <div className="flex flex-col">
-                          <span className="font-bold text-slate-700 text-xs">{new Date(a.adjustment_date).toLocaleDateString()}</span>
-                          <span className="text-[9px] font-medium text-slate-400 uppercase">{new Date(a.adjustment_date).toLocaleTimeString()}</span>
-                       </div>
-                    </TableCell>
-                    <TableCell className="py-4">
-                       <div className="flex flex-col">
-                          <span className="font-bold text-slate-800 text-xs truncate max-w-[150px] uppercase">{a.product?.name}</span>
-                          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">{a.product?.sku}</span>
-                       </div>
-                    </TableCell>
-                    <TableCell className="py-4">
-                       <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded bg-slate-100 text-[10px] font-black text-slate-600 uppercase italic">
-                          <MapPin className="h-2.5 w-2.5 text-indigo-500" /> {a.branch?.name}
-                       </span>
-                    </TableCell>
-                    <TableCell className="py-4">
-                       <div className="flex flex-col">
-                          <span className="text-[10px] font-black text-slate-800 uppercase tracking-tight">{a.adjustment_type}</span>
-                          <span className={`text-[9px] font-bold uppercase italic ${a.adjustment_category === 'DAMAGE' ? 'text-rose-500' : 'text-blue-500'}`}>{a.adjustment_category}</span>
-                       </div>
-                    </TableCell>
-                    <TableCell className="py-4 text-right">
-                       <div className={`font-black text-xs ${isLoss ? "text-rose-500" : "text-emerald-500"}`}>
-                          {Number(a.difference) > 0 ? "+" : ""}{a.difference}
-                       </div>
-                       <div className="text-[9px] font-bold text-slate-300 uppercase">Total: {a.physical_count ?? a.change_quantity}</div>
-                    </TableCell>
-                    <TableCell className="py-4 text-right max-w-[180px]">
-                       <div className="flex items-center justify-end gap-1.5 text-[10px] font-medium text-slate-500 italic truncate">
-                          {a.reason || "Automatic Policy Adjust"}
-                       </div>
-                       {a.reference_no && <div className="text-[9px] font-black text-slate-400 uppercase opacity-50"># {a.reference_no}</div>}
-                    </TableCell>
-                    <TableCell className="px-6 py-4 text-right">
-                       <span className="text-[10px] font-black text-slate-600 uppercase italic border-b border-slate-200 pb-1">{a.user?.email?.split('@')[0] || "Operator"}</span>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
+              {adjustments.map((a) => (
+                <TableRow key={a.id} className="border-gray-100 hover:bg-gray-50">
+                  <TableCell className="px-6 py-5 align-top">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-sm text-black">
+                        {new Date(a.adjustment_date).toLocaleDateString()}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        {new Date(a.adjustment_date).toLocaleTimeString()}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-5 align-top">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-sm text-black truncate max-w-[200px]">{a.product?.name}</span>
+                      <span className="text-xs text-gray-500">{a.product?.sku}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-5 align-top">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-gray-100 text-sm text-black">
+                      <MapPin className="h-3.5 w-3.5 text-gray-500" /> {a.branch?.name}
+                    </span>
+                  </TableCell>
+                  <TableCell className="py-5 align-top">
+                    <div className="flex flex-col gap-1">
+                      <span className="text-sm text-black">{a.adjustment_type}</span>
+                      <span className="text-xs text-gray-500">{a.adjustment_category}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-5 text-right align-top">
+                    <div className="flex flex-col gap-1 items-end">
+                      <span className="text-sm font-medium text-black">
+                        {Number(a.difference) > 0 ? "+" : ""}
+                        {a.difference}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        Total: {a.physical_count ?? a.change_quantity}
+                      </span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="py-5 text-right max-w-[200px] align-top">
+                    <div className="flex flex-col gap-1 items-end">
+                      <span className="text-sm text-black truncate max-w-full">
+                        {a.reason || "—"}
+                      </span>
+                      {a.reference_no && (
+                        <span className="text-xs text-gray-500"># {a.reference_no}</span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="px-6 py-5 text-right align-top">
+                    <span className="text-sm text-black">
+                      {a.user?.email?.split("@")[0] || "Operator"}
+                    </span>
+                  </TableCell>
+                </TableRow>
+              ))}
             </TableBody>
           </Table>
 
           {adjustments.length === 0 && !loading && (
-             <div className="p-20 flex flex-col items-center justify-center text-center">
-                <History className="h-12 w-12 text-slate-100 mb-4" />
-                <h4 className="text-xs font-bold text-slate-300 uppercase tracking-widest">No matching history found</h4>
-             </div>
+            <div className="p-16 flex flex-col items-center justify-center text-center">
+              <History className="h-10 w-10 text-gray-300 mb-3" />
+              <p className="text-sm text-black">No adjustments found</p>
+            </div>
           )}
         </div>
-      </Card>
 
-      <div className="flex justify-between items-center px-2 text-[9px] font-bold text-slate-400 uppercase tracking-widest italic">
-         <span>System Integrity: Verified</span>
-         <span className="flex items-center gap-1.5">
-            <div className="h-1.5 w-1.5 rounded-full bg-emerald-500 shadow-sm" /> Operational Nodes Online
-         </span>
-      </div>
+        {/* Pagination */}
+        {totalAdjustments > 0 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-gray-200">
+            <p className="text-sm text-black">
+              Showing {(page - 1) * PAGE_SIZE + 1}–
+              {Math.min(page * PAGE_SIZE, totalAdjustments)} of {totalAdjustments}
+            </p>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(1)}
+                disabled={page === 1 || loading}
+                className="text-sm text-black"
+              >
+                First
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1 || loading}
+                className="text-sm text-black"
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-black px-3">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page >= totalPages || loading}
+                className="text-sm text-black"
+              >
+                Next
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setPage(totalPages)}
+                disabled={page >= totalPages || loading}
+                className="text-sm text-black"
+              >
+                Last
+              </Button>
+            </div>
+          </div>
+        )}
+      </Card>
     </div>
   );
 }

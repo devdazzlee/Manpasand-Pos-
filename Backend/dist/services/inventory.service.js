@@ -195,7 +195,11 @@ class InventoryService {
             if (params.endDate)
                 where.created_at.lte = params.endDate;
         }
-        const [total, movements] = await Promise.all([
+        // Summary must reflect ALL movements matching the filter, not just the
+        // current page. Previously we summed `movements` (the paginated slice)
+        // which produced "+0 / -0" whenever the meaningful inbound/outbound
+        // records lived on a later page.
+        const [total, movements, increaseAgg, decreaseAgg] = await Promise.all([
             client_1.prisma.stockMovement.count({ where }),
             client_1.prisma.stockMovement.findMany({
                 where,
@@ -208,16 +212,24 @@ class InventoryService {
                     user: { select: { email: true } },
                 },
             }),
+            client_1.prisma.stockMovement.aggregate({
+                _sum: { quantity_change: true },
+                where: { ...where, quantity_change: { gt: 0 } },
+            }),
+            client_1.prisma.stockMovement.aggregate({
+                _sum: { quantity_change: true },
+                where: { ...where, quantity_change: { lt: 0 } },
+            }),
         ]);
         const summary = {
-            totalIncrease: movements.filter(m => (0, helpers_1.asNumber)(m.quantity_change) > 0).reduce((acc, m) => acc + (0, helpers_1.asNumber)(m.quantity_change), 0),
-            totalDecrease: movements.filter(m => (0, helpers_1.asNumber)(m.quantity_change) < 0).reduce((acc, m) => acc + Math.abs((0, helpers_1.asNumber)(m.quantity_change)), 0),
-            count: total
+            totalIncrease: (0, helpers_1.asNumber)(increaseAgg._sum.quantity_change),
+            totalDecrease: Math.abs((0, helpers_1.asNumber)(decreaseAgg._sum.quantity_change)),
+            count: total,
         };
         return {
             data: movements,
             meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
-            summary
+            summary,
         };
     }
     async getStockByLocation(branchId, userRole) {

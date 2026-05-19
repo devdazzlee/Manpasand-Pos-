@@ -26,6 +26,7 @@ import JsBarcode from "jsbarcode";
 import { PageLoader } from "./ui/page-loader";
 import { usePosData } from "@/hooks/use-pos-data";
 import { useToast } from "@/hooks/use-toast";
+import { toast as sonnerToast } from "sonner";
 import apiClient from "@/lib/apiClient";
 import { isKioskMode, silentPrint, enableKioskMode } from "@/utils/kiosk-printing";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
@@ -54,6 +55,7 @@ interface SelectedProductItem {
   packageDate: Date;
   expiryDuration: string;
   expiryDate?: Date;
+  copies: number;
 }
 
 export default function BarcodeGenerator() {
@@ -63,6 +65,10 @@ export default function BarcodeGenerator() {
   const [searchTerm, setSearchTerm] = useState("");
   const [currentProductId, setCurrentProductId] = useState("");
   const [globalExpiryDuration, setGlobalExpiryDuration] = useState("");
+  // Global default net weight + a global copies value so a whole batch can be
+  // configured in one click for bulk printing workflows.
+  const [globalNetWeight, setGlobalNetWeight] = useState("");
+  const [globalCopies, setGlobalCopies] = useState("1");
   const [productDropdownOpen, setProductDropdownOpen] = useState(false);
   const productSearchInputRef = useRef<HTMLInputElement | null>(null);
   const productDropdownRef = useRef<HTMLDivElement | null>(null);
@@ -391,21 +397,36 @@ export default function BarcodeGenerator() {
     const product = products.find((p) => p.id === productId);
     if (!product) return;
 
-    if (selectedProducts.some((sp) => sp.product.id === productId)) {
-      toast({
-        variant: "destructive",
-        title: "Product already selected",
-        description: "This product is already in the list.",
+    // If the product is already in the list, bump its copies count instead
+    // of rejecting — matches the scan-to-add behaviour and supports the bulk
+    // workflow where you re-pick the same item to print extra labels.
+    const existing = selectedProducts.find((sp) => sp.product.id === productId);
+    if (existing) {
+      const nextCopies = (existing.copies || 1) + 1;
+      setSelectedProducts((prev) =>
+        prev.map((sp) =>
+          sp.product.id === productId ? { ...sp, copies: nextCopies } : sp,
+        ),
+      );
+      sonnerToast.success(`${product.name}`, {
+        description: `Copies set to ${nextCopies}`,
+        position: "top-right",
+        duration: 300,
       });
+      setCurrentProductId("");
+      setSearchTerm("");
+      setProductDropdownOpen(false);
+      if (productSearchInputRef.current) productSearchInputRef.current.focus();
       return;
     }
 
     const newItem: SelectedProductItem = {
       id: Date.now().toString(),
       product,
-      netWeight: "",
+      netWeight: globalNetWeight || "",
       packageDate: new Date(),
       expiryDuration: "",
+      copies: Math.max(1, parseInt(globalCopies, 10) || 1),
     };
 
     if (globalExpiryDuration) {
@@ -417,12 +438,47 @@ export default function BarcodeGenerator() {
     }
 
     setSelectedProducts((prev) => [...prev, newItem]);
+    sonnerToast.success(`Added ${product.name}`, {
+      description: `SKU ${product.sku || product.code || ""}`.trim(),
+      position: "top-right",
+      duration: 300,
+    });
     setCurrentProductId("");
     setSearchTerm("");
     setProductDropdownOpen(false);
     if (productSearchInputRef.current) {
-      productSearchInputRef.current.blur();
+      // Re-focus so the next scan/search lands here without an extra click.
+      productSearchInputRef.current.focus();
     }
+  };
+
+  // Scan-to-add: if the user presses Enter and the search matches exactly one
+  // product (by SKU, code, or full name), add it immediately. If a product is
+  // already selected, bump its copies count instead of duplicating the row.
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter") return;
+    const term = searchTerm.trim();
+    if (!term) return;
+    const lower = term.toLowerCase();
+    const exact =
+      products.find((p) => (p.sku || "").toLowerCase() === lower) ||
+      products.find((p) => (p.code || "").toLowerCase() === lower) ||
+      products.find((p) => p.name.toLowerCase() === lower);
+    const match = exact || (filteredProducts.length === 1 ? filteredProducts[0] : null);
+    if (!match) return;
+    e.preventDefault();
+    const already = selectedProducts.find((sp) => sp.product.id === match.id);
+    if (already) {
+      setSelectedProducts((prev) =>
+        prev.map((sp) =>
+          sp.product.id === match.id ? { ...sp, copies: sp.copies + 1 } : sp,
+        ),
+      );
+      setSearchTerm("");
+      setProductDropdownOpen(false);
+      return;
+    }
+    handleProductSelect(match.id);
   };
 
   const addProduct = () => {
@@ -456,21 +512,31 @@ export default function BarcodeGenerator() {
     );
   };
 
+  // Apply globally-configured values (expiry duration, net weight, copies)
+  // to every selected product. Each value is only applied when it's set, so
+  // the user can choose which fields to bulk-update.
   const applyGlobalDates = () => {
-    if (!globalExpiryDuration) return;
-
+    if (!globalExpiryDuration && !globalNetWeight && !globalCopies) return;
+    const copiesNum = Math.max(1, parseInt(globalCopies, 10) || 1);
     setSelectedProducts((prev) => {
-      const updated = prev.map((item) => ({
-        ...item,
-        expiryDuration: globalExpiryDuration,
-        expiryDate: calculateExpiryDate(item.packageDate, globalExpiryDuration),
-      }));
-
-      toast({
-        title: "Expiry duration applied",
-        description: `Global expiry duration has been applied to all ${updated.length} products.`,
+      const updated = prev.map((item) => {
+        const next = { ...item };
+        if (globalExpiryDuration) {
+          next.expiryDuration = globalExpiryDuration;
+          next.expiryDate = calculateExpiryDate(item.packageDate, globalExpiryDuration);
+        }
+        if (globalNetWeight) {
+          next.netWeight = globalNetWeight;
+        }
+        if (globalCopies) {
+          next.copies = copiesNum;
+        }
+        return next;
       });
-
+      toast({
+        title: "Applied to all products",
+        description: `${updated.length} product${updated.length === 1 ? "" : "s"} updated.`,
+      });
       return updated;
     });
   };
@@ -561,10 +627,18 @@ export default function BarcodeGenerator() {
     const valueFontSize = 8; // pt - bold values - larger
     const priceFontSize = 9; // pt - price in bold - larger
     
-    // Process each product
-    for (const sp of selectedProducts) {
-      // Add new page for each label
-      if (selectedProducts.indexOf(sp) > 0) {
+    // Expand each product into N labels based on its copies count, so a
+    // single click prints continuous strips from the thermal printer.
+    const labelsToRender: SelectedProductItem[] = selectedProducts.flatMap((sp) => {
+      const n = Math.max(1, sp.copies || 1);
+      return Array.from({ length: n }, () => sp);
+    });
+
+    // Process each label
+    for (let labelIdx = 0; labelIdx < labelsToRender.length; labelIdx++) {
+      const sp = labelsToRender[labelIdx];
+      // Add new page for each label after the first
+      if (labelIdx > 0) {
         doc.addPage([widthPt, heightPt], 'landscape');
       }
       
@@ -706,66 +780,62 @@ export default function BarcodeGenerator() {
           ctx.putImageData(imageData, 0, 0);
         }
         
-        const barcodeDataURL = canvas.toDataURL('image/png', 1.0); // High quality, no compression
-        
-        // Calculate remaining space from current Y to bottom
-        const remainingHeight = heightPt - marginPt - y;
-        
-        // Target barcode height - INCREASED SIZE (17mm) to use more space
-        const targetBarcodeHeightPt = mmToPt(17); // Increased from 15mm
-        
-        // Set barcode width to 90% of content width (increased from 80%)
-        const targetBarcodeWidthPt = contentWidth * 0.90;
-        
-        // Calculate actual barcode height based on aspect ratio
-        const actualBarcodeWidth = canvas.width;
-        const actualBarcodeHeight = canvas.height;
-        const barcodeAspectRatio = actualBarcodeWidth / actualBarcodeHeight;
-        
-        // Calculate height based on 90% width constraint
-        let finalBarcodeHeightPt = targetBarcodeWidthPt / barcodeAspectRatio;
+        const barcodeDataURL = canvas.toDataURL('image/png', 1.0);
+
+        // Position the barcode *below the dates row* — the old code anchored
+        // it from the bottom of the label, which caused it to overlap the
+        // PKG/EXP text when the title wrapped or fonts grew.
+        const barcodeTopGap = mmToPt(1.5); // gap between dates row and barcode
+        const barcodeStartY = y + barcodeTopGap;
+
+        // Reserve room for the barcode number text below the bars.
+        const textFontSize = 9;
+        const textTopGap = mmToPt(1.5);
+        const reservedTextSpace = textFontSize + textTopGap + mmToPt(0.5);
+
+        // Vertical room actually available between the dates row and the
+        // bottom margin, minus the text below the barcode.
+        const availableHeight =
+          heightPt - marginPt - barcodeStartY - reservedTextSpace;
+
+        // Cap width at 90% of content width.
+        const targetBarcodeWidthPt = contentWidth * 0.9;
+
+        const barcodeAspectRatio = canvas.width / canvas.height;
+
+        // Start from the width target and derive height; if that overflows the
+        // available vertical space, shrink to fit instead.
         let finalBarcodeWidthPt = targetBarcodeWidthPt;
-        
-        // Use maximum available space - ensure barcode is as large as possible
-        if (finalBarcodeHeightPt > remainingHeight * 0.95) {
-          finalBarcodeHeightPt = remainingHeight * 0.95;
+        let finalBarcodeHeightPt = finalBarcodeWidthPt / barcodeAspectRatio;
+        if (finalBarcodeHeightPt > availableHeight) {
+          finalBarcodeHeightPt = Math.max(availableHeight, mmToPt(6));
           finalBarcodeWidthPt = finalBarcodeHeightPt * barcodeAspectRatio;
-        } else {
-          // If we have space, use the target height
-          finalBarcodeHeightPt = Math.min(targetBarcodeHeightPt, remainingHeight * 0.95);
-          finalBarcodeWidthPt = finalBarcodeHeightPt * barcodeAspectRatio;
-          // Ensure width doesn't exceed 90% of content
-          if (finalBarcodeWidthPt > contentWidth * 0.90) {
-            finalBarcodeWidthPt = contentWidth * 0.90;
+          if (finalBarcodeWidthPt > targetBarcodeWidthPt) {
+            finalBarcodeWidthPt = targetBarcodeWidthPt;
             finalBarcodeHeightPt = finalBarcodeWidthPt / barcodeAspectRatio;
           }
         }
-        
-          // Position barcode - leave MORE space for large barcode number text below
+
         const barcodeX = leftMargin + (contentWidth - finalBarcodeWidthPt) / 2;
-        
-        // Calculate space needed for text (10pt font + MORE spacing)
-        const textHeight = 10 + mmToPt(2); // Font size + more spacing
-        // Position barcode higher to leave MORE room for large barcode number text below
-        const barcodeY = heightPt - marginPt - finalBarcodeHeightPt - textHeight - mmToPt(4); // More space (4mm gap + text height)
-        
-        // Add barcode image to PDF - larger, DARK
+        const barcodeY = barcodeStartY;
+
         doc.addImage(
-          barcodeDataURL, 
-          'PNG', 
-          barcodeX, 
-          barcodeY, 
-          finalBarcodeWidthPt, 
-          finalBarcodeHeightPt
+          barcodeDataURL,
+          'PNG',
+          barcodeX,
+          barcodeY,
+          finalBarcodeWidthPt,
+          finalBarcodeHeightPt,
         );
-        
-        // Add LARGE barcode number text below barcode with MUCH MORE spacing to avoid collision
-        const barcodeTextY = barcodeY + finalBarcodeHeightPt + mmToPt(4.5); // Increased spacing from 2.5mm to 4.5mm for clear separation
+
+        // Barcode number — centered under the bars, clear gap, doesn't run
+        // past the bottom margin.
+        const barcodeTextY = barcodeY + finalBarcodeHeightPt + textTopGap + textFontSize;
         doc.setFont('helvetica', 'bold');
-        doc.setFontSize(10); // LARGE font size (10pt) for barcode number
-        doc.setTextColor(0, 0, 0); // Pure black
+        doc.setFontSize(textFontSize);
+        doc.setTextColor(0, 0, 0);
         const barcodeTextWidth = doc.getTextWidth(barcodeValue);
-        const barcodeTextX = leftMargin + (contentWidth - barcodeTextWidth) / 2; // Center the text
+        const barcodeTextX = leftMargin + (contentWidth - barcodeTextWidth) / 2;
         doc.text(barcodeValue, barcodeTextX, barcodeTextY);
       } catch (err) {
         console.error('Barcode generation error:', err);
@@ -1003,8 +1073,20 @@ export default function BarcodeGenerator() {
   const isFormValid =
     selectedProducts.length > 0 &&
     selectedProducts.every(
-      (item) => item.netWeight.trim() && item.packageDate && item.expiryDate
+      (item) =>
+        item.netWeight.trim() &&
+        item.packageDate &&
+        item.expiryDate &&
+        item.copies > 0,
     );
+
+  // Total label count across all selected products — what the printer will
+  // actually emit. Drives the print button label so the user knows how many
+  // labels a batch will produce before they click.
+  const totalLabels = selectedProducts.reduce(
+    (sum, item) => sum + Math.max(1, item.copies || 1),
+    0,
+  );
 
   if (productsLoading && products.length === 0) {
     return <PageLoader message="Loading Barcode Generator..." />;
@@ -1034,7 +1116,7 @@ export default function BarcodeGenerator() {
                 <Input
                   ref={productSearchInputRef}
                   id="product-search"
-                  placeholder="Search by name, SKU, or code..."
+                  placeholder="Scan or search by name, SKU, code (Enter to add)"
                   value={searchTerm}
                   onFocus={() => setProductDropdownOpen(true)}
                   autoComplete="off"
@@ -1042,6 +1124,7 @@ export default function BarcodeGenerator() {
                     setSearchTerm(e.target.value);
                     setProductDropdownOpen(true);
                   }}
+                  onKeyDown={handleSearchKeyDown}
                   className="pl-9"
                 />
                 {productDropdownOpen && (
@@ -1098,16 +1181,49 @@ export default function BarcodeGenerator() {
               )}
             </div>
 
-            {/* Global Dates */}
-            <div className="space-y-2 border-t pt-4">
-              <Label>Global Expiry (Apply to All)</Label>
-              <div className="grid grid-cols-1 gap-2">
+            {/* Global Defaults — applied to every product in one click. */}
+            <div className="space-y-3 border-t pt-4">
+              <div className="flex items-center justify-between">
+                <Label>Apply to All</Label>
+                <span className="text-xs text-gray-500">For bulk batches</span>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2">
+                <div>
+                  <Label htmlFor="global-net-weight" className="text-xs text-gray-600">
+                    Net Weight
+                  </Label>
+                  <Input
+                    id="global-net-weight"
+                    value={globalNetWeight}
+                    onChange={(e) => setGlobalNetWeight(e.target.value)}
+                    placeholder="e.g. 500g"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="global-copies" className="text-xs text-gray-600">
+                    Copies / product
+                  </Label>
+                  <Input
+                    id="global-copies"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={globalCopies}
+                    onChange={(e) => setGlobalCopies(e.target.value)}
+                    placeholder="1"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <Label className="text-xs text-gray-600">Expiry</Label>
                 <Select
                   onValueChange={setGlobalExpiryDuration}
                   value={globalExpiryDuration}
                 >
                   <SelectTrigger>
-                    <SelectValue placeholder="Choose global expiry" />
+                    <SelectValue placeholder="Choose expiry duration" />
                   </SelectTrigger>
                   <SelectContent>
                     {expiryOptions.map((opt) => (
@@ -1117,18 +1233,20 @@ export default function BarcodeGenerator() {
                     ))}
                   </SelectContent>
                 </Select>
-
-                <Button
-                  onClick={applyGlobalDates}
-                  variant="outline"
-                  size="sm"
-                  disabled={
-                    !globalExpiryDuration || selectedProducts.length === 0
-                  }
-                >
-                  Apply to All Products
-                </Button>
               </div>
+
+              <Button
+                onClick={applyGlobalDates}
+                variant="outline"
+                size="sm"
+                className="w-full"
+                disabled={
+                  selectedProducts.length === 0 ||
+                  (!globalExpiryDuration && !globalNetWeight && !globalCopies)
+                }
+              >
+                Apply to All Products
+              </Button>
             </div>
 
             {/* Action Buttons */}
@@ -1141,9 +1259,11 @@ export default function BarcodeGenerator() {
                 {isPrinting ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
-                <Printer className="h-4 w-4 mr-2" />
+                  <Printer className="h-4 w-4 mr-2" />
                 )}
-                {isPrinting ? "Printing..." : `Print All Barcodes (${selectedProducts.length})`}
+                {isPrinting
+                  ? "Printing..."
+                  : `Print ${totalLabels} Label${totalLabels === 1 ? "" : "s"}`}
               </Button>
               <Button
                 onClick={clearAll}
@@ -1161,7 +1281,14 @@ export default function BarcodeGenerator() {
         {/* Selected Products List */}
         <Card className="xl:col-span-2">
           <CardHeader>
-            <CardTitle>Selected Products ({selectedProducts.length})</CardTitle>
+            <CardTitle className="flex items-center justify-between gap-2">
+              <span>Selected Products ({selectedProducts.length})</span>
+              {totalLabels > 0 && (
+                <span className="text-sm font-normal text-gray-600 bg-gray-100 rounded-full px-3 py-1">
+                  {totalLabels} label{totalLabels === 1 ? "" : "s"} total
+                </span>
+              )}
+            </CardTitle>
           </CardHeader>
           <CardContent>
             {selectedProducts.length === 0 ? (
@@ -1171,32 +1298,30 @@ export default function BarcodeGenerator() {
                 <p className="text-sm">Add products from the dropdown above.</p>
               </div>
             ) : (
-              <div className="space-y-4 max-h-96 overflow-y-auto">
+              <div className="space-y-3 max-h-screen overflow-y-auto pr-1">
                 {selectedProducts.map((item) => (
                   <div
                     key={item.id}
-                    className="border rounded-lg p-4 space-y-4"
+                    className="border rounded-lg p-3 space-y-3"
                   >
-                    <div className="flex justify-between items-start">
-                      <div>
-                        <h3 className="font-medium">{item.product.name}</h3>
-                        <p className="text-sm text-gray-600">
-                          SKU: {item.product.sku}
-                        </p>
-                        <p className="text-sm text-gray-600">
-                          Price: Rs {item.product.sales_rate_exc_dis_and_tax}
+                    <div className="flex justify-between items-start gap-2">
+                      <div className="min-w-0">
+                        <h3 className="font-medium text-sm truncate">{item.product.name}</h3>
+                        <p className="text-xs text-gray-600">
+                          SKU: {item.product.sku} · Price: Rs {item.product.sales_rate_exc_dis_and_tax}
                         </p>
                       </div>
                       <Button
                         onClick={() => removeProduct(item.id)}
-                        variant="outline"
+                        variant="ghost"
                         size="sm"
+                        className="h-7 w-7 p-0 text-gray-500 hover:text-red-600"
                       >
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
                       <div>
                         <Label htmlFor={`weight-${item.id}`}>
                           Net Weight *
@@ -1311,53 +1436,101 @@ export default function BarcodeGenerator() {
                           </SelectContent>
                         </Select>
                       </div>
+                      <div>
+                        <Label htmlFor={`copies-${item.id}`}>Copies</Label>
+                        <div className="flex items-center gap-1">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9 w-9 p-0"
+                            onClick={() =>
+                              updateProductData(
+                                item.id,
+                                "copies",
+                                Math.max(1, (item.copies || 1) - 1),
+                              )
+                            }
+                            disabled={(item.copies || 1) <= 1}
+                          >
+                            -
+                          </Button>
+                          <Input
+                            id={`copies-${item.id}`}
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            value={item.copies}
+                            onChange={(e) => {
+                              const n = parseInt(e.target.value, 10);
+                              updateProductData(
+                                item.id,
+                                "copies",
+                                Number.isFinite(n) && n > 0 ? n : 1,
+                              );
+                            }}
+                            className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                          />
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            className="h-9 w-9 p-0"
+                            onClick={() =>
+                              updateProductData(
+                                item.id,
+                                "copies",
+                                (item.copies || 1) + 1,
+                              )
+                            }
+                          >
+                            +
+                          </Button>
+                        </div>
+                      </div>
                     </div>
 
-                    {/* Individual Preview with Proper Barcode */}
-                    <div className="bg-gray-50 p-3 rounded border">
-                      <div className="text-center space-y-2">
-                        <div className="font-bold text-sm">
-                          {item.product.name.toUpperCase()}
-                        </div>
-                        <div className="flex justify-between text-xs">
-                          <span>
-                            Net Wt: {formatWeightDisplay(item.netWeight)}
+                    {/* Compact preview — keeps the visual confirmation
+                        without dominating the card height. */}
+                    <div className="bg-gray-50 px-3 py-2 rounded border flex items-center gap-3">
+                      <img
+                        src={generateBarcodeDataURL(
+                          encodeLabelBarcodeValue(
+                            item.product.sku,
+                            item.product.code,
+                            Math.round(
+                              Number(
+                                calculatePriceByWeight(
+                                  item.netWeight,
+                                  item.product.sales_rate_exc_dis_and_tax,
+                                ),
+                              ),
+                            ),
+                          ),
+                        )}
+                        alt="Barcode Preview"
+                        className="h-8 object-contain bg-white p-1 rounded shrink-0"
+                      />
+                      <div className="flex-1 min-w-0 text-xs text-gray-700 space-y-0.5">
+                        <div className="flex justify-between gap-2">
+                          <span className="truncate">
+                            Net: {formatWeightDisplay(item.netWeight)}
                           </span>
-                          <span>
-                            Price: Rs{" "}
+                          <span className="font-semibold">
+                            Rs{" "}
                             {Math.round(
                               Number(
                                 calculatePriceByWeight(
                                   item.netWeight,
-                                  item.product.sales_rate_exc_dis_and_tax
-                                )
-                              )
+                                  item.product.sales_rate_exc_dis_and_tax,
+                                ),
+                              ),
                             )}
                           </span>
                         </div>
-                        <div className="flex justify-center bg-white p-2 rounded">
-                          <img
-                            src={generateBarcodeDataURL(
-                              encodeLabelBarcodeValue(
-                                item.product.sku,
-                                item.product.code,
-                                Math.round(
-                                  Number(
-                                    calculatePriceByWeight(
-                                      item.netWeight,
-                                      item.product.sales_rate_exc_dis_and_tax
-                                    )
-                                  )
-                                )
-                              )
-                            )}
-                            alt="Barcode Preview"
-                            className="max-w-full h-10 object-contain"
-                          />
-                        </div>
-                        <div className="flex justify-between text-xs border-t pt-2">
-                          <span>PKG: {formatDate(item.packageDate)}</span>
-                          <span>EXP: {formatDate(item.expiryDate)}</span>
+                        <div className="flex justify-between gap-2 text-gray-500">
+                          <span>PKG {formatDate(item.packageDate)}</span>
+                          <span>EXP {formatDate(item.expiryDate)}</span>
                         </div>
                       </div>
                     </div>

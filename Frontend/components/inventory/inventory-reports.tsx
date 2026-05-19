@@ -28,6 +28,10 @@ import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { format } from "date-fns";
+import { PageLoader } from "@/components/ui/page-loader";
 
 const REPORT_TYPES = [
   { value: "valuation", label: "Stock Valuation", icon: Box, desc: "Current inventory worth and quantities across locations." },
@@ -41,6 +45,19 @@ const REPORT_TYPES = [
 
 export function InventoryReports() {
   const { toast } = useToast();
+  const parseDate = (dStr: string) => {
+    if (!dStr) return undefined;
+    const [year, month, day] = dStr.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  };
+
+  const formatDate = (date?: Date) => {
+    if (!date) return "";
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
   const [reportType, setReportType] = useState("valuation");
   const [data, setData] = useState<any>(null);
   const [branches, setBranches] = useState<any[]>([]);
@@ -52,17 +69,50 @@ export function InventoryReports() {
     startDate: "",
     endDate: "",
   });
+
+  const hasActiveFilters = filters.branchId !== "" || filters.startDate !== "" || filters.endDate !== "";
+
+  const clearFilters = () => {
+    const cleared = {
+      branchId: "",
+      supplierId: "",
+      startDate: "",
+      endDate: "",
+    };
+    setFilters(cleared);
+    fetchReport(cleared);
+  };
+
+  // Guard: auto-swap start/end dates if user picks end before start
+  const handleStartDate = (d: Date | undefined) => {
+    const newStart = formatDate(d);
+    if (filters.endDate && newStart && newStart > filters.endDate) {
+      setFilters(f => ({ ...f, startDate: newStart, endDate: "" }));
+    } else {
+      setFilters(f => ({ ...f, startDate: newStart }));
+    }
+  };
+
+  const handleEndDate = (d: Date | undefined) => {
+    const newEnd = formatDate(d);
+    if (filters.startDate && newEnd && newEnd < filters.startDate) {
+      setFilters(f => ({ ...f, startDate: "", endDate: newEnd }));
+    } else {
+      setFilters(f => ({ ...f, endDate: newEnd }));
+    }
+  };
   const [userRole, setUserRole] = useState<string | null>(null);
   const [userBranchId, setUserBranchId] = useState<string | null>(null);
 
-  const fetchReport = useCallback(async () => {
+  const fetchReport = useCallback(async (overrideFilters?: typeof filters) => {
     setLoading(true);
+    const activeFilters = overrideFilters || filters;
     try {
       const params: any = { type: reportType };
-      if (filters.branchId) params.branchId = filters.branchId;
-      if (filters.supplierId) params.supplierId = filters.supplierId;
-      if (filters.startDate) params.startDate = filters.startDate;
-      if (filters.endDate) params.endDate = filters.endDate;
+      if (activeFilters.branchId) params.branchId = activeFilters.branchId;
+      if (activeFilters.supplierId) params.supplierId = activeFilters.supplierId;
+      if (activeFilters.startDate) params.startDate = activeFilters.startDate;
+      if (activeFilters.endDate) params.endDate = activeFilters.endDate;
       const res = await apiClient.get("/inventory/reports", { params });
       setData(res.data?.data || res.data);
     } catch (e: any) {
@@ -74,7 +124,7 @@ export function InventoryReports() {
     } finally {
       setLoading(false);
     }
-  }, [reportType, filters, toast]);
+  }, [reportType, toast]);
 
   const fetchMeta = useCallback(async () => {
     try {
@@ -89,6 +139,12 @@ export function InventoryReports() {
     }
   }, []);
 
+  // Only auto-fetch when report TYPE changes — not on every filter change
+  useEffect(() => {
+    fetchReport();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [reportType]);
+
   useEffect(() => {
     const role = localStorage.getItem("role");
     setUserRole(role);
@@ -102,16 +158,9 @@ export function InventoryReports() {
         bId = b;
       }
       setUserBranchId(bId);
-      if (role === "BRANCH_MANAGER") {
-        setFilters(prev => ({ ...prev, branchId: bId }));
-      }
     }
     fetchMeta();
   }, [fetchMeta]);
-
-  useEffect(() => {
-    fetchReport();
-  }, [fetchReport]);
 
   const exportCSV = () => {
     if (!data) return;
@@ -173,19 +222,19 @@ export function InventoryReports() {
       {/* SIDEBAR NAVIGATION */}
       <div className="w-full lg:w-72 bg-white border-r border-slate-200 p-6 space-y-8 shrink-0">
         <div>
-          <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Report Categories</h2>
+          <h2 className="text-xs font-normal text-black/60 uppercase tracking-widest mb-4">Report Categories</h2>
           <nav className="space-y-1">
             {REPORT_TYPES.map((r) => (
               <button
                 key={r.value}
                 onClick={() => setReportType(r.value)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-normal transition-all ${
                   reportType === r.value 
-                  ? "bg-blue-50 text-blue-600 shadow-sm" 
-                  : "text-slate-500 hover:bg-slate-50 hover:text-slate-800"
+                  ? "bg-slate-100 text-black shadow-sm" 
+                  : "text-black/80 hover:bg-slate-50 hover:text-black"
                 }`}
               >
-                <r.icon className={`h-4 w-4 ${reportType === r.value ? "text-blue-600" : "text-slate-400"}`} />
+                <r.icon className={`h-4 w-4 ${reportType === r.value ? "text-black" : "text-black/60"}`} />
                 {r.label}
               </button>
             ))}
@@ -193,14 +242,14 @@ export function InventoryReports() {
         </div>
 
         <div className="pt-8 border-t border-slate-100">
-           <h2 className="text-xs font-bold text-slate-400 uppercase tracking-widest mb-4">Operations</h2>
+           <h2 className="text-xs font-normal text-black/60 uppercase tracking-widest mb-4">Operations</h2>
            <Button 
              variant="outline" 
-             className="w-full justify-start gap-2 border-slate-200 text-slate-600 font-bold text-xs h-10 shadow-sm"
+             className="w-full justify-start gap-2 border-slate-200 text-black font-normal text-xs h-10 shadow-sm"
              onClick={exportCSV}
              disabled={!data || loading}
            >
-             <Download className="h-3.5 w-3.5" />
+             <Download className="h-3.5 w-3.5 text-black" />
              EXPORT CURRENT VIEW
            </Button>
         </div>
@@ -213,17 +262,17 @@ export function InventoryReports() {
         <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
           <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
             <div>
-              <h1 className="text-xl font-bold text-slate-800 tracking-tight">
+              <h1 className="text-xl font-bold text-black tracking-tight">
                 {REPORT_TYPES.find(r => r.value === reportType)?.label}
               </h1>
-              <p className="text-xs font-medium text-slate-400 mt-0.5 italic">
+              <p className="text-xs font-normal text-black/80 mt-0.5">
                 {REPORT_TYPES.find(r => r.value === reportType)?.desc}
               </p>
             </div>
             
             <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 text-[10px] font-bold text-slate-400 uppercase tracking-wider bg-slate-50 px-3 py-1 rounded-full border">
-                <Calendar className="h-3 w-3" />
+              <div className="flex items-center gap-2 text-[10px] font-normal text-black uppercase tracking-wider bg-slate-50 px-3 py-1 rounded-full border">
+                <Calendar className="h-3 w-3 text-black" />
                 Live Feed
               </div>
             </div>
@@ -231,71 +280,128 @@ export function InventoryReports() {
 
           <div className="flex flex-wrap items-end gap-3 pt-4 border-t border-slate-100">
             <div className="space-y-1.5 flex-1 min-w-[160px]">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">Location</label>
+              <label className="text-[10px] font-normal text-black uppercase tracking-wider ml-1">Location</label>
               <Select
                 value={filters.branchId || "all"}
                 onValueChange={(v) => setFilters({ ...filters, branchId: v === "all" ? "" : v })}
               >
-                <SelectTrigger className="h-9 border-slate-200 bg-slate-50/50 font-semibold text-xs">
+                <SelectTrigger className="h-9 border-slate-200 bg-slate-50/50 font-normal text-xs text-black">
                   <SelectValue placeholder="All Branches" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="all">All Branches</SelectItem>
-                  {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+                  <SelectItem value="all" className="font-normal text-xs py-2 pl-8 pr-4 text-black">All Branches</SelectItem>
+                  {branches.map((b) => <SelectItem key={b.id} value={b.id} className="font-normal text-xs py-2 pl-8 pr-4 text-black">{b.name}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-1.5 flex-1 min-w-[120px]">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">From Date</label>
-              <Input
-                type="date"
-                value={filters.startDate}
-                onChange={(e) => setFilters({ ...filters, startDate: e.target.value })}
-                className="h-9 border-slate-200 bg-slate-50/50 text-xs font-semibold"
-              />
+              <label className="text-[10px] font-normal text-black uppercase tracking-wider ml-1">From Date</label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full h-9 justify-start text-left font-normal text-xs border-slate-200 bg-slate-50/50 text-black hover:bg-slate-100/50"
+                  >
+                    <Calendar className="mr-2 h-3.5 w-3.5 text-black" />
+                    {filters.startDate ? format(parseDate(filters.startDate)!, "MM/dd/yyyy") : <span className="text-black/60">Pick a date</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent 
+                    mode="single" 
+                    selected={parseDate(filters.startDate)} 
+                    onSelect={handleStartDate}
+                    initialFocus 
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
 
             <div className="space-y-1.5 flex-1 min-w-[120px]">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider ml-1">To Date</label>
-              <Input
-                type="date"
-                value={filters.endDate}
-                onChange={(e) => setFilters({ ...filters, endDate: e.target.value })}
-                className="h-9 border-slate-200 bg-slate-50/50 text-xs font-semibold"
-              />
+              <label className="text-[10px] font-normal text-black uppercase tracking-wider ml-1">To Date</label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="w-full h-9 justify-start text-left font-normal text-xs border-slate-200 bg-slate-50/50 text-black hover:bg-slate-100/50"
+                  >
+                    <Calendar className="mr-2 h-3.5 w-3.5 text-black" />
+                    {filters.endDate ? format(parseDate(filters.endDate)!, "MM/dd/yyyy") : <span className="text-black/60">Pick a date</span>}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent 
+                    mode="single" 
+                    selected={parseDate(filters.endDate)} 
+                    onSelect={handleEndDate}
+                    initialFocus 
+                  />
+                </PopoverContent>
+              </Popover>
             </div>
 
             <Button 
                 onClick={fetchReport} 
                 disabled={loading}
-                className="h-9 bg-slate-900 hover:bg-slate-800 text-white font-bold px-6 text-xs shadow-md shadow-slate-200"
+                className="h-9 bg-slate-900 hover:bg-black text-white font-normal px-6 text-xs shadow-md shadow-slate-200"
             >
               {loading ? "Generating..." : "Apply Filters"}
             </Button>
+            {hasActiveFilters && (
+              <Button
+                variant="ghost"
+                onClick={clearFilters}
+                className="h-9 text-xs font-normal text-black hover:bg-slate-100/50"
+              >
+                Clear Filters
+              </Button>
+            )}
           </div>
         </div>
 
         {/* KPI SUMMARY CARDS */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {reportType === "valuation" ? (
+          {loading ? (
+            /* Skeleton cards while loading */
+            <>
+              <Card className="border-none shadow-sm bg-white border border-slate-100">
+                <CardContent className="p-5 space-y-2">
+                  <Skeleton className="h-3 w-24 rounded" />
+                  <Skeleton className="h-7 w-40 rounded" />
+                </CardContent>
+              </Card>
+              <Card className="border-none shadow-sm bg-white border border-slate-100">
+                <CardContent className="p-5 space-y-2">
+                  <Skeleton className="h-3 w-24 rounded" />
+                  <Skeleton className="h-7 w-32 rounded" />
+                </CardContent>
+              </Card>
+              <Card className="border-none shadow-sm bg-white border border-slate-100">
+                <CardContent className="p-5 space-y-2">
+                  <Skeleton className="h-3 w-24 rounded" />
+                  <Skeleton className="h-7 w-28 rounded" />
+                </CardContent>
+              </Card>
+            </>
+          ) : !data ? null : reportType === "valuation" ? (
              <>
                <Card className="border-none shadow-sm bg-white border border-slate-100">
                   <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Value</p>
-                     <h3 className="text-xl font-bold text-slate-800 mt-1">{formatCurrency(summary.totalValue || 0)}</h3>
+                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Total Value</p>
+                     <h3 className="text-xl font-bold text-black mt-1">{formatCurrency(summary.totalValue || 0)}</h3>
                   </CardContent>
                </Card>
                <Card className="border-none shadow-sm bg-white border border-slate-100">
                   <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">SKUs Tracked</p>
-                     <h3 className="text-xl font-bold text-slate-800 mt-1">{summary.totalItems || 0} Products</h3>
+                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">SKUs Tracked</p>
+                     <h3 className="text-xl font-bold text-black mt-1">{summary.totalItems || 0} Products</h3>
                   </CardContent>
                </Card>
                <Card className="border-none shadow-sm bg-white border border-slate-100">
                   <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Locations</p>
-                     <h3 className="text-xl font-bold text-slate-800 mt-1">{summary.locationsCount || 0} Branches</h3>
+                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Locations</p>
+                     <h3 className="text-xl font-bold text-black mt-1">{summary.locationsCount || 0} Branches</h3>
                   </CardContent>
                </Card>
              </>
@@ -303,31 +409,28 @@ export function InventoryReports() {
              <>
                 <Card className="border-none shadow-sm bg-white border border-slate-100">
                   <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Total Spend</p>
-                     <h3 className="text-xl font-bold text-slate-800 mt-1">{formatCurrency(summary.totalCost || 0)}</h3>
+                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Total Spend</p>
+                     <h3 className="text-xl font-bold text-black mt-1">{formatCurrency(summary.totalCost || 0)}</h3>
                   </CardContent>
                </Card>
                <Card className="border-none shadow-sm bg-white border border-slate-100">
                   <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">PO Count</p>
-                     <h3 className="text-xl font-bold text-slate-800 mt-1">{summary.count || 0} Records</h3>
+                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">PO Count</p>
+                     <h3 className="text-xl font-bold text-black mt-1">{summary.count || 0} Records</h3>
                   </CardContent>
                </Card>
                <Card className="border-none shadow-sm bg-white border border-slate-100">
                   <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Avg PO Value</p>
-                     <h3 className="text-xl font-bold text-slate-800 mt-1">{formatCurrency(summary.avgPrice || 0)}</h3>
+                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Avg PO Value</p>
+                     <h3 className="text-xl font-bold text-black mt-1">{formatCurrency(summary.avgPrice || 0)}</h3>
                   </CardContent>
                </Card>
              </>
           ) : (
-            <Card className="md:col-span-3 border-none shadow-sm bg-white border border-slate-100 relative overflow-hidden h-20 flex items-center px-6">
-               <div className="absolute right-0 top-0 h-full w-32 bg-slate-50/50 flex items-center justify-center">
-                  <LayoutDashboard className="h-10 w-10 text-slate-200" />
-               </div>
+            <Card className="md:col-span-3 border-none shadow-sm bg-white border border-slate-100 h-20 flex items-center px-6">
                <div>
-                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">Report Volume</p>
-                 <h3 className="text-lg font-bold text-slate-700">{summary.count || data?.data?.length || 0} Matching Entries Found</h3>
+                 <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Report Volume</p>
+                 <h3 className="text-lg font-bold text-black">{summary.count || data?.data?.length || 0} Matching Entries Found</h3>
                </div>
             </Card>
           )}
@@ -337,15 +440,16 @@ export function InventoryReports() {
         <Card className="border-none shadow-sm bg-white rounded-2xl overflow-hidden min-h-[400px]">
            <CardContent className="p-0">
              {loading ? (
-               <div className="py-20 flex flex-col items-center justify-center animate-in fade-in zoom-in duration-500">
-                  <div className="relative mb-6">
-                    <div className="h-16 w-16 rounded-full border-4 border-slate-100 border-t-blue-600 animate-spin" />
-                    <div className="absolute inset-0 flex items-center justify-center">
-                       <RefreshCw className="h-5 w-5 text-blue-600 animate-pulse" />
-                    </div>
-                  </div>
-                  <h3 className="text-sm font-black text-slate-800 tracking-tight uppercase mb-1">Generating Neural Report...</h3>
-                  <p className="text-[9px] font-bold text-slate-400 uppercase tracking-widest italic animate-pulse">Aggregating Cross-Branch Ledger Data</p>
+               <div className="p-6 space-y-3">
+                 {[...Array(7)].map((_, i) => (
+                   <div key={i} className="flex items-center gap-4 py-2">
+                     <Skeleton className="h-4 w-[30%] rounded" />
+                     <Skeleton className="h-4 w-[20%] rounded" />
+                     <Skeleton className="h-4 w-[15%] rounded ml-auto" />
+                     <Skeleton className="h-4 w-[15%] rounded" />
+                     <Skeleton className="h-4 w-[12%] rounded" />
+                   </div>
+                 ))}
                </div>
              ) : reportType === "valuation" && data?.byLocation ? (
                 <div className="divide-y divide-slate-100">
@@ -355,31 +459,31 @@ export function InventoryReports() {
                       <div key={bid} className="p-8">
                         <div className="flex items-center justify-between mb-4">
                            <div className="flex items-center gap-2">
-                             <Box className="h-4 w-4 text-emerald-500" />
-                             <h4 className="font-bold text-slate-800">{branchName}</h4>
+                             <Box className="h-4 w-4 text-black" />
+                             <h4 className="font-bold text-black">{branchName}</h4>
                            </div>
-                           <Badge variant="outline" className="text-emerald-600 bg-emerald-50 border-emerald-100 font-bold">
+                           <Badge variant="outline" className="text-black bg-slate-50 border-slate-200 font-bold">
                              Value: {formatCurrency(loc.value || 0)}
                            </Badge>
                         </div>
                         <Table>
-                          <TableHeader className="bg-slate-50/50 font-bold uppercase text-[9px] tracking-widest text-slate-400 border-none">
+                          <TableHeader className="bg-slate-50/50 font-normal uppercase text-[9px] tracking-widest text-black border-none">
                             <TableRow>
-                              <TableHead>Product Name</TableHead>
-                              <TableHead>SKU</TableHead>
-                              <TableHead className="text-right">Quantity</TableHead>
-                              <TableHead className="text-right">Unit Value</TableHead>
-                              <TableHead className="text-right">Total Value</TableHead>
+                              <TableHead className="text-black font-normal">Product Name</TableHead>
+                              <TableHead className="text-black font-normal">SKU</TableHead>
+                              <TableHead className="text-right text-black font-normal">Quantity</TableHead>
+                              <TableHead className="text-right text-black font-normal">Unit Value</TableHead>
+                              <TableHead className="text-right text-black font-normal">Total Value</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {(loc.items || []).map((item: any, i: number) => (
                               <TableRow key={i} className="hover:bg-slate-50/30">
-                                <TableCell className="font-bold text-slate-700 text-xs">{item.product?.name}</TableCell>
-                                <TableCell className="text-xs text-slate-400 font-medium">{item.product?.sku}</TableCell>
-                                <TableCell className="text-right font-bold text-slate-800 text-xs">{item.quantity}</TableCell>
-                                <TableCell className="text-right text-xs text-slate-400">{formatCurrency(item.value / item.quantity)}</TableCell>
-                                <TableCell className="text-right font-extrabold text-slate-900 text-xs">{formatCurrency(item.value)}</TableCell>
+                                <TableCell className="font-normal text-black text-xs">{item.product?.name}</TableCell>
+                                <TableCell className="text-xs text-black/60 font-normal">{item.product?.sku}</TableCell>
+                                <TableCell className="text-right font-normal text-black text-xs">{item.quantity}</TableCell>
+                                <TableCell className="text-right text-xs text-black/60">{formatCurrency(item.value / item.quantity)}</TableCell>
+                                <TableCell className="text-right font-normal text-black text-xs">{formatCurrency(item.value)}</TableCell>
                               </TableRow>
                             ))}
                           </TableBody>
@@ -391,7 +495,7 @@ export function InventoryReports() {
              ) : Array.isArray(data?.data) && data.data.length > 0 ? (
                <div className="overflow-x-auto">
                  <Table>
-                   <TableHeader className="bg-slate-50/50 font-bold uppercase text-[9px] tracking-widest text-slate-400 border-none">
+                   <TableHeader className="bg-slate-50/50 font-normal uppercase text-[9px] tracking-widest text-black border-none">
                      <TableRow>
                        {reportType === "purchase" && (
                          <>
@@ -453,24 +557,24 @@ export function InventoryReports() {
                        <TableRow key={i} className="hover:bg-slate-50/30">
                          {reportType === "purchase" && (
                            <>
-                             <TableCell className="text-xs font-semibold text-slate-500">{new Date(d.purchase_date).toLocaleDateString()}</TableCell>
-                             <TableCell className="text-xs font-bold text-slate-800">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs text-slate-400 font-medium">{d.supplier?.name}</TableCell>
-                             <TableCell className="text-right font-bold text-xs text-slate-800">{d.quantity}</TableCell>
-                             <TableCell className="text-right text-xs text-slate-400">{formatCurrency(Number(d.cost_price))}</TableCell>
-                             <TableCell className="text-right font-extrabold text-slate-900 text-xs">{formatCurrency(d.quantity * d.cost_price)}</TableCell>
+                             <TableCell className="text-xs font-normal text-black">{new Date(d.purchase_date).toLocaleDateString()}</TableCell>
+                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
+                             <TableCell className="text-xs text-black/60 font-normal">{d.supplier?.name}</TableCell>
+                             <TableCell className="text-right font-normal text-xs text-black">{d.quantity}</TableCell>
+                             <TableCell className="text-right text-xs text-black/60">{formatCurrency(Number(d.cost_price))}</TableCell>
+                             <TableCell className="text-right font-normal text-black text-xs">{formatCurrency(d.quantity * d.cost_price)}</TableCell>
                            </>
                          )}
                          {reportType === "transfer" && (
                            <>
-                             <TableCell className="text-xs font-semibold text-slate-500">{new Date(d.transfer_date).toLocaleDateString()}</TableCell>
-                             <TableCell className="text-xs font-bold text-slate-800">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs font-medium text-slate-400">
+                             <TableCell className="text-xs font-normal text-black">{new Date(d.transfer_date).toLocaleDateString()}</TableCell>
+                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
+                             <TableCell className="text-xs font-medium text-black/60">
                                 {d.from_branch?.name} → {d.to_branch?.name}
                              </TableCell>
-                             <TableCell className="text-right font-bold text-xs text-slate-800">{d.quantity}</TableCell>
+                             <TableCell className="text-right font-normal text-xs text-black">{d.quantity}</TableCell>
                              <TableCell className="text-right">
-                               <Badge variant="outline" className={`text-[9px] font-bold ${d.status === 'COMPLETED' ? 'text-emerald-600 bg-emerald-50' : 'text-blue-600 bg-blue-50'}`}>
+                               <Badge variant="outline" className={`text-[9px] font-normal ${d.status === 'COMPLETED' ? 'text-black bg-slate-50' : 'text-black bg-slate-50'}`}>
                                  {d.status}
                                </Badge>
                              </TableCell>
@@ -478,49 +582,52 @@ export function InventoryReports() {
                          )}
                          {reportType === "stockout" && (
                            <>
-                             <TableCell className="text-xs font-semibold text-slate-500">{new Date(d.created_at).toLocaleDateString()}</TableCell>
-                             <TableCell className="text-xs font-bold text-slate-800">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs text-slate-400">{d.branch?.name}</TableCell>
-                             <TableCell className="text-right font-bold text-xs text-rose-600">{Math.abs(d.quantity_change)}</TableCell>
+                             <TableCell className="text-xs font-normal text-black">{new Date(d.created_at).toLocaleDateString()}</TableCell>
+                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
+                             <TableCell className="text-xs text-black/60">{d.branch?.name}</TableCell>
+                             <TableCell className="text-right font-normal text-xs text-rose-600">{Math.abs(d.quantity_change)}</TableCell>
                              <TableCell className="text-right">
-                                <Badge className="text-[9px] font-black uppercase bg-slate-100 text-slate-600 border-none">{d.movement_type}</Badge>
+                                <Badge className="text-[9px] font-normal uppercase bg-slate-50 text-black border border-slate-200">{d.movement_type}</Badge>
                              </TableCell>
                            </>
                          )}
                          {reportType === "lowstock" && (
                            <>
-                             <TableCell className="text-xs font-bold text-slate-800">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs text-slate-400">{d.product?.sku}</TableCell>
-                             <TableCell className="text-right font-bold text-xs text-rose-700">{Number(d.current_quantity)}</TableCell>
-                             <TableCell className="text-right text-xs text-slate-400">{Number(d.product?.min_qty ?? d.minimum_quantity ?? 0)}</TableCell>
+                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
+                             <TableCell className="text-xs text-black/60">{d.product?.sku}</TableCell>
+                             <TableCell className="text-right font-normal text-xs text-rose-700">{Number(d.current_quantity)}</TableCell>
+                             <TableCell className="text-right text-xs text-black/60">{Number(d.product?.min_qty ?? d.minimum_quantity ?? 0)}</TableCell>
                              <TableCell className="text-right">
-                                <Badge variant="destructive" className="text-[9px] font-black">{Number(d.current_quantity) <= 0 ? 'OUT OF STOCK' : 'LOW'}</Badge>
+                                <Badge variant="outline" className="text-[9px] font-normal text-rose-600 bg-rose-50 border-rose-100">{Number(d.current_quantity) <= 0 ? 'OUT OF STOCK' : 'LOW'}</Badge>
                              </TableCell>
                            </>
                          )}
                          {reportType === "aging" && (
                             <>
-                             <TableCell className="text-xs font-bold text-slate-800">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs text-slate-400">{d.branch?.name}</TableCell>
-                             <TableCell className="text-right font-bold text-xs text-slate-800">{d.currentQuantity}</TableCell>
+                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
+                             <TableCell className="text-xs text-black/60">{d.branch?.name}</TableCell>
+                             <TableCell className="text-right font-normal text-xs text-black">{d.currentQuantity}</TableCell>
                              <TableCell className="text-right">
-                                <Badge className={`text-[10px] font-bold border-none ${d.daysOld > 90 ? 'bg-rose-100 text-rose-700' : d.daysOld > 30 ? 'bg-amber-100 text-amber-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                                <Badge className={`text-[10px] font-normal border-slate-200 ${d.daysOld > 90 ? 'bg-slate-50 text-black' : d.daysOld > 30 ? 'bg-slate-50 text-black' : 'bg-slate-50 text-black'}`}>
                                   {d.daysOld} Days
                                 </Badge>
                              </TableCell>
-                             <TableCell className="text-right text-xs text-slate-400">{new Date(d.lastAction).toLocaleDateString()}</TableCell>
+                             <TableCell className="text-right text-xs text-black/60">{new Date(d.lastAction).toLocaleDateString()}</TableCell>
                             </>
                          )}
                          {reportType === "movement_summary" && (
                             <>
-                             <TableCell className="text-xs font-bold text-slate-800">
+                             <TableCell className="text-xs font-normal text-black">
                                 <div className="flex items-center gap-2">
                                   <div className={`h-2 w-2 rounded-full ${d.movement_type === 'SALE' ? 'bg-emerald-500' : d.movement_type === 'PURCHASE' ? 'bg-blue-500' : 'bg-slate-300'}`} />
                                   {d.movement_type}
                                 </div>
                              </TableCell>
-                             <TableCell className="text-right font-bold text-xs text-slate-800">{(d._count || 0)} events</TableCell>
-                             <TableCell className="text-right font-extrabold text-xs text-slate-900">
+                             <TableCell className="text-right font-normal text-xs text-black">
+                                {/* Prisma groupBy returns _count as a plain number */}
+                                {(typeof d._count === 'number' ? d._count : d._count?._all ?? 0)} events
+                              </TableCell>
+                             <TableCell className="text-right font-normal text-xs text-black">
                                {Number(d._sum?.quantity_change || 0) > 0 ? '+' : ''}
                                {Number(d._sum?.quantity_change || 0).toFixed(2)}
                              </TableCell>
@@ -537,8 +644,8 @@ export function InventoryReports() {
                     <History className="h-8 w-8 text-slate-200" />
                   </div>
                   <div>
-                    <h3 className="text-sm font-bold text-slate-800">No report data found</h3>
-                    <p className="text-xs text-slate-400 mt-1 max-w-[240px]">Adjust your filters or date range to discover broader inventory insights.</p>
+                    <h3 className="text-sm font-bold text-black">No report data found</h3>
+                    <p className="text-xs text-black/60 mt-1 max-w-[240px]">Adjust your filters or date range to discover broader inventory insights.</p>
                   </div>
                </div>
              )}

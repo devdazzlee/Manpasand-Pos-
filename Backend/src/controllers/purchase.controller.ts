@@ -18,6 +18,19 @@ export const createPurchase = asyncHandler(async (req: Request, res: Response) =
   new ApiResponse(purchase, 'Purchase logged successfully', 201).send(res);
 });
 
+export const createBulkPurchase = asyncHandler(async (req: Request, res: Response) => {
+  const body = req.body;
+  const purchaseDate = body.purchaseDate ? new Date(body.purchaseDate) : undefined;
+  const expiryDate = body.expiryDate ? new Date(body.expiryDate) : undefined;
+  const result = await purchaseService.createBulkPurchase({
+    ...body,
+    purchaseDate,
+    expiryDate,
+    createdBy: req.user!.id,
+  });
+  new ApiResponse(result, 'Supplier bill saved successfully', 201).send(res);
+});
+
 export const listPurchases = asyncHandler(async (req: Request, res: Response) => {
   const query = req.query as any;
   const startDate = query.startDate ? new Date(query.startDate) : undefined;

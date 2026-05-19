@@ -19,13 +19,22 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle, Loader2, Minus, X, ChevronLeft, ChevronRight } from "lucide-react"
+import { Plus, Search, Eye, RotateCcw, CreditCard, DollarSign, CheckCircle, XCircle, Loader2, Minus, X, ChevronLeft, ChevronRight, Printer, Download, MessageCircle } from "lucide-react"
 import { useToast } from "@/hooks/use-toast"
 import { PageLoader } from "@/components/ui/page-loader"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import apiClient from "@/lib/apiClient"
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri"
+import {
+  prepareReceiptDataFromSale,
+  downloadReceiptPdf,
+  shareReceiptOnWhatsApp,
+  type ReceiptData,
+} from "@/lib/receipt"
+import { printReceiptViaServer } from "@/lib/print-server"
+import { usePrinterSettings } from "@/hooks/use-printer-settings"
 
 interface Sale {
   id: string
@@ -101,6 +110,10 @@ interface Product {
   purchase_rate: number
   available_stock?: number
   current_stock?: number
+  // Backend can expose unit either as a relation { name } or as a flat
+  // unit_name string depending on the endpoint. Accept both shapes.
+  unit?: { name?: string | null } | null
+  unit_name?: string | null
 }
 
 interface ExchangeItem {
@@ -109,6 +122,7 @@ interface ExchangeItem {
   sku: string
   quantity: number
   price: number
+  unit?: string
 }
 
 interface SelectedReturnItem {
@@ -223,6 +237,10 @@ export function Returns() {
   const [products, setProducts] = useState<Product[]>([])
   const [productsLoading, setProductsLoading] = useState(false)
   const [exchangeItems, setExchangeItems] = useState<ExchangeItem[]>([])
+  // Per-row draft text for the quantity input so the user can clear the field
+  // without it snapping back to "0" and concatenating their next keystroke
+  // (e.g. clearing then typing "22" was producing "022").
+  const [exchangeQtyDrafts, setExchangeQtyDrafts] = useState<Record<string, string>>({})
   const [exchangeProductSearch, setExchangeProductSearch] = useState("")
   const [exchangeProductDropdownOpen, setExchangeProductDropdownOpen] = useState(false)
   const exchangeProductSearchRef = useRef<HTMLInputElement | null>(null)
@@ -232,6 +250,9 @@ export function Returns() {
   const [saleDropdownOpen, setSaleDropdownOpen] = useState(false)
   const [selectedReturn, setSelectedReturn] = useState<ReturnItem | null>(null)
   const [isViewOpen, setIsViewOpen] = useState(false)
+  const [receiptData, setReceiptData] = useState<ReceiptData | null>(null)
+  const logoDataUri = useLogoDataUri()
+  const { receiptPrinter, getReceiptPrinterObj, printers } = usePrinterSettings()
   const [searchTerm, setSearchTerm] = useState("")
   const [saleSearch, setSaleSearch] = useState("")
   const [saleSearchPending, setSaleSearchPending] = useState(false)
@@ -548,6 +569,75 @@ export function Returns() {
     setCurrentPage(1)
   }, [searchTerm])
 
+  // Prepare ReceiptData (same shape as sales-history) whenever a return is
+  // opened. The data feeds the Print / Download / Share actions — there's no
+  // on-screen receipt preview here; the original card view stays as-is.
+  useEffect(() => {
+    if (selectedReturn && isViewOpen) {
+      const data = prepareReceiptDataFromSale(
+        selectedReturn as any,
+        { name: "MANPASAND GENERAL STORE", address: "Karachi" },
+        { transactionLabel: selectedReturn.sale_number },
+      )
+      setReceiptData(data)
+    } else {
+      setReceiptData(null)
+    }
+  }, [selectedReturn, isViewOpen])
+
+  const handleServerPrint = async () => {
+    if (!receiptData) return
+    const printerInfo = getReceiptPrinterObj()
+    if (!printerInfo) {
+      toast({ title: "Please select a receipt printer in Printer Settings", variant: "destructive" })
+      return
+    }
+    try {
+      await printReceiptViaServer(
+        {
+          ...printerInfo,
+          columns: printerInfo.receiptProfile?.columns || { fontA: 48, fontB: 64 },
+        },
+        receiptData,
+        { copies: 1, cut: true, openDrawer: false },
+      )
+      toast({ title: "Receipt sent to printer" })
+    } catch (err: any) {
+      toast({ title: err?.message || "Failed to print receipt", variant: "destructive" })
+    }
+  }
+
+  const handleDownloadReceipt = async () => {
+    if (!receiptData) return
+    try {
+      await downloadReceiptPdf(receiptData, logoDataUri)
+    } catch (err: any) {
+      toast({ title: err?.message || "Failed to download receipt", variant: "destructive" })
+    }
+  }
+
+  const handleShareReceiptOnWhatsApp = async () => {
+    if (!receiptData) return
+    try {
+      const { fellBack } = await shareReceiptOnWhatsApp(
+        receiptData,
+        logoDataUri,
+        (selectedReturn as any)?.customer?.phone_number ||
+          (selectedReturn as any)?.customer?.mobile_number ||
+          "",
+      )
+      if (fellBack) {
+        toast({
+          title: "Receipt downloaded",
+          description:
+            "Your browser doesn't support direct file share. Attach the PDF in the WhatsApp chat.",
+        })
+      }
+    } catch (err: any) {
+      toast({ title: err?.message || "Failed to share receipt", variant: "destructive" })
+    }
+  }
+
   // Calculate stats
   const today = new Date()
   const yesterday = new Date()
@@ -591,7 +681,10 @@ export function Returns() {
         )
       )
     } else {
-      // Add new exchange item
+      // Add new exchange item — capture the unit (kg / pcs / etc.) so we can
+      // show it next to the quantity input.
+      const unitLabel =
+        product.unit?.name || product.unit_name || undefined
       setExchangeItems((prev) => [
         ...prev,
         {
@@ -600,6 +693,7 @@ export function Returns() {
           sku: product.sku,
           quantity: 1,
           price: price,
+          unit: unitLabel || undefined,
         },
       ])
     }
@@ -631,28 +725,30 @@ export function Returns() {
 
   // Handle exchange item quantity change
   const handleExchangeQuantityChange = (productId: string, quantity: number) => {
-    if (quantity <= 0) {
-      // Remove item
-      setExchangeItems((prev) => prev.filter((item) => item.productId !== productId))
-      setNewReturn((prev) => ({
-        ...prev,
-        exchangedItems: prev.exchangedItems.filter((item) => item.productId !== productId),
-      }))
-    } else {
-      // Update quantity
-      setExchangeItems((prev) =>
-        prev.map((item) =>
-          item.productId === productId ? { ...item, quantity } : item
-        )
-      )
-      setNewReturn((prev) => ({
-        ...prev,
-        exchangedItems: prev.exchangedItems.map((item) =>
-          item.productId === productId ? { ...item, quantity } : item
-        ),
-      }))
-    }
-  }
+    // Keep the row even when quantity is 0 so the user can finish typing a
+    // value like "0.5" without the row disappearing on the first "0".
+    // Use removeExchangeItem to explicitly drop a row.
+    const safeQty = Number.isFinite(quantity) && quantity >= 0 ? quantity : 0;
+    setExchangeItems((prev) =>
+      prev.map((item) =>
+        item.productId === productId ? { ...item, quantity: safeQty } : item,
+      ),
+    );
+    setNewReturn((prev) => ({
+      ...prev,
+      exchangedItems: prev.exchangedItems.map((item) =>
+        item.productId === productId ? { ...item, quantity: safeQty } : item,
+      ),
+    }));
+  };
+
+  const removeExchangeItem = (productId: string) => {
+    setExchangeItems((prev) => prev.filter((item) => item.productId !== productId));
+    setNewReturn((prev) => ({
+      ...prev,
+      exchangedItems: prev.exchangedItems.filter((item) => item.productId !== productId),
+    }));
+  };
 
   // Filter products for exchange
   const filteredExchangeProducts = useMemo(() => {
@@ -683,8 +779,12 @@ export function Returns() {
       nextErrors.refundMethod = "Please select a refund method."
     }
 
-    if (newReturn.returnType === "EXCHANGE" && newReturn.exchangedItems.length === 0) {
-      nextErrors.exchangeItems = "Please add at least one item for exchange."
+    if (newReturn.returnType === "EXCHANGE") {
+      if (newReturn.exchangedItems.length === 0) {
+        nextErrors.exchangeItems = "Please add at least one item for exchange."
+      } else if (newReturn.exchangedItems.some((it) => !it.quantity || it.quantity <= 0)) {
+        nextErrors.exchangeItems = "Exchange item quantity must be greater than 0."
+      }
     }
 
     if (validReturnedItems.length === 0 && newReturn.exchangedItems.length === 0) {
@@ -1548,28 +1648,87 @@ export function Returns() {
                             <div className="text-sm text-gray-500">
                               SKU: {item.sku} • Price: Rs {Number(item.price).toLocaleString()}
                             </div>
+                            <div className="text-sm font-semibold text-green-700 mt-0.5">
+                              Subtotal: Rs{" "}
+                              {(item.quantity * item.price).toLocaleString("en-US", {
+                                minimumFractionDigits: 2,
+                                maximumFractionDigits: 2,
+                              })}
+                            </div>
                           </div>
                           <div className="flex items-center gap-2">
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleExchangeQuantityChange(item.productId, item.quantity - 1)}
-                              disabled={item.quantity <= 1}
+                              onClick={() =>
+                                handleExchangeQuantityChange(
+                                  item.productId,
+                                  Math.max(0, Number((item.quantity - 1).toFixed(3))),
+                                )
+                              }
+                              disabled={item.quantity <= 0}
                             >
                               <Minus className="w-3 h-3" />
                             </Button>
-                            <span className="w-12 text-center font-medium">{item.quantity}</span>
+                            <Input
+                              type="number"
+                              inputMode="decimal"
+                              step="0.001"
+                              min="0"
+                              // Show the draft while editing; fall back to the
+                              // canonical quantity once the user blurs. This
+                              // prevents the "022" concat where typing into a
+                              // cleared field appended to a leading "0".
+                              value={
+                                exchangeQtyDrafts[item.productId] ??
+                                String(item.quantity)
+                              }
+                              onChange={(e) => {
+                                const v = e.target.value;
+                                setExchangeQtyDrafts((d) => ({
+                                  ...d,
+                                  [item.productId]: v,
+                                }));
+                                if (v === "") {
+                                  handleExchangeQuantityChange(item.productId, 0);
+                                  return;
+                                }
+                                const n = Number(v);
+                                if (Number.isFinite(n) && n >= 0) {
+                                  handleExchangeQuantityChange(item.productId, n);
+                                }
+                              }}
+                              onBlur={() => {
+                                // Commit: drop the draft so the controlled
+                                // input reflects the canonical, clean number.
+                                setExchangeQtyDrafts((d) => {
+                                  const { [item.productId]: _drop, ...rest } = d;
+                                  return rest;
+                                });
+                              }}
+                              className="w-20 text-center font-medium [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                            />
+                            {item.unit && (
+                              <span className="text-sm text-gray-500 min-w-[2rem]">
+                                {item.unit}
+                              </span>
+                            )}
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleExchangeQuantityChange(item.productId, item.quantity + 1)}
+                              onClick={() =>
+                                handleExchangeQuantityChange(
+                                  item.productId,
+                                  Number((item.quantity + 1).toFixed(3)),
+                                )
+                              }
                             >
                               <Plus className="w-3 h-3" />
                             </Button>
                             <Button
                               variant="outline"
                               size="sm"
-                              onClick={() => handleExchangeQuantityChange(item.productId, 0)}
+                              onClick={() => removeExchangeItem(item.productId)}
                               className="ml-2 text-red-600 hover:text-red-700"
                             >
                               <X className="w-3 h-3" />
@@ -1579,16 +1738,40 @@ export function Returns() {
                       ))}
                       
                       {/* Exchange Summary */}
-                      <div className="bg-green-50 p-3 rounded-lg mt-4">
-                        <h4 className="font-medium text-green-900 mb-2">Exchange Summary</h4>
-                        <div className="text-sm text-green-800 space-y-1">
-                          <div>
-                            <strong>Exchange Items:</strong> {exchangeItems.length}
+                      <div className="bg-green-50 border border-green-100 p-4 rounded-lg mt-4">
+                        <h4 className="font-semibold text-green-900 mb-3">Exchange Summary</h4>
+                        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                          <div className="flex flex-col">
+                            <span className="text-green-700">Items</span>
+                            <span className="font-semibold text-green-900 text-base">
+                              {exchangeItems.length}
+                            </span>
                           </div>
-                          <div>
-                            <strong>Total Exchange Value:</strong> Rs {exchangeItems
-                              .reduce((total, item) => total + (item.quantity * item.price), 0)
-                              .toLocaleString()}
+                          <div className="flex flex-col">
+                            <span className="text-green-700">Total Quantity</span>
+                            <span className="font-semibold text-green-900 text-base">
+                              {exchangeItems
+                                .reduce((total, item) => total + item.quantity, 0)
+                                .toLocaleString("en-US", {
+                                  minimumFractionDigits: 0,
+                                  maximumFractionDigits: 3,
+                                })}
+                            </span>
+                          </div>
+                          <div className="flex flex-col">
+                            <span className="text-green-700">Total Exchange Value</span>
+                            <span className="font-bold text-green-900 text-base">
+                              Rs{" "}
+                              {exchangeItems
+                                .reduce(
+                                  (total, item) => total + item.quantity * item.price,
+                                  0,
+                                )
+                                .toLocaleString("en-US", {
+                                  minimumFractionDigits: 2,
+                                  maximumFractionDigits: 2,
+                                })}
+                            </span>
                           </div>
                         </div>
                       </div>
@@ -1862,6 +2045,38 @@ export function Returns() {
               )}
             </div>
           )}
+          <DialogFooter className="pt-2">
+            <div className="flex flex-wrap items-center gap-2 w-full justify-end">
+              {printers.length > 0 && (
+                <Button
+                  onClick={handleServerPrint}
+                  disabled={!receiptPrinter || !receiptData}
+                  size="sm"
+                >
+                  <Printer className="h-4 w-4 mr-2" />
+                  Print
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                onClick={handleDownloadReceipt}
+                disabled={!receiptData}
+                size="sm"
+              >
+                <Download className="h-4 w-4 mr-2" />
+                Download PDF
+              </Button>
+              <Button
+                onClick={handleShareReceiptOnWhatsApp}
+                disabled={!receiptData}
+                className="bg-[#25D366] hover:bg-[#1ebe57] text-white"
+                size="sm"
+              >
+                <MessageCircle className="h-4 w-4 mr-2" />
+                Share on WhatsApp
+              </Button>
+            </div>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

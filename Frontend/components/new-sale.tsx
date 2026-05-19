@@ -1106,19 +1106,10 @@ export function NewSale() {
         // Auto-print receipt
         if (autoPrint) {
           try {
-            // Get branch name from localStorage (correct source)
-            const storedBranchName = localStorage.getItem("branchName");
-            
-            console.log("🏢 Current Branch:", storedBranchName);
-            
-            // Use DB branch address when available instead of hardcoded city text
-            const fullAddress = "Karachi, Pakistan";
-           
-            console.log("fullAddress", fullAddress);
             const receiptDataForServer: ReceiptData = {
-              storeName: storedBranchName || branchInfo.name || "MANPASAND GENERAL STORE",
+              storeName: branchInfo.name,
               tagline: "Quality • Service • Value",
-              address: fullAddress,
+              address: branchInfo.address,
               transactionId: transactionId,
               timestamp: new Date(receiptData.timestamp).toISOString(),
               cashier: receiptData.cashier || "Walk-in",

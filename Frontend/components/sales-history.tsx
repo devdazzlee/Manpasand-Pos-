@@ -33,6 +33,7 @@ import {
   Loader2,
   ChevronLeft,
   ChevronRight,
+  MessageCircle,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -51,6 +52,14 @@ import {
 } from "@/components/ui/dialog";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import {
+  prepareReceiptDataFromSale,
+  generateReceiptHtml as buildReceiptHtmlShared,
+  receiptPageWrapper as wrapReceiptPageShared,
+  buildReceiptPdfBlob as buildReceiptPdfShared,
+  normalizeWhatsAppNumber,
+} from "@/lib/receipt";
 
 interface SaleItem {
   id: string;
@@ -70,6 +79,9 @@ interface SaleItem {
 interface Customer {
   id: string;
   email: string;
+  name?: string | null;
+  phone_number?: string | null;
+  mobile_number?: string | null;
 }
 
 interface Branch {
@@ -150,6 +162,8 @@ export function SalesHistory() {
   // Global printer settings (configured in Printer Settings page)
   const { receiptPrinter, getReceiptPrinterObj, printers } = usePrinterSettings();
   const [kioskMode, setKioskMode] = useState<boolean>(false);
+  // Logo embedded as data URI for srcDoc iframe + jsPDF — shared hook.
+  const logoDataUri = useLogoDataUri();
 
   const [searchTerm, setSearchTerm] = useState("");
   const [startDate, setStartDate] = useState<Date | undefined>(undefined);
@@ -453,12 +467,13 @@ export function SalesHistory() {
 <div class="powered-by">Powered by Ace Studios</div>
 <div class="ace-line">+92 336 2500357</div>`;
     
+    const logoSrc = logoDataUri || `${window.location.origin}/logo.png`;
     return `
 <div class="receipt">
 <div class="logo">
-<img 
-  src="${window.location.origin}/logo.png" 
-  alt="Logo" 
+<img
+  src="${logoSrc}"
+  alt="Logo"
   class="logo-img" />
 </div>
 <div class="store-name">${branchLine}</div>
@@ -493,7 +508,9 @@ ${data.strn ? `<div class="strn">${data.strn}</div>` : ''}
 </div>
 <div class="items-divider"></div>
 
+<div class="items-list">
 ${itemsHtml}
+</div>
 
 <div class="divider"></div>
 
@@ -598,23 +615,28 @@ ${aceHtml}
           }
           .logo {
             text-align: center;
-            margin-bottom: 3mm;
+            /* Bigger gap below the logo block so the store name doesn't
+               sit right under the wordmark. */
+            margin-bottom: 5mm;
           }
           .logo-img {
-            max-width: 48mm;
-            max-height: 24mm;
+            /* No grayscale/contrast filter — those produced the ghosted
+               vertical bars that looked like a strikethrough on the logo.
+               Width tuned so the mark + wordmark stay legible without
+               dominating the 80mm-wide receipt. */
+            max-width: 42mm;
+            max-height: 22mm;
             width: auto;
             height: auto;
             display: block;
-            margin: 0 auto 3mm auto;
+            margin: 0 auto;
             object-fit: contain;
-            filter: grayscale(100%) contrast(200%);
-            image-rendering: pixelated;
           }
           .store-name {
             font-weight: bold;
             font-size: 11pt;
             text-align: center;
+            margin-top: 1mm;
             margin-bottom: 2mm;
             color: #000000;
             line-height: 1.2;
@@ -679,17 +701,27 @@ ${aceHtml}
           }
           .items-divider {
             border-top: 1px solid #000;
-            margin: 1mm 0 2mm 0;
+            margin: 2mm 0 0 0;
             height: 0;
             width: 100%;
           }
+          .items-list {
+            /* Explicit padding (not margin) so the gap can't collapse into
+               the divider or the first row's own margins. */
+            padding-top: 5mm;
+          }
+          .items-list .item-row:first-child {
+            margin-top: 0;
+          }
           .item-col {
-            flex: 0 0 48%;
+            flex: 0 0 56%;
             text-align: left;
+            padding-right: 2mm;
           }
           .qty-col {
-            flex: 0 0 18%;
-            text-align: center;
+            flex: 0 0 14%;
+            text-align: right;
+            padding-right: 2mm;
           }
           .rate-col {
             flex: 1;
@@ -700,20 +732,21 @@ ${aceHtml}
             justify-content: space-between;
             align-items: flex-start;
             width: 100%;
-            margin: 1.5mm 0;
+            margin: 2mm 0;
             font-size: 9.4pt;
             line-height: 1.3;
             word-break: break-word;
           }
           .item-name {
-            flex: 0 0 48%;
+            flex: 0 0 56%;
             text-align: left;
             padding-right: 2mm;
             word-break: break-word;
           }
           .item-qty {
-            flex: 0 0 18%;
-            text-align: center;
+            flex: 0 0 14%;
+            text-align: right;
+            padding-right: 2mm;
             word-break: break-word;
           }
           .item-rate {
@@ -829,14 +862,17 @@ ${aceHtml}
   useEffect(() => {
     if (viewSale) {
       const data = prepareReceiptDataFromSale(viewSale, branchInfo);
-      const content = generateReceiptHtml(data);
+      const content = buildReceiptHtmlShared(data, logoDataUri);
       setReceiptData(data);
-      setReceiptHtml(receiptPageWrapper(content));
+      setReceiptHtml(wrapReceiptPageShared(content));
     } else {
       setReceiptHtml("");
       setReceiptData(null);
     }
-  }, [viewSale, branchInfo]);
+    // Re-render when the logo data URI loads so the logo appears without
+    // needing to close and reopen the receipt dialog.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viewSale, branchInfo, logoDataUri]);
 
   useEffect(() => {
     const iframe = receiptIframeRef.current;
@@ -875,6 +911,206 @@ ${aceHtml}
       window.removeEventListener("resize", handleLoad);
     };
   }, [receiptHtml]);
+
+  // Sanitize a phone number for the wa.me URL format (digits only, country
+  // code retained). wa.me rejects "+", spaces, and dashes.
+  const normalizeWhatsAppNumber = (raw: string | null | undefined) => {
+    if (!raw) return "";
+    const digits = raw.replace(/\D/g, "");
+    if (!digits) return "";
+    // Local Pakistani numbers starting with 0 → 92.
+    if (digits.startsWith("0")) return `92${digits.slice(1)}`;
+    return digits;
+  };
+
+  // Build a thermal-receipt-sized PDF Blob from receiptData using jsPDF.
+  // Sized at 80mm width like the printed receipt for a consistent look.
+  const buildReceiptPdfBlob = async (): Promise<{ blob: Blob; filename: string } | null> => {
+    if (!receiptData) return null;
+    const { jsPDF } = await import("jspdf");
+
+    const money = (n: number) =>
+      Number(n || 0).toLocaleString("en-US", {
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2,
+      });
+
+    const widthMm = 80;
+    const doc = new jsPDF({ unit: "mm", format: [widthMm, 297] });
+    const left = 4;
+    const right = widthMm - 4;
+    const usable = right - left;
+    let y = 6;
+
+    const lineGap = 4;
+    const sectionGap = 2;
+
+    const writeCentered = (text: string, opts?: { bold?: boolean; size?: number }) => {
+      doc.setFont("helvetica", opts?.bold ? "bold" : "normal");
+      doc.setFontSize(opts?.size ?? 9);
+      const lines = doc.splitTextToSize(text, usable);
+      lines.forEach((ln: string) => {
+        doc.text(ln, widthMm / 2, y, { align: "center" });
+        y += lineGap;
+      });
+    };
+
+    const writeRow = (label: string, value: string, opts?: { bold?: boolean; size?: number }) => {
+      doc.setFont("helvetica", opts?.bold ? "bold" : "normal");
+      doc.setFontSize(opts?.size ?? 8.5);
+      doc.text(label, left, y);
+      doc.text(value, right, y, { align: "right" });
+      y += lineGap;
+    };
+
+    const hr = () => {
+      doc.setLineDashPattern([0.6, 0.6], 0);
+      doc.setLineWidth(0.2);
+      doc.line(left, y, right, y);
+      doc.setLineDashPattern([], 0);
+      y += sectionGap + 2;
+    };
+
+    // Logo (centered) — load the image first so we can honor its natural
+    // aspect ratio. Passing fixed w/h to addImage stretches the logo, which
+    // is what was distorting the wordmark in the WhatsApp PDF.
+    if (logoDataUri) {
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const el = new Image();
+          el.onload = () => resolve(el);
+          el.onerror = reject;
+          el.src = logoDataUri;
+        });
+        const aspect = img.naturalWidth / img.naturalHeight || 2;
+        const maxW = 44;
+        const maxH = 20;
+        let imgW = maxW;
+        let imgH = imgW / aspect;
+        if (imgH > maxH) {
+          imgH = maxH;
+          imgW = imgH * aspect;
+        }
+        const x = (widthMm - imgW) / 2;
+        doc.addImage(logoDataUri, "PNG", x, y, imgW, imgH);
+        y += imgH + 5;
+      } catch {
+        // ignore — image load failed; receipt continues without logo
+      }
+    }
+
+    // Header
+    if (receiptData.storeName) writeCentered(receiptData.storeName, { bold: true, size: 11 });
+    if (receiptData.address) writeCentered(receiptData.address, { size: 8.5 });
+    writeCentered(receiptData.tagline || "Quality - Service - Value", { size: 8 });
+    hr();
+
+    // Meta
+    const when = receiptData.timestamp ? new Date(receiptData.timestamp) : new Date();
+    writeRow("Receipt #", String(receiptData.transactionId));
+    writeRow("Date", `${when.toLocaleDateString()} ${when.toLocaleTimeString()}`);
+    writeRow("Cashier", receiptData.cashier || "Walk-in");
+    writeRow("Customer", receiptData.customerType || "Walk-in");
+    hr();
+
+    // Items table — explicit column anchors prevent ITEM text from colliding
+    // with the QTY column when product names are long.
+    const colItemMaxWidth = usable * 0.60; // wrap ITEM at 60% of row
+    const qtyAnchor = left + usable * 0.74; // QTY column (right-aligned)
+    const rateAnchor = right; // RATE column (right-aligned)
+
+    // Header — write the label row, then a 2mm gap, then the rule, then
+    // a real 5mm gap before items. Earlier the rule was drawn 2mm above the
+    // cursor which put it through the top of "Ginger Gurr"'s glyphs.
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(8.5);
+    doc.text("ITEM", left, y);
+    doc.text("QTY", qtyAnchor, y, { align: "right" });
+    doc.text("RATE", rateAnchor, y, { align: "right" });
+    y += 2;
+    doc.setLineWidth(0.3);
+    doc.line(left, y, right, y);
+    y += 5;
+
+    // Rows
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    const rowGap = 4.5;
+    for (const it of receiptData.items || []) {
+      const name = String(it.name || "");
+      const qty = `${it.quantity}${it.unit ? ` ${it.unit}` : ""}`;
+      const rate = money(Number(it.price || 0) * Number(it.quantity || 0));
+      const nameLines: string[] = doc.splitTextToSize(name, colItemMaxWidth);
+      doc.text(nameLines, left, y);
+      doc.text(qty, qtyAnchor, y, { align: "right" });
+      doc.text(rate, rateAnchor, y, { align: "right" });
+      y += rowGap * Math.max(1, nameLines.length);
+    }
+    y += 1;
+    hr();
+
+    // Totals
+    writeRow("Subtotal", `PKR ${money(receiptData.subtotal || 0)}`);
+    if (receiptData.discount && Number(receiptData.discount) > 0) {
+      writeRow("Discount", `- PKR ${money(receiptData.discount)}`);
+    }
+    writeRow("Grand Total", `PKR ${money(receiptData.total ?? 0)}`, { bold: true, size: 10 });
+    hr();
+
+    // Payment
+    writeRow("Payment", String(receiptData.paymentMethod || "CASH").toUpperCase());
+    if (receiptData.amountPaid != null) {
+      writeRow("Paid", `PKR ${money(receiptData.amountPaid)}`);
+    }
+    if (receiptData.changeAmount && receiptData.changeAmount > 0) {
+      writeRow("Change", `PKR ${money(receiptData.changeAmount)}`);
+    }
+    hr();
+
+    // Footer
+    writeCentered(receiptData.thankYouMessage || "Thank you for shopping!", {
+      bold: true,
+      size: 9.5,
+    });
+    writeCentered("Branch: 021 34892110", { size: 8 });
+    writeCentered("Delivery Hotline WhatsApp: +92 342 3344040", { size: 8 });
+    writeCentered("Website: Manpasandstore.com", { size: 8 });
+
+    // Trim height to content
+    const finalHeight = Math.ceil(y + 6);
+    const blob = doc.output("blob");
+    // jsPDF doesn't let us trim height after creation cleanly; the trailing
+    // blank space inside an 80×297mm page is acceptable for a receipt PDF.
+    void finalHeight;
+
+    const filename = `receipt-${receiptData.transactionId}.pdf`;
+    return { blob, filename };
+  };
+
+  const handleShareOnWhatsApp = async () => {
+    if (!receiptData) {
+      toast({ title: "No receipt data available", variant: "destructive" });
+      return;
+    }
+    try {
+      const { fellBack } = await import("@/lib/receipt").then((m) =>
+        m.shareReceiptOnWhatsApp(
+          receiptData,
+          logoDataUri,
+          viewSale?.customer?.phone_number || viewSale?.customer?.mobile_number || "",
+        ),
+      );
+      if (fellBack) {
+        toast({
+          title: "Receipt downloaded",
+          description:
+            "Your browser doesn't support direct file share. Attach the downloaded PDF in the WhatsApp chat.",
+        });
+      }
+    } catch (err: any) {
+      toast({ title: err?.message || "Failed to share receipt", variant: "destructive" });
+    }
+  };
 
   const handleBrowserPrintReceipt = () => {
     if (!receiptHtml) return;
@@ -1292,13 +1528,21 @@ ${aceHtml}
                           Print to Printer
                         </Button>
                       )}
-                      <Button 
-                        variant="outline" 
+                      <Button
+                        variant="outline"
                         onClick={handleBrowserPrintReceipt}
                         className="whitespace-nowrap shadow-sm hover:shadow-md transition-all"
                         size="default"
                       >
                         Browser Print
+                      </Button>
+                      <Button
+                        onClick={handleShareOnWhatsApp}
+                        className="whitespace-nowrap shadow-sm hover:shadow-md transition-all bg-[#25D366] hover:bg-[#1ebe57] text-white"
+                        size="default"
+                      >
+                        <MessageCircle className="h-4 w-4 mr-2" />
+                        Share on WhatsApp
                       </Button>
                     </div>
                     <Button 

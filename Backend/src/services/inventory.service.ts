@@ -245,7 +245,11 @@ export class InventoryService {
       if (params.endDate) where.created_at.lte = params.endDate;
     }
 
-    const [total, movements] = await Promise.all([
+    // Summary must reflect ALL movements matching the filter, not just the
+    // current page. Previously we summed `movements` (the paginated slice)
+    // which produced "+0 / -0" whenever the meaningful inbound/outbound
+    // records lived on a later page.
+    const [total, movements, increaseAgg, decreaseAgg] = await Promise.all([
       prisma.stockMovement.count({ where }),
       prisma.stockMovement.findMany({
         where,
@@ -258,18 +262,26 @@ export class InventoryService {
           user: { select: { email: true } },
         },
       }),
+      prisma.stockMovement.aggregate({
+        _sum: { quantity_change: true },
+        where: { ...where, quantity_change: { gt: 0 } },
+      }),
+      prisma.stockMovement.aggregate({
+        _sum: { quantity_change: true },
+        where: { ...where, quantity_change: { lt: 0 } },
+      }),
     ]);
 
     const summary = {
-      totalIncrease: movements.filter(m => asNumber(m.quantity_change) > 0).reduce((acc, m) => acc + asNumber(m.quantity_change), 0),
-      totalDecrease: movements.filter(m => asNumber(m.quantity_change) < 0).reduce((acc, m) => acc + Math.abs(asNumber(m.quantity_change)), 0),
-      count: total
+      totalIncrease: asNumber(increaseAgg._sum.quantity_change),
+      totalDecrease: Math.abs(asNumber(decreaseAgg._sum.quantity_change)),
+      count: total,
     };
 
     return {
       data: movements,
       meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
-      summary
+      summary,
     };
   }
 

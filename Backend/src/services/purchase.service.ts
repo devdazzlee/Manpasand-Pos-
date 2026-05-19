@@ -103,6 +103,128 @@ export class PurchaseService {
     });
   }
 
+  // Multi-line GRN — saves the supplier delivery as N Purchase rows + one
+  // stock movement per line, all in a single transaction. Use this for the
+  // "Save purchase" flow on the Stock In screen.
+  async createBulkPurchase(data: {
+    supplierId: string;
+    warehouseBranchId: string;
+    purchaseDate?: Date;
+    invoiceRef?: string;
+    notes?: string;
+    batchNo?: string;
+    expiryDate?: Date;
+    deliveryStatus?: 'PARTIAL' | 'COMPLETE';
+    lines: Array<{
+      productId: string;
+      quantity: number;
+      costPrice: number;
+      salePrice?: number;
+    }>;
+    createdBy: string;
+  }) {
+    if (!Array.isArray(data.lines) || data.lines.length === 0) {
+      throw new AppError(400, 'At least one line is required');
+    }
+
+    const branch = await prisma.branch.findUnique({
+      where: { id: data.warehouseBranchId },
+    });
+    if (!branch) throw new AppError(404, 'Warehouse branch not found');
+
+    return prisma.$transaction(async (tx) => {
+      const purchaseIds: string[] = [];
+
+      for (const line of data.lines) {
+        if (!line.productId) throw new AppError(400, 'Product is required on every line');
+        if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
+          throw new AppError(400, `Invalid quantity on line for product ${line.productId}`);
+        }
+        if (!Number.isFinite(line.costPrice) || line.costPrice < 0) {
+          throw new AppError(400, `Invalid cost price on line for product ${line.productId}`);
+        }
+
+        // Compose per-line notes that preserve the batch/expiry/notes
+        // metadata next to the row's other fields.
+        const noteParts: string[] = [];
+        if (data.batchNo) noteParts.push(`Batch: ${data.batchNo}`);
+        if (data.expiryDate) noteParts.push(`Expiry: ${data.expiryDate.toISOString().slice(0, 10)}`);
+        if (data.notes) noteParts.push(data.notes);
+        const noteText = noteParts.length > 0 ? noteParts.join(' | ') : undefined;
+
+        const purchase = await tx.purchase.create({
+          data: {
+            product_id: line.productId,
+            supplier_id: data.supplierId,
+            warehouse_branch_id: data.warehouseBranchId,
+            quantity: line.quantity,
+            cost_price: line.costPrice,
+            sale_price: line.salePrice ?? line.costPrice,
+            purchase_date: data.purchaseDate || new Date(),
+            invoice_ref: data.invoiceRef,
+            notes: noteText,
+            delivery_status: data.deliveryStatus || 'COMPLETE',
+            created_by: data.createdBy,
+          },
+        });
+
+        let stock = await tx.stock.findUnique({
+          where: {
+            product_id_branch_id: {
+              product_id: line.productId,
+              branch_id: data.warehouseBranchId,
+            },
+          },
+        });
+
+        const previousQty = stock ? asNumber(stock.current_quantity) : 0;
+        const newQty = stock
+          ? addDecimal(stock.current_quantity, line.quantity)
+          : line.quantity;
+
+        if (stock) {
+          await tx.stock.update({
+            where: {
+              product_id_branch_id: {
+                product_id: line.productId,
+                branch_id: data.warehouseBranchId,
+              },
+            },
+            data: { current_quantity: newQty },
+          });
+        } else {
+          await tx.stock.create({
+            data: {
+              product_id: line.productId,
+              branch_id: data.warehouseBranchId,
+              current_quantity: line.quantity,
+            },
+          });
+        }
+
+        await tx.stockMovement.create({
+          data: {
+            product_id: line.productId,
+            branch_id: data.warehouseBranchId,
+            movement_type: 'PURCHASE',
+            reference_id: purchase.id,
+            reference_type: 'purchase',
+            quantity_change: line.quantity,
+            previous_qty: previousQty,
+            new_qty: typeof newQty === 'number' ? newQty : asNumber(newQty as Prisma.Decimal),
+            unit_cost: line.costPrice,
+            notes: noteText,
+            created_by: data.createdBy,
+          },
+        });
+
+        purchaseIds.push(purchase.id);
+      }
+
+      return { count: purchaseIds.length, purchaseIds };
+    });
+  }
+
   async listPurchases(params: {
     page?: number;
     limit?: number;

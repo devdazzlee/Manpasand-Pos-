@@ -581,12 +581,30 @@ app.post('/print-receipt', async (req, res) => {
 
     y += hr(y, 'dotted');
 
+    // Column widths shared by header + rows so they line up cleanly.
+    const itemColW = W * 0.55;
+    const qtyColW = W * 0.16;
+    const rateColW = W - itemColW - qtyColW;
+    const X_ITEM_C = margins.left;
+    const X_QTY_C = X_ITEM_C + itemColW;
+    const X_RATE_C = X_QTY_C + qtyColW;
+
     // ===== ITEMS HEADER =====
-    const lhHdr = rowIQR('ITEM', 'QTY', 'RATE', y, { header: true });
-    y += lhHdr;
+    doc.font(boldFont).fontSize(TOTAL_MAX);
+    doc.text('ITEM', X_ITEM_C, y, { width: itemColW, align: 'left', lineBreak: false });
+    doc.text('QTY', X_QTY_C, y, { width: qtyColW, align: 'right', lineBreak: false });
+    doc.text('RATE', X_RATE_C, y, { width: rateColW, align: 'right', lineBreak: false });
+    y += lineH(TOTAL_MAX);
     y += hr(y, 'solid', 1);
+    // Extra breathing room between the header rule and the first row so the
+    // rule doesn't visually slice into the first item's text.
+    y += 4;
 
     // ===== ITEMS =====
+    // Real wrapping for long names. The old `rowIQR` used `lineBreak: false`
+    // which made long item names overflow into the QTY column, e.g.
+    // "Key Synthetic Vinegar (750 ml)" colliding with "1 Pcs".
+
     for (const it of receiptData.items || []) {
       const name = String(it.name || '');
       const qtyNumber = Number(it.quantity || 0);
@@ -595,10 +613,31 @@ app.post('/print-receipt', async (req, res) => {
       );
       const qty = qtyNumber.toString() + (it.unit ? ` ${it.unit}` : '');
       const rate = `${money(unitPrice * qtyNumber)}`;
-      const lh = rowIQR(name, qty, rate, y);
-      y += lh;
+
+      doc.font(baseFont).fontSize(BODY_MAX);
+      const itemH = doc.heightOfString(name, { width: itemColW });
+
+      // ITEM cell — wraps within its column.
+      doc.text(name, X_ITEM_C, y, {
+        width: itemColW,
+        align: 'left',
+      });
+      // QTY + RATE pinned to the first text line only.
+      doc.text(qty, X_QTY_C, y, {
+        width: qtyColW,
+        align: 'right',
+        lineBreak: false,
+      });
+      doc.text(rate, X_RATE_C, y, {
+        width: rateColW,
+        align: 'right',
+        lineBreak: false,
+      });
+
+      y += Math.max(itemH, lineH(BODY_MAX)) + 1;
     }
 
+    y += 2;
     y += hr(y, 'dotted');
 
     // ===== TOTALS =====

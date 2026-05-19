@@ -8,14 +8,11 @@ import { Button } from "@/components/ui/button"
 import { PageLoader } from "@/components/ui/page-loader"
 import { useLoading } from "@/hooks/use-loading"
 import { useToast } from "@/hooks/use-toast"
-import { DollarSign, ShoppingCart, Users, Package, TrendingUp, TrendingDown, RefreshCw, Download, Truck, Plus, Loader2 } from "lucide-react"
+import { DollarSign, ShoppingCart, Users, Package, TrendingUp, TrendingDown, RefreshCw, Download, Loader2 } from "lucide-react"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import apiClient from "@/lib/apiClient"
 import { normalizeUserRole, type UserRole } from "@/lib/role-utils"
 
-const PURCHASE_ENTRY_ROLES: UserRole[] = ["SUPER_ADMIN", "ADMIN"]
-const TRANSFER_ENTRY_ROLES: UserRole[] = ["SUPER_ADMIN", "ADMIN"]
-const STOCK_OUT_ENTRY_ROLES: UserRole[] = ["SUPER_ADMIN", "ADMIN"]
 const INVENTORY_NAV_ROLES: UserRole[] = [
   "SUPER_ADMIN",
   "ADMIN",
@@ -385,29 +382,6 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
           </>
         )}
       </div>
-
-      {onNavigate && role && (
-        <div className="flex flex-wrap gap-2">
-          {PURCHASE_ENTRY_ROLES.includes(role) && (
-            <Button variant="outline" size="sm" onClick={() => onNavigate("purchases")}>
-              <Plus className="h-4 w-4 mr-1" />
-              New Purchase
-            </Button>
-          )}
-          {TRANSFER_ENTRY_ROLES.includes(role) && (
-            <Button variant="outline" size="sm" onClick={() => onNavigate("transfers")}>
-              <Truck className="h-4 w-4 mr-1" />
-              New Transfer
-            </Button>
-          )}
-          {STOCK_OUT_ENTRY_ROLES.includes(role) && (
-            <Button variant="outline" size="sm" onClick={() => onNavigate("stock-out")}>
-              <Package className="h-4 w-4 mr-1" />
-              Stock Out
-            </Button>
-          )}
-        </div>
-      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* Recent Sales */}

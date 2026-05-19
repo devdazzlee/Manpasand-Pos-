@@ -57,19 +57,31 @@ function getWeightInGramsFromText(weightText?: string): number | undefined {
   return value;
 }
 
-function formatGramsLabel(grams: number, unitName?: string): string {
-  const unit = unitName?.toLowerCase().trim() ?? "";
-  if (["kg", "kgs", "kilogram", "kilograms"].includes(unit)) {
-    const kg = grams / 1000;
-    return kg >= 1 && Number.isInteger(kg)
-      ? `${kg} Kg`
-      : `${kg.toFixed(2).replace(/\.?0+$/, "")} Kg`;
-  }
+/** Show weight in gms unless 1 kg or more — do not convert using product catalog unit (often KG). */
+function formatGramsForDisplay(grams: number): string {
   if (grams >= 1000) {
     const kg = grams / 1000;
-    return `${kg} Kg`;
+    if (Number.isInteger(kg)) return `${kg} Kg`;
+    return `${kg.toFixed(2).replace(/\.?0+$/, "")} Kg`;
   }
   return Number.isInteger(grams) ? `${grams} gms` : `${grams.toFixed(1)} gms`;
+}
+
+/** Weight text embedded in product/line name (e.g. "Shilajit .10 gm"). */
+function extractInlineWeightLabel(label: string): string | undefined {
+  const match = label.match(/(\d+(?:\.\d+)?)\s*(kg|kgs|g|gm|gram|grams|gms)\b/i);
+  if (!match) {
+    const dotMatch = label.match(/\.(\d+(?:\.\d+)?)\s*(g|gm|gram|grams|gms|kg|kgs)\b/i);
+    if (!dotMatch) return undefined;
+    const value = dotMatch[1];
+    const unit = dotMatch[2].toLowerCase();
+    if (["kg", "kgs"].includes(unit)) return `${value} Kg`;
+    return `${value} gms`;
+  }
+  const value = match[1];
+  const unit = match[2].toLowerCase();
+  if (["kg", "kgs", "kilogram", "kilograms"].includes(unit)) return `${value} Kg`;
+  return `${value} gms`;
 }
 
 /** Parse Prisma Decimal / string / number for order line quantity. */
@@ -109,24 +121,33 @@ function resolveLineGrams(item: OrderItem): number | undefined {
   return getWeightInGramsFromText(getOrderItemLabel(item));
 }
 
-/** Human-readable quantity: weight (10 gms), packs (2 × 250 gms), or count. */
+function formatWeightQuantityLabel(weightLabel: string, packQty: number): string {
+  if (packQty <= 1) return weightLabel;
+  return `${formatQuantityValue(packQty)} × ${weightLabel}`;
+}
+
+/** Human-readable quantity — matches what the customer ordered (gms, not forced to kg). */
 function formatOrderItemQuantity(item: OrderItem): string {
   const packQty = parseOrderQuantity(item.quantity);
   const label = getOrderItemLabel(item);
-  const grams = resolveLineGrams(item);
-  const unitName = item.unit_name || item.product?.unit?.name;
 
-  if (grams && grams > 0) {
-    const weightLabel = formatGramsLabel(grams, unitName);
-    if (packQty <= 1) return weightLabel;
-    return `${formatQuantityValue(packQty)} × ${weightLabel}`;
+  // Prefer exact variant from line name: "Sugar - 100 gms" → "100 gms"
+  const variantMatch = label.match(/\s-\s(.+)$/);
+  if (variantMatch) {
+    const variant = variantMatch[1].trim();
+    if (variant.length > 0) {
+      return formatWeightQuantityLabel(variant, packQty);
+    }
   }
 
-  const variantMatch = label.match(/\s-\s(.+)$/);
-  if (variantMatch && packQty > 0) {
-    const variant = variantMatch[1].trim();
-    if (packQty === 1) return variant;
-    return `${formatQuantityValue(packQty)} × ${variant}`;
+  const inlineWeight = extractInlineWeightLabel(label);
+  if (inlineWeight) {
+    return formatWeightQuantityLabel(inlineWeight, packQty);
+  }
+
+  const grams = resolveLineGrams(item);
+  if (grams && grams > 0) {
+    return formatWeightQuantityLabel(formatGramsForDisplay(grams), packQty);
   }
 
   return formatQuantityValue(packQty);

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMonthlyStats = exports.getPurchaseById = exports.listPurchases = exports.createPurchase = void 0;
+exports.getMonthlyStats = exports.getPurchaseById = exports.listPurchases = exports.createBulkPurchase = exports.createPurchase = void 0;
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const purchase_service_1 = require("../services/purchase.service");
@@ -19,6 +19,18 @@ exports.createPurchase = (0, asyncHandler_1.default)(async (req, res) => {
         createdBy: req.user.id,
     });
     new apiResponse_1.ApiResponse(purchase, 'Purchase logged successfully', 201).send(res);
+});
+exports.createBulkPurchase = (0, asyncHandler_1.default)(async (req, res) => {
+    const body = req.body;
+    const purchaseDate = body.purchaseDate ? new Date(body.purchaseDate) : undefined;
+    const expiryDate = body.expiryDate ? new Date(body.expiryDate) : undefined;
+    const result = await purchaseService.createBulkPurchase({
+        ...body,
+        purchaseDate,
+        expiryDate,
+        createdBy: req.user.id,
+    });
+    new apiResponse_1.ApiResponse(result, 'Supplier bill saved successfully', 201).send(res);
 });
 exports.listPurchases = (0, asyncHandler_1.default)(async (req, res) => {
     const query = req.query;
