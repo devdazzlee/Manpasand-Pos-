@@ -7,6 +7,7 @@ import {
     transferStockController,
     removeStockController,
     getStocksController,
+    getStockByProductBranchController,
     getStockMovementsController,
     getTodayStockMovementsController,
 } from "../controllers/stock.controller";
@@ -26,5 +27,6 @@ router.delete("/remove", validate(removeStockSchema), removeStockController);
 router.get("/", getStocksController);
 router.get("/history", getStockMovementsController);
 router.get("/today", getTodayStockMovementsController);
+router.get("/product/:productId/branch/:branchId", getStockByProductBranchController);
 
 export default router;

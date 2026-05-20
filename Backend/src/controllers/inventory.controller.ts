@@ -32,7 +32,7 @@ export const getStockMovements = asyncHandler(async (req: Request, res: Response
     limit: Number(query.limit) || 50,
     userRole: req.user?.role as string,
   });
-  new ApiResponse(result.data, 'Stock movements retrieved', 200, true, result.meta).send(res);
+  new ApiResponse(result.data, 'Stock movements retrieved', 200, true, { ...result.meta, summary: result.summary }).send(res);
 });
 
 export const getStockByLocation = asyncHandler(async (req: Request, res: Response) => {

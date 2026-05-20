@@ -186,7 +186,7 @@ const menuSections: SidebarMenuSection[] = [
       },
       {
         id: "purchases",
-        label: "Stock In (Purchases)",
+        label: "Stock In",
         icon: Truck,
         roles: PURCHASE_ROLES,
       },
@@ -203,18 +203,6 @@ const menuSections: SidebarMenuSection[] = [
     label: "Movements & Adjustments",
     expandable: true,
     items: [
-      {
-        id: "transfers",
-        label: "Transfers",
-        icon: Truck,
-        roles: TRANSFER_ROLES,
-      },
-      {
-        id: "stock-adjustment",
-        label: "Stock Adjustment",
-        icon: Warehouse,
-        roles: TRANSFER_ROLES,
-      },
       {
         id: "stock-movement-log",
         label: "Movement Log",

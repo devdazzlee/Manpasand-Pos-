@@ -288,6 +288,32 @@ class StockService {
         });
     }
 
+    // Single-row lookup for the "Available: N" hint in Stock Out / Transfer
+    // dialogs. Returns current_quantity = 0 if there's no Stock row for
+    // this product+branch yet, so callers always get a number.
+    async getStockByProductBranch(productId: string, branchId: string) {
+        const stock = await prisma.stock.findUnique({
+            where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
+            select: {
+                id: true,
+                product_id: true,
+                branch_id: true,
+                current_quantity: true,
+                minimum_quantity: true,
+                last_updated: true,
+            },
+        });
+        if (!stock) {
+            return {
+                product_id: productId,
+                branch_id: branchId,
+                current_quantity: 0,
+                minimum_quantity: 0,
+            };
+        }
+        return stock;
+    }
+
     async getStockByBranch(branchId: string, page: number = 1, limit: number = 20, search?: string, userRole?: string, categoryId?: string) {
         const skip = (page - 1) * limit;
         

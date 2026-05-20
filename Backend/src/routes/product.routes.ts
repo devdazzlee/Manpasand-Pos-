@@ -9,6 +9,7 @@ import {
   getFeaturedProducts,
   getBestSellingProducts,
   bulkUploadProducts,
+  importProductRow,
   deleteAllProducts,
   deleteProduct,
   uploadProductImage,
@@ -38,6 +39,7 @@ router.post(
 );
 router.post('/upload-image', upload.single('image'), uploadProductImage);
 router.post('/bulk-upload', uploadBulk.single('file'), bulkUploadProducts);
+router.post('/import-row', importProductRow);
 router.delete('/all', deleteAllProducts);
 router.get('/', validate(listProductsSchema), listProducts);
 router.get('/export/excel', exportProductsToExcel);

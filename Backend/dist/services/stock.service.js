@@ -5,7 +5,7 @@ const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const helpers_1 = require("../utils/helpers");
 class StockService {
-    async createStock({ productId, branchId, quantity, createdBy }) {
+    async createStock({ productId, branchId, quantity, supplierId, unitCost, invoiceRef, notes, createdBy }) {
         return client_1.prisma.$transaction(async (tx) => {
             const exists = await tx.stock.findUnique({
                 where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
@@ -34,6 +34,16 @@ class StockService {
                     },
                 });
             }
+            // Compose notes that preserve all the optional metadata next to
+            // the movement record so the audit log shows where it came from.
+            const noteParts = [];
+            if (supplierId)
+                noteParts.push(`Supplier: ${supplierId}`);
+            if (invoiceRef)
+                noteParts.push(`Invoice: ${invoiceRef}`);
+            if (notes)
+                noteParts.push(notes);
+            const noteText = noteParts.length > 0 ? noteParts.join(" | ") : undefined;
             await tx.stockMovement.create({
                 data: {
                     product_id: productId,
@@ -42,13 +52,15 @@ class StockService {
                     quantity_change: quantity,
                     previous_qty: previousQty,
                     new_qty: newQty,
+                    unit_cost: unitCost,
+                    notes: noteText,
                     created_by: createdBy,
                 },
             });
             return stock;
         });
     }
-    async adjustStock({ productId, branchId, quantityChange, reason, createdBy }) {
+    async adjustStock({ productId, branchId, quantityChange, reason, notes, createdBy }) {
         return client_1.prisma.$transaction(async (tx) => {
             const stock = await tx.stock.findUnique({
                 where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
@@ -69,6 +81,13 @@ class StockService {
                     current_quantity: newQty,
                 },
             });
+            // Combine reason + notes so both surface in the movement log.
+            const noteParts = [];
+            if (reason)
+                noteParts.push(`Reason: ${reason}`);
+            if (notes)
+                noteParts.push(notes);
+            const noteText = noteParts.length > 0 ? noteParts.join(" | ") : undefined;
             await tx.stockMovement.create({
                 data: {
                     product_id: productId,
@@ -77,7 +96,7 @@ class StockService {
                     quantity_change: quantityChange,
                     previous_qty: stock.current_quantity,
                     new_qty: newQty,
-                    notes: reason,
+                    notes: noteText,
                     created_by: createdBy,
                 },
             });
@@ -167,7 +186,7 @@ class StockService {
             };
         });
     }
-    async removeStock({ productId, branchId, quantity, reason, createdBy }) {
+    async removeStock({ productId, branchId, quantity, reason, notes, createdBy }) {
         if (quantity <= 0) {
             throw new apiError_1.AppError(400, "Quantity must be greater than 0");
         }
@@ -188,20 +207,58 @@ class StockService {
                     current_quantity: newQty,
                 },
             });
+            // Map the UI reason (DAMAGE/WASTE/THEFT/EXPIRED) to a real movement
+            // type when it matches the schema enum; otherwise default to DAMAGE.
+            const reasonUpper = (reason || "").toUpperCase();
+            const movementType = reasonUpper === "EXPIRED" ? "EXPIRED" :
+                reasonUpper === "THEFT" ? "LOSS" :
+                    reasonUpper === "WASTE" ? "DAMAGE" :
+                        "DAMAGE";
+            const noteParts = [];
+            if (reason)
+                noteParts.push(`Reason: ${reason}`);
+            if (notes)
+                noteParts.push(notes);
+            const noteText = noteParts.length > 0 ? noteParts.join(" | ") : "Stock removed";
             await tx.stockMovement.create({
                 data: {
                     product_id: productId,
                     branch_id: branchId,
-                    movement_type: "DAMAGE",
+                    movement_type: movementType,
                     quantity_change: -quantity,
                     previous_qty: stock.current_quantity,
                     new_qty: newQty,
-                    notes: reason || "Stock removed",
+                    notes: noteText,
                     created_by: createdBy,
                 },
             });
             return { newQty };
         });
+    }
+    // Single-row lookup for the "Available: N" hint in Stock Out / Transfer
+    // dialogs. Returns current_quantity = 0 if there's no Stock row for
+    // this product+branch yet, so callers always get a number.
+    async getStockByProductBranch(productId, branchId) {
+        const stock = await client_1.prisma.stock.findUnique({
+            where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
+            select: {
+                id: true,
+                product_id: true,
+                branch_id: true,
+                current_quantity: true,
+                minimum_quantity: true,
+                last_updated: true,
+            },
+        });
+        if (!stock) {
+            return {
+                product_id: productId,
+                branch_id: branchId,
+                current_quantity: 0,
+                minimum_quantity: 0,
+            };
+        }
+        return stock;
     }
     async getStockByBranch(branchId, page = 1, limit = 20, search, userRole, categoryId) {
         const skip = (page - 1) * limit;

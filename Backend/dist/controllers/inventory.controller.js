@@ -30,7 +30,7 @@ exports.getStockMovements = (0, asyncHandler_1.default)(async (req, res) => {
         limit: Number(query.limit) || 50,
         userRole: req.user?.role,
     });
-    new apiResponse_1.ApiResponse(result.data, 'Stock movements retrieved', 200, true, result.meta).send(res);
+    new apiResponse_1.ApiResponse(result.data, 'Stock movements retrieved', 200, true, { ...result.meta, summary: result.summary }).send(res);
 });
 exports.getStockByLocation = (0, asyncHandler_1.default)(async (req, res) => {
     const stocks = await inventoryService.getStockByLocation(req.query.branchId, req.user?.role);

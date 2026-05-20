@@ -42,6 +42,7 @@ import {
   StockView,
   InventoryReports,
   InventoryAudit,
+  BulkProductUpload,
 } from "./inventory/index";
 import { Sales } from "./sales";
 import Orders from "./orders";
@@ -138,6 +139,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <StockAdjustment />;
       case "stock-view":
         return <StockView />;
+      case "bulk-product-upload":
+        return <BulkProductUpload />;
       case "inventory-reports":
         return <InventoryReports />;
       case "inventory-audit":

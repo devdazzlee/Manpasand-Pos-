@@ -802,6 +802,8 @@ export default function Inventory() {
 
   // State for filters
   const [searchTerm, setSearchTerm] = useState("")
+  // Sort dropdown — name A→Z / Z→A, stock low/high, price low/high, newest/oldest.
+  const [sortBy, setSortBy] = useState<string>("name-asc")
   // Sentinel value for the "no filter" option in the category / subcategory
   // dropdowns. Must not collide with any real ID — using "all" alone broke
   // when a record happened to have id="all" and Radix Select treated two items
@@ -1020,7 +1022,7 @@ export default function Inventory() {
       setIsInitialLoading(false)
       setLoading(false)
     }
-  }, [currentPage, searchTerm, selectedCategory, selectedSubcategory, pageSize, globalProducts, globalLoading])
+  }, [currentPage, searchTerm, selectedCategory, selectedSubcategory, pageSize, sortBy, globalProducts, globalLoading])
 
   const loadDropdownData = async () => {
     try {
@@ -1093,6 +1095,39 @@ export default function Inventory() {
         filteredProducts = filteredProducts.filter(product =>
           product.subcategoryId && product.subcategoryId === selectedSubcategory
         )
+      }
+
+      // Apply sort (in-memory — the table is paginated client-side already).
+      const nameOf = (p: any) => String(p?.name || "").toLowerCase()
+      const stockOf = (p: any) => Number(p?.available_stock ?? p?.current_stock ?? 0)
+      const priceOf = (p: any) => Number(p?.sales_rate_exc_dis_and_tax ?? 0)
+      const createdOf = (p: any) =>
+        new Date(p?.created_at || p?.createdAt || 0).getTime()
+      switch (sortBy) {
+        case "name-asc":
+          filteredProducts.sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+          break
+        case "name-desc":
+          filteredProducts.sort((a, b) => nameOf(b).localeCompare(nameOf(a)))
+          break
+        case "stock-asc":
+          filteredProducts.sort((a, b) => stockOf(a) - stockOf(b))
+          break
+        case "stock-desc":
+          filteredProducts.sort((a, b) => stockOf(b) - stockOf(a))
+          break
+        case "price-asc":
+          filteredProducts.sort((a, b) => priceOf(a) - priceOf(b))
+          break
+        case "price-desc":
+          filteredProducts.sort((a, b) => priceOf(b) - priceOf(a))
+          break
+        case "newest":
+          filteredProducts.sort((a, b) => createdOf(b) - createdOf(a))
+          break
+        case "oldest":
+          filteredProducts.sort((a, b) => createdOf(a) - createdOf(b))
+          break
       }
 
       // Apply pagination
@@ -1290,28 +1325,37 @@ export default function Inventory() {
   // shows a spinner on the confirm button while the request runs so the user
   // never wonders whether the click registered.
   const confirmDeleteProduct = async () => {
-    if (!productToDelete) return
+    if (!productToDelete || isDeletingProduct) return
     const product = productToDelete
     setIsDeletingProduct(true)
     try {
+      // Wait for the API delete AND the global cache refresh before closing
+      // the modal. Closing earlier let the user open a second delete dialog
+      // while the first request was still in flight, which both raced the
+      // refresh and made it look like the first delete hadn't applied.
       await apiService.deleteProduct(product.id)
+      setProducts((prev) => prev.filter((p) => p.id !== product.id))
+      await refreshAllData()
       toast({
         title: "Deleted",
         description: `"${product.name}" has been removed.`,
       })
-      // Optimistic local update so the user sees the row disappear immediately.
-      setProducts((prev) => prev.filter((p) => p.id !== product.id))
       setProductToDelete(null)
-      // Refresh the GLOBAL product cache. `loadProducts()` reads from
-      // `globalProducts`, so without this the deleted row would reappear on
-      // the next re-render via the cached copy. `refreshAllData()` re-fetches
-      // from the API, then the effect watching `globalProducts` re-runs
-      // `loadProducts()` automatically with the fresh list.
-      await refreshAllData()
     } catch (error: any) {
+      // The backend returns `{ message, errors: [{ message, code }] }`. The
+      // top-level `message` is the category ("Cannot delete: …") and the
+      // inner one is the detailed reason. Prefer whichever is more specific
+      // so the user sees the real cause (e.g. FK violation table) instead of
+      // a generic wrapper.
+      const data = error?.response?.data
+      const description =
+        data?.errors?.[0]?.message ||
+        data?.message ||
+        error?.message ||
+        "Failed to delete product"
       toast({
-        title: "Error",
-        description: error?.response?.data?.message || "Failed to delete product",
+        title: data?.message || "Failed to delete",
+        description,
         variant: "destructive",
       })
     } finally {
@@ -1601,18 +1645,18 @@ export default function Inventory() {
         </div>
 
         {/* Filters */}
-        <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
-          <div className="relative flex-1 sm:max-w-md">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+        <div className="flex flex-col lg:flex-row gap-3">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
             <Input
               placeholder="Search products..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-10"
+              className="h-10 pl-10"
             />
           </div>
-          <Select value={selectedCategory} onValueChange={setSelectedCategory}>
-            <SelectTrigger className="w-full sm:w-48">
+          <Select value={selectedCategory} onValueChange={(v) => { setSelectedCategory(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-10 flex-1 min-w-[160px]">
               <SelectValue placeholder="All Categories" />
             </SelectTrigger>
             <SelectContent>
@@ -1624,25 +1668,35 @@ export default function Inventory() {
               ))}
             </SelectContent>
           </Select>
-          <div className="flex items-center gap-2">
-            <Label htmlFor="page-size" className="text-sm font-medium whitespace-nowrap">
-              Items per page:
-            </Label>
-            <Select value={String(pageSize)} onValueChange={value => { setPageSize(Number(value)); setCurrentPage(1); }}>
-              <SelectTrigger className="w-32" id="page-size">
-                <SelectValue placeholder="Page Size" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="10">10</SelectItem>
-                <SelectItem value="25">25</SelectItem>
-                <SelectItem value="50">50</SelectItem>
-                <SelectItem value="100">100</SelectItem>
-                <SelectItem value="200">200</SelectItem>
-                <SelectItem value="500">500</SelectItem>
-                <SelectItem value="0">All</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
+          <Select value={sortBy} onValueChange={(v) => { setSortBy(v); setCurrentPage(1); }}>
+            <SelectTrigger className="h-10 flex-1 min-w-[160px]">
+              <SelectValue placeholder="Sort by" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="name-asc">Name (A → Z)</SelectItem>
+              <SelectItem value="name-desc">Name (Z → A)</SelectItem>
+              <SelectItem value="stock-desc">Stock (High → Low)</SelectItem>
+              <SelectItem value="stock-asc">Stock (Low → High)</SelectItem>
+              <SelectItem value="price-desc">Price (High → Low)</SelectItem>
+              <SelectItem value="price-asc">Price (Low → High)</SelectItem>
+              <SelectItem value="newest">Newest first</SelectItem>
+              <SelectItem value="oldest">Oldest first</SelectItem>
+            </SelectContent>
+          </Select>
+          <Select value={String(pageSize)} onValueChange={value => { setPageSize(Number(value)); setCurrentPage(1); }}>
+            <SelectTrigger className="h-10 flex-1 min-w-[140px]">
+              <SelectValue placeholder="Items per page" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="10">10 per page</SelectItem>
+              <SelectItem value="25">25 per page</SelectItem>
+              <SelectItem value="50">50 per page</SelectItem>
+              <SelectItem value="100">100 per page</SelectItem>
+              <SelectItem value="200">200 per page</SelectItem>
+              <SelectItem value="500">500 per page</SelectItem>
+              <SelectItem value="0">Show all</SelectItem>
+            </SelectContent>
+          </Select>
         </div>
 
         {/* Products Table */}
@@ -1706,7 +1760,12 @@ export default function Inventory() {
                         <TableCell>{product.sales_rate_exc_dis_and_tax.toFixed(2)}</TableCell>
                         <TableCell>
                           <Badge
-                            className={product.is_active ? "bg-green-100 text-green-800" : "bg-red-100 text-red-800"}
+                            variant="outline"
+                            className={
+                              product.is_active
+                                ? "bg-green-100 text-green-800 border-green-200 hover:bg-green-100"
+                                : "bg-red-100 text-red-800 border-red-200 hover:bg-red-100"
+                            }
                           >
                             {product.is_active ? "Active" : "Inactive"}
                           </Badge>
@@ -1732,119 +1791,61 @@ export default function Inventory() {
                 </Table>
                   </div>
                 </div>
-                {/* Pagination */}
-                {(totalPages > 1 || pageSize === 0) && (
-                  <div className="flex flex-col gap-4 mt-6 pt-4 border-t">
-                    {/* Pagination Info */}
-                    <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
-                      <div className="text-sm text-gray-600">
-                        {pageSize === 0 ? (
-                          <>Showing all <span className="font-semibold">{totalProducts}</span> products</>
-                        ) : (
-                          <>
-                            Showing <span className="font-semibold">{(currentPage - 1) * pageSize + 1}</span> to{" "}
-                            <span className="font-semibold">{Math.min(currentPage * pageSize, totalProducts)}</span> of{" "}
-                            <span className="font-semibold">{totalProducts}</span> products
-                            {" "}(Page <span className="font-semibold">{currentPage}</span> of <span className="font-semibold">{totalPages}</span>)
-                          </>
-                        )}
-                      </div>
-                      
-                      {/* Page Size Selector */}
-                      {pageSize !== 0 && (
-                        <div className="flex items-center gap-2">
-                          <Label htmlFor="pagination-page-size" className="text-sm font-medium whitespace-nowrap">
-                            Items per page:
-                          </Label>
-                          <Select 
-                            value={String(pageSize)} 
-                            onValueChange={value => { 
-                              setPageSize(Number(value)); 
-                              setCurrentPage(1); 
-                            }}
-                          >
-                            <SelectTrigger className="w-32" id="pagination-page-size">
-                              <SelectValue placeholder="Page Size" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="10">10</SelectItem>
-                              <SelectItem value="25">25</SelectItem>
-                              <SelectItem value="50">50</SelectItem>
-                              <SelectItem value="100">100</SelectItem>
-                              <SelectItem value="200">200</SelectItem>
-                              <SelectItem value="500">500</SelectItem>
-                              <SelectItem value="0">All</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
+                {/* Pagination — matches the First/Prev/Page X of Y/Next/Last
+                    pattern used in Stock Management and other inventory tabs. */}
+                {totalProducts > 0 && (
+                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 py-3 border-t mt-2">
+                    <p className="text-sm text-black">
+                      {pageSize === 0 ? (
+                        <>Showing all {totalProducts} products</>
+                      ) : (
+                        <>
+                          Showing {(currentPage - 1) * pageSize + 1}–
+                          {Math.min(currentPage * pageSize, totalProducts)} of {totalProducts}
+                        </>
                       )}
-                    </div>
-
-                    {/* Pagination Controls */}
+                    </p>
                     {pageSize !== 0 && totalPages > 1 && (
-                      <div className="flex flex-col sm:flex-row items-center justify-center gap-2">
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(1)}
-                            disabled={currentPage === 1}
-                            className="min-w-[80px]"
-                          >
-                            First
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                            disabled={currentPage === 1}
-                            className="min-w-[80px]"
-                          >
-                            Previous
-                          </Button>
-                        </div>
-                        
-                        <div className="flex items-center gap-2">
-                          <span className="text-sm text-gray-600">Go to page:</span>
-                          <Input
-                            type="number"
-                            min={1}
-                            max={totalPages}
-                            value={gotoPage}
-                            onChange={e => setGotoPage(e.target.value)}
-                            onKeyDown={e => {
-                              if (e.key === "Enter") {
-                                const page = Math.max(1, Math.min(Number(gotoPage), totalPages))
-                                if (!isNaN(page)) setCurrentPage(page)
-                                setGotoPage("")
-                              }
-                            }}
-                            placeholder="Page #"
-                            className="w-20 h-9 px-2 text-sm text-center"
-                          />
-                          <span className="text-sm text-gray-500">/ {totalPages}</span>
-                        </div>
-                        
-                        <div className="flex items-center gap-1">
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                            disabled={currentPage === totalPages}
-                            className="min-w-[80px]"
-                          >
-                            Next
-                          </Button>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setCurrentPage(totalPages)}
-                            disabled={currentPage === totalPages}
-                            className="min-w-[80px]"
-                          >
-                            Last
-                          </Button>
-                        </div>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-sm text-black"
+                          onClick={() => setCurrentPage(1)}
+                          disabled={currentPage === 1 || loading}
+                        >
+                          First
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-sm text-black"
+                          onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                          disabled={currentPage === 1 || loading}
+                        >
+                          Previous
+                        </Button>
+                        <span className="text-sm text-black px-3">
+                          Page {currentPage} of {totalPages}
+                        </span>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-sm text-black"
+                          onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                          disabled={currentPage >= totalPages || loading}
+                        >
+                          Next
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="text-sm text-black"
+                          onClick={() => setCurrentPage(totalPages)}
+                          disabled={currentPage >= totalPages || loading}
+                        >
+                          Last
+                        </Button>
                       </div>
                     )}
                   </div>

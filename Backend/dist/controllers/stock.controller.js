@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getTodayStockMovementsController = exports.getStockMovementsController = exports.getStocksController = exports.removeStockController = exports.transferStockController = exports.adjustStockController = exports.createStockController = void 0;
+exports.getTodayStockMovementsController = exports.getStockMovementsController = exports.getStockByProductBranchController = exports.getStocksController = exports.removeStockController = exports.transferStockController = exports.adjustStockController = exports.createStockController = void 0;
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const stock_service_1 = require("../services/stock.service");
@@ -35,6 +35,16 @@ const getStocksController = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(result.data, "Stocks retrieved successfully", 200, true, result.meta).send(res);
 });
 exports.getStocksController = getStocksController;
+// Returns the on-hand quantity of a single product at a single branch. Used
+// by Stock Out / Transfer dialogs to show "Available: N" inline. Returns
+// current_quantity = 0 (rather than 404) when there's no Stock row yet, so
+// the client always gets a number.
+const getStockByProductBranchController = (0, asyncHandler_1.default)(async (req, res) => {
+    const { productId, branchId } = req.params;
+    const stock = await stockService.getStockByProductBranch(productId, branchId);
+    new apiResponse_1.ApiResponse(stock, "Stock retrieved").send(res);
+});
+exports.getStockByProductBranchController = getStockByProductBranchController;
 const getStockMovementsController = (0, asyncHandler_1.default)(async (req, res) => {
     const branchId = req.query.branchId;
     const userRole = req.user?.role;

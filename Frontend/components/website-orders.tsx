@@ -218,6 +218,11 @@ const WebsiteOrders: React.FC = () => {
   const [statusUpdatingIds, setStatusUpdatingIds] = useState<Record<string, boolean>>({});
   const [orderToDelete, setOrderToDelete] = useState<string | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  // Client-side pagination over the already-filtered list. Page resets on
+  // any filter / search / sort change so the user always sees page 1 of the
+  // new view.
+  const [currentPage, setCurrentPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
 
   useEffect(() => {
     fetchOrders();
@@ -735,6 +740,19 @@ const WebsiteOrders: React.FC = () => {
     return list;
   }, [orders, searchTerm, paymentFilter, dateRangeFilter, sortBy]);
 
+  // Reset to page 1 whenever the filtered view changes — otherwise the user
+  // can end up "stuck" on an empty page 5 after narrowing the results.
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm, paymentFilter, dateRangeFilter, sortBy, statusFilter, pageSize]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+  const paged = useMemo(
+    () => filtered.slice((safePage - 1) * pageSize, safePage * pageSize),
+    [filtered, safePage, pageSize],
+  );
+
   // Calculate stats
   const totalOrders = orders.length;
   const totalRevenue = orders.reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0);
@@ -811,47 +829,58 @@ const WebsiteOrders: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="rounded-xl border bg-white p-3 md:p-4 space-y-3">
-        <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-          <Filter className="h-4 w-4" />
-          Filters & Options
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button size="sm" variant={statusFilter === "" ? "default" : "outline"} onClick={() => setStatusFilter("")}>All</Button>
-          <Button size="sm" variant={statusFilter === "PENDING" ? "default" : "outline"} onClick={() => setStatusFilter("PENDING")}>Pending</Button>
-          <Button size="sm" variant={statusFilter === "PROCESSING" ? "default" : "outline"} onClick={() => setStatusFilter("PROCESSING")}>Processing</Button>
-          <Button size="sm" variant={statusFilter === "COMPLETED" ? "default" : "outline"} onClick={() => setStatusFilter("COMPLETED")}>Completed</Button>
-        </div>
-        <div className="flex flex-col lg:flex-row items-stretch lg:items-center gap-3 sm:gap-4">
-        <div className="relative flex-1 sm:max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-          <Input
-            placeholder="Search Order #"
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <Label htmlFor="status-filter" className="mr-1">Status:</Label>
-          <Select
-            value={statusFilter || "ALL"}
-            onValueChange={(value) => setStatusFilter(value === "ALL" ? "" : value)}
+      <div className="rounded-xl border bg-white p-4 space-y-3">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
+            <Filter className="h-4 w-4" />
+            Filters & Options
+          </div>
+          <Button
+            onClick={fetchOrders}
+            variant="outline"
+            size="sm"
+            className="h-9 text-sm text-black"
           >
-            <SelectTrigger id="status-filter" className="w-[160px]">
-              <SelectValue placeholder="All" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All</SelectItem>
-              <SelectItem value="PENDING">Pending</SelectItem>
-              <SelectItem value="PROCESSING">Processing</SelectItem>
-              <SelectItem value="COMPLETED">Completed</SelectItem>
-              <SelectItem value="CANCELLED">Cancelled</SelectItem>
-            </SelectContent>
-          </Select>
+            <RefreshCcw className="w-4 h-4 mr-2" />
+            Refresh
+          </Button>
+        </div>
+
+        {/* Status chip row */}
+        <div className="flex flex-wrap gap-2">
+          {[
+            { v: "", label: "All" },
+            { v: "PENDING", label: "Pending" },
+            { v: "PROCESSING", label: "Processing" },
+            { v: "COMPLETED", label: "Completed" },
+            { v: "CANCELLED", label: "Cancelled" },
+          ].map((s) => (
+            <Button
+              key={s.v || "ALL"}
+              size="sm"
+              variant={statusFilter === s.v ? "default" : "outline"}
+              className="h-8 text-sm"
+              onClick={() => setStatusFilter(s.v)}
+            >
+              {s.label}
+            </Button>
+          ))}
+        </div>
+
+        {/* One aligned row: search + the three dropdowns */}
+        <div className="flex flex-col lg:flex-row gap-3">
+          <div className="relative flex-1 min-w-[200px]">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+            <Input
+              placeholder="Search Order #"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="h-10 pl-10"
+            />
+          </div>
           <Select value={paymentFilter} onValueChange={setPaymentFilter}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="Payment" />
+            <SelectTrigger className="h-10 flex-1 min-w-[150px]">
+              <SelectValue placeholder="All Payments" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Payments</SelectItem>
@@ -862,8 +891,8 @@ const WebsiteOrders: React.FC = () => {
             </SelectContent>
           </Select>
           <Select value={dateRangeFilter} onValueChange={setDateRangeFilter}>
-            <SelectTrigger className="w-[130px]">
-              <SelectValue placeholder="Date" />
+            <SelectTrigger className="h-10 flex-1 min-w-[140px]">
+              <SelectValue placeholder="All Dates" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Dates</SelectItem>
@@ -873,20 +902,16 @@ const WebsiteOrders: React.FC = () => {
             </SelectContent>
           </Select>
           <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue placeholder="Sort By" />
+            <SelectTrigger className="h-10 flex-1 min-w-[150px]">
+              <SelectValue placeholder="Sort" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="NEWEST">Newest</SelectItem>
-              <SelectItem value="OLDEST">Oldest</SelectItem>
-              <SelectItem value="AMOUNT_HIGH">Amount High</SelectItem>
-              <SelectItem value="AMOUNT_LOW">Amount Low</SelectItem>
+              <SelectItem value="NEWEST">Newest first</SelectItem>
+              <SelectItem value="OLDEST">Oldest first</SelectItem>
+              <SelectItem value="AMOUNT_HIGH">Amount (High → Low)</SelectItem>
+              <SelectItem value="AMOUNT_LOW">Amount (Low → High)</SelectItem>
             </SelectContent>
           </Select>
-          <Button onClick={fetchOrders} variant="outline">
-            <RefreshCcw className="w-4 h-4" />
-          </Button>
-        </div>
         </div>
       </div>
 
@@ -907,7 +932,7 @@ const WebsiteOrders: React.FC = () => {
             <>
               {/* Mobile Cards */}
               <div className="grid grid-cols-1 gap-4 md:hidden">
-                {filtered.map(o => {
+                {paged.map(o => {
                   const allowedStatusOptions = getAllowedStatusOptions(o.status);
                   const isTerminal = isTerminalOrderStatus(o.status);
 
@@ -1001,94 +1026,193 @@ const WebsiteOrders: React.FC = () => {
               </div>
 
               {/* Desktop Table */}
-              <div className="hidden md:block overflow-x-auto">
-                <div className="inline-block min-w-full align-middle">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead className="min-w-[120px]">Order #</TableHead>
-                        <TableHead className="min-w-[100px]">Total</TableHead>
-                        <TableHead className="min-w-[120px]">Payment</TableHead>
-                        <TableHead className="min-w-[120px]">Status</TableHead>
-                        <TableHead className="min-w-[110px]">Items</TableHead>
-                        <TableHead className="min-w-[120px]">Date</TableHead>
-                        <TableHead className="min-w-[140px]">Time</TableHead>
-                        <TableHead className="min-w-[120px]">Actions</TableHead>
-                      </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {filtered.map(o => (
-                        <TableRow key={o.id}>
-                          <TableCell className="font-medium">{o.order_number}</TableCell>
-                          <TableCell className="font-medium">Rs. {(Number(o.total_amount) || 0).toFixed(2)}</TableCell>
-                          <TableCell className="text-sm">{o.payment_method || 'CASH'}</TableCell>
-                          <TableCell>
-                            {(() => {
-                              const allowedStatusOptions = getAllowedStatusOptions(o.status);
-                              const isTerminal = isTerminalOrderStatus(o.status);
+              <div className="hidden md:block overflow-hidden rounded-lg border border-gray-200">
+                <Table>
+                  <TableHeader className="bg-gray-50">
+                    <TableRow className="border-gray-200 hover:bg-gray-50">
+                      <TableHead className="px-4 py-3 text-sm font-medium text-black">Order #</TableHead>
+                      <TableHead className="py-3 text-sm font-medium text-black text-right">Total</TableHead>
+                      <TableHead className="py-3 text-sm font-medium text-black">Payment</TableHead>
+                      <TableHead className="py-3 text-sm font-medium text-black">Status</TableHead>
+                      <TableHead className="py-3 text-sm font-medium text-black text-center">Items</TableHead>
+                      <TableHead className="py-3 text-sm font-medium text-black">Date / Time</TableHead>
+                      <TableHead className="px-4 py-3 text-sm font-medium text-black text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paged.map((o) => {
+                      const allowedStatusOptions = getAllowedStatusOptions(o.status);
+                      const isTerminal = isTerminalOrderStatus(o.status);
+                      const ts = new Date(o.created_at);
+                      const statusStyle =
+                        o.status === "COMPLETED"
+                          ? "bg-green-100 text-green-800 border-green-200"
+                          : o.status === "PROCESSING"
+                            ? "bg-blue-100 text-blue-800 border-blue-200"
+                            : o.status === "PENDING"
+                              ? "bg-amber-100 text-amber-800 border-amber-200"
+                              : "bg-red-100 text-red-800 border-red-200";
 
-                              return (
-                              <>
-                              <div className="flex items-center gap-2">
-                                <Select
-                                  value={o.status} 
-                                  onValueChange={(value) => handleStatusUpdate(o.id, value)}
-                                  disabled={!!statusUpdatingIds[o.id] || isTerminal}
+                      return (
+                        <TableRow
+                          key={o.id}
+                          className="border-gray-100 hover:bg-gray-50/60"
+                        >
+                          <TableCell className="px-4 py-3 text-sm font-mono text-black">
+                            {o.order_number}
+                          </TableCell>
+                          <TableCell className="py-3 text-sm font-semibold text-black text-right">
+                            Rs. {(Number(o.total_amount) || 0).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="py-3 text-sm text-black">
+                            {o.payment_method || "CASH"}
+                          </TableCell>
+                          <TableCell className="py-3">
+                            {isTerminal ? (
+                              <span
+                                className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border ${statusStyle}`}
+                              >
+                                {o.status}
+                              </span>
+                            ) : (
+                              <Select
+                                value={o.status}
+                                onValueChange={(value) =>
+                                  handleStatusUpdate(o.id, value)
+                                }
+                                disabled={!!statusUpdatingIds[o.id]}
+                              >
+                                <SelectTrigger
+                                  className={`h-8 w-[140px] text-xs font-medium border ${statusStyle}`}
                                 >
-                                  <SelectTrigger className="h-8 w-[140px] text-sm font-medium">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {allowedStatusOptions.map((status) => (
-                                      <SelectItem key={status} value={status}>
-                                        {status}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                                {isTerminal && (
-                                  <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 uppercase">
-                                    Terminal
-                                  </span>
-                                )}
-                              </div>
-                              {statusUpdatingIds[o.id] && !o.status.includes('CANCELLED') && (
-                                <span className="inline-flex items-center text-xs text-blue-600 mt-1">
-                                  <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                                  Updating...
-                                </span>
-                              )}
-                              </>
-                            );
-                          })()}
-                        </TableCell>
-                          <TableCell>{o.items?.length || 0}</TableCell>
-                          <TableCell>{new Date(o.created_at).toLocaleDateString()}</TableCell>
-                          <TableCell className="text-sm text-gray-500">{new Date(o.created_at).toLocaleTimeString()}</TableCell>
-                          <TableCell className="flex space-x-2">
-                            <Button 
-                              size="sm" 
-                              variant="outline" 
-                              onClick={() => viewOrderDetail(o.id)}
-                              className="flex items-center gap-1"
-                            >
-                              <Eye className="w-4 h-4"/>
-                              <span className="hidden sm:inline">View</span>
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              onClick={() => confirmDelete(o.id)}
-                              className="flex items-center gap-1 text-red-600 hover:text-red-700"
-                              disabled={!!statusUpdatingIds[o.id]}
-                            >
-                              <Trash2 className="w-4 h-4" />
-                            </Button>
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  {allowedStatusOptions.map((status) => (
+                                    <SelectItem
+                                      key={status}
+                                      value={status}
+                                      className="text-sm"
+                                    >
+                                      {status}
+                                    </SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            )}
+                            {statusUpdatingIds[o.id] && (
+                              <span className="inline-flex items-center text-xs text-blue-600 mt-1">
+                                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                                Updating
+                              </span>
+                            )}
+                          </TableCell>
+                          <TableCell className="py-3 text-sm text-black text-center">
+                            {o.items?.length || 0}
+                          </TableCell>
+                          <TableCell className="py-3">
+                            <div className="flex flex-col">
+                              <span className="text-sm text-black">
+                                {ts.toLocaleDateString()}
+                              </span>
+                              <span className="text-xs text-gray-500">
+                                {ts.toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </span>
+                            </div>
+                          </TableCell>
+                          <TableCell className="px-4 py-3 text-right">
+                            <div className="flex items-center justify-end gap-1.5">
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => viewOrderDetail(o.id)}
+                                className="h-8 text-xs text-black"
+                              >
+                                <Eye className="w-3.5 h-3.5 mr-1" /> View
+                              </Button>
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => confirmDelete(o.id)}
+                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
+                                disabled={!!statusUpdatingIds[o.id]}
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </Button>
+                            </div>
                           </TableCell>
                         </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {/* Pagination */}
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 pt-4 border-t">
+                <div className="flex items-center gap-3 text-sm text-black">
+                  <span>
+                    Showing {(safePage - 1) * pageSize + 1}–
+                    {Math.min(safePage * pageSize, filtered.length)} of {filtered.length}
+                  </span>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(v) => setPageSize(Number(v))}
+                  >
+                    <SelectTrigger className="h-9 w-[120px] text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10 / page</SelectItem>
+                      <SelectItem value="25">25 / page</SelectItem>
+                      <SelectItem value="50">50 / page</SelectItem>
+                      <SelectItem value="100">100 / page</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-sm text-black"
+                    onClick={() => setCurrentPage(1)}
+                    disabled={safePage === 1}
+                  >
+                    First
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-sm text-black"
+                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    disabled={safePage === 1}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-black px-3">
+                    Page {safePage} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-sm text-black"
+                    onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={safePage >= totalPages}
+                  >
+                    Next
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-sm text-black"
+                    onClick={() => setCurrentPage(totalPages)}
+                    disabled={safePage >= totalPages}
+                  >
+                    Last
+                  </Button>
                 </div>
               </div>
             </>

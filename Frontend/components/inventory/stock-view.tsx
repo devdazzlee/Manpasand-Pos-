@@ -35,6 +35,7 @@ import {
   CheckCircle2,
   XCircle,
   ChevronRight,
+  ChevronLeft,
   Boxes,
   Loader2,
 } from "lucide-react";
@@ -582,32 +583,52 @@ export function StockView() {
           </div>
 
           {totalPages > 1 && (
-            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-gray-200">
-              <p className="text-sm text-gray-600">
+            <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-white rounded-b-xl">
+              <p className="text-xs font-normal text-slate-500">
                 Page {currentPage} of {totalPages}
               </p>
-              <div className="flex gap-2">
+              <div className="flex items-center gap-1">
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={currentPage === 1 || loading}
+                  className="h-8 w-8 p-0 border-slate-200 text-black"
+                  disabled={currentPage <= 1 || loading}
                   onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                  className="text-sm text-black"
                 >
-                  Previous
+                  <ChevronLeft className="h-4 w-4" />
                 </Button>
+                {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
+                  const pg = Math.max(1, Math.min(totalPages - 4, currentPage - 2)) + i;
+                  return (
+                    <Button
+                      key={pg}
+                      variant={pg === currentPage ? "default" : "outline"}
+                      size="sm"
+                      className={`h-8 w-8 p-0 text-xs font-normal transition-all ${
+                        pg === currentPage
+                          ? "bg-slate-900 text-white shadow-sm"
+                          : "border-slate-200 text-black hover:bg-slate-50"
+                      }`}
+                      onClick={() => setCurrentPage(pg)}
+                      disabled={loading}
+                    >
+                      {pg}
+                    </Button>
+                  );
+                })}
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={currentPage === totalPages || loading}
-                  onClick={() =>
-                    setCurrentPage((p) => Math.min(totalPages, p + 1))
-                  }
-                  className="text-sm text-black"
+                  className="h-8 w-8 p-0 border-slate-200 text-black"
+                  disabled={currentPage >= totalPages || loading}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                 >
-                  Next
+                  <ChevronRight className="h-4 w-4" />
                 </Button>
               </div>
+              <p className="text-xs font-normal text-slate-500 hidden sm:block">
+                {stats.totalItems.toLocaleString()} total items
+              </p>
             </div>
           )}
         </CardContent>

@@ -37,6 +37,7 @@ import {
   AlertTriangle,
 } from "lucide-react";
 import * as XLSX from "xlsx";
+import { z } from "zod";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { toast } from "sonner";
@@ -52,6 +53,21 @@ const REASON_OPTIONS: { value: Reason; label: string }[] = [
   { value: "LOSS", label: "Loss" },
   { value: "EXPIRED", label: "Expired" },
 ];
+
+// Zod schema for the dispatch form. Kept narrow on purpose — only the fields
+// the user might forget. Errors land next to the offending input so they
+// don't have to hunt for what's missing.
+const dispatchSchema = z.object({
+  branchId: z.string().min(1, "Pick a branch before saving"),
+  reason: z.enum(["SALE", "DAMAGE", "LOSS", "EXPIRED"], {
+    errorMap: () => ({ message: "Pick a reason" }),
+  }),
+  lines: z
+    .array(z.any())
+    .min(1, "Add at least one line to dispatch"),
+});
+
+type DispatchFieldErrors = Partial<Record<"branchId" | "reason" | "lines", string>>;
 
 interface DraftLine {
   productId: string;
@@ -134,6 +150,17 @@ export function StockOut() {
   const [notes, setNotes] = useState<string>("");
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [saving, setSaving] = useState(false);
+  const [formErrors, setFormErrors] = useState<DispatchFieldErrors>({});
+
+  // Clearing a field error as soon as the user fixes it is more forgiving
+  // than leaving stale red text under an already-valid input.
+  const clearError = (key: keyof DispatchFieldErrors) =>
+    setFormErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
 
   // Add-a-line input row
   const [searchTerm, setSearchTerm] = useState("");
@@ -236,6 +263,7 @@ export function StockOut() {
         },
       ];
     });
+    clearError("lines");
     resetAddLine();
   };
 
@@ -275,116 +303,91 @@ export function StockOut() {
     return map;
   }, [products]);
 
-  const processExcelFile = async (file: File) => {
+  // Per-row processor used by the live-progress upload dialog. The dialog
+  // parses the sheet itself and hands us each row; we look up the product,
+  // check available stock, and append a draft line. Resolves with
+  // { ok, error } so the dialog can mark this row green / red.
+  const availabilityCacheRef = useRef(new Map<string, number>());
+  const processRow = async (
+    row: Record<string, any>,
+  ): Promise<{ ok: boolean; error?: string }> => {
     if (!branchId) {
-      toast.error("Pick a branch in step 2 first so we can look up stock per line");
-      throw new Error("Branch required");
+      return { ok: false, error: "Pick a branch in step 2 first" };
     }
-    setUnmatched([]);
-    try {
-      const buf = await file.arrayBuffer();
-      const wb = XLSX.read(buf, { type: "array" });
-      const sheet = wb.Sheets[wb.SheetNames[0]];
-      if (!sheet) throw new Error("Workbook has no sheets");
-      const rowsRaw = XLSX.utils.sheet_to_json<Record<string, any>>(sheet, {
-        defval: "",
-      });
-      if (rowsRaw.length === 0) throw new Error("Sheet is empty");
 
-      // Normalize header keys: trim + lowercase. Pick the first present key
-      // from a list of synonyms (so we don't fight users over capitalization).
-      const pick = (row: Record<string, any>, keys: string[]) => {
-        const normalized: Record<string, any> = {};
-        for (const k of Object.keys(row)) normalized[k.trim().toLowerCase()] = row[k];
-        for (const k of keys) {
-          const key = k.toLowerCase();
-          if (normalized[key] !== undefined && normalized[key] !== "")
-            return normalized[key];
-        }
-        return undefined;
+    // Header tolerance — name / product / "product name", qty / quantity, rate / price.
+    const pick = (keys: string[]) => {
+      const normalized: Record<string, any> = {};
+      for (const k of Object.keys(row)) normalized[k.trim().toLowerCase()] = row[k];
+      for (const k of keys) {
+        const key = k.toLowerCase();
+        if (normalized[key] !== undefined && normalized[key] !== "")
+          return normalized[key];
+      }
+      return undefined;
+    };
+
+    const name = String(pick(["name", "product", "product name"]) || "").trim();
+    if (!name) return { ok: false, error: "Missing product name" };
+    const qty = Number(pick(["quantity", "qty"]));
+    if (!Number.isFinite(qty) || qty <= 0) {
+      return { ok: false, error: "Invalid or missing quantity" };
+    }
+    const rate = Number(pick(["rate", "price", "unit price"]) || 0) || 0;
+
+    const match = productNameIndex.get(name.toLowerCase());
+    if (!match) return { ok: false, error: "Product name not found in catalog" };
+
+    // Cache available-stock lookups across rows in the same upload so a 100-
+    // row file doesn't fire 100 HTTP requests for the same product.
+    let available = availabilityCacheRef.current.get(match.id);
+    if (available === undefined) {
+      try {
+        const res = await apiClient.get(
+          `${API_BASE}/stock/product/${match.id}/branch/${branchId}`,
+        );
+        available = Number(res.data?.data?.current_quantity ?? 0);
+      } catch {
+        available = 0;
+      }
+      availabilityCacheRef.current.set(match.id, available);
+    }
+
+    if (reason === "SALE" && qty > available) {
+      return {
+        ok: false,
+        error: `Only ${available} in stock — can't dispatch ${qty}`,
       };
+    }
 
-      const newLines: DraftLine[] = [];
-      const missed: string[] = [];
-
-      // Available-stock lookups are batched per unique product so a 100-row
-      // file doesn't fire 100 HTTP requests.
-      const availabilityCache = new Map<string, number>();
-
-      for (const row of rowsRaw) {
-        const name = String(pick(row, ["name", "product", "product name"]) || "").trim();
-        const qtyRaw = pick(row, ["quantity", "qty"]);
-        const rateRaw = pick(row, ["rate", "price", "unit price"]);
-        if (!name) continue;
-
-        const qty = Number(qtyRaw);
-        if (!Number.isFinite(qty) || qty <= 0) continue;
-
-        const match = productNameIndex.get(name.toLowerCase());
-        if (!match) {
-          missed.push(name);
-          continue;
-        }
-
-        let available = availabilityCache.get(match.id);
-        if (available === undefined) {
-          try {
-            const res = await apiClient.get(
-              `${API_BASE}/stock/product/${match.id}/branch/${branchId}`,
-            );
-            available = Number(res.data?.data?.current_quantity ?? 0);
-          } catch {
-            available = 0;
-          }
-          availabilityCache.set(match.id, available);
-        }
-
-        newLines.push({
+    // Merge into the existing draft (same as manual add — bump qty for dupes).
+    setLines((prev) => {
+      const byId = new Map(prev.map((l) => [l.productId, { ...l }]));
+      const ex = byId.get(match.id);
+      if (ex) {
+        ex.quantity += qty;
+        if (rate) ex.rate = rate;
+      } else {
+        byId.set(match.id, {
           productId: match.id,
           productName: match.name,
           sku: match.sku,
           quantity: qty,
-          rate: Number(rateRaw || 0) || 0,
+          rate,
           available: available || 0,
         });
       }
+      return Array.from(byId.values());
+    });
 
-      if (newLines.length === 0 && missed.length === 0) {
-        toast.error("No valid rows found in the file");
-        throw new Error("No valid rows");
-      }
+    return { ok: true };
+  };
 
-      // Merge into existing draft (same logic as manual add — bump qty for
-      // duplicates).
-      setLines((prev) => {
-        const byId = new Map(prev.map((l) => [l.productId, { ...l }]));
-        for (const nl of newLines) {
-          const ex = byId.get(nl.productId);
-          if (ex) {
-            ex.quantity += nl.quantity;
-            if (nl.rate) ex.rate = nl.rate;
-          } else {
-            byId.set(nl.productId, nl);
-          }
-        }
-        return Array.from(byId.values());
-      });
-      setUnmatched(missed);
-
-      if (missed.length > 0) {
-        toast.warning(
-          `Loaded ${newLines.length} line${newLines.length === 1 ? "" : "s"} — ${missed.length} name${missed.length === 1 ? "" : "s"} didn't match`,
-        );
-      } else {
-        toast.success(
-          `Loaded ${newLines.length} line${newLines.length === 1 ? "" : "s"} from Excel`,
-        );
-      }
-    } catch (err: any) {
-      console.error(err);
-      toast.error(err?.message || "Failed to read the Excel file");
-      throw err;
-    }
+  // Reset the per-upload availability cache so a fresh upload re-reads stock
+  // (it may have changed since the previous upload).
+  const resetUploadCaches = () => {
+    availabilityCacheRef.current = new Map<string, number>();
+    setUnmatched([]);
   };
 
   const downloadTemplate = () => {
@@ -406,14 +409,23 @@ export function StockOut() {
     return { lineCount, units, value };
   }, [lines]);
 
-  const canSave =
-    !!branchId &&
-    !!reason &&
-    lines.length > 0 &&
-    !saving;
-
   const handleSave = async () => {
-    if (!canSave) return;
+    if (saving) return;
+
+    // Validate up-front so missing fields show inline rather than the button
+    // being silently disabled — much easier UX when the form has many fields.
+    const parsed = dispatchSchema.safeParse({ branchId, reason, lines });
+    if (!parsed.success) {
+      const next: DispatchFieldErrors = {};
+      for (const issue of parsed.error.issues) {
+        const key = issue.path[0] as keyof DispatchFieldErrors;
+        if (key && !next[key]) next[key] = issue.message;
+      }
+      setFormErrors(next);
+      return;
+    }
+    setFormErrors({});
+
     setSaving(true);
     try {
       await apiClient.post(`${API_BASE}/stock-out/bulk`, {
@@ -519,53 +531,55 @@ export function StockOut() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           <div className="lg:col-span-2 space-y-6">
             {/* Info banner */}
-            <Card className="p-4 border border-gray-200 bg-gray-50">
-              <div className="flex gap-3">
-                <Info className="h-5 w-5 text-gray-500 mt-0.5 shrink-0" />
-                <div className="text-sm text-gray-700">
-                  <p className="font-medium text-black mb-1">What this list shows</p>
+            <Card className="p-4 border border-blue-100 bg-blue-50/50 shadow-sm rounded-xl">
+              <div className="flex items-start gap-3">
+                <Info className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+                <div className="text-xs md:text-sm text-slate-700 leading-relaxed space-y-1">
+                  <h4 className="font-bold text-slate-900">What this list shows</h4>
                   <p>
-                    Rows are stock movements with a negative quantity (stock removed).
-                    Saving a dispatch from <span className="font-medium">New Dispatch</span> creates one movement per line via{" "}
-                    <code className="text-xs bg-white px-1 py-0.5 rounded border border-gray-200">
-                      POST /stock-out/bulk
-                    </code>
-                    . Sales rung through the POS appear separately in the Movement Log.
+                    This screen displays outgoing stock movements (removed items). Saving a dispatch logs negative inventory adjustments.
+                  </p>
+                  <p className="text-slate-500 text-xs mt-1 border-t border-blue-100/50 pt-1">
+                    Note: Standard POS sales are recorded separately and can be tracked in detail inside the general Movement Log.
                   </p>
                 </div>
               </div>
             </Card>
 
             {/* Step 1 — Excel upload */}
-            <Card className="p-5 border border-gray-200">
-              <div className="space-y-3">
-                <div>
-                  <h2 className="text-base font-semibold text-black">
-                    Step 1 — Load from Excel (optional)
-                  </h2>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Adds lines to the draft below. Stock is{" "}
-                    <span className="font-medium">not</span> reduced until you save in step 2.
-                    Use the upload button to see required columns and download a template.
+            <Card className="p-6 border border-slate-200 bg-white shadow-sm rounded-xl">
+              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+                <div className="flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <div className="bg-emerald-50 text-emerald-700 p-1.5 rounded-lg shrink-0">
+                      <FileSpreadsheet className="h-5 w-5" />
+                    </div>
+                    <h2 className="text-base font-bold text-slate-900">
+                      Step 1 — Bulk Import Dispatch Items (Optional)
+                    </h2>
+                  </div>
+                  <p className="text-sm text-slate-600 leading-relaxed">
+                    Quickly add lines to your draft below from an Excel spreadsheet. Outbound quantities are <span className="font-semibold text-slate-800">not reduced</span> from stock until you save in Step 2.
                   </p>
                 </div>
-
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setExcelDialogOpen(true)}
-                  className="text-sm text-black"
-                >
-                  <FileSpreadsheet className="h-4 w-4 mr-2" />
-                  Upload Excel file
-                </Button>
-
-                {!branchId && (
-                  <p className="text-xs text-amber-600 flex items-center gap-1.5">
-                    <AlertTriangle className="h-3.5 w-3.5" /> Pick a branch in step 2 first so
-                    we can look up stock per line.
-                  </p>
-                )}
+                <div className="flex flex-col items-stretch md:items-end gap-2 shrink-0 min-w-[200px]">
+                  <Button
+                    onClick={() => setExcelDialogOpen(true)}
+                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold transition-colors shadow-sm h-10 px-4 rounded-lg flex items-center justify-center gap-2"
+                  >
+                    <FileSpreadsheet className="h-4 w-4 shrink-0" />
+                    Upload Excel file
+                  </Button>
+                  <span className="text-xs text-slate-400 text-left md:text-right font-medium">
+                    See required columns in the upload dialog
+                  </span>
+                </div>
+              </div>
+              {!branchId && (
+                <div className="mt-4 border-t border-amber-100 pt-4 text-xs text-amber-600 flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> Pick a branch in step 2 first so we can check stock.
+                </div>
+              )}
 
                 {unmatched.length > 0 && (
                   <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3">
@@ -583,7 +597,6 @@ export function StockOut() {
                     </ul>
                   </div>
                 )}
-              </div>
             </Card>
 
             {/* Step 2 — Record dispatch */}
@@ -602,8 +615,16 @@ export function StockOut() {
                 <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
                   <div className="space-y-1.5">
                     <Label className="text-sm text-black">Reason</Label>
-                    <Select value={reason} onValueChange={(v) => setReason(v as Reason)}>
-                      <SelectTrigger className="h-9 text-sm text-black">
+                    <Select
+                      value={reason}
+                      onValueChange={(v) => {
+                        setReason(v as Reason);
+                        clearError("reason");
+                      }}
+                    >
+                      <SelectTrigger
+                        className={`h-9 text-sm text-black ${formErrors.reason ? "border-red-500 focus:ring-red-500" : ""}`}
+                      >
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -614,12 +635,23 @@ export function StockOut() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {formErrors.reason && (
+                      <p className="text-xs text-red-600">{formErrors.reason}</p>
+                    )}
                   </div>
 
                   <div className="space-y-1.5">
                     <Label className="text-sm text-black">Branch</Label>
-                    <Select value={branchId} onValueChange={setBranchId}>
-                      <SelectTrigger className="h-9 text-sm text-black">
+                    <Select
+                      value={branchId}
+                      onValueChange={(v) => {
+                        setBranchId(v);
+                        clearError("branchId");
+                      }}
+                    >
+                      <SelectTrigger
+                        className={`h-9 text-sm text-black ${formErrors.branchId ? "border-red-500 focus:ring-red-500" : ""}`}
+                      >
                         <SelectValue placeholder="Select branch" />
                       </SelectTrigger>
                       <SelectContent>
@@ -630,6 +662,9 @@ export function StockOut() {
                         ))}
                       </SelectContent>
                     </Select>
+                    {formErrors.branchId && (
+                      <p className="text-xs text-red-600">{formErrors.branchId}</p>
+                    )}
                   </div>
 
                   <div className="space-y-1.5">
@@ -671,7 +706,20 @@ export function StockOut() {
                   <h3 className="text-sm font-medium text-black">Add a line</h3>
                   <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_120px_auto] gap-3 items-end">
                     <div className="space-y-1.5" ref={pickerRef}>
-                      <Label className="text-sm text-black">Product</Label>
+                      {/* Label row carries the "Available: N" hint inline
+                          so it doesn't push the input down and break grid
+                          alignment with the Quantity / Rate columns. */}
+                      <div className="flex items-baseline justify-between gap-2">
+                        <Label className="text-sm text-black">Product</Label>
+                        {pickedProductId && pickedAvailable !== null && (
+                          <span className="text-xs text-gray-500">
+                            Available:{" "}
+                            <span className="text-black font-medium">
+                              {pickedAvailable}
+                            </span>
+                          </span>
+                        )}
+                      </div>
                       <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
                         <PopoverAnchor asChild>
                           <div className="relative">
@@ -727,11 +775,6 @@ export function StockOut() {
                           )}
                         </PopoverContent>
                       </Popover>
-                      {pickedProductId && pickedAvailable !== null && (
-                        <p className="text-xs text-gray-500">
-                          Available: {pickedAvailable}
-                        </p>
-                      )}
                     </div>
                     <div className="space-y-1.5">
                       <Label className="text-sm text-black">Quantity</Label>
@@ -766,7 +809,12 @@ export function StockOut() {
                   <h3 className="text-sm font-medium text-black mb-2">
                     Draft lines ({lines.length})
                   </h3>
-                  <div className="border border-gray-200 rounded-md overflow-hidden">
+                  {formErrors.lines && (
+                    <p className="text-xs text-red-600 mb-2">{formErrors.lines}</p>
+                  )}
+                  <div
+                    className={`border rounded-md overflow-hidden ${formErrors.lines ? "border-red-500" : "border-gray-200"}`}
+                  >
                     <Table>
                       <TableHeader className="bg-gray-50">
                         <TableRow className="border-gray-200">
@@ -871,7 +919,7 @@ export function StockOut() {
 
               <Button
                 onClick={handleSave}
-                disabled={!canSave}
+                disabled={saving}
                 size="sm"
                 className="w-full mt-4 text-sm"
               >
@@ -880,6 +928,11 @@ export function StockOut() {
                 ) : null}
                 Save dispatch
               </Button>
+              {Object.keys(formErrors).length > 0 && (
+                <p className="mt-2 text-xs text-red-600">
+                  Please fix the highlighted fields above.
+                </p>
+              )}
 
               <p className="mt-3 text-xs text-gray-500">
                 Saving deducts stock immediately (per line). Reference and dispatch date
@@ -892,7 +945,10 @@ export function StockOut() {
 
       <ExcelUploadDialog
         open={excelDialogOpen}
-        onOpenChange={setExcelDialogOpen}
+        onOpenChange={(open) => {
+          setExcelDialogOpen(open);
+          if (open) resetUploadCaches();
+        }}
         title="Load dispatch lines from Excel"
         description={
           <>
@@ -902,13 +958,24 @@ export function StockOut() {
           </>
         }
         fields={STOCK_OUT_FIELDS}
+        nameColumns={["Name", "name", "Product", "product", "Product Name", "product name"]}
         footnote={
           <>
             Rows with unknown product names are skipped and listed after upload. Empty
             name rows are ignored.
           </>
         }
-        onFile={processExcelFile}
+        onRow={processRow}
+        onBatchComplete={({ ok, failed, total }) => {
+          // Surface a clear summary toast after the live list finishes.
+          if (failed === 0) {
+            toast.success(`Added ${ok} of ${total} line${total === 1 ? "" : "s"} to the draft`);
+          } else if (ok === 0) {
+            toast.error(`No rows could be added (${failed} failed)`);
+          } else {
+            toast.warning(`Added ${ok} of ${total}, ${failed} failed`);
+          }
+        }}
         onDownloadTemplate={downloadTemplate}
       />
     </div>
@@ -951,11 +1018,11 @@ function HistoryView({
     <div className="space-y-4">
       {/* Filters */}
       <Card className="p-4 border border-gray-200">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex flex-col gap-1">
+        <div className="flex flex-col lg:flex-row gap-3">
+          <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
             <Label className="text-sm text-black">Reason</Label>
             <Select value={filterReason} onValueChange={setFilterReason}>
-              <SelectTrigger className="h-9 w-[160px] text-sm text-black">
+              <SelectTrigger className="h-9 text-sm text-black w-full">
                 <SelectValue placeholder="All Reasons" />
               </SelectTrigger>
               <SelectContent>
@@ -969,17 +1036,17 @@ function HistoryView({
             </Select>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 flex-1 min-w-[150px]">
             <Label className="text-sm text-black">From date</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
-                  className="h-9 w-[160px] justify-start text-left text-sm font-normal text-black"
+                  className="h-9 w-full justify-start text-left text-sm font-normal text-black"
                 >
                   <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
                   {filterStart ? format(filterStart, "MM/dd/yyyy") : (
-                    <span className="text-gray-500">Start date</span>
+                    <span className="text-gray-400">Start date</span>
                   )}
                 </Button>
               </PopoverTrigger>
@@ -989,17 +1056,17 @@ function HistoryView({
             </Popover>
           </div>
 
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 flex-1 min-w-[150px]">
             <Label className="text-sm text-black">To date</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
-                  className="h-9 w-[160px] justify-start text-left text-sm font-normal text-black"
+                  className="h-9 w-full justify-start text-left text-sm font-normal text-black"
                 >
                   <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
                   {filterEnd ? format(filterEnd, "MM/dd/yyyy") : (
-                    <span className="text-gray-500">End date</span>
+                    <span className="text-gray-400">End date</span>
                   )}
                 </Button>
               </PopoverTrigger>
@@ -1009,23 +1076,30 @@ function HistoryView({
             </Popover>
           </div>
 
-          <Button onClick={onRefresh} size="sm" className="text-sm">
-            <Search className="h-4 w-4 mr-2" /> Search
-          </Button>
-          {(filterStart || filterEnd || filterReason !== "all") && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-sm text-black"
-              onClick={() => {
-                setFilterReason("all");
-                setFilterStart(undefined);
-                setFilterEnd(undefined);
-              }}
-            >
-              Clear filters
-            </Button>
-          )}
+          <div className="flex flex-col gap-1 justify-end">
+            <Label className="text-sm text-transparent select-none hidden lg:block">
+              Action
+            </Label>
+            <div className="flex items-center gap-2">
+              <Button onClick={onRefresh} size="sm" className="h-9 text-sm px-4">
+                <Search className="h-4 w-4 mr-2" /> Search
+              </Button>
+              {(filterStart || filterEnd || filterReason !== "all") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 text-sm text-black"
+                  onClick={() => {
+                    setFilterReason("all");
+                    setFilterStart(undefined);
+                    setFilterEnd(undefined);
+                  }}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </Card>
 

@@ -16,6 +16,7 @@ const router = express_1.default.Router();
 router.post('/', multer_1.default.array('images', 10), parse_formdata_middleware_1.parseFormData, (0, validation_middleware_1.validate)(product_validation_1.createProductSchema), product_controller_1.createProduct);
 router.post('/upload-image', multer_1.default.single('image'), product_controller_1.uploadProductImage);
 router.post('/bulk-upload', uploadBulk_1.default.single('file'), product_controller_1.bulkUploadProducts);
+router.post('/import-row', product_controller_1.importProductRow);
 router.delete('/all', product_controller_1.deleteAllProducts);
 router.get('/', (0, validation_middleware_1.validate)(product_validation_1.listProductsSchema), product_controller_1.listProducts);
 router.get('/export/excel', product_controller_1.exportProductsToExcel);

@@ -6,7 +6,7 @@ import { Decimal } from 'decimal.js';
 import { startOfMonth } from 'date-fns';
 import { imageService } from './common/cloudinaryService';
 import { randomUUID } from 'crypto';
-import { asNumber } from '../utils/helpers';
+import { addDecimal, asNumber } from '../utils/helpers';
 import { generateUniqueNumericSku, isNineDigitNumericSku } from '../utils/numericBarcodeSku';
 
 
@@ -921,15 +921,19 @@ export class ProductService {
         // generic Prisma P2025.
         const product = await this.getProductById(id);
 
-        // The Product row has several relations with ON DELETE RESTRICT
-        // (Stock, StockMovement, SaleItem, PurchaseOrderItem, OrderItem,
-        // ProductImage). Walk them in dependency order inside a transaction
-        // so a single failure rolls everything back.
+        // The Product row has many relations with ON DELETE RESTRICT. We walk
+        // them in dependency order inside a transaction so a single failure
+        // rolls everything back. Missing any one of these causes a P2003 FK
+        // violation at the final product.delete() — e.g. Purchase was added
+        // by the new Stock In flow and was not in the original cleanup list.
         await prisma.$transaction(async (tx) => {
             await tx.productImage.deleteMany({ where: { product_id: id } });
             await tx.stockMovement.deleteMany({ where: { product_id: id } });
+            await tx.stockAdjustment.deleteMany({ where: { product_id: id } });
+            await tx.transfer.deleteMany({ where: { product_id: id } });
             await tx.stock.deleteMany({ where: { product_id: id } });
             await tx.saleItem.deleteMany({ where: { product_id: id } });
+            await tx.purchase.deleteMany({ where: { product_id: id } });
             await tx.purchaseOrderItem.deleteMany({ where: { product_id: id } });
             await tx.orderItem.deleteMany({ where: { product_id: id } });
             await tx.product.delete({ where: { id } });
@@ -1297,7 +1301,88 @@ export class ProductService {
         return products;
     }
 
-    async createProductFromBulkUpload(data: any): Promise<Product & {
+    private async getDefaultWarehouseBranchId(tx: Prisma.TransactionClient): Promise<string | null> {
+        const warehouse = await tx.branch.findFirst({
+            where: { branch_type: 'WAREHOUSE' },
+            select: { id: true },
+        });
+        if (warehouse) return warehouse.id;
+        const anyBranch = await tx.branch.findFirst({
+            orderBy: { created_at: 'asc' },
+            select: { id: true },
+        });
+        return anyBranch?.id ?? null;
+    }
+
+    private async applyOpeningStockFromBulk(
+        tx: Prisma.TransactionClient,
+        productId: string,
+        data: { opening_stock?: number; min_qty?: number; purchase_rate?: number },
+        createdBy?: string,
+    ) {
+        const qty = Number(data.opening_stock ?? 0);
+        if (!Number.isFinite(qty) || qty <= 0) return;
+
+        const branchId = await this.getDefaultWarehouseBranchId(tx);
+        if (!branchId) {
+            console.warn('Bulk upload: no branch found — opening stock not applied');
+            return;
+        }
+
+        const existing = await tx.stock.findUnique({
+            where: {
+                product_id_branch_id: { product_id: productId, branch_id: branchId },
+            },
+        });
+
+        const previousQty = existing ? asNumber(existing.current_quantity) : 0;
+        const newQty = existing
+            ? addDecimal(existing.current_quantity, qty)
+            : new Prisma.Decimal(qty);
+
+        if (existing) {
+            await tx.stock.update({
+                where: {
+                    product_id_branch_id: { product_id: productId, branch_id: branchId },
+                },
+                data: {
+                    current_quantity: newQty,
+                    minimum_quantity: new Prisma.Decimal(data.min_qty ?? 10),
+                },
+            });
+        } else {
+            await tx.stock.create({
+                data: {
+                    product_id: productId,
+                    branch_id: branchId,
+                    current_quantity: newQty,
+                    minimum_quantity: new Prisma.Decimal(data.min_qty ?? 10),
+                },
+            });
+        }
+
+        await tx.stockMovement.create({
+            data: {
+                product_id: productId,
+                branch_id: branchId,
+                movement_type: 'PURCHASE',
+                quantity_change: new Prisma.Decimal(qty),
+                previous_qty: new Prisma.Decimal(previousQty),
+                new_qty: newQty,
+                unit_cost: data.purchase_rate
+                    ? new Prisma.Decimal(data.purchase_rate)
+                    : undefined,
+                notes: 'Stock In Excel import — opening stock',
+                created_by: createdBy ?? null,
+                reference_type: 'bulk-upload',
+            },
+        });
+    }
+
+    async createProductFromBulkUpload(
+        data: any,
+        createdBy?: string,
+    ): Promise<Product & {
         unit: any;
         category: any;
         subcategory: any;
@@ -1439,6 +1524,9 @@ export class ProductService {
                 };
 
             console.log(existingProduct ? `✅ Product updated successfully with ID: ${product.id}` : `✅ Product created successfully with ID: ${product.id}`);
+
+            await this.applyOpeningStockFromBulk(tx, product.id, data, createdBy);
+
             return product;
         }, {
             maxWait: 20000, // 20 seconds

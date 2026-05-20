@@ -7,6 +7,7 @@ exports.authorize = exports.authenticate = void 0;
 const jsonwebtoken_1 = __importDefault(require("jsonwebtoken"));
 const app_1 = require("../config/app");
 const apiError_1 = require("../utils/apiError");
+const client_1 = require("../prisma/client");
 // Pure JWT auth — no server-side session store. The signed token is the
 // session. Tokens are issued without expiry (see auth.service.ts), so a user
 // stays logged in until they explicitly clear the token on the client.
@@ -17,6 +18,18 @@ const authenticate = async (req, res, next) => {
             throw new apiError_1.AppError(401, 'Authentication required');
         }
         const decoded = jsonwebtoken_1.default.verify(token, app_1.config.jwtSecret);
+        // Verify the user still exists. Tokens never expire on their own, so a
+        // user who was deleted (or a DB reseed) leaves the client holding a JWT
+        // whose `id` doesn't match a User row — every subsequent write that
+        // stores `created_by` would FK-violate. Reject the request cleanly so
+        // the client can drop the stale token and prompt a fresh login.
+        const userExists = await client_1.prisma.user.findUnique({
+            where: { id: decoded.id },
+            select: { id: true },
+        });
+        if (!userExists) {
+            throw new apiError_1.AppError(401, 'Session expired, please log in again');
+        }
         req.user = decoded;
         next();
     }

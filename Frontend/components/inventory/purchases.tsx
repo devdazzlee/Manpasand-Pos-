@@ -28,6 +28,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import {
@@ -41,6 +48,9 @@ import {
   FileText,
   Trash2,
   Box,
+  Printer,
+  Building,
+  User,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
@@ -48,6 +58,20 @@ import { toast } from "sonner";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ExcelUploadDialog, type ExcelField } from "@/components/inventory/excel-upload-dialog";
 import * as XLSX from "xlsx";
+import { z } from "zod";
+
+// Zod schema for the supplier-delivery form. Limited to the inputs the user
+// commonly misses — supplier, warehouse, and at least one line. Inline errors
+// guide the user to the offending field instead of a disabled Save button.
+const purchaseSchema = z.object({
+  supplierId: z.string().min(1, "Choose a supplier"),
+  warehouseBranchId: z.string().min(1, "Pick a warehouse or branch"),
+  lines: z.array(z.any()).min(1, "Add at least one product line before saving"),
+});
+
+type PurchaseFieldErrors = Partial<
+  Record<"supplierId" | "warehouseBranchId" | "lines", string>
+>;
 
 interface Product {
   id: string;
@@ -136,6 +160,28 @@ export function Purchases() {
   const [filterStart, setFilterStart] = useState<Date | undefined>(undefined);
   const [filterEnd, setFilterEnd] = useState<Date | undefined>(undefined);
 
+  // ------- detail modal -------
+  const [selectedPurchaseId, setSelectedPurchaseId] = useState<string | null>(null);
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [purchaseDetail, setPurchaseDetail] = useState<any>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const handleViewPurchase = useCallback(async (id: string) => {
+    setSelectedPurchaseId(id);
+    setDetailOpen(true);
+    setDetailLoading(true);
+    setPurchaseDetail(null);
+    try {
+      const res = await apiClient.get(`${API_BASE}/purchases/${id}`);
+      setPurchaseDetail(res.data?.data || null);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || "Failed to load purchase details");
+      setDetailOpen(false);
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
   const fetchHistory = useCallback(
     async (pg = page) => {
       setHistoryLoading(true);
@@ -167,30 +213,6 @@ export function Purchases() {
 
   // ------- new entry: step 1 (Excel new products) -------
   const [excelDialogOpen, setExcelDialogOpen] = useState(false);
-
-  const handleProductsExcelFile = async (file: File) => {
-    try {
-      const fd = new FormData();
-      fd.append("file", file);
-      const res = await apiClient.post(`${API_BASE}/products/bulk-upload`, fd, {
-        headers: { "Content-Type": "multipart/form-data" },
-      });
-      const results: { success?: boolean }[] = Array.isArray(res.data?.data)
-        ? res.data.data
-        : [];
-      const ok = results.filter((r) => r.success).length;
-      toast.success(
-        results.length > 0
-          ? `Imported ${ok} of ${results.length} product${results.length === 1 ? "" : "s"}`
-          : "Products imported",
-      );
-      // Re-fetch product list so the new SKUs are pickable below.
-      fetchMeta();
-    } catch (err: any) {
-      toast.error(err?.response?.data?.message || "Failed to import products");
-      throw err; // keep dialog open if the upload failed
-    }
-  };
 
   const downloadStockInTemplate = () => {
     const ws = XLSX.utils.aoa_to_sheet([
@@ -258,6 +280,15 @@ export function Purchases() {
   const [notes, setNotes] = useState<string>("");
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [saving, setSaving] = useState(false);
+  const [formErrors, setFormErrors] = useState<PurchaseFieldErrors>({});
+
+  const clearError = (key: keyof PurchaseFieldErrors) =>
+    setFormErrors((prev) => {
+      if (!prev[key]) return prev;
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
 
   // Auto-pick first warehouse branch if none selected.
   useEffect(() => {
@@ -275,6 +306,35 @@ export function Purchases() {
   const [pickedProductId, setPickedProductId] = useState<string>("");
   const [pickedQty, setPickedQty] = useState<string>("");
   const [pickedCost, setPickedCost] = useState<string>("");
+  const [pickedAvailable, setPickedAvailable] = useState<number | null>(null);
+  const [availableLoading, setAvailableLoading] = useState(false);
+
+  // Fetch current on-hand quantity for the selected product at the selected
+  // branch so the user can see the current stock before adding more.
+  useEffect(() => {
+    if (!pickedProductId || !warehouseBranchId) {
+      setPickedAvailable(null);
+      return;
+    }
+    let cancelled = false;
+    setAvailableLoading(true);
+    apiClient
+      .get(`${API_BASE}/stock/product/${pickedProductId}/branch/${warehouseBranchId}`)
+      .then((res) => {
+        if (cancelled) return;
+        const qty = Number(res.data?.data?.current_quantity ?? 0);
+        setPickedAvailable(Number.isFinite(qty) ? qty : 0);
+      })
+      .catch(() => {
+        if (!cancelled) setPickedAvailable(0);
+      })
+      .finally(() => {
+        if (!cancelled) setAvailableLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [pickedProductId, warehouseBranchId]);
 
   const filteredProducts = useMemo(() => {
     const t = searchTerm.toLowerCase().trim();
@@ -298,6 +358,7 @@ export function Purchases() {
     setPickedQty("");
     setPickedCost("");
     setSearchTerm("");
+    setPickedAvailable(null);
   };
 
   const addLine = () => {
@@ -335,6 +396,7 @@ export function Purchases() {
         },
       ];
     });
+    clearError("lines");
     resetAddLine();
   };
 
@@ -349,14 +411,27 @@ export function Purchases() {
     return { lineCount, units, value };
   }, [lines]);
 
-  const canSave =
-    !!supplierId &&
-    !!warehouseBranchId &&
-    lines.length > 0 &&
-    !saving;
-
   const handleSave = async () => {
-    if (!canSave) return;
+    if (saving) return;
+
+    // Inline-error pattern — pinpoint exactly what the user missed instead of
+    // greying out the Save button on a form this long.
+    const parsed = purchaseSchema.safeParse({
+      supplierId,
+      warehouseBranchId,
+      lines,
+    });
+    if (!parsed.success) {
+      const next: PurchaseFieldErrors = {};
+      for (const issue of parsed.error.issues) {
+        const key = issue.path[0] as keyof PurchaseFieldErrors;
+        if (key && !next[key]) next[key] = issue.message;
+      }
+      setFormErrors(next);
+      return;
+    }
+    setFormErrors({});
+
     setSaving(true);
     try {
       await apiClient.post(`${API_BASE}/purchases/bulk`, {
@@ -461,6 +536,7 @@ export function Purchases() {
             setPage(1);
           }}
           onSearch={() => fetchHistory()}
+          onViewDetail={handleViewPurchase}
         />
       ) : (
         <>
@@ -471,9 +547,15 @@ export function Purchases() {
           suppliers={suppliers}
           branches={branches}
           supplierId={supplierId}
-          setSupplierId={setSupplierId}
+          setSupplierId={(v) => {
+            setSupplierId(v);
+            clearError("supplierId");
+          }}
           warehouseBranchId={warehouseBranchId}
-          setWarehouseBranchId={setWarehouseBranchId}
+          setWarehouseBranchId={(v) => {
+            setWarehouseBranchId(v);
+            clearError("warehouseBranchId");
+          }}
           purchaseDate={purchaseDate}
           setPurchaseDate={setPurchaseDate}
           invoiceRef={invoiceRef}
@@ -495,6 +577,8 @@ export function Purchases() {
           setPickedQty={setPickedQty}
           pickedCost={pickedCost}
           setPickedCost={setPickedCost}
+          pickedAvailable={pickedAvailable}
+          availableLoading={availableLoading}
           onAddLine={addLine}
           // lines
           lines={lines}
@@ -503,8 +587,8 @@ export function Purchases() {
           notes={notes}
           setNotes={setNotes}
           totals={totals}
-          canSave={canSave}
           saving={saving}
+          formErrors={formErrors}
           onSave={handleSave}
         />
         <ExcelUploadDialog
@@ -528,11 +612,231 @@ export function Purchases() {
               <span className="font-medium">sales_rate_inc_dis_and_tax</span> are also accepted.
             </>
           }
-          onFile={handleProductsExcelFile}
+          onRow={async (row) => {
+            // Each row goes to the per-row import endpoint so the dialog
+            // can update its progress list one product at a time.
+            try {
+              await apiClient.post(`${API_BASE}/products/import-row`, { row });
+              return { ok: true };
+            } catch (err: any) {
+              return {
+                ok: false,
+                error:
+                  err?.response?.data?.message ||
+                  err?.response?.data?.errors?.[0]?.message ||
+                  err?.message ||
+                  "Failed",
+              };
+            }
+          }}
+          onBatchComplete={({ ok, failed, total }) => {
+            // Refresh the picker so newly-imported products are selectable
+            // in Step 2 immediately.
+            fetchMeta();
+            if (failed === 0) {
+              toast.success(`Imported ${ok} of ${total} product${total === 1 ? "" : "s"}`);
+            } else if (ok === 0) {
+              toast.error(`All ${total} rows failed — see the list for details`);
+            } else {
+              toast.warning(`Imported ${ok} of ${total}, ${failed} failed`);
+            }
+          }}
           onDownloadTemplate={downloadStockInTemplate}
         />
         </>
       )}
+
+      {/* Detail Dialog */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="max-w-2xl bg-white border border-slate-200 shadow-2xl rounded-2xl p-6 text-black">
+          <DialogHeader className="border-b border-slate-100 pb-4">
+            <div className="flex items-center gap-3">
+              <div className="bg-slate-900 text-white p-2 rounded-xl">
+                <Receipt className="h-6 w-6" />
+              </div>
+              <div>
+                <DialogTitle className="text-xl font-bold text-black">Stock In Detail</DialogTitle>
+                <DialogDescription className="text-xs text-slate-500 mt-0.5">
+                  Full purchase receipt details and item valuation
+                </DialogDescription>
+              </div>
+            </div>
+          </DialogHeader>
+
+          {detailLoading ? (
+            <div className="flex flex-col items-center justify-center py-16 space-y-3">
+              <Loader2 className="h-9 w-9 animate-spin text-slate-500" />
+              <p className="text-sm font-semibold text-slate-600">Fetching stock details...</p>
+              <p className="text-xs text-slate-400">Please wait a moment</p>
+            </div>
+          ) : purchaseDetail ? (() => {
+            const { batchNo, expiryDate, userNotes } = parsePurchaseNotes(purchaseDetail.notes);
+            const ts = new Date(purchaseDetail.purchase_date);
+            const valuation = Number(purchaseDetail.quantity) * Number(purchaseDetail.cost_price);
+
+            return (
+              <div className="space-y-6 mt-4">
+                {/* Status and Doc Ref Banner */}
+                <div className="flex flex-wrap items-center justify-between gap-3 bg-slate-50 border border-slate-100 p-4 rounded-xl">
+                  <div>
+                    <span className="text-xs text-slate-500 font-semibold block uppercase tracking-wider">Document Reference</span>
+                    <span className="text-lg font-bold font-mono text-black">
+                      {purchaseDetail.invoice_ref || "— (Direct)"}
+                    </span>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Badge variant="outline" className="px-3 py-1 text-xs font-semibold bg-white text-emerald-700 border-emerald-200">
+                      {purchaseDetail.delivery_status || "COMPLETE"}
+                    </Badge>
+                  </div>
+                </div>
+
+                {/* Metadata Grid */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Left Column */}
+                  <div className="space-y-3 border border-slate-100 p-4 rounded-xl bg-white shadow-sm">
+                    <div className="flex items-start gap-2">
+                      <Building className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="text-xs text-slate-400 font-medium block">Branch / Location</span>
+                        <span className="text-sm font-semibold text-slate-800">
+                          {purchaseDetail.warehouse_branch?.name || "—"}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <User className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="text-xs text-slate-400 font-medium block">Supplier / Vendor</span>
+                        <span className="text-sm font-semibold text-slate-800">
+                          {purchaseDetail.supplier?.name || "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* Right Column */}
+                  <div className="space-y-3 border border-slate-100 p-4 rounded-xl bg-white shadow-sm">
+                    <div className="flex items-start gap-2">
+                      <CalendarIcon className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="text-xs text-slate-400 font-medium block">Timestamp</span>
+                        <span className="text-sm font-semibold text-slate-800">
+                          {ts.toLocaleDateString(undefined, { dateStyle: "long" })} at {ts.toLocaleTimeString(undefined, { timeStyle: "short" })}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-start gap-2">
+                      <User className="h-4 w-4 text-slate-400 mt-0.5 shrink-0" />
+                      <div>
+                        <span className="text-xs text-slate-400 font-medium block">Recorded By</span>
+                        <span className="text-sm font-semibold text-slate-800">
+                          {purchaseDetail.user?.email || "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Items & Valuation Table */}
+                <div className="border border-slate-100 rounded-xl overflow-hidden shadow-sm">
+                  <div className="bg-slate-50 px-4 py-2 border-b border-slate-100 flex items-center justify-between">
+                    <span className="text-xs font-bold text-slate-700 uppercase tracking-wider">Item Details</span>
+                    <span className="text-xs font-semibold text-slate-500">1 Line Item</span>
+                  </div>
+                  <Table>
+                    <TableHeader className="bg-slate-50/50">
+                      <TableRow>
+                        <TableHead className="text-xs font-bold text-slate-600">Product</TableHead>
+                        <TableHead className="text-xs font-bold text-slate-600 text-center">SKU</TableHead>
+                        <TableHead className="text-xs font-bold text-slate-600 text-right">Quantity</TableHead>
+                        <TableHead className="text-xs font-bold text-slate-600 text-right">Cost Price</TableHead>
+                        <TableHead className="text-xs font-bold text-slate-600 text-right">Total</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      <TableRow className="hover:bg-slate-50/30">
+                        <TableCell className="text-sm font-medium text-slate-900">
+                          {purchaseDetail.product?.name || "—"}
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-500 font-mono text-center">
+                          {purchaseDetail.product?.sku || "—"}
+                        </TableCell>
+                        <TableCell className="text-sm font-medium text-slate-900 text-right">
+                          {purchaseDetail.quantity}
+                        </TableCell>
+                        <TableCell className="text-sm text-slate-700 text-right">
+                          Rs {Number(purchaseDetail.cost_price).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                        </TableCell>
+                        <TableCell className="text-sm font-bold text-slate-900 text-right">
+                          Rs {valuation.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                        </TableCell>
+                      </TableRow>
+                    </TableBody>
+                  </Table>
+                  <div className="bg-slate-50 px-4 py-3 flex justify-between items-center border-t border-slate-100">
+                    <span className="text-sm font-bold text-slate-700">Total Valuation</span>
+                    <span className="text-base font-extrabold text-black">
+                      Rs {valuation.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Batch, Expiry & Notes */}
+                {(batchNo || expiryDate || userNotes) && (
+                  <div className="border border-slate-100 rounded-xl p-4 bg-slate-50/50 space-y-3">
+                    <div className="grid grid-cols-2 gap-4">
+                      {batchNo && (
+                        <div>
+                          <span className="text-xs text-slate-400 font-medium block">Batch Number</span>
+                          <span className="text-sm font-semibold text-slate-800">{batchNo}</span>
+                        </div>
+                      )}
+                      {expiryDate && (
+                        <div>
+                          <span className="text-xs text-slate-400 font-medium block">Expiry Date</span>
+                          <span className="text-sm font-semibold text-slate-800">{expiryDate}</span>
+                        </div>
+                      )}
+                    </div>
+                    {userNotes && (
+                      <div className="border-t border-slate-100 pt-2 mt-2">
+                        <span className="text-xs text-slate-400 font-medium block">Notes / Remarks</span>
+                        <p className="text-sm text-slate-700 leading-relaxed mt-0.5">{userNotes}</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Modal Actions */}
+                <div className="flex justify-end gap-2 border-t border-slate-100 pt-4 mt-6">
+                  <Button
+                    variant="outline"
+                    className="text-xs font-semibold h-9 text-slate-700 border-slate-200"
+                    onClick={() => setDetailOpen(false)}
+                  >
+                    Close
+                  </Button>
+                  <Button
+                    className="text-xs font-semibold h-9 bg-slate-900 hover:bg-slate-800 text-white"
+                    onClick={() => {
+                      window.print();
+                    }}
+                  >
+                    <Printer className="h-4 w-4 mr-2" /> Print Receipt
+                  </Button>
+                </div>
+              </div>
+            );
+          })() : (
+            <div className="flex flex-col items-center justify-center py-12 text-slate-400">
+              <p className="text-sm font-medium">Failed to retrieve details</p>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -553,6 +857,7 @@ interface HistoryViewProps {
   filterEnd?: Date;
   setFilterEnd: (d?: Date) => void;
   onSearch: () => void;
+  onViewDetail: (id: string) => void;
 }
 
 function HistoryView({
@@ -570,34 +875,21 @@ function HistoryView({
   filterEnd,
   setFilterEnd,
   onSearch,
+  onViewDetail,
 }: HistoryViewProps) {
   return (
     <div className="space-y-4">
       {/* Info banner */}
-      <Card className="p-4 border border-gray-200 bg-gray-50">
-        <div className="flex gap-3">
-          <Info className="h-5 w-5 text-gray-500 mt-0.5 shrink-0" />
-          <div className="text-sm text-gray-700 space-y-2">
-            <p className="font-medium text-black">What this list shows</p>
+      <Card className="p-4 border border-blue-100 bg-blue-50/50 shadow-sm rounded-xl">
+        <div className="flex items-start gap-3">
+          <Info className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
+          <div className="text-xs md:text-sm text-slate-700 leading-relaxed space-y-1">
+            <h4 className="font-bold text-slate-900">What this list shows</h4>
             <p>
-              Only <span className="font-medium">supplier deliveries</span> you save
-              from <span className="font-medium">New Entry → Save purchase</span> (server{" "}
-              <code className="text-xs bg-white px-1 py-0.5 rounded border border-gray-200">
-                POST /purchases
-              </code>
-              ). Each line becomes a purchase record with supplier, invoice, and cost.
+              This list logs <span className="font-semibold text-slate-900">supplier deliveries</span> recorded manually under the <strong>New Entry</strong> tab.
             </p>
-            <p>
-              Stock added via <span className="font-medium">Stock Management → New products (Excel)</span>{" "}
-              or <span className="font-medium">Stock In → Step 1 Excel</span> updates
-              inventory through bulk product import — it writes{" "}
-              <span className="font-medium">stock movements</span>, not purchase rows, so
-              it will <span className="font-medium">not</span> appear here. To review
-              that activity use{" "}
-              <span className="font-medium">
-                Inventory → Stock Management → Movement Log
-              </span>{" "}
-              tab.
+            <p className="text-slate-500 text-xs mt-1 border-t border-blue-100/50 pt-1">
+              Note: Bulk product imports (opening stock) added via Excel are registered as <span className="font-medium">stock movements</span> rather than supplier purchases. You can review Excel imports under <span className="font-medium text-slate-900">Inventory → Stock Management → Movement Log</span>.
             </p>
           </div>
         </div>
@@ -723,13 +1015,16 @@ function HistoryView({
                 <TableHead className="px-6 py-4 text-sm font-medium text-black">
                   Status
                 </TableHead>
+                <TableHead className="px-6 py-4 text-sm font-medium text-black text-right">
+                  Actions
+                </TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
               {loading ? (
                 <TableRow>
                   <TableCell
-                    colSpan={6}
+                    colSpan={7}
                     className="py-12 text-center text-sm text-gray-500"
                   >
                     Loading...
@@ -737,7 +1032,7 @@ function HistoryView({
                 </TableRow>
               ) : rows.length === 0 ? (
                 <TableRow>
-                  <TableCell colSpan={6} className="py-16 text-center">
+                  <TableCell colSpan={7} className="py-16 text-center">
                     <div className="flex flex-col items-center gap-3 max-w-xl mx-auto">
                       <FileText className="h-10 w-10 text-gray-300" />
                       <p className="text-base font-medium text-black">
@@ -793,6 +1088,16 @@ function HistoryView({
                         <Badge variant="outline" className="text-xs text-black">
                           {r.delivery_status || "COMPLETE"}
                         </Badge>
+                      </TableCell>
+                      <TableCell className="px-6 py-4 align-top text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-8 text-xs text-black border border-slate-200 hover:bg-slate-50 transition-all font-medium rounded-md px-3"
+                          onClick={() => onViewDetail(r.id)}
+                        >
+                          View
+                        </Button>
                       </TableCell>
                     </TableRow>
                   );
@@ -856,6 +1161,28 @@ function HistoryView({
   );
 }
 
+function parsePurchaseNotes(notes?: string | null) {
+  if (!notes) return { batchNo: "", expiryDate: "", userNotes: "" };
+  const parts = notes.split(" | ");
+  let batchNo = "";
+  let expiryDate = "";
+  const remaining: string[] = [];
+  parts.forEach((p) => {
+    if (p.startsWith("Batch: ")) {
+      batchNo = p.replace("Batch: ", "");
+    } else if (p.startsWith("Expiry: ")) {
+      expiryDate = p.replace("Expiry: ", "");
+    } else {
+      remaining.push(p);
+    }
+  });
+  return {
+    batchNo,
+    expiryDate,
+    userNotes: remaining.join(" | "),
+  };
+}
+
 // ---------- New Entry sub-component ----------
 interface NewEntryViewProps {
   onOpenExcelDialog: () => void;
@@ -887,6 +1214,8 @@ interface NewEntryViewProps {
   setPickedQty: (v: string) => void;
   pickedCost: string;
   setPickedCost: (v: string) => void;
+  pickedAvailable: number | null;
+  availableLoading: boolean;
   onAddLine: () => void;
 
   lines: DraftLine[];
@@ -895,8 +1224,8 @@ interface NewEntryViewProps {
   notes: string;
   setNotes: (v: string) => void;
   totals: { lineCount: number; units: number; value: number };
-  canSave: boolean;
   saving: boolean;
+  formErrors: PurchaseFieldErrors;
   onSave: () => void;
 }
 
@@ -929,14 +1258,16 @@ function NewEntryView(props: NewEntryViewProps) {
     setPickedQty,
     pickedCost,
     setPickedCost,
+    pickedAvailable,
+    availableLoading,
     onAddLine,
     lines,
     removeLine,
     notes,
     setNotes,
     totals,
-    canSave,
     saving,
+    formErrors,
     onSave,
   } = props;
 
@@ -944,38 +1275,40 @@ function NewEntryView(props: NewEntryViewProps) {
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
       <div className="lg:col-span-2 space-y-6">
         {/* Step 1 — Excel new products */}
-        <Card className="p-5 border border-green-200 bg-green-50/50">
-          <div className="flex flex-col md:flex-row md:items-start md:justify-between gap-4">
-            <div className="flex-1">
-              <h2 className="text-base font-semibold text-black">
-                Step 1 — New products from Excel (optional)
-              </h2>
-              <p className="text-sm text-gray-700 mt-2">
-                For a list of <span className="font-medium">new products</span> with
-                prices and opening stock. When you pick a file, each row is saved to
-                the <span className="font-medium">product catalog</span> — it does{" "}
-                <span className="font-medium">not</span> fill the supplier receipt in
-                Step 2.
+        <Card className="p-6 border border-slate-200 bg-white shadow-sm rounded-xl">
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
+            <div className="flex-1 space-y-2">
+              <div className="flex items-center gap-2">
+                <div className="bg-emerald-50 text-emerald-700 p-1.5 rounded-lg shrink-0">
+                  <FileSpreadsheet className="h-5 w-5" />
+                </div>
+                <h2 className="text-base font-bold text-slate-900">
+                  Step 1 — Bulk Import New Products (Optional)
+                </h2>
+              </div>
+              <p className="text-sm text-slate-600 leading-relaxed">
+                If you have a spreadsheet of new products with prices and opening stock, upload it here. 
+                This populates the <span className="font-semibold text-slate-800">product catalog</span> only (opening stock) — it does not create a supplier purchase receipt (use Step 2 below).
               </p>
             </div>
-            <div className="shrink-0">
+            <div className="flex flex-col items-stretch md:items-end gap-2 shrink-0 min-w-[200px]">
               <Button
                 onClick={onOpenExcelDialog}
-                size="sm"
-                className="bg-green-600 hover:bg-green-700 text-white text-sm"
+                className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold transition-colors shadow-sm h-10 px-4 rounded-lg flex items-center justify-center gap-2"
               >
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
+                <FileSpreadsheet className="h-4 w-4 shrink-0" />
                 Upload Excel file
               </Button>
-              <p className="text-xs text-gray-500 mt-1 text-right">
+              <span className="text-xs text-slate-400 text-left md:text-right font-medium">
                 See required columns in the upload dialog
-              </p>
+              </span>
             </div>
           </div>
-          <div className="mt-3 border-t border-green-100 pt-3 text-xs text-gray-700">
-            Click <span className="font-medium">Upload Excel file</span> to see required
-            columns and download a template. Skip this step if you only need a supplier
-            bill — use Step 2.
+          <div className="mt-4 border-t border-slate-100 pt-4 text-xs text-slate-500 flex items-start gap-1.5 leading-relaxed">
+            <Info className="h-4 w-4 text-slate-400 shrink-0 mt-0.5" />
+            <span>
+              Click <span className="font-semibold text-slate-700">Upload Excel file</span> to see required columns and download a template. Skip this step if you only need a supplier bill — use Step 2.
+            </span>
           </div>
         </Card>
 
@@ -998,7 +1331,9 @@ function NewEntryView(props: NewEntryViewProps) {
               <div className="space-y-1.5">
                 <Label className="text-sm text-black">Supplier</Label>
                 <Select value={supplierId} onValueChange={setSupplierId}>
-                  <SelectTrigger className="h-9 text-sm text-black">
+                  <SelectTrigger
+                    className={`h-9 text-sm text-black ${formErrors.supplierId ? "border-red-500 focus:ring-red-500" : ""}`}
+                  >
                     <SelectValue placeholder="Choose supplier" />
                   </SelectTrigger>
                   <SelectContent>
@@ -1009,6 +1344,9 @@ function NewEntryView(props: NewEntryViewProps) {
                     ))}
                   </SelectContent>
                 </Select>
+                {formErrors.supplierId && (
+                  <p className="text-xs text-red-600">{formErrors.supplierId}</p>
+                )}
               </div>
               <div className="space-y-1.5">
                 <Label className="text-sm text-black">Delivery date</Label>
@@ -1047,7 +1385,9 @@ function NewEntryView(props: NewEntryViewProps) {
             <div className="space-y-1.5 max-w-sm">
               <Label className="text-sm text-black">Warehouse / Branch</Label>
               <Select value={warehouseBranchId} onValueChange={setWarehouseBranchId}>
-                <SelectTrigger className="h-9 text-sm text-black">
+                <SelectTrigger
+                  className={`h-9 text-sm text-black ${formErrors.warehouseBranchId ? "border-red-500 focus:ring-red-500" : ""}`}
+                >
                   <SelectValue placeholder="Select branch" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1058,6 +1398,9 @@ function NewEntryView(props: NewEntryViewProps) {
                   ))}
                 </SelectContent>
               </Select>
+              {formErrors.warehouseBranchId && (
+                <p className="text-xs text-red-600">{formErrors.warehouseBranchId}</p>
+              )}
             </div>
 
             {/* Add a line */}
@@ -1065,7 +1408,21 @@ function NewEntryView(props: NewEntryViewProps) {
               <h3 className="text-sm font-medium text-black">Add one line at a time</h3>
               <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_140px_auto] gap-3 items-end">
                 <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Product</Label>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <Label className="text-sm text-black">Product</Label>
+                    {pickedProductId && (
+                      <span className="text-xs text-gray-500">
+                        Available:{" "}
+                        <span className="text-black font-medium">
+                          {availableLoading
+                            ? "…"
+                            : pickedAvailable !== null
+                              ? pickedAvailable
+                              : "—"}
+                        </span>
+                      </span>
+                    )}
+                  </div>
                   <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
                     <PopoverAnchor asChild>
                       <div className="relative">
@@ -1124,7 +1481,19 @@ function NewEntryView(props: NewEntryViewProps) {
                   </Popover>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Qty</Label>
+                  <div className="flex items-baseline justify-between gap-2">
+                    <Label className="text-sm text-black">Qty</Label>
+                    {pickedProductId &&
+                      pickedAvailable !== null &&
+                      Number(pickedQty) > 0 && (
+                        <span className="text-xs text-gray-500">
+                          After:{" "}
+                          <span className="text-black font-medium">
+                            {pickedAvailable + Number(pickedQty)}
+                          </span>
+                        </span>
+                      )}
+                  </div>
                   <Input
                     type="number"
                     min={0}
@@ -1189,11 +1558,16 @@ function NewEntryView(props: NewEntryViewProps) {
             {/* Lines on this bill */}
             <div>
               <h3 className="text-sm font-medium text-black mb-1">Lines on this bill</h3>
-              <p className="text-xs text-gray-500 mb-3">
+              <p className="text-xs text-gray-500 mb-2">
                 These lines are what will be saved with the supplier invoice — not the
                 Excel import above.
               </p>
-              <div className="border border-gray-200 rounded-md overflow-hidden">
+              {formErrors.lines && (
+                <p className="text-xs text-red-600 mb-2">{formErrors.lines}</p>
+              )}
+              <div
+                className={`border rounded-md overflow-hidden ${formErrors.lines ? "border-red-500" : "border-gray-200"}`}
+              >
                 <Table>
                   <TableHeader className="bg-gray-50">
                     <TableRow className="border-gray-200">
@@ -1328,13 +1702,18 @@ function NewEntryView(props: NewEntryViewProps) {
 
           <Button
             onClick={onSave}
-            disabled={!canSave}
+            disabled={saving}
             size="sm"
             className="w-full mt-4 text-sm"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
             Save purchase
           </Button>
+          {Object.keys(formErrors).length > 0 && (
+            <p className="mt-2 text-xs text-red-600">
+              Please fix the highlighted fields above.
+            </p>
+          )}
 
           <p className="mt-3 text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-md p-2 flex items-start gap-1.5">
             <Info className="h-3.5 w-3.5 mt-0.5 shrink-0" />

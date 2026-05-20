@@ -15,7 +15,10 @@
       "Bash(powershell -NoProfile -Command \"\\(Get-Content components/inventory/stock-out.tsx | Measure-Object -Line\\).Lines\")",
       "Bash(yarn add *)",
       "Bash(powershell -NoProfile -Command \"\\(Get-Content components/inventory/purchases.tsx | Measure-Object -Line\\).Lines\")",
-      "Bash(powershell -NoProfile -Command \"\\(Get-Content components/inventory/inventory-reports.tsx | Measure-Object -Line\\).Lines\")"
+      "Bash(powershell -NoProfile -Command \"\\(Get-Content components/inventory/inventory-reports.tsx | Measure-Object -Line\\).Lines\")",
+      "Bash(node -e \"console.log\\(require\\('./package.json'\\).dependencies.zod\\)\")",
+      "Bash(powershell -Command \"Select-String -Path 'Backend/src/prisma/schema.prisma' -Pattern '^model ' -Context 0,0 | Select-Object LineNumber, Line | Format-Table -AutoSize\")",
+      "Bash(powershell -Command \"Select-String -Path 'Backend/src/controllers/product.controller.ts' -Pattern 'deleteProduct|delete' -Context 1,3\")"
     ]
   }
 }

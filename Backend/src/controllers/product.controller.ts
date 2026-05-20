@@ -15,7 +15,7 @@ const productService = new ProductService();
  */
 export const uploadProductImage = asyncHandler(async (req: Request, res: Response) => {
     if (!req.file) {
-        return new ApiResponse(null, 'No image file provided', 400).send(res);
+        return new ApiResponse(null, 'No image file provided', 400, false).send(res);
     }
     const { imageService } = await import('../services/common/cloudinaryService');
     const url = await imageService.uploadImage(req.file);
@@ -323,9 +323,173 @@ export const getBestSellingProducts = asyncHandler(async (req: Request, res: Res
     new ApiResponse(bestSellingProducts, 'Best selling products retrieved successfully', 200).send(res);
 });
 
+/** Read first non-empty cell from a spreadsheet row (supports Stock In template headers). */
+function pickCell(row: Record<string, unknown>, ...keys: string[]): unknown {
+    for (const key of keys) {
+        const v = row[key];
+        if (v !== undefined && v !== null && String(v).trim() !== '') {
+            return v;
+        }
+    }
+    return undefined;
+}
+
+function mapBulkUploadRow(prod: Record<string, unknown>) {
+    const nameRaw = pickCell(
+        prod,
+        'Product Name',
+        'product name',
+        'Name',
+        'name',
+        'PRODUCT NAME',
+    );
+    const purchaseRaw = pickCell(
+        prod,
+        'Purchase Rate',
+        'purchase_rate',
+        'Buy Price (Rs)',
+        'buy_price',
+        'Cost',
+    );
+    const salesRaw = pickCell(
+        prod,
+        'Sales Rate',
+        'sales_rate_inc_dis_and_tax',
+        'sales_rate_exc_dis_and_tax',
+        'Selling Price',
+        'selling_price',
+        'Sell Price (Rs)',
+    );
+    const minRaw = pickCell(prod, 'Min Stock', 'min_qty', 'min stock', 'Minimum Stock');
+    const stockRaw = pickCell(
+        prod,
+        'Stock',
+        'stock',
+        'Initial Stock Qty',
+        'Opening Stock',
+        'Quantity',
+        'quantity',
+    );
+
+    const purchase_rate = Number(purchaseRaw) || 0;
+    let sales_rate_exc_dis_and_tax =
+        Number(pickCell(prod, 'sales_rate_exc_dis_and_tax')) || 0;
+    let sales_rate_inc_dis_and_tax =
+        Number(pickCell(prod, 'sales_rate_inc_dis_and_tax')) || Number(salesRaw) || 0;
+
+    if (!sales_rate_exc_dis_and_tax && !sales_rate_inc_dis_and_tax) {
+        sales_rate_exc_dis_and_tax = purchase_rate;
+        sales_rate_inc_dis_and_tax = purchase_rate;
+    } else if (!sales_rate_exc_dis_and_tax) {
+        sales_rate_exc_dis_and_tax = sales_rate_inc_dis_and_tax;
+    } else if (!sales_rate_inc_dis_and_tax) {
+        sales_rate_inc_dis_and_tax = sales_rate_exc_dis_and_tax;
+    }
+
+    let min_qty = 10;
+    if (minRaw !== undefined) {
+        const n = Number(minRaw);
+        if (Number.isFinite(n)) min_qty = n;
+    }
+
+    let opening_stock = 0;
+    if (stockRaw !== undefined) {
+        const n = Number(stockRaw);
+        if (Number.isFinite(n) && n > 0) opening_stock = n;
+    }
+
+    const maxRaw = pickCell(prod, 'max_qty', 'Max Stock', 'max stock');
+    let max_qty = 10;
+    if (maxRaw !== undefined) {
+        const n = Number(maxRaw);
+        if (Number.isFinite(n)) max_qty = n;
+    }
+
+    return {
+        name: nameRaw ? String(nameRaw).trim() : '',
+        purchase_rate,
+        sales_rate_exc_dis_and_tax,
+        sales_rate_inc_dis_and_tax,
+        min_qty,
+        max_qty,
+        opening_stock,
+        is_active: prod.is_active !== undefined ? Boolean(prod.is_active) : true,
+        display_on_pos: prod.display_on_pos !== undefined ? Boolean(prod.display_on_pos) : true,
+        is_batch: prod.is_batch !== undefined ? Boolean(prod.is_batch) : false,
+        auto_fill_on_demand_sheet:
+            prod.auto_fill_on_demand_sheet !== undefined
+                ? Boolean(prod.auto_fill_on_demand_sheet)
+                : false,
+        non_inventory_item:
+            prod.non_inventory_item !== undefined ? Boolean(prod.non_inventory_item) : false,
+        is_deal: prod.is_deal !== undefined ? Boolean(prod.is_deal) : false,
+        is_featured: prod.is_featured !== undefined ? Boolean(prod.is_featured) : false,
+        description: prod.description as string | undefined,
+        pct_or_hs_code: prod.pct_or_hs_code as string | undefined,
+        sku: (pickCell(prod, 'sku', 'SKU') as string | undefined) || undefined,
+        discount_amount: prod.discount_amount ? Number(prod.discount_amount) : 0,
+        unit_name: pickCell(prod, 'unit_name', 'unit', 'Unit') as string | undefined,
+        category_name: pickCell(prod, 'category_name', 'category', 'Category') as
+            | string
+            | undefined,
+        subcategory_name: pickCell(
+            prod,
+            'subcategory_name',
+            'subcategory',
+            'Subcategory',
+        ) as string | undefined,
+        tax_name: pickCell(prod, 'tax_name', 'tax', 'Tax') as string | undefined,
+        supplier_name: pickCell(prod, 'supplier_name', 'supplier', 'Supplier') as
+            | string
+            | undefined,
+        brand_name: pickCell(prod, 'brand_name', 'brand', 'Brand') as string | undefined,
+        color_name: pickCell(prod, 'color_name', 'color', 'Color') as string | undefined,
+        size_name: pickCell(prod, 'size_name', 'size', 'Size') as string | undefined,
+    };
+}
+
+// Per-row import — used by the live-progress upload dialog. Accepts one
+// product row as JSON (using the same header aliases as the bulk endpoint)
+// and runs it through the exact same mapping + service. Returns the result
+// of just that row so the client can show progress per call.
+export const importProductRow = asyncHandler(async (req: Request, res: Response) => {
+    const row = (req.body?.row || req.body || {}) as Record<string, unknown>;
+    const enhancedProd = mapBulkUploadRow(row);
+
+    if (!enhancedProd.name) {
+        return new ApiResponse(null, 'Missing required field: Product Name', 400, false).send(res);
+    }
+    if (
+        !enhancedProd.sales_rate_exc_dis_and_tax &&
+        !enhancedProd.sales_rate_inc_dis_and_tax &&
+        !enhancedProd.purchase_rate
+    ) {
+        return new ApiResponse(null, 'Missing required field: purchase or sales rate', 400, false).send(res);
+    }
+
+    const createdBy = (req as Request & { user?: { id: string } }).user?.id;
+
+    try {
+        const created = await productService.createProductFromBulkUpload(enhancedProd, createdBy);
+        new ApiResponse(
+            {
+                id: created.id,
+                name: created.name,
+                unit: created.unit?.name || 'Unknown',
+                category: created.category?.name || 'Unknown',
+                stockAdded: enhancedProd.opening_stock,
+            },
+            'Product imported',
+            201,
+        ).send(res);
+    } catch (err) {
+        new ApiResponse(null, (err as Error).message || 'Import failed', 400, false).send(res);
+    }
+});
+
 export const bulkUploadProducts = asyncHandler(async (req: Request, res: Response) => {
     if (!req.file) {
-        return new ApiResponse(null, 'No file uploaded', 400).send(res);
+        return new ApiResponse(null, 'No file uploaded', 400, false).send(res);
     }
 
     const ext = path.extname(req.file.originalname).toLowerCase();
@@ -342,77 +506,69 @@ export const bulkUploadProducts = asyncHandler(async (req: Request, res: Respons
         const sheetName = workbook.SheetNames[0];
         products = XLSX.utils.sheet_to_json(workbook.Sheets[sheetName]);
     } else {
-        return new ApiResponse(null, 'Unsupported file type', 400).send(res);
+        return new ApiResponse(null, 'Unsupported file type', 400, false).send(res);
     }
 
-    // Validate and create/update products
-    const results = [];
+    const createdBy = (req as Request & { user?: { id: string } }).user?.id;
+
+    const results: {
+        success: boolean;
+        id?: string;
+        name?: string;
+        unit?: string;
+        category?: string;
+        stockAdded?: number;
+        error?: string;
+        data?: unknown;
+    }[] = [];
+
     for (const prod of products) {
         try {
-            // Map XLSX column names to our data structure
-            // Handle both standard format and XLSX format (e.g., "Purchase Rate", "Selling Price")
-            const purchaseRate = prod.purchase_rate || prod['Purchase Rate'] || prod['Purchase Rate'] || 0;
-            const sellingPrice = prod.sales_rate_exc_dis_and_tax || prod.sales_rate_inc_dis_and_tax || 
-                                prod['Selling Price'] || prod['selling_price'] || 0;
-            
-            // Enhanced product data that can include relation names
-            const enhancedProd = {
-                name: prod.name || prod.Name,
-                purchase_rate: Number(purchaseRate) || 0,
-                // Set both sales rates to the same value if only one is provided
-                sales_rate_exc_dis_and_tax: Number(prod.sales_rate_exc_dis_and_tax || sellingPrice) || 0,
-                sales_rate_inc_dis_and_tax: Number(prod.sales_rate_inc_dis_and_tax || sellingPrice) || 0,
-                min_qty: Number(prod.min_qty) || 10,
-                max_qty: Number(prod.max_qty) || 10,
-                is_active: prod.is_active !== undefined ? Boolean(prod.is_active) : true,
-                display_on_pos: prod.display_on_pos !== undefined ? Boolean(prod.display_on_pos) : true,
-                is_batch: prod.is_batch !== undefined ? Boolean(prod.is_batch) : false,
-                auto_fill_on_demand_sheet: prod.auto_fill_on_demand_sheet !== undefined ? Boolean(prod.auto_fill_on_demand_sheet) : false,
-                non_inventory_item: prod.non_inventory_item !== undefined ? Boolean(prod.non_inventory_item) : false,
-                is_deal: prod.is_deal !== undefined ? Boolean(prod.is_deal) : false,
-                is_featured: prod.is_featured !== undefined ? Boolean(prod.is_featured) : false,
-                description: prod.description,
-                pct_or_hs_code: prod.pct_or_hs_code,
-                sku: prod.sku || prod.SKU,
-                discount_amount: prod.discount_amount ? Number(prod.discount_amount) : 0,
-                // Relation names from sheet (will be converted to IDs)
-                // Handle both standard format and XLSX format
-                unit_name: prod.unit_name || prod.unit || prod.Unit,
-                category_name: prod.category_name || prod.category || prod.Category,
-                subcategory_name: prod.subcategory_name || prod.subcategory || prod.Subcategory,
-                tax_name: prod.tax_name || prod.tax || prod.Tax,
-                supplier_name: prod.supplier_name || prod.supplier || prod.Supplier,
-                brand_name: prod.brand_name || prod.brand || prod.Brand,
-                color_name: prod.color_name || prod.color || prod.Color,
-                size_name: prod.size_name || prod.size || prod.Size,
-            };
+            const enhancedProd = mapBulkUploadRow(prod as Record<string, unknown>);
 
-            // Validate required fields (name and at least one price)
             if (!enhancedProd.name) {
-                throw new Error('Missing required field: name');
+                continue;
             }
-            
-            // For updates, we can allow missing prices (they'll just not be updated)
-            // For new products, we need at least selling price
-            if (!enhancedProd.sales_rate_exc_dis_and_tax && !enhancedProd.sales_rate_inc_dis_and_tax) {
-                throw new Error('Missing required field: selling price');
+            if (/^sample product/i.test(enhancedProd.name)) {
+                continue;
             }
 
-            const created = await productService.createProductFromBulkUpload(enhancedProd);
-            results.push({ 
-                success: true, 
-                id: created.id, 
+            if (
+                !enhancedProd.sales_rate_exc_dis_and_tax &&
+                !enhancedProd.sales_rate_inc_dis_and_tax &&
+                !enhancedProd.purchase_rate
+            ) {
+                throw new Error('Missing required field: purchase or sales rate');
+            }
+
+            const created = await productService.createProductFromBulkUpload(
+                enhancedProd,
+                createdBy,
+            );
+            results.push({
+                success: true,
+                id: created.id,
                 name: created.name,
                 unit: created.unit?.name || 'Unknown',
-                category: created.category?.name || 'Unknown'
+                category: created.category?.name || 'Unknown',
+                stockAdded: enhancedProd.opening_stock,
             });
         } catch (err) {
-            results.push({ 
-                success: false, 
-                error: (err as Error).message, 
-                data: prod 
+            results.push({
+                success: false,
+                error: (err as Error).message,
+                data: prod,
             });
         }
+    }
+
+    if (products.length > 0 && results.length === 0) {
+        return new ApiResponse(
+            results,
+            'No data rows found. Use the downloaded template headers (Product Name, Purchase Rate, Sales Rate, Stock, etc.).',
+            400,
+            false,
+        ).send(res);
     }
 
     new ApiResponse(results, 'Bulk upload completed').send(res);

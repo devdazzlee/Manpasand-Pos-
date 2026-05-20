@@ -14,5 +14,6 @@ router.delete("/remove", (0, validation_middleware_1.validate)(stock_validation_
 router.get("/", stock_controller_1.getStocksController);
 router.get("/history", stock_controller_1.getStockMovementsController);
 router.get("/today", stock_controller_1.getTodayStockMovementsController);
+router.get("/product/:productId/branch/:branchId", stock_controller_1.getStockByProductBranchController);
 exports.default = router;
 //# sourceMappingURL=stock.routes.js.map

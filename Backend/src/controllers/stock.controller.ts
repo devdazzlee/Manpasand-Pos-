@@ -35,6 +35,18 @@ const getStocksController = asyncHandler(async (req: Request, res: Response) => 
     new ApiResponse(result.data, "Stocks retrieved successfully", 200, true, result.meta).send(res);
 });
 
+// Returns the on-hand quantity of a single product at a single branch. Used
+// by Stock Out / Transfer dialogs to show "Available: N" inline. Returns
+// current_quantity = 0 (rather than 404) when there's no Stock row yet, so
+// the client always gets a number.
+const getStockByProductBranchController = asyncHandler(
+    async (req: Request, res: Response) => {
+        const { productId, branchId } = req.params;
+        const stock = await stockService.getStockByProductBranch(productId, branchId);
+        new ApiResponse(stock, "Stock retrieved").send(res);
+    },
+);
+
 const getStockMovementsController = asyncHandler(async (req: Request, res: Response) => {
     const branchId = req.query.branchId as string;
     const userRole = req.user?.role as string | undefined;
@@ -60,6 +72,7 @@ export {
     transferStockController,
     removeStockController,
     getStocksController,
+    getStockByProductBranchController,
     getStockMovementsController,
     getTodayStockMovementsController,
 };
