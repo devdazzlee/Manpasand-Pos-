@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -36,6 +36,7 @@ import {
   XCircle,
   ChevronRight,
   Boxes,
+  Loader2,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
@@ -44,9 +45,43 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { usePosData } from "@/hooks/use-pos-data";
 import { cn } from "@/lib/utils";
 
-/** Sentinel values — must not match a real branch/category id from the API. */
+/** Sentinel values - must not match a real branch/category id from the API. */
 const ALL_BRANCHES = "__all_branches__";
 const ALL_CATEGORIES = "__all_categories__";
+/** Plain ASCII placeholder for empty fields (avoids em-dash encoding issues on Windows). */
+const EMPTY = "-";
+
+function DetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex justify-between gap-4 py-1.5 border-b border-gray-50 last:border-0">
+      <dt className="text-sm text-gray-600 shrink-0">{label}</dt>
+      <dd className="text-sm text-black text-right">{value ?? EMPTY}</dd>
+    </div>
+  );
+}
+
+function DetailSection({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className="space-y-2">
+      <h3 className="text-sm font-semibold text-black border-b border-gray-200 pb-1.5">
+        {title}
+      </h3>
+      <dl>{children}</dl>
+    </div>
+  );
+}
 
 function StatCard({
   label,
@@ -80,6 +115,9 @@ export function StockView() {
   const [stocks, setStocks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [detailRow, setDetailRow] = useState<any | null>(null);
+  const [detailProduct, setDetailProduct] = useState<Record<string, unknown> | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
 
   const [branchFilter, setBranchFilter] = useState(ALL_BRANCHES);
   const [categoryFilter, setCategoryFilter] = useState(ALL_CATEGORIES);
@@ -117,6 +155,10 @@ export function StockView() {
     fetchBranches();
     fetchCategories();
   }, [fetchStocks, fetchBranches, fetchCategories]);
+
+  const categoryNameById = useMemo(() => {
+    return new Map(categories.map((c) => [c.id, c.name]));
+  }, [categories]);
 
   const sortedStocks = useMemo(() => {
     return [...stocks].sort((a, b) => {
@@ -166,7 +208,9 @@ export function StockView() {
 
   const getStatusDisplay = (s: any) => {
     const qty = Number(s.current_quantity || 0);
-    const min = Number(s.product?.min_qty || 0);
+    const min = Number(
+      s.minimum_quantity ?? s.product?.min_qty ?? 0,
+    );
 
     if (qty <= 0) {
       return {
@@ -225,8 +269,86 @@ export function StockView() {
     }
   };
 
+  const formatMoney = (v: unknown) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return EMPTY;
+    return n.toLocaleString(undefined, {
+      minimumFractionDigits: 0,
+      maximumFractionDigits: 2,
+    });
+  };
+
+  const formatQty = (v: unknown) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return EMPTY;
+    return n.toLocaleString(undefined, {
+      maximumFractionDigits: 2,
+    });
+  };
+
+  const getCategoryLabel = useCallback(
+    (rowProduct?: { category_id?: string; category?: { name?: string } }, full?: Record<string, unknown> | null) => {
+      const fromFull = (full?.category as { name?: string } | undefined)?.name;
+      if (fromFull) return fromFull;
+      if (rowProduct?.category?.name) return rowProduct.category.name;
+      const categoryId =
+        (full?.category_id as string) || rowProduct?.category_id;
+      if (categoryId) {
+        const match = categories.find((c) => c.id === categoryId);
+        if (match?.name) return match.name;
+      }
+      return "Uncategorized";
+    },
+    [categories],
+  );
+
+  const openDetail = useCallback(async (row: any) => {
+    setDetailRow(row);
+    setDetailProduct(null);
+    setDetailLoading(true);
+    setDetailError(null);
+    try {
+      const res = await apiClient.get(`${API_BASE}/products/${row.product.id}`);
+      setDetailProduct(res.data?.data ?? res.data ?? null);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setDetailError(
+        err?.response?.data?.message || "Could not load product details",
+      );
+    } finally {
+      setDetailLoading(false);
+    }
+  }, []);
+
+  const closeDetail = () => {
+    setDetailRow(null);
+    setDetailProduct(null);
+    setDetailLoading(false);
+    setDetailError(null);
+  };
+
   const detailStatus = detailRow ? getStatusDisplay(detailRow) : null;
   const DetailStatusIcon = detailStatus?.icon;
+
+  const detailMinStock = detailRow
+    ? Number(
+        detailRow.minimum_quantity ??
+          detailProduct?.min_qty ??
+          detailRow.product?.min_qty ??
+          0,
+      )
+    : 0;
+
+  const detailMaxStock = detailRow
+    ? Number(
+        detailRow.maximum_quantity ?? detailProduct?.max_qty ?? 0,
+      )
+    : 0;
+
+  const detailAvailable =
+    detailRow &&
+    Number(detailRow.current_quantity || 0) -
+      Number(detailRow.reserved_quantity || 0);
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6 text-black">
@@ -410,17 +532,19 @@ export function StockView() {
                       <TableRow key={s.id} className="border-gray-100">
                         <TableCell className="py-3">
                           <span className="text-sm text-black block">
-                            {s.product?.name || "—"}
+                            {s.product?.name || "-"}
                           </span>
                           <span className="text-xs text-gray-500 block mt-0.5">
-                            {s.product?.category?.name || "Uncategorized"}
+                            {s.product?.category?.name ||
+                              categoryNameById.get(s.product?.category_id) ||
+                              "Uncategorized"}
                           </span>
                         </TableCell>
                         <TableCell className="text-sm text-gray-600">
-                          {s.product?.sku || "—"}
+                          {s.product?.sku || "-"}
                         </TableCell>
                         <TableCell className="text-sm text-black">
-                          {s.branch?.name || "—"}
+                          {s.branch?.name || "-"}
                         </TableCell>
                         <TableCell className="text-sm text-black text-right">
                           {Number(s.current_quantity || 0).toLocaleString()}
@@ -444,7 +568,7 @@ export function StockView() {
                             size="sm"
                             className="h-8 w-8 p-0 text-gray-600 hover:text-black"
                             aria-label={`View details for ${s.product?.name || "product"}`}
-                            onClick={() => setDetailRow(s)}
+                            onClick={() => openDetail(s)}
                           >
                             <ChevronRight className="h-4 w-4" />
                           </Button>
@@ -492,10 +616,12 @@ export function StockView() {
       {/* Row details */}
       <Dialog
         open={!!detailRow}
-        onOpenChange={(open) => !open && setDetailRow(null)}
+        onOpenChange={(open) => {
+          if (!open) closeDetail();
+        }}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
+        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto border border-gray-200 p-0 gap-0">
+          <DialogHeader className="px-6 py-4 border-b border-gray-200">
             <DialogTitle className="text-lg font-bold text-black">
               Stock details
             </DialogTitle>
@@ -503,60 +629,210 @@ export function StockView() {
               {detailRow?.product?.name} at {detailRow?.branch?.name}
             </DialogDescription>
           </DialogHeader>
-          {detailRow && (
-            <dl className="space-y-3 text-sm">
-              <div className="flex justify-between gap-4">
-                <dt className="text-gray-600">Product</dt>
-                <dd className="text-black text-right">
-                  {detailRow.product?.name || "—"}
-                </dd>
+          {detailLoading ? (
+            <div className="flex flex-col items-center justify-center py-20 px-6 gap-3">
+              <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+              <p className="text-sm text-gray-600">Loading product details...</p>
+            </div>
+          ) : detailError ? (
+            <div className="px-6 py-12 text-center">
+              <p className="text-sm text-gray-600">{detailError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4 text-sm text-black"
+                onClick={() => detailRow && openDetail(detailRow)}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : detailRow ? (
+            <div className="px-6 py-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <DetailSection title="Product">
+                  <DetailRow label="Name" value={detailRow.product?.name} />
+                  <DetailRow
+                    label="SKU"
+                    value={
+                      (detailProduct?.sku as string) || detailRow.product?.sku
+                    }
+                  />
+                  <DetailRow
+                    label="Barcode"
+                    value={(detailProduct?.code as string) || "-"}
+                  />
+                  <DetailRow
+                    label="Category"
+                    value={getCategoryLabel(detailRow.product, detailProduct)}
+                  />
+                  <DetailRow
+                    label="Subcategory"
+                    value={
+                      (detailProduct?.subcategory as { name?: string })?.name ||
+                      "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Brand"
+                    value={
+                      (detailProduct?.brand as { name?: string })?.name || "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Unit"
+                    value={
+                      (detailProduct?.unit as { name?: string })?.name || "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Supplier"
+                    value={
+                      (detailProduct?.supplier as { name?: string })?.name ||
+                      "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Tax"
+                    value={
+                      (detailProduct?.tax as { name?: string })?.name || "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Product active"
+                    value={
+                      detailProduct?.is_active === false ? "No" : "Yes"
+                    }
+                  />
+                </DetailSection>
+
+                <DetailSection title="Stock at this branch">
+                  <DetailRow label="Branch" value={detailRow.branch?.name} />
+                  <DetailRow
+                    label="Quantity on hand"
+                    value={formatQty(detailRow.current_quantity)}
+                  />
+                  <DetailRow
+                    label="Reserved"
+                    value={formatQty(detailRow.reserved_quantity ?? 0)}
+                  />
+                  <DetailRow
+                    label="Available to sell"
+                    value={formatQty(detailAvailable)}
+                  />
+                  <DetailRow
+                    label="Minimum stock"
+                    value={formatQty(detailMinStock)}
+                  />
+                  <DetailRow
+                    label="Maximum stock"
+                    value={
+                      detailMaxStock > 0 ? formatQty(detailMaxStock) : "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Reorder level"
+                    value={
+                      detailRow.reorder_level != null
+                        ? formatQty(detailRow.reorder_level)
+                        : "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Last updated"
+                    value={
+                      detailRow.last_updated
+                        ? new Date(detailRow.last_updated).toLocaleString()
+                        : "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Stock status"
+                    value={
+                      detailStatus && DetailStatusIcon ? (
+                        <Badge
+                          variant="outline"
+                          className={cn(
+                            "text-xs gap-1 font-normal",
+                            detailStatus.className,
+                          )}
+                        >
+                          <DetailStatusIcon className="h-3 w-3" />
+                          {detailStatus.label}
+                        </Badge>
+                      ) : (
+                        "-"
+                      )
+                    }
+                  />
+                </DetailSection>
+
+                <DetailSection title="Pricing">
+                  <DetailRow
+                    label="Purchase rate"
+                    value={formatMoney(detailProduct?.purchase_rate)}
+                  />
+                  <DetailRow
+                    label="Sales rate (ex. tax)"
+                    value={formatMoney(
+                      detailProduct?.sales_rate_exc_dis_and_tax,
+                    )}
+                  />
+                  <DetailRow
+                    label="Sales rate (inc. tax)"
+                    value={formatMoney(
+                      detailProduct?.sales_rate_inc_dis_and_tax,
+                    )}
+                  />
+                  <DetailRow
+                    label="Discount %"
+                    value={
+                      detailProduct?.discount_percentage != null
+                        ? `${detailProduct.discount_percentage}%`
+                        : "-"
+                    }
+                  />
+                </DetailSection>
+
+                <DetailSection title="Identifiers">
+                  <DetailRow
+                    label="HS / PCT code"
+                    value={(detailProduct?.pct_or_hs_code as string) || "-"}
+                  />
+                  <DetailRow
+                    label="Size"
+                    value={
+                      (detailProduct?.size as { name?: string })?.name || "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Color"
+                    value={
+                      (detailProduct?.color as { name?: string })?.name || "-"
+                    }
+                  />
+                  <DetailRow
+                    label="Weight"
+                    value={
+                      detailProduct?.weight != null
+                        ? `${detailProduct.weight} ${(detailProduct?.weight_unit as string) || ""}`.trim()
+                        : "-"
+                    }
+                  />
+                </DetailSection>
               </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-gray-600">SKU</dt>
-                <dd className="text-black text-right">
-                  {detailRow.product?.sku || "—"}
-                </dd>
+
+              <div className="flex justify-end pt-5 mt-2 border-t border-gray-200">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-sm text-black"
+                  onClick={closeDetail}
+                >
+                  Close
+                </Button>
               </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-gray-600">Category</dt>
-                <dd className="text-black text-right">
-                  {detailRow.product?.category?.name || "—"}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-gray-600">Branch</dt>
-                <dd className="text-black text-right">
-                  {detailRow.branch?.name || "—"}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-gray-600">Quantity on hand</dt>
-                <dd className="text-black text-right">
-                  {Number(detailRow.current_quantity || 0).toLocaleString()}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4">
-                <dt className="text-gray-600">Minimum stock</dt>
-                <dd className="text-black text-right">
-                  {Number(detailRow.product?.min_qty ?? 0).toLocaleString()}
-                </dd>
-              </div>
-              <div className="flex justify-between gap-4 items-center">
-                <dt className="text-gray-600">Status</dt>
-                <dd>
-                  {detailStatus && DetailStatusIcon && (
-                    <Badge
-                      variant="outline"
-                      className={cn("text-xs gap-1", detailStatus.className)}
-                    >
-                      <DetailStatusIcon className="h-3 w-3" />
-                      {detailStatus.label}
-                    </Badge>
-                  )}
-                </dd>
-              </div>
-            </dl>
-          )}
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>

@@ -36,6 +36,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
+import { z } from "zod";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { usePosData } from "@/hooks/use-pos-data";
@@ -59,6 +60,47 @@ const DLG = {
   pickRow: "flex w-full flex-col px-3 py-2 text-left hover:bg-gray-50 text-sm text-black",
   pickSku: "text-xs text-gray-500",
 };
+
+// ─── Zod Schemas ────────────────────────────────────────────────────────────
+const addStockSchema = z.object({
+  productId: z.string().min(1, "Product is required"),
+  branchId:  z.string().min(1, "Branch is required"),
+  quantity:  z.preprocess(
+    (v) => (v === "" ? undefined : Number(v)),
+    z.number({ required_error: "Quantity is required", invalid_type_error: "Must be a number" }).positive("Must be greater than 0")
+  ),
+});
+
+const adjustStockSchema = z.object({
+  productId:      z.string().min(1, "Product is required"),
+  branchId:       z.string().min(1, "Branch is required"),
+  quantityChange: z.preprocess(
+    (v) => (v === "" || v === "-" ? undefined : Number(v)),
+    z.number({ required_error: "Change amount is required", invalid_type_error: "Must be a number" }).refine((n) => n !== 0, { message: "Change cannot be zero" })
+  ),
+});
+
+const removeStockSchema = z.object({
+  productId: z.string().min(1, "Product is required"),
+  branchId:  z.string().min(1, "Branch is required"),
+  quantity:  z.preprocess(
+    (v) => (v === "" ? undefined : Number(v)),
+    z.number({ required_error: "Quantity is required", invalid_type_error: "Must be a number" }).positive("Must be greater than 0")
+  ),
+});
+
+const transferStockSchema = z.object({
+  productId:    z.string().min(1, "Product is required"),
+  fromBranchId: z.string().min(1, "From branch is required"),
+  toBranchId:   z.string().min(1, "To branch is required"),
+  quantity:     z.preprocess(
+    (v) => (v === "" ? undefined : Number(v)),
+    z.number({ required_error: "Quantity is required", invalid_type_error: "Must be a number" }).positive("Must be greater than 0")
+  ),
+}).refine((d) => d.fromBranchId !== d.toBranchId, {
+  message: "From and To branch must be different",
+  path: ["toBranchId"],
+});
 
 function DetailRow({
   label,
@@ -206,6 +248,13 @@ export function StockManagement() {
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [isRemoveOpen, setIsRemoveOpen] = useState(false);
 
+  // ─── Per-field validation errors ─────────────────────────────────────────
+  type FieldErrors = Record<string, string>;
+  const [addErrors,      setAddErrors]      = useState<FieldErrors>({});
+  const [adjustErrors,   setAdjustErrors]   = useState<FieldErrors>({});
+  const [removeErrors,   setRemoveErrors]   = useState<FieldErrors>({});
+  const [transferErrors, setTransferErrors] = useState<FieldErrors>({});
+
   // Dropdown state for product selection
   const [addProductDropdownOpen, setAddProductDropdownOpen] = useState(false);
   const [adjustProductDropdownOpen, setAdjustProductDropdownOpen] = useState(false);
@@ -352,66 +401,37 @@ export function StockManagement() {
   const totalStockPages = stockMeta.totalPages || 1;
 
   // Handlers
-  const handleTransfer = async () => {
-    const quantity = typeof transferForm.quantity === "string" 
-      ? (transferForm.quantity === "" ? 0 : Number(transferForm.quantity) || 0)
-      : transferForm.quantity;
-    
-    if (!transferForm.productId || !transferForm.fromBranchId || !transferForm.toBranchId || quantity <= 0) {
-      toast.error("Please fill all required fields");
-      return;
+  // ─── helper to flatten Zod errors into a flat record ───────────────────
+  const flattenZodErrors = (err: z.ZodError): FieldErrors => {
+    const out: FieldErrors = {};
+    for (const issue of err.issues) {
+      const key = issue.path.join(".") || "_root";
+      if (!out[key]) out[key] = issue.message;
     }
-
-    setIsTransferring(true);
-    try {
-      await apiClient.post(`${API_BASE}/stock/transfer`, {
-        productId: transferForm.productId,
-        fromBranchId: transferForm.fromBranchId,
-        toBranchId: transferForm.toBranchId,
-        quantity: quantity,
-        notes: transferForm.notes,
-      });
-
-      setIsTransferOpen(false);
-      setTransferForm({ productId: "", fromBranchId: "", toBranchId: "", quantity: "", notes: "" });
-      setProductSearch("");
-      setTransferProductDropdownOpen(false);
-      refreshAllData();
-
-      toast.success("Stock transferred successfully");
-    } catch (e: any) {
-      showErrorToast(e);
-    } finally {
-      setIsTransferring(false);
-    }
+    return out;
   };
 
   const handleAddStock = async () => {
-    const quantity = typeof addForm.quantity === "string" 
-      ? (addForm.quantity === "" ? 0 : Number(addForm.quantity) || 0)
-      : addForm.quantity;
-    
-    if (!addForm.productId || !addForm.branchId || !quantity || quantity <= 0) {
-      toast.error("Please fill all required fields");
+    const parsed = addStockSchema.safeParse(addForm);
+    if (!parsed.success) {
+      setAddErrors(flattenZodErrors(parsed.error));
       return;
     }
-
+    setAddErrors({});
     setIsTransferring(true);
     try {
       await apiClient.post(`${API_BASE}/stock`, {
-        productId: addForm.productId,
-        branchId: addForm.branchId,
-        quantity: quantity,
-        supplierId: addForm.supplierId || undefined,
-        unitCost: addForm.unitCost ? Number(addForm.unitCost) : undefined,
-        invoiceRef: addForm.invoiceRef || undefined,
-        notes: addForm.notes || undefined,
+        productId:  parsed.data.productId,
+        branchId:   parsed.data.branchId,
+        quantity:   parsed.data.quantity,
+        supplierId: addForm.supplierId  || undefined,
+        unitCost:   addForm.unitCost    ? Number(addForm.unitCost) : undefined,
+        invoiceRef: addForm.invoiceRef  || undefined,
+        notes:      addForm.notes       || undefined,
       });
-
       setIsAddOpen(false);
       clearProductUI();
       refreshAllData();
-
       toast.success("Stock added successfully");
     } catch (e: any) {
       showErrorToast(e);
@@ -421,31 +441,26 @@ export function StockManagement() {
   };
 
   const handleAdjustStock = async () => {
-    const quantityChange = typeof adjustForm.quantityChange === "string" 
-      ? (adjustForm.quantityChange === "" || adjustForm.quantityChange === "-" ? 0 : Number(adjustForm.quantityChange) || 0)
-      : adjustForm.quantityChange;
-    
-    if (!adjustForm.productId || !adjustForm.branchId || quantityChange === 0) {
-      toast.error("Please enter a valid change amount");
+    const parsed = adjustStockSchema.safeParse(adjustForm);
+    if (!parsed.success) {
+      setAdjustErrors(flattenZodErrors(parsed.error));
       return;
     }
-
+    setAdjustErrors({});
     setIsTransferring(true);
     try {
       await apiClient.patch(`${API_BASE}/stock/adjust`, {
-        productId: adjustForm.productId,
-        branchId: adjustForm.branchId,
-        quantityChange: quantityChange,
+        productId:      parsed.data.productId,
+        branchId:       parsed.data.branchId,
+        quantityChange: parsed.data.quantityChange,
         reason: adjustForm.reason || undefined,
-        notes: adjustForm.notes || undefined,
+        notes:  adjustForm.notes  || undefined,
       });
-
       setIsAdjustOpen(false);
       setAdjustForm({ productId: "", branchId: "", quantityChange: "", reason: "", notes: "" });
       setProductSearch("");
       setAdjustProductDropdownOpen(false);
       refreshAllData();
-
       toast.success("Stock adjusted successfully");
     } catch (e: any) {
       showErrorToast(e);
@@ -455,34 +470,58 @@ export function StockManagement() {
   };
 
   const handleRemoveStock = async () => {
-    const quantity = typeof removeForm.quantity === "string" 
-      ? (removeForm.quantity === "" ? 0 : Number(removeForm.quantity) || 0)
-      : removeForm.quantity;
-    
-    if (!removeForm.productId || !removeForm.branchId || !quantity || quantity <= 0) {
-      toast.error("Please fill all required fields");
+    const parsed = removeStockSchema.safeParse(removeForm);
+    if (!parsed.success) {
+      setRemoveErrors(flattenZodErrors(parsed.error));
       return;
     }
-
+    setRemoveErrors({});
     setIsTransferring(true);
     try {
       await apiClient.delete(`${API_BASE}/stock/remove`, {
         data: {
-          productId: removeForm.productId,
-          branchId: removeForm.branchId,
-          quantity: quantity,
-          reason: removeForm.reason,
-          notes: removeForm.notes || undefined,
+          productId: parsed.data.productId,
+          branchId:  parsed.data.branchId,
+          quantity:  parsed.data.quantity,
+          reason:    removeForm.reason,
+          notes:     removeForm.notes || undefined,
         },
       });
-
       setIsRemoveOpen(false);
       setRemoveForm({ productId: "", branchId: "", quantity: "", reason: "WASTE", notes: "" });
       setProductSearch("");
       setRemoveProductDropdownOpen(false);
       refreshAllData();
-
       toast.success("Stock removed successfully");
+    } catch (e: any) {
+      showErrorToast(e);
+    } finally {
+      setIsTransferring(false);
+    }
+  };
+
+  const handleTransfer = async () => {
+    const parsed = transferStockSchema.safeParse(transferForm);
+    if (!parsed.success) {
+      setTransferErrors(flattenZodErrors(parsed.error));
+      return;
+    }
+    setTransferErrors({});
+    setIsTransferring(true);
+    try {
+      await apiClient.post(`${API_BASE}/stock/transfer`, {
+        productId:    parsed.data.productId,
+        fromBranchId: parsed.data.fromBranchId,
+        toBranchId:   parsed.data.toBranchId,
+        quantity:     parsed.data.quantity,
+        notes:        transferForm.notes,
+      });
+      setIsTransferOpen(false);
+      setTransferForm({ productId: "", fromBranchId: "", toBranchId: "", quantity: "", notes: "" });
+      setProductSearch("");
+      setTransferProductDropdownOpen(false);
+      refreshAllData();
+      toast.success("Stock transferred successfully");
     } catch (e: any) {
       showErrorToast(e);
     } finally {
@@ -634,7 +673,7 @@ export function StockManagement() {
                 open={isAddOpen} 
                 onOpenChange={(open) => {
                   setIsAddOpen(open);
-                  if (!open) clearProductUI();
+                  if (!open) { clearProductUI(); setAddErrors({}); }
                 }}
               >
                 <DialogTrigger asChild>
@@ -661,7 +700,7 @@ export function StockManagement() {
                             setProductSearch(e.target.value);
                             setAddProductDropdownOpen(true);
                           }}
-                          className="px-4 h-9 border border-gray-200 text-sm text-black focus:ring-1 focus:ring-slate-300 transition-all"
+                          className={`px-4 h-9 border text-sm text-black focus:ring-1 focus:ring-slate-300 transition-all ${addErrors.productId ? "border-red-400" : "border-gray-200"}`}
                         />
                         {addProductDropdownOpen && (
                           <Card className={DLG.dropdown}>
@@ -678,6 +717,7 @@ export function StockManagement() {
                                     className={DLG.pickRow}
                                     onClick={() => {
                                       setAddForm({ ...addForm, productId: p.id });
+                                      setAddErrors(e => ({ ...e, productId: "" }));
                                       setProductSearch(p.name);
                                       setAddProductDropdownOpen(false);
                                     }}
@@ -694,17 +734,19 @@ export function StockManagement() {
                         )}
                       </div>
                     </div>
+                    {addErrors.productId && <p className="text-xs text-red-500 -mt-2">{addErrors.productId}</p>}
 
                     <div className="space-y-2">
                       <Label className={DLG.label}>Branch</Label>
-                      <Select value={addForm.branchId} onValueChange={(v) => setAddForm({ ...addForm, branchId: v })}>
-                        <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                      <Select value={addForm.branchId} onValueChange={(v) => { setAddForm({ ...addForm, branchId: v }); setAddErrors(e => ({...e, branchId: ""})); }}>
+                        <SelectTrigger className={`h-9 border text-sm text-black ${addErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
                           <SelectValue placeholder="Select branch" />
                         </SelectTrigger>
                         <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
                           {branches.map(b => <SelectItem key={b.id} value={b.id} className="font-normal text-sm py-2">{b.name}</SelectItem>)}
                         </SelectContent>
                       </Select>
+                      {addErrors.branchId && <p className="text-xs text-red-500 mt-0.5">{addErrors.branchId}</p>}
                     </div>
 
                     {(() => {
@@ -744,9 +786,10 @@ export function StockManagement() {
                               type="number"
                               placeholder="0"
                               value={addForm.quantity}
-                              onChange={(e) => setAddForm({ ...addForm, quantity: e.target.value })}
-                              className="h-9 border border-gray-200 text-sm text-black text-center"
+                              onChange={(e) => { setAddForm({ ...addForm, quantity: e.target.value }); setAddErrors(er => ({...er, quantity: ""})); }}
+                              className={`h-9 border text-sm text-black text-center ${addErrors.quantity ? "border-red-400" : "border-gray-200"}`}
                             />
+                            {addErrors.quantity && <p className="text-xs text-red-500 mt-0.5">{addErrors.quantity}</p>}
                           </div>
                           <div className="space-y-1">
                             <Label className="text-sm text-gray-600">After adding</Label>
@@ -829,7 +872,7 @@ export function StockManagement() {
                 open={isAdjustOpen} 
                 onOpenChange={(open) => {
                   setIsAdjustOpen(open);
-                  if (!open) clearProductUI();
+                  if (!open) { clearProductUI(); setAdjustErrors({}); }
                 }}
               >
                 <DialogTrigger asChild>
@@ -869,6 +912,7 @@ export function StockManagement() {
                                     className={DLG.pickRow}
                                     onClick={() => {
                                       setAdjustForm({ ...adjustForm, productId: p.id });
+                                      setAdjustErrors(e => ({ ...e, productId: "" }));
                                       setProductSearch(p.name);
                                       setAdjustProductDropdownOpen(false);
                                     }}
@@ -885,18 +929,20 @@ export function StockManagement() {
                         )}
                       </div>
                     </div>
+                    {adjustErrors.productId && <p className="text-xs text-red-500 -mt-2">{adjustErrors.productId}</p>}
                     
                     <div className="grid grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label className={DLG.label}>Branch</Label>
-                        <Select value={adjustForm.branchId} onValueChange={(v) => setAdjustForm({ ...adjustForm, branchId: v })}>
-                          <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                        <Select value={adjustForm.branchId} onValueChange={(v) => { setAdjustForm({ ...adjustForm, branchId: v }); setAdjustErrors(e => ({...e, branchId: ""})); }}>
+                          <SelectTrigger className={`h-9 border text-sm text-black ${adjustErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
                              <SelectValue placeholder="Branch" />
                           </SelectTrigger>
                           <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
                              {branches.map(b => <SelectItem key={b.id} value={b.id} className="font-normal text-sm py-2">{b.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
+                        {adjustErrors.branchId && <p className="text-xs text-red-500 mt-0.5">{adjustErrors.branchId}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label className={DLG.label}>Reason</Label>
@@ -943,11 +989,10 @@ export function StockManagement() {
                               type="number"
                               placeholder="e.g. -5 or 10"
                               value={adjustForm.quantityChange}
-                              onChange={(e) =>
-                                setAdjustForm({ ...adjustForm, quantityChange: e.target.value })
-                              }
-                              className="h-9 border border-gray-200 text-sm text-black text-center"
+                              onChange={(e) => { setAdjustForm({ ...adjustForm, quantityChange: e.target.value }); setAdjustErrors(er => ({...er, quantityChange: ""})); }}
+                              className={`h-9 border text-sm text-black text-center ${adjustErrors.quantityChange ? "border-red-400" : "border-gray-200"}`}
                             />
+                            {adjustErrors.quantityChange && <p className="text-xs text-red-500 mt-0.5">{adjustErrors.quantityChange}</p>}
                           </div>
                           <div className="space-y-1">
                             <Label className="text-sm text-gray-600">New total</Label>
@@ -1001,7 +1046,7 @@ export function StockManagement() {
                 open={isRemoveOpen} 
                 onOpenChange={(open) => {
                   setIsRemoveOpen(open);
-                  if (!open) clearProductUI();
+                  if (!open) { clearProductUI(); setRemoveErrors({}); }
                 }}
               >
                 <DialogTrigger asChild>
@@ -1041,6 +1086,7 @@ export function StockManagement() {
                                     className={DLG.pickRow}
                                     onClick={() => {
                                       setRemoveForm({ ...removeForm, productId: p.id });
+                                      setRemoveErrors(e => ({ ...e, productId: "" }));
                                       setProductSearch(p.name);
                                       setRemoveProductDropdownOpen(false);
                                     }}
@@ -1057,12 +1103,13 @@ export function StockManagement() {
                         )}
                       </div>
                     </div>
+                    {removeErrors.productId && <p className="text-xs text-red-500 -mt-2">{removeErrors.productId}</p>}
                     
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
                         <Label className={DLG.label}>Branch</Label>
-                        <Select value={removeForm.branchId} onValueChange={(v) => setRemoveForm({ ...removeForm, branchId: v })}>
-                          <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                        <Select value={removeForm.branchId} onValueChange={(v) => { setRemoveForm({ ...removeForm, branchId: v }); setRemoveErrors(e => ({...e, branchId: ""})); }}>
+                          <SelectTrigger className={`h-9 border text-sm text-black ${removeErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
                             <SelectValue placeholder="Select branch" />
                           </SelectTrigger>
                           <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
@@ -1073,6 +1120,7 @@ export function StockManagement() {
                             ))}
                           </SelectContent>
                         </Select>
+                        {removeErrors.branchId && <p className="text-xs text-red-500 mt-0.5">{removeErrors.branchId}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label className={DLG.label}>Reason</Label>
@@ -1118,9 +1166,10 @@ export function StockManagement() {
                               type="number"
                               placeholder="0"
                               value={removeForm.quantity}
-                              onChange={(e) => setRemoveForm({ ...removeForm, quantity: e.target.value })}
-                              className="h-9 border border-gray-200 text-sm text-black text-center"
+                              onChange={(e) => { setRemoveForm({ ...removeForm, quantity: e.target.value }); setRemoveErrors(er => ({...er, quantity: ""})); }}
+                              className={`h-9 border text-sm text-black text-center ${removeErrors.quantity ? "border-red-400" : "border-gray-200"}`}
                             />
+                            {removeErrors.quantity && <p className="text-xs text-red-500 mt-0.5">{removeErrors.quantity}</p>}
                           </div>
                           <div className="space-y-1">
                             <Label className="text-sm text-gray-600">After removal</Label>
@@ -1174,7 +1223,7 @@ export function StockManagement() {
                 open={isTransferOpen} 
                 onOpenChange={(open) => {
                   setIsTransferOpen(open);
-                  if (!open) clearProductUI();
+                  if (!open) { clearProductUI(); setTransferErrors({}); }
                 }}
               >
                 <DialogTrigger asChild>
@@ -1216,6 +1265,7 @@ export function StockManagement() {
                                     className={DLG.pickRow}
                                     onClick={() => {
                                       setTransferForm({ ...transferForm, productId: p.id });
+                                      setTransferErrors(e => ({ ...e, productId: "" }));
                                       setProductSearch(p.name);
                                       setTransferProductDropdownOpen(false);
                                     }}
@@ -1232,12 +1282,13 @@ export function StockManagement() {
                         )}
                       </div>
                     </div>
+                    {transferErrors.productId && <p className="text-xs text-red-500 -mt-2">{transferErrors.productId}</p>}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="flex-1 w-full space-y-2">
                         <Label className={DLG.label}>From branch</Label>
-                        <Select value={transferForm.fromBranchId} onValueChange={(v) => setTransferForm({ ...transferForm, fromBranchId: v })}>
-                          <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                        <Select value={transferForm.fromBranchId} onValueChange={(v) => { setTransferForm({ ...transferForm, fromBranchId: v }); setTransferErrors(e => ({...e, fromBranchId: ""})); }}>
+                          <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.fromBranchId ? "border-red-400" : "border-gray-200"}`}>
                              <SelectValue placeholder="Select branch" />
                           </SelectTrigger>
                           <SelectContent className="rounded-2xl border border-slate-100 shadow-xl">
@@ -1253,14 +1304,14 @@ export function StockManagement() {
                              ))}
                           </SelectContent>
                         </Select>
+                        {transferErrors.fromBranchId && <p className="text-xs text-red-500 mt-0.5">{transferErrors.fromBranchId}</p>}
                       </div>
-                      
                       
 
                       <div className="flex-1 w-full space-y-2">
                          <Label className={DLG.label}>To branch</Label>
-                        <Select value={transferForm.toBranchId} onValueChange={(v) => setTransferForm({ ...transferForm, toBranchId: v })}>
-                          <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                        <Select value={transferForm.toBranchId} onValueChange={(v) => { setTransferForm({ ...transferForm, toBranchId: v }); setTransferErrors(e => ({...e, toBranchId: ""})); }}>
+                          <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.toBranchId ? "border-red-400" : "border-gray-200"}`}>
                              <SelectValue placeholder="Select branch" />
                           </SelectTrigger>
                           <SelectContent className="rounded-2xl border border-slate-100 shadow-xl">
@@ -1276,6 +1327,7 @@ export function StockManagement() {
                              ))}
                           </SelectContent>
                         </Select>
+                        {transferErrors.toBranchId && <p className="text-xs text-red-500 mt-0.5">{transferErrors.toBranchId}</p>}
                       </div>
                     </div>
 
@@ -1350,9 +1402,10 @@ export function StockManagement() {
                           type="number"
                           placeholder="Quantity"
                           value={transferForm.quantity}
-                          onChange={(e) => setTransferForm({ ...transferForm, quantity: e.target.value })}
-                          className="h-9 border border-gray-200 text-sm text-black text-sm"
+                          onChange={(e) => { setTransferForm({ ...transferForm, quantity: e.target.value }); setTransferErrors(er => ({...er, quantity: ""})); }}
+                          className={`h-9 border text-sm text-black ${transferErrors.quantity ? "border-red-400" : "border-gray-200"}`}
                         />
+                        {transferErrors.quantity && <p className="text-xs text-red-500 mt-0.5">{transferErrors.quantity}</p>}
                       </div>
                       <div className="space-y-2">
                         <Label className={DLG.label}>Notes</Label>

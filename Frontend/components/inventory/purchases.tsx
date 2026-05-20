@@ -605,11 +605,12 @@ function HistoryView({
 
       {/* Filters */}
       <Card className="p-4 border border-gray-200">
-        <div className="flex flex-wrap items-end gap-3">
-          <div className="flex flex-col gap-1">
+        <div className="flex flex-col lg:flex-row gap-3">
+          {/* Supplier */}
+          <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
             <Label className="text-sm text-black">Supplier</Label>
             <Select value={filterSupplier} onValueChange={setFilterSupplier}>
-              <SelectTrigger className="h-9 w-[200px] text-sm text-black">
+              <SelectTrigger className="h-9 text-sm text-black w-full">
                 <SelectValue placeholder="All Sources" />
               </SelectTrigger>
               <SelectContent>
@@ -624,19 +625,21 @@ function HistoryView({
               </SelectContent>
             </Select>
           </div>
-          <div className="flex flex-col gap-1">
+
+          {/* From date */}
+          <div className="flex flex-col gap-1 flex-1 min-w-[150px]">
             <Label className="text-sm text-black">From date</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
-                  className="h-9 w-[180px] justify-start text-left text-sm font-normal text-black"
+                  className="h-9 w-full justify-start text-left text-sm font-normal text-black"
                 >
                   <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
                   {filterStart ? (
-                    format(filterStart, "MM/dd/yyyy")
+                    format(filterStart, "dd MMM yyyy")
                   ) : (
-                    <span className="text-gray-500">Start date</span>
+                    <span className="text-gray-400">Start date</span>
                   )}
                 </Button>
               </PopoverTrigger>
@@ -649,19 +652,21 @@ function HistoryView({
               </PopoverContent>
             </Popover>
           </div>
-          <div className="flex flex-col gap-1">
+
+          {/* To date */}
+          <div className="flex flex-col gap-1 flex-1 min-w-[150px]">
             <Label className="text-sm text-black">To date</Label>
             <Popover>
               <PopoverTrigger asChild>
                 <Button
                   variant="outline"
-                  className="h-9 w-[180px] justify-start text-left text-sm font-normal text-black"
+                  className="h-9 w-full justify-start text-left text-sm font-normal text-black"
                 >
                   <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
                   {filterEnd ? (
-                    format(filterEnd, "MM/dd/yyyy")
+                    format(filterEnd, "dd MMM yyyy")
                   ) : (
-                    <span className="text-gray-500">End date</span>
+                    <span className="text-gray-400">End date</span>
                   )}
                 </Button>
               </PopoverTrigger>
@@ -674,23 +679,29 @@ function HistoryView({
               </PopoverContent>
             </Popover>
           </div>
-          <Button onClick={onSearch} size="sm" className="text-sm">
-            <Search className="h-4 w-4 mr-2" /> Search
-          </Button>
-          {(filterStart || filterEnd || filterSupplier !== "all") && (
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-sm text-black"
-              onClick={() => {
-                setFilterSupplier("all");
-                setFilterStart(undefined);
-                setFilterEnd(undefined);
-              }}
-            >
-              Clear filters
-            </Button>
-          )}
+          {/* Actions */}
+          <div className="flex flex-col gap-1 justify-end">
+            <Label className="text-sm text-transparent select-none hidden lg:block">Action</Label>
+            <div className="flex items-center gap-2">
+              <Button onClick={onSearch} size="sm" className="h-9 text-sm px-4">
+                <Search className="h-4 w-4 mr-2" /> Search
+              </Button>
+              {(filterStart || filterEnd || filterSupplier !== "all") && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-9 text-sm text-black"
+                  onClick={() => {
+                    setFilterSupplier("all");
+                    setFilterStart(undefined);
+                    setFilterEnd(undefined);
+                  }}
+                >
+                  Clear
+                </Button>
+              )}
+            </div>
+          </div>
         </div>
       </Card>
 
