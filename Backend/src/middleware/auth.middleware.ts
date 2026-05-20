@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/app';
 import { AppError } from '../utils/apiError';
+import { prisma } from '../prisma/client';
 
 declare global {
   namespace Express {
@@ -31,6 +32,19 @@ const authenticate = async (req: Request, res: Response, next: NextFunction) => 
       role: string;
       branch_id?: string;
     };
+
+    // Verify the user still exists. Tokens never expire on their own, so a
+    // user who was deleted (or a DB reseed) leaves the client holding a JWT
+    // whose `id` doesn't match a User row — every subsequent write that
+    // stores `created_by` would FK-violate. Reject the request cleanly so
+    // the client can drop the stale token and prompt a fresh login.
+    const userExists = await prisma.user.findUnique({
+      where: { id: decoded.id },
+      select: { id: true },
+    });
+    if (!userExists) {
+      throw new AppError(401, 'Session expired, please log in again');
+    }
 
     req.user = decoded;
     next();

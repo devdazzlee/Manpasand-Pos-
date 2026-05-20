@@ -5,6 +5,11 @@ const createStockSchema = z.object({
         productId: z.string().min(1),
         branchId: z.string().min(1),
         quantity: z.number().positive().min(0.01), // Allow decimals for stock quantities
+        // Optional metadata — captured into the StockMovement record.
+        supplierId: z.string().optional(),
+        unitCost: z.number().nonnegative().optional(),
+        invoiceRef: z.string().optional(),
+        notes: z.string().optional(),
     }),
 });
 
@@ -14,6 +19,7 @@ const adjustStockSchema = z.object({
         branchId: z.string().min(1),
         quantityChange: z.number().int().refine(val => val !== 0, { message: "Quantity change must not be zero" }),
         reason: z.string().optional(),
+        notes: z.string().optional(),
     }),
 });
 
@@ -33,6 +39,7 @@ const removeStockSchema = z.object({
         branchId: z.string().min(1, "Branch ID is required"),
         quantity: z.number().positive().min(0.01, "Quantity must be greater than 0"),
         reason: z.string().optional(),
+        notes: z.string().optional(),
     }),
 });
 

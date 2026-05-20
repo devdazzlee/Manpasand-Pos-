@@ -14,7 +14,8 @@
       "Bash(powershell -NoProfile -Command \"\\(Get-Content components/inventory/transfers.tsx | Measure-Object -Line\\).Lines\")",
       "Bash(powershell -NoProfile -Command \"\\(Get-Content components/inventory/stock-out.tsx | Measure-Object -Line\\).Lines\")",
       "Bash(yarn add *)",
-      "Bash(powershell -NoProfile -Command \"\\(Get-Content components/inventory/purchases.tsx | Measure-Object -Line\\).Lines\")"
+      "Bash(powershell -NoProfile -Command \"\\(Get-Content components/inventory/purchases.tsx | Measure-Object -Line\\).Lines\")",
+      "Bash(powershell -NoProfile -Command \"\\(Get-Content components/inventory/inventory-reports.tsx | Measure-Object -Line\\).Lines\")"
     ]
   }
 }

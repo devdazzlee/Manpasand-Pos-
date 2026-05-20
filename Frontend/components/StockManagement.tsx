@@ -5,12 +5,36 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+  DialogTrigger,
+} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Search, Plus, ArrowRightLeft, RefreshCw, TrendingUp, TrendingDown, Package, Loader2, Calendar, Edit, MapPin, Filter, Trash2, X, FileDown } from "lucide-react";
+import {
+  Search,
+  Plus,
+  ArrowRightLeft,
+  TrendingUp,
+  TrendingDown,
+  Package,
+  Loader2,
+  Calendar,
+  Edit,
+  MapPin,
+  Filter,
+  Trash2,
+  X,
+  FileDown,
+  Eye,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
 import { toast } from "sonner";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
@@ -22,7 +46,7 @@ const ALL_BRANCHES = "__all_branches__";
 const ALL_CATEGORIES = "__all_categories__";
 
 const DLG = {
-  content: "max-w-lg border border-gray-200 p-0 gap-0",
+  content: "max-w-2xl border border-gray-200 p-0 gap-0 max-h-[90vh] overflow-y-auto",
   header: "px-5 py-4 border-b border-gray-200",
   title: "text-base text-black font-normal",
   desc: "text-sm text-gray-600 font-normal",
@@ -35,6 +59,21 @@ const DLG = {
   pickRow: "flex w-full flex-col px-3 py-2 text-left hover:bg-gray-50 text-sm text-black",
   pickSku: "text-xs text-gray-500",
 };
+
+function DetailRow({
+  label,
+  value,
+}: {
+  label: string;
+  value: React.ReactNode;
+}) {
+  return (
+    <div className="flex justify-between gap-4 py-2 border-b border-gray-100 last:border-0">
+      <dt className="text-sm text-gray-600">{label}</dt>
+      <dd className="text-sm text-black text-right">{value ?? "—"}</dd>
+    </div>
+  );
+}
 
 function StatCard({
   label,
@@ -116,8 +155,43 @@ export function StockManagement() {
   const [categoryFilter, setCategoryFilter] = useState<string>(ALL_CATEGORIES);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+
+  // Apply the filter bar to Movement Log + Today too — currently only the
+  // Stock List respects it. Filter is client-side over the already-fetched
+  // arrays. SKU + name search, branch by id, category via product.category_id.
+  const filterMovement = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+    return (m: Movement) => {
+      if (branchFilter !== ALL_BRANCHES && m.branch?.id !== branchFilter) return false;
+      if (
+        categoryFilter !== ALL_CATEGORIES &&
+        m.product?.category_id !== categoryFilter
+      )
+        return false;
+      if (term) {
+        const name = (m.product?.name || "").toLowerCase();
+        const sku = (m.product?.sku || "").toLowerCase();
+        if (!name.includes(term) && !sku.includes(term)) return false;
+      }
+      return true;
+    };
+  }, [branchFilter, categoryFilter, searchTerm]);
+  const filteredHistory = useMemo(
+    () => history.filter(filterMovement),
+    [history, filterMovement],
+  );
+  const filteredTodayMovements = useMemo(
+    () => todayMovements.filter(filterMovement),
+    [todayMovements, filterMovement],
+  );
   const [isTransferring, setIsTransferring] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
+
+  const [viewOpen, setViewOpen] = useState(false);
+  const [viewRow, setViewRow] = useState<Stock | null>(null);
+  const [viewLoading, setViewLoading] = useState(false);
+  const [viewProduct, setViewProduct] = useState<Record<string, unknown> | null>(null);
+  const [viewError, setViewError] = useState<string | null>(null);
 
   // Product search state
   const [productSearch, setProductSearch] = useState("");
@@ -159,6 +233,8 @@ export function StockManagement() {
     quantity: "" as string | number,
     supplierId: "",
     unitCost: "" as string | number,
+    invoiceRef: "",
+    notes: "",
   });
 
   const [adjustForm, setAdjustForm] = useState({
@@ -166,6 +242,7 @@ export function StockManagement() {
     branchId: "",
     quantityChange: "" as string | number,
     reason: "",
+    notes: "",
   });
 
   const [removeForm, setRemoveForm] = useState({
@@ -325,8 +402,10 @@ export function StockManagement() {
         productId: addForm.productId,
         branchId: addForm.branchId,
         quantity: quantity,
-        supplierId: addForm.supplierId,
-        unitCost: addForm.unitCost ? Number(addForm.unitCost) : undefined
+        supplierId: addForm.supplierId || undefined,
+        unitCost: addForm.unitCost ? Number(addForm.unitCost) : undefined,
+        invoiceRef: addForm.invoiceRef || undefined,
+        notes: addForm.notes || undefined,
       });
 
       setIsAddOpen(false);
@@ -357,11 +436,12 @@ export function StockManagement() {
         productId: adjustForm.productId,
         branchId: adjustForm.branchId,
         quantityChange: quantityChange,
-        reason: adjustForm.reason,
+        reason: adjustForm.reason || undefined,
+        notes: adjustForm.notes || undefined,
       });
 
       setIsAdjustOpen(false);
-      setAdjustForm({ productId: "", branchId: "", quantityChange: "", reason: "" });
+      setAdjustForm({ productId: "", branchId: "", quantityChange: "", reason: "", notes: "" });
       setProductSearch("");
       setAdjustProductDropdownOpen(false);
       refreshAllData();
@@ -392,6 +472,7 @@ export function StockManagement() {
           branchId: removeForm.branchId,
           quantity: quantity,
           reason: removeForm.reason,
+          notes: removeForm.notes || undefined,
         },
       });
 
@@ -424,10 +505,52 @@ export function StockManagement() {
     return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   };
 
-  const getStockStatusMeta = (qty: number) => {
+  const getStockStatusMeta = (qty: number, minQty = 10) => {
     if (qty <= 0) return { label: "Out of stock", className: "bg-gray-100 text-gray-700 border-gray-200" };
-    if (qty <= 10) return { label: "Low stock", className: "bg-amber-50 text-amber-800 border-amber-200" };
-    return { label: "In stock", className: "bg-green-50 text-green-800 border-green-200" };
+    if (qty <= minQty) return { label: "Low stock", className: "bg-gray-100 text-gray-700 border-gray-200" };
+    return { label: "In stock", className: "bg-gray-100 text-gray-700 border-gray-200" };
+  };
+
+  const openStockView = useCallback(async (row: Stock) => {
+    setViewRow(row);
+    setViewOpen(true);
+    setViewLoading(true);
+    setViewProduct(null);
+    setViewError(null);
+    try {
+      const res = await apiClient.get(`${API_BASE}/products/${row.product.id}`);
+      setViewProduct(res.data?.data ?? res.data ?? null);
+    } catch (e: unknown) {
+      const err = e as { response?: { data?: { message?: string } } };
+      setViewError(err?.response?.data?.message || "Could not load product details");
+    } finally {
+      setViewLoading(false);
+    }
+  }, []);
+
+  const closeStockView = () => {
+    setViewOpen(false);
+    setViewRow(null);
+    setViewProduct(null);
+    setViewError(null);
+    setViewLoading(false);
+  };
+
+  const viewMovements = useMemo(() => {
+    if (!viewRow) return [];
+    return history
+      .filter(
+        (m) =>
+          m.product?.id === viewRow.product.id &&
+          m.branch?.id === viewRow.branch?.id,
+      )
+      .slice(0, 10);
+  }, [history, viewRow]);
+
+  const formatMoney = (v: unknown) => {
+    const n = Number(v);
+    if (!Number.isFinite(n)) return "—";
+    return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   };
 
   const handleProductSearch = (search: string) => {
@@ -572,32 +695,68 @@ export function StockManagement() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Branch</Label>
-                        <Select value={addForm.branchId} onValueChange={(v) => setAddForm({ ...addForm, branchId: v })}>
-                          <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
-                            <SelectValue placeholder="Select branch" />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
-                            {branches.map(b => <SelectItem key={b.id} value={b.id} className="font-normal text-sm py-2">{b.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Quantity</Label>
-                        <div className="relative">
-                           <Input
-                            type="number"
-                            placeholder="0"
-                            value={addForm.quantity}
-                            onChange={(e) => setAddForm({ ...addForm, quantity: e.target.value })}
-                            className="h-9 border border-gray-200 text-sm text-black text-sm pr-12 focus:ring-1 focus:ring-slate-300"
-                           />
-                        </div>
-                      </div>
+                    <div className="space-y-2">
+                      <Label className={DLG.label}>Branch</Label>
+                      <Select value={addForm.branchId} onValueChange={(v) => setAddForm({ ...addForm, branchId: v })}>
+                        <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                          <SelectValue placeholder="Select branch" />
+                        </SelectTrigger>
+                        <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
+                          {branches.map(b => <SelectItem key={b.id} value={b.id} className="font-normal text-sm py-2">{b.name}</SelectItem>)}
+                        </SelectContent>
+                      </Select>
                     </div>
+
+                    {(() => {
+                      // Pre/post balance preview — same pattern as Adjust /
+                      // Remove / Transfer. Helps the user see how many they
+                      // already have before piling on more.
+                      const addStock = addForm.productId && addForm.branchId
+                        ? allStocks.find(
+                            (s) =>
+                              s.product?.id === addForm.productId &&
+                              s.branch?.id === addForm.branchId,
+                          )
+                        : undefined;
+                      const currentQty = addStock ? Number(addStock.current_quantity) : null;
+                      const addQty = Number(addForm.quantity) || 0;
+                      const newTotal =
+                        currentQty !== null
+                          ? currentQty + addQty
+                          : addQty > 0 && addForm.branchId
+                            ? addQty
+                            : null;
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-sm text-gray-600">Current quantity</Label>
+                            <div className="h-9 flex items-center px-3 rounded-md bg-gray-50 border border-gray-200 text-sm text-black">
+                              {currentQty !== null
+                                ? formatQty(currentQty)
+                                : addForm.branchId
+                                  ? "0"
+                                  : "—"}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className={DLG.label}>Quantity to add</Label>
+                            <Input
+                              type="number"
+                              placeholder="0"
+                              value={addForm.quantity}
+                              onChange={(e) => setAddForm({ ...addForm, quantity: e.target.value })}
+                              className="h-9 border border-gray-200 text-sm text-black text-center"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-sm text-gray-600">After adding</Label>
+                            <div className="h-9 flex items-center px-3 rounded-md bg-gray-50 border border-gray-200 text-sm text-black">
+                              {newTotal !== null ? formatQty(newTotal) : "—"}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                       <div className="space-y-2">
@@ -621,6 +780,26 @@ export function StockManagement() {
                           className="h-9 border border-gray-200 text-sm text-black text-sm"
                         />
                       </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className={DLG.label}>Invoice / GRN reference (optional)</Label>
+                      <Input
+                        placeholder="e.g. INV-1024"
+                        value={addForm.invoiceRef}
+                        onChange={(e) => setAddForm({ ...addForm, invoiceRef: e.target.value })}
+                        className="h-9 border border-gray-200 text-sm text-black"
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <Label className={DLG.label}>Notes (optional)</Label>
+                      <Textarea
+                        placeholder="Delivery note, vehicle, approval, etc."
+                        value={addForm.notes}
+                        onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
+                        className="text-sm text-black min-h-[64px] resize-none border-gray-200"
+                      />
                     </div>
 
                     <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
@@ -735,28 +914,64 @@ export function StockManagement() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                      <div className="space-y-1">
-                        <Label className="text-sm text-gray-600">Current quantity</Label>
-                        <span className="text-sm text-black">—</span>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>New quantity</Label>
-                        <Input
-                          type="number"
-                          placeholder="0"
-                          value={adjustForm.quantityChange}
-                          onChange={(e) => setAdjustForm({ ...adjustForm, quantityChange: e.target.value })}
-                          className="h-9 border border-gray-200 text-sm text-black text-sm text-center"
-                        />
-                      </div>
-                    </div>
+                    {(() => {
+                      // Look up the current on-hand stock for the picked
+                      // product + branch combination. allStocks is the full
+                      // list loaded for the current page; if the user hasn't
+                      // picked both yet, we just show a dash.
+                      const adjStock = adjustForm.productId && adjustForm.branchId
+                        ? allStocks.find(
+                            (s) =>
+                              s.product?.id === adjustForm.productId &&
+                              s.branch?.id === adjustForm.branchId,
+                          )
+                        : undefined;
+                      const currentQty = adjStock ? Number(adjStock.current_quantity) : null;
+                      const delta = Number(adjustForm.quantityChange) || 0;
+                      const newTotal = currentQty !== null ? currentQty + delta : null;
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                          <div className="space-y-1">
+                            <Label className="text-sm text-gray-600">Current quantity</Label>
+                            <div className="h-9 flex items-center px-3 rounded-md bg-gray-50 border border-gray-200 text-sm text-black">
+                              {currentQty !== null ? formatQty(currentQty) : "—"}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className={DLG.label}>Change (+ / −)</Label>
+                            <Input
+                              type="number"
+                              placeholder="e.g. -5 or 10"
+                              value={adjustForm.quantityChange}
+                              onChange={(e) =>
+                                setAdjustForm({ ...adjustForm, quantityChange: e.target.value })
+                              }
+                              className="h-9 border border-gray-200 text-sm text-black text-center"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-sm text-gray-600">New total</Label>
+                            <div
+                              className={`h-9 flex items-center px-3 rounded-md border text-sm ${
+                                newTotal !== null && newTotal < 0
+                                  ? "bg-red-50 border-red-200 text-red-700"
+                                  : "bg-gray-50 border-gray-200 text-black"
+                              }`}
+                            >
+                              {newTotal !== null ? formatQty(newTotal) : "—"}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
 
                     <div className="space-y-2">
                       <Label className={DLG.label}>Notes (optional)</Label>
-                      <Input
+                      <Textarea
                         placeholder="Add any additional details..."
-                        className="h-9 border border-gray-200 text-sm text-black text-sm"
+                        value={adjustForm.notes}
+                        onChange={(e) => setAdjustForm({ ...adjustForm, notes: e.target.value })}
+                        className="text-sm text-black min-h-[64px] resize-none border-gray-200"
                       />
                     </div>
 
@@ -843,16 +1058,21 @@ export function StockManagement() {
                       </div>
                     </div>
                     
-                    <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       <div className="space-y-2">
-                        <Label className={DLG.label}>Quantity</Label>
-                        <Input
-                          type="number"
-                          placeholder="0"
-                          value={removeForm.quantity}
-                          onChange={(e) => setRemoveForm({ ...removeForm, quantity: e.target.value })}
-                          className="h-9 border border-gray-200 text-sm text-black text-sm text-center"
-                        />
+                        <Label className={DLG.label}>Branch</Label>
+                        <Select value={removeForm.branchId} onValueChange={(v) => setRemoveForm({ ...removeForm, branchId: v })}>
+                          <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                            <SelectValue placeholder="Select branch" />
+                          </SelectTrigger>
+                          <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
+                            {branches.map((b) => (
+                              <SelectItem key={b.id} value={b.id} className="font-normal text-sm py-2">
+                                {b.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="space-y-2">
                         <Label className={DLG.label}>Reason</Label>
@@ -870,13 +1090,61 @@ export function StockManagement() {
                       </div>
                     </div>
 
+                    {(() => {
+                      // Same live preview as Adjust — show current on-hand,
+                      // the quantity being removed, and the resulting total.
+                      const rmStock = removeForm.productId && removeForm.branchId
+                        ? allStocks.find(
+                            (s) =>
+                              s.product?.id === removeForm.productId &&
+                              s.branch?.id === removeForm.branchId,
+                          )
+                        : undefined;
+                      const currentQty = rmStock ? Number(rmStock.current_quantity) : null;
+                      const removeAmt = Number(removeForm.quantity) || 0;
+                      const newTotal = currentQty !== null ? currentQty - removeAmt : null;
+                      const wouldOverdraw = newTotal !== null && newTotal < 0;
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-sm text-gray-600">Current quantity</Label>
+                            <div className="h-9 flex items-center px-3 rounded-md bg-gray-50 border border-gray-200 text-sm text-black">
+                              {currentQty !== null ? formatQty(currentQty) : "—"}
+                            </div>
+                          </div>
+                          <div className="space-y-2">
+                            <Label className={DLG.label}>Quantity to remove</Label>
+                            <Input
+                              type="number"
+                              placeholder="0"
+                              value={removeForm.quantity}
+                              onChange={(e) => setRemoveForm({ ...removeForm, quantity: e.target.value })}
+                              className="h-9 border border-gray-200 text-sm text-black text-center"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-sm text-gray-600">After removal</Label>
+                            <div
+                              className={`h-9 flex items-center px-3 rounded-md border text-sm ${
+                                wouldOverdraw
+                                  ? "bg-red-50 border-red-200 text-red-700"
+                                  : "bg-gray-50 border-gray-200 text-black"
+                              }`}
+                            >
+                              {newTotal !== null ? formatQty(newTotal) : "—"}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     <div className="space-y-2">
-                      <Label className={DLG.label}>Notes</Label>
-                      <Input
-                        placeholder="Optional notes"
+                      <Label className={DLG.label}>Notes (optional)</Label>
+                      <Textarea
+                        placeholder="Add reference, batch, vehicle, etc."
                         value={removeForm.notes}
                         onChange={(e) => setRemoveForm({ ...removeForm, notes: e.target.value })}
-                        className="h-9 border border-gray-200 text-sm text-black text-sm"
+                        className="text-sm text-black min-h-[64px] resize-none border-gray-200"
                       />
                     </div>
 
@@ -1011,6 +1279,70 @@ export function StockManagement() {
                       </div>
                     </div>
 
+                    {(() => {
+                      // Pre/post-transfer balance preview. allStocks is the
+                      // full stocks list for the current page — sufficient
+                      // for the typical case where the user picks something
+                      // they can see; for products in stocks outside the
+                      // current page, the balances simply show "—".
+                      const fromStock = transferForm.productId && transferForm.fromBranchId
+                        ? allStocks.find(
+                            (s) =>
+                              s.product?.id === transferForm.productId &&
+                              s.branch?.id === transferForm.fromBranchId,
+                          )
+                        : undefined;
+                      const toStock = transferForm.productId && transferForm.toBranchId
+                        ? allStocks.find(
+                            (s) =>
+                              s.product?.id === transferForm.productId &&
+                              s.branch?.id === transferForm.toBranchId,
+                          )
+                        : undefined;
+                      const fromQty = fromStock ? Number(fromStock.current_quantity) : null;
+                      const toQty = toStock ? Number(toStock.current_quantity) : null;
+                      const moveQty = Number(transferForm.quantity) || 0;
+                      const fromAfter = fromQty !== null ? fromQty - moveQty : null;
+                      const toAfter = toQty !== null ? toQty + moveQty : moveQty > 0 ? moveQty : null;
+                      const wouldOverdraw = fromAfter !== null && fromAfter < 0;
+
+                      if (!transferForm.productId) return null;
+                      return (
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-md border border-gray-200 bg-gray-50/60 p-3">
+                          <div className="space-y-1">
+                            <p className="text-xs text-gray-600 uppercase tracking-wide">From branch</p>
+                            <div className="flex items-baseline gap-2 text-sm">
+                              <span className="text-gray-600">Current:</span>
+                              <span className="text-black">
+                                {fromQty !== null ? formatQty(fromQty) : "—"}
+                              </span>
+                            </div>
+                            <div className="flex items-baseline gap-2 text-sm">
+                              <span className="text-gray-600">After:</span>
+                              <span className={wouldOverdraw ? "text-red-700 font-medium" : "text-black"}>
+                                {fromAfter !== null ? formatQty(fromAfter) : "—"}
+                              </span>
+                            </div>
+                          </div>
+                          <div className="space-y-1">
+                            <p className="text-xs text-gray-600 uppercase tracking-wide">To branch</p>
+                            <div className="flex items-baseline gap-2 text-sm">
+                              <span className="text-gray-600">Current:</span>
+                              <span className="text-black">
+                                {toQty !== null ? formatQty(toQty) : transferForm.toBranchId ? "0" : "—"}
+                              </span>
+                            </div>
+                            <div className="flex items-baseline gap-2 text-sm">
+                              <span className="text-gray-600">After:</span>
+                              <span className="text-black">
+                                {toAfter !== null ? formatQty(toAfter) : "—"}
+                              </span>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })()}
+
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
                       <div className="space-y-2">
                         <Label className={DLG.label}>Quantity</Label>
@@ -1100,6 +1432,23 @@ export function StockManagement() {
               ))}
             </SelectContent>
           </Select>
+          {/* Clear filters — only renders when any filter is active so the
+              row stays uncluttered for users who haven't filtered. */}
+          {(searchTerm || branchFilter !== ALL_BRANCHES || categoryFilter !== ALL_CATEGORIES) && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-9 text-sm text-black"
+              onClick={() => {
+                setSearchTerm("");
+                setBranchFilter(ALL_BRANCHES);
+                setCategoryFilter(ALL_CATEGORIES);
+              }}
+            >
+              <X className="h-4 w-4 mr-1.5" />
+              Clear filters
+            </Button>
+          )}
         </div>
       </Card>
 
@@ -1142,16 +1491,15 @@ export function StockManagement() {
                 <TableHeader className="bg-slate-50/30">
                   <TableRow className="hover:bg-transparent border-slate-100">
                     <TableHead className="text-sm text-gray-600 py-3">Product</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">SKU</TableHead>
                     <TableHead className="text-sm text-gray-600 py-3 text-center">Quantity</TableHead>
                     <TableHead className="text-sm text-gray-600 py-3">Status</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-right">Last updated</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 text-right w-[72px]">View</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {allStocks.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={5} className="text-center p-24">
+                      <TableCell colSpan={4} className="text-center p-24">
                         <div className="flex flex-col items-center opacity-20">
                           <Package className="h-12 w-12 mb-3 text-slate-300" />
                           <p className="text-sm text-gray-500">No stock found</p>
@@ -1161,33 +1509,37 @@ export function StockManagement() {
                   ) : (
                     allStocks.map((s) => {
                       const qty = Number(s.current_quantity || 0);
-                      const status = getStockStatusMeta(qty);
+                      const minQty = Number(
+                        (s.product as { min_qty?: number }).min_qty ?? 10,
+                      );
+                      const status = getStockStatusMeta(qty, minQty);
                       return (
-                        <TableRow key={s.id} className="hover:bg-slate-50/50 group transition-all duration-200 border-slate-50">
-                          <TableCell className="p-8 py-5">
+                        <TableRow key={s.id} className="border-gray-100 hover:bg-gray-50">
+                          <TableCell className="py-3">
                             <div className="flex flex-col">
                               <span className="text-sm text-black">{s.product.name}</span>
-                              <span className="text-xs text-gray-500 mt-1">{s.branch?.name}</span>
+                              <span className="text-xs text-gray-500 mt-0.5">{s.branch?.name}</span>
                             </div>
                           </TableCell>
-                          <TableCell>
-                             <div className="font-mono text-xs font-semibold text-slate-500 bg-slate-50 px-2 py-1 rounded inline-block uppercase">
-                               {s.product.sku || (s.product.id ? s.product.id.slice(0, 8) : 'N/A')}
-                             </div>
-                          </TableCell>
-                          <TableCell className="text-center">
+                          <TableCell className="text-center py-3">
                             <span className="text-sm text-black">{formatQty(qty)}</span>
                           </TableCell>
-                          <TableCell>
-                            <div className={`px-2 py-0.5 rounded text-xs inline-block border ${status.className}`}>
+                          <TableCell className="py-3">
+                            <Badge variant="outline" className={cn("text-xs font-normal", status.className)}>
                               {status.label}
-                            </div>
+                            </Badge>
                           </TableCell>
-                          <TableCell className="p-8 py-5 text-right">
-                             <div className="flex flex-col items-end">
-                                <span className="text-xs text-slate-500 uppercase">{new Date(s.last_updated).toLocaleDateString()}</span>
-                                <span className="text-xs text-slate-400 uppercase">Checked: {new Date(s.last_updated).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                             </div>
+                          <TableCell className="text-right py-3 pr-4">
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 w-8 p-0 text-gray-600 hover:text-black"
+                              aria-label={`View details for ${s.product.name}`}
+                              onClick={() => openStockView(s)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
                           </TableCell>
                         </TableRow>
                       );
@@ -1196,47 +1548,83 @@ export function StockManagement() {
                 </TableBody>
               </Table>
               
-              {/* Pagination Section */}
+              {/* Pagination — First / Prev / Page X of Y / Next / Last with
+                  an inline rows-per-page selector and a "Showing 1–20 of N"
+                  caption. Same pattern as the other inventory tables. */}
               {totalStocks > 0 && (
-                <div className="flex flex-col sm:flex-row items-center justify-between p-8 bg-slate-50/30 border-t border-slate-100 gap-4">
-                  <div className="flex items-center gap-4">
-                     <span className="text-xs text-slate-500">Rows per page:</span>
-                     <Select value={String(stockPageSize)} onValueChange={(v) => { setStockPageSize(Number(v)); setStockPage(1); }}>
-                       <SelectTrigger className="w-16 h-8 border-slate-200 bg-white rounded-lg text-xs font-normal">
-                         <SelectValue />
-                       </SelectTrigger>
-                       <SelectContent className="rounded-xl border-slate-100">
-                         {paginationOptions.map((size) => <SelectItem key={size} value={String(size)} className="font-normal text-xs">{size}</SelectItem>)}
-                       </SelectContent>
-                     </Select>
-                     <span className="text-xs text-slate-400 ml-2">
-                       Page {stockPage} of {totalStockPages}
-                     </span>
-                  </div>
-                  
-                  {totalStockPages > 1 && (
-                    <div className="flex items-center gap-2">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setStockPage(p => Math.max(1, p - 1))}
-                        disabled={stockPage === 1}
-                        className="rounded-xl font-normal text-xs border-slate-200 h-9 px-4 hover:bg-white"
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-gray-200">
+                  <div className="flex items-center gap-3">
+                    <p className="text-sm text-black">
+                      Showing {(stockPage - 1) * stockPageSize + 1}–
+                      {Math.min(stockPage * stockPageSize, totalStocks)} of {totalStocks}
+                    </p>
+                    <span className="text-gray-300">|</span>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-sm text-gray-600">Rows:</span>
+                      <Select
+                        value={String(stockPageSize)}
+                        onValueChange={(v) => {
+                          setStockPageSize(Number(v));
+                          setStockPage(1);
+                        }}
                       >
-                        Previous
-                      </Button>
-                      <span className="text-sm text-gray-600 px-2">{stockPage}</span>
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => setStockPage(p => Math.min(totalStockPages, p + 1))}
-                        disabled={stockPage === totalStockPages}
-                        className="rounded-xl font-normal text-xs border-slate-200 h-9 px-4 hover:bg-white"
-                      >
-                        Next
-                      </Button>
+                        <SelectTrigger className="h-8 w-[72px] text-sm text-black">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {paginationOptions.map((size) => (
+                            <SelectItem key={size} value={String(size)} className="text-sm">
+                              {size}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
                     </div>
-                  )}
+                  </div>
+
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-sm text-black"
+                      onClick={() => setStockPage(1)}
+                      disabled={stockPage === 1}
+                    >
+                      First
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-sm text-black"
+                      onClick={() => setStockPage((p) => Math.max(1, p - 1))}
+                      disabled={stockPage === 1}
+                    >
+                      Previous
+                    </Button>
+                    <span className="text-sm text-black px-3">
+                      Page {stockPage} of {totalStockPages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-sm text-black"
+                      onClick={() =>
+                        setStockPage((p) => Math.min(totalStockPages, p + 1))
+                      }
+                      disabled={stockPage >= totalStockPages}
+                    >
+                      Next
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-sm text-black"
+                      onClick={() => setStockPage(totalStockPages)}
+                      disabled={stockPage >= totalStockPages}
+                    >
+                      Last
+                    </Button>
+                  </div>
                 </div>
               )}
             </CardContent>
@@ -1258,12 +1646,12 @@ export function StockManagement() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {history.length === 0 ? (
+                  {filteredHistory.length === 0 ? (
                     <TableRow>
                       <TableCell colSpan={6} className="text-center p-20 text-slate-400 text-xs uppercase font-semibold">No movement history discovered</TableCell>
                     </TableRow>
                   ) : (
-                    history.map((m) => (
+                    filteredHistory.map((m) => (
                       <TableRow key={m.id} className="hover:bg-slate-50/50 border-slate-50 transition-colors">
                         <TableCell className="p-8 py-4 text-xs font-bold text-slate-500 whitespace-nowrap">
                           {new Date(m.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
@@ -1312,12 +1700,12 @@ export function StockManagement() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                   {todayMovements.length === 0 ? (
+                   {filteredTodayMovements.length === 0 ? (
                       <TableRow>
                         <TableCell colSpan={6} className="text-center p-20 text-slate-400 text-xs uppercase font-semibold">No events recorded today</TableCell>
                       </TableRow>
                    ) : (
-                     todayMovements.map((m) => (
+                     filteredTodayMovements.map((m) => (
                         <TableRow key={m.id} className="hover:bg-slate-50/50 border-slate-50 transition-colors">
                           <TableCell className="p-8 py-4 text-xs font-semibold text-indigo-600 uppercase">
                             {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
@@ -1339,6 +1727,150 @@ export function StockManagement() {
            </Card>
         </TabsContent>
       </Tabs>
+
+      <Dialog
+        open={viewOpen}
+        onOpenChange={(open) => {
+          if (!open) closeStockView();
+        }}
+      >
+        <DialogContent className={DLG.content}>
+          <DialogHeader className={DLG.header}>
+            <DialogTitle className={DLG.title}>Stock details</DialogTitle>
+            <DialogDescription className={DLG.desc}>
+              {viewRow
+                ? `${viewRow.product?.name ?? "Product"} · ${viewRow.branch?.name ?? "Branch"}`
+                : "Product and branch stock information"}
+            </DialogDescription>
+          </DialogHeader>
+
+          {viewLoading ? (
+            <div className="flex flex-col items-center justify-center py-16 px-5 gap-3">
+              <Loader2 className="h-7 w-7 animate-spin text-gray-400" />
+              <p className="text-sm text-gray-600">Loading details…</p>
+            </div>
+          ) : viewError ? (
+            <div className="px-5 py-10 text-center">
+              <p className="text-sm text-gray-600">{viewError}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                className="mt-4 text-sm text-black"
+                onClick={() => viewRow && openStockView(viewRow)}
+              >
+                Try again
+              </Button>
+            </div>
+          ) : viewRow ? (
+            <div className={DLG.body}>
+              <dl>
+                <DetailRow label="Product" value={viewRow.product?.name} />
+                <DetailRow
+                  label="SKU"
+                  value={
+                    (viewProduct?.sku as string) ||
+                    viewRow.product?.sku ||
+                    "—"
+                  }
+                />
+                <DetailRow
+                  label="Barcode"
+                  value={(viewProduct?.code as string) || viewRow.product?.barcode || "—"}
+                />
+                <DetailRow label="Branch" value={viewRow.branch?.name} />
+                <DetailRow
+                  label="Category"
+                  value={
+                    (viewProduct?.category as { name?: string })?.name ||
+                    categories.find((c) => c.id === viewRow.product?.category_id)?.name ||
+                    "—"
+                  }
+                />
+                <DetailRow
+                  label="Subcategory"
+                  value={(viewProduct?.subcategory as { name?: string })?.name || "—"}
+                />
+                <DetailRow
+                  label="Unit"
+                  value={(viewProduct?.unit as { name?: string })?.name || "—"}
+                />
+                <DetailRow
+                  label="Quantity on hand"
+                  value={formatQty(Number(viewRow.current_quantity || 0))}
+                />
+                <DetailRow
+                  label="Minimum stock"
+                  value={formatQty(Number(viewProduct?.min_qty ?? 0))}
+                />
+                <DetailRow
+                  label="Maximum stock"
+                  value={formatQty(Number(viewProduct?.max_qty ?? 0))}
+                />
+                <DetailRow
+                  label="Purchase rate"
+                  value={formatMoney(viewProduct?.purchase_rate)}
+                />
+                <DetailRow
+                  label="Sales rate"
+                  value={formatMoney(
+                    viewProduct?.sales_rate_inc_dis_and_tax ??
+                      viewProduct?.sales_rate_exc_dis_and_tax,
+                  )}
+                />
+                <DetailRow
+                  label="Status"
+                  value={
+                    getStockStatusMeta(
+                      Number(viewRow.current_quantity || 0),
+                      Number(viewProduct?.min_qty ?? 10),
+                    ).label
+                  }
+                />
+                <DetailRow
+                  label="Last updated"
+                  value={new Date(viewRow.last_updated).toLocaleString()}
+                />
+                <DetailRow
+                  label="Active"
+                  value={viewProduct?.is_active === false ? "No" : "Yes"}
+                />
+              </dl>
+
+              {viewMovements.length > 0 && (
+                <div className="pt-2 border-t border-gray-200">
+                  <p className="text-sm text-gray-600 mb-2">Recent movements at this branch</p>
+                  <ul className="space-y-2 max-h-40 overflow-y-auto">
+                    {viewMovements.map((m) => (
+                      <li
+                        key={m.id}
+                        className="text-sm text-black flex justify-between gap-2 border-b border-gray-50 pb-2 last:border-0"
+                      >
+                        <span className="text-gray-600 shrink-0">
+                          {new Date(m.created_at).toLocaleString()}
+                        </span>
+                        <span>
+                          {m.movement_type.replace(/_/g, " ")}{" "}
+                          {m.quantity_change > 0 ? "+" : ""}
+                          {formatQty(Number(m.quantity_change))}
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          ) : null}
+
+          {!viewLoading && !viewError && viewRow && (
+            <div className={DLG.footer}>
+              <Button variant="outline" size="sm" className="text-sm text-black" onClick={closeStockView}>
+                Close
+              </Button>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
+
       <style>{`
         input::-webkit-outer-spin-button,
         input::-webkit-inner-spin-button {

@@ -69,6 +69,20 @@ export function InventoryReports() {
     startDate: "",
     endDate: "",
   });
+  // Pagination — `page` is the current page for the non-valuation table
+  // (data.data). Valuation uses one paginator per branch card via
+  // `branchPages` so each branch's items list pages independently.
+  const PAGE_SIZE = 20;
+  const [page, setPage] = useState(1);
+  const [branchPages, setBranchPages] = useState<Record<string, number>>({});
+  const setBranchPage = (bid: string, p: number) =>
+    setBranchPages((prev) => ({ ...prev, [bid]: p }));
+  // Reset pagination whenever the data set or the report type changes so the
+  // user never lands on an empty page after a refetch.
+  useEffect(() => {
+    setPage(1);
+    setBranchPages({});
+  }, [data, reportType]);
 
   const hasActiveFilters = filters.branchId !== "" || filters.startDate !== "" || filters.endDate !== "";
 
@@ -124,7 +138,10 @@ export function InventoryReports() {
     } finally {
       setLoading(false);
     }
-  }, [reportType, toast]);
+    // `filters` MUST be in the deps — otherwise the callback closes over
+    // a stale `filters` (the value when reportType last changed), and
+    // clicking Apply after picking a branch sends the old empty filters.
+  }, [reportType, filters, toast]);
 
   const fetchMeta = useCallback(async () => {
     try {
@@ -341,8 +358,8 @@ export function InventoryReports() {
               </Popover>
             </div>
 
-            <Button 
-                onClick={fetchReport} 
+            <Button
+                onClick={() => fetchReport()}
                 disabled={loading}
                 className="h-9 bg-slate-900 hover:bg-black text-white font-normal px-6 text-xs shadow-md shadow-slate-200"
             >
@@ -455,6 +472,13 @@ export function InventoryReports() {
                 <div className="divide-y divide-slate-100">
                   {Object.entries(data.byLocation).map(([bid, loc]: [string, any]) => {
                     const branchName = branches.find(b => b.id === bid)?.name || "Main Site";
+                    const allItems = loc.items || [];
+                    const branchPage = branchPages[bid] || 1;
+                    const branchTotalPages = Math.max(1, Math.ceil(allItems.length / PAGE_SIZE));
+                    const paginatedItems = allItems.slice(
+                      (branchPage - 1) * PAGE_SIZE,
+                      branchPage * PAGE_SIZE,
+                    );
                     return (
                       <div key={bid} className="p-8">
                         <div className="flex items-center justify-between mb-4">
@@ -477,23 +501,55 @@ export function InventoryReports() {
                             </TableRow>
                           </TableHeader>
                           <TableBody>
-                            {(loc.items || []).map((item: any, i: number) => (
-                              <TableRow key={i} className="hover:bg-slate-50/30">
-                                <TableCell className="font-normal text-black text-xs">{item.product?.name}</TableCell>
-                                <TableCell className="text-xs text-black/60 font-normal">{item.product?.sku}</TableCell>
-                                <TableCell className="text-right font-normal text-black text-xs">{item.quantity}</TableCell>
-                                <TableCell className="text-right text-xs text-black/60">{formatCurrency(item.value / item.quantity)}</TableCell>
-                                <TableCell className="text-right font-normal text-black text-xs">{formatCurrency(item.value)}</TableCell>
-                              </TableRow>
-                            ))}
+                            {paginatedItems.map((item: any, i: number) => {
+                              // Prefer the product's purchase_rate as the unit
+                              // value; fall back to value/quantity only when
+                              // we have a non-zero quantity. Avoids the 0/0
+                              // = NaN that showed "Rs NaN" for zero-stock rows.
+                              const unitValueRaw =
+                                item.product?.purchase_rate != null
+                                  ? Number(item.product.purchase_rate)
+                                  : Number.isFinite(item.value / item.quantity) && item.quantity > 0
+                                    ? item.value / item.quantity
+                                    : 0;
+                              return (
+                                <TableRow key={i} className="hover:bg-slate-50/30">
+                                  <TableCell className="font-normal text-black text-xs">{item.product?.name}</TableCell>
+                                  <TableCell className="text-xs text-black/60 font-normal">{item.product?.sku}</TableCell>
+                                  <TableCell className="text-right font-normal text-black text-xs">{item.quantity}</TableCell>
+                                  <TableCell className="text-right text-xs text-black/60">{formatCurrency(unitValueRaw)}</TableCell>
+                                  <TableCell className="text-right font-normal text-black text-xs">{formatCurrency(item.value)}</TableCell>
+                                </TableRow>
+                              );
+                            })}
                           </TableBody>
                         </Table>
+                        {allItems.length > PAGE_SIZE && (
+                          <PaginationBar
+                            page={branchPage}
+                            totalPages={branchTotalPages}
+                            total={allItems.length}
+                            pageSize={PAGE_SIZE}
+                            onPage={(p) => setBranchPage(bid, p)}
+                            disabled={loading}
+                          />
+                        )}
                       </div>
                     )
                   })}
                 </div>
              ) : Array.isArray(data?.data) && data.data.length > 0 ? (
                <div className="overflow-x-auto">
+                 {(() => {
+                   const total = data.data.length;
+                   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+                   const currentPage = Math.min(page, totalPages);
+                   const sliced = data.data.slice(
+                     (currentPage - 1) * PAGE_SIZE,
+                     currentPage * PAGE_SIZE,
+                   );
+                   return (
+                 <>
                  <Table>
                    <TableHeader className="bg-slate-50/50 font-normal uppercase text-[9px] tracking-widest text-black border-none">
                      <TableRow>
@@ -553,7 +609,7 @@ export function InventoryReports() {
                      </TableRow>
                    </TableHeader>
                    <TableBody>
-                     {data.data.map((d: any, i: number) => (
+                     {sliced.map((d: any, i: number) => (
                        <TableRow key={i} className="hover:bg-slate-50/30">
                          {reportType === "purchase" && (
                            <>
@@ -637,6 +693,19 @@ export function InventoryReports() {
                      ))}
                    </TableBody>
                  </Table>
+                 {total > PAGE_SIZE && (
+                   <PaginationBar
+                     page={currentPage}
+                     totalPages={totalPages}
+                     total={total}
+                     pageSize={PAGE_SIZE}
+                     onPage={setPage}
+                     disabled={loading}
+                   />
+                 )}
+                 </>
+                 );
+                 })()}
                </div>
              ) : (
                <div className="p-32 flex flex-col items-center justify-center text-center space-y-4">
@@ -651,6 +720,73 @@ export function InventoryReports() {
              )}
            </CardContent>
         </Card>
+      </div>
+    </div>
+  );
+}
+
+// Reusable pagination footer — same look across every report category, and
+// across the per-branch slices inside Stock Valuation.
+function PaginationBar({
+  page,
+  totalPages,
+  total,
+  pageSize,
+  onPage,
+  disabled,
+}: {
+  page: number;
+  totalPages: number;
+  total: number;
+  pageSize: number;
+  onPage: (p: number) => void;
+  disabled?: boolean;
+}) {
+  return (
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-slate-100">
+      <p className="text-xs text-black">
+        Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+      </p>
+      <div className="flex items-center gap-1">
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs text-black"
+          onClick={() => onPage(1)}
+          disabled={page === 1 || disabled}
+        >
+          First
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs text-black"
+          onClick={() => onPage(Math.max(1, page - 1))}
+          disabled={page === 1 || disabled}
+        >
+          Previous
+        </Button>
+        <span className="text-xs text-black px-3">
+          Page {page} of {totalPages}
+        </span>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs text-black"
+          onClick={() => onPage(Math.min(totalPages, page + 1))}
+          disabled={page >= totalPages || disabled}
+        >
+          Next
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-8 text-xs text-black"
+          onClick={() => onPage(totalPages)}
+          disabled={page >= totalPages || disabled}
+        >
+          Last
+        </Button>
       </div>
     </div>
   );

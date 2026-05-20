@@ -4,10 +4,14 @@ import { AppError } from "../utils/apiError";
 import { addDecimal, asNumber } from "../utils/helpers";
 
 class StockService {
-    async createStock({ productId, branchId, quantity, createdBy }: {
+    async createStock({ productId, branchId, quantity, supplierId, unitCost, invoiceRef, notes, createdBy }: {
         productId: Stock["product_id"];
         branchId: Stock["branch_id"];
         quantity: Stock["current_quantity"];
+        supplierId?: string;
+        unitCost?: number;
+        invoiceRef?: string;
+        notes?: string;
         createdBy: StockMovement["created_by"];
     }) {
         return prisma.$transaction(async (tx) => {
@@ -23,7 +27,7 @@ class StockService {
                 // If stock exists, add to existing quantity
                 previousQty = asNumber(exists.current_quantity);
                 newQty = addDecimal(exists.current_quantity, quantity);
-                
+
                 stock = await tx.stock.update({
                     where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
                     data: {
@@ -41,6 +45,14 @@ class StockService {
                 });
             }
 
+            // Compose notes that preserve all the optional metadata next to
+            // the movement record so the audit log shows where it came from.
+            const noteParts: string[] = [];
+            if (supplierId) noteParts.push(`Supplier: ${supplierId}`);
+            if (invoiceRef) noteParts.push(`Invoice: ${invoiceRef}`);
+            if (notes) noteParts.push(notes);
+            const noteText = noteParts.length > 0 ? noteParts.join(" | ") : undefined;
+
             await tx.stockMovement.create({
                 data: {
                     product_id: productId,
@@ -49,6 +61,8 @@ class StockService {
                     quantity_change: quantity,
                     previous_qty: previousQty,
                     new_qty: newQty,
+                    unit_cost: unitCost,
+                    notes: noteText,
                     created_by: createdBy,
                 },
             });
@@ -57,11 +71,12 @@ class StockService {
         });
     }
 
-    async adjustStock({ productId, branchId, quantityChange, reason, createdBy }: {
+    async adjustStock({ productId, branchId, quantityChange, reason, notes, createdBy }: {
         productId: string;
         branchId: string;
         quantityChange: number;
         reason?: string;
+        notes?: string;
         createdBy: string;
     }) {
         return prisma.$transaction(async (tx) => {
@@ -86,6 +101,12 @@ class StockService {
                 },
             });
 
+            // Combine reason + notes so both surface in the movement log.
+            const noteParts: string[] = [];
+            if (reason) noteParts.push(`Reason: ${reason}`);
+            if (notes) noteParts.push(notes);
+            const noteText = noteParts.length > 0 ? noteParts.join(" | ") : undefined;
+
             await tx.stockMovement.create({
                 data: {
                     product_id: productId,
@@ -94,7 +115,7 @@ class StockService {
                     quantity_change: quantityChange,
                     previous_qty: stock.current_quantity,
                     new_qty: newQty,
-                    notes: reason,
+                    notes: noteText,
                     created_by: createdBy,
                 },
             });
@@ -203,11 +224,12 @@ class StockService {
         });
     }
 
-    async removeStock({ productId, branchId, quantity, reason, createdBy }: {
+    async removeStock({ productId, branchId, quantity, reason, notes, createdBy }: {
         productId: string;
         branchId: string;
         quantity: number;
         reason?: string;
+        notes?: string;
         createdBy: string;
     }) {
         if (quantity <= 0) {
@@ -227,7 +249,7 @@ class StockService {
             }
 
             const newQty = addDecimal(stock.current_quantity, -quantity);
-            
+
             await tx.stock.update({
                 where: { product_id_branch_id: { product_id: productId, branch_id: branchId } },
                 data: {
@@ -235,15 +257,29 @@ class StockService {
                 },
             });
 
+            // Map the UI reason (DAMAGE/WASTE/THEFT/EXPIRED) to a real movement
+            // type when it matches the schema enum; otherwise default to DAMAGE.
+            const reasonUpper = (reason || "").toUpperCase();
+            const movementType =
+                reasonUpper === "EXPIRED" ? "EXPIRED" :
+                reasonUpper === "THEFT" ? "LOSS" :
+                reasonUpper === "WASTE" ? "DAMAGE" :
+                "DAMAGE";
+
+            const noteParts: string[] = [];
+            if (reason) noteParts.push(`Reason: ${reason}`);
+            if (notes) noteParts.push(notes);
+            const noteText = noteParts.length > 0 ? noteParts.join(" | ") : "Stock removed";
+
             await tx.stockMovement.create({
                 data: {
                     product_id: productId,
                     branch_id: branchId,
-                    movement_type: "DAMAGE",
+                    movement_type: movementType,
                     quantity_change: -quantity,
                     previous_qty: stock.current_quantity,
                     new_qty: newQty,
-                    notes: reason || "Stock removed",
+                    notes: noteText,
                     created_by: createdBy,
                 },
             });
