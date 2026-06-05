@@ -26,6 +26,7 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
+import { cn } from "@/lib/utils";
 
 interface OrderItem { 
   productId?: string;
@@ -181,6 +182,19 @@ type OrderStatusOption = (typeof ORDER_STATUS_OPTIONS)[number];
 
 const isTerminalOrderStatus = (status: string) =>
   status === "COMPLETED" || status === "CANCELLED";
+
+const getOrderStatusStyle = (status: string) => {
+  switch (status) {
+    case "COMPLETED":
+      return "bg-green-100 text-green-800 border-green-200";
+    case "PROCESSING":
+      return "bg-blue-100 text-blue-800 border-blue-200";
+    case "PENDING":
+      return "bg-amber-100 text-amber-800 border-amber-200";
+    default:
+      return "bg-red-100 text-red-800 border-red-200";
+  }
+};
 
 const getAllowedStatusOptions = (status: string): OrderStatusOption[] => {
   switch (status) {
@@ -915,240 +929,191 @@ const WebsiteOrders: React.FC = () => {
         </div>
       </div>
 
-      {/* Orders Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Website Orders List ({filtered.length})</CardTitle>
+      {/* Orders Grid */}
+      <Card className="border-gray-200 shadow-sm">
+        <CardHeader className="pb-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle>Website Orders ({filtered.length})</CardTitle>
+            <p className="text-sm text-gray-500">
+              Online checkout orders and delivery requests
+            </p>
+          </div>
         </CardHeader>
         <CardContent>
           {isLoading ? (
-            <PageLoader message="Loading orders..." />
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
+                >
+                  <div className="h-16 rounded-xl bg-gray-100" />
+                  <div className="mt-4 h-4 w-2/3 rounded bg-gray-100" />
+                  <div className="mt-2 h-3 w-1/2 rounded bg-gray-100" />
+                  <div className="mt-4 grid grid-cols-3 gap-2">
+                    <div className="h-12 rounded-lg bg-gray-100" />
+                    <div className="h-12 rounded-lg bg-gray-100" />
+                    <div className="h-12 rounded-lg bg-gray-100" />
+                  </div>
+                </div>
+              ))}
+            </div>
           ) : filtered.length === 0 ? (
-            <div className="text-center py-10">
-              <Globe className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600">No website orders found</p>
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center">
+              <Globe className="h-12 w-12 text-gray-400" />
+              <h3 className="mt-4 text-lg font-semibold text-gray-900">No website orders found</h3>
+              <p className="mt-1 max-w-sm text-sm text-gray-500">
+                Try changing your filters or check back when new online orders arrive.
+              </p>
             </div>
           ) : (
             <>
-              {/* Mobile Cards */}
-              <div className="grid grid-cols-1 gap-4 md:hidden">
-                {paged.map(o => {
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+                {paged.map((o) => {
                   const allowedStatusOptions = getAllowedStatusOptions(o.status);
                   const isTerminal = isTerminalOrderStatus(o.status);
+                  const statusStyle = getOrderStatusStyle(o.status);
+                  const ts = new Date(o.created_at);
 
                   return (
-                    <div key={o.id} className="bg-white border rounded-xl p-4 shadow-sm flex flex-col gap-3">
-                      <div className="flex justify-between items-start">
-                        <div>
-                          <span className="text-sm text-gray-500">Order #</span>
-                          <p className="font-semibold text-gray-900">{o.order_number}</p>
-                        </div>
-                        <div className="text-right">
-                          <span className="text-sm text-gray-500">Total</span>
-                          <p className="font-bold text-green-600 text-lg">Rs. {(Number(o.total_amount) || 0).toFixed(2)}</p>
+                    <div
+                      key={o.id}
+                      className="group flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md"
+                    >
+                      <div className="border-b border-gray-100 bg-gradient-to-r from-slate-50 to-blue-50/40 px-4 py-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 text-blue-700">
+                              <Globe className="h-4 w-4 shrink-0" />
+                              <span className="text-[11px] font-semibold uppercase tracking-wide">
+                                Website Order
+                              </span>
+                            </div>
+                            <p className="mt-1 truncate font-mono text-sm font-semibold text-gray-900">
+                              {o.order_number}
+                            </p>
+                            <p className="mt-1 truncate text-sm text-gray-600">
+                              {o.customer_name?.trim() || "Guest Customer"}
+                            </p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                              Total
+                            </p>
+                            <p className="text-xl font-bold text-green-700">
+                              Rs. {(Number(o.total_amount) || 0).toFixed(2)}
+                            </p>
+                          </div>
                         </div>
                       </div>
 
-                      <div className="grid grid-cols-2 gap-2 text-sm">
-                        <div>
-                          <span className="text-gray-500 block">Payment</span>
-                          <span className="font-medium text-gray-800">{o.payment_method || 'CASH'}</span>
+                      <div className="flex flex-1 flex-col p-4">
+                        <div className="grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3">
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                              Payment
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                              {o.payment_method || "CASH"}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                              Items
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                              {o.items?.length || 0}
+                            </p>
+                          </div>
+                          <div>
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                              Date
+                            </p>
+                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                              {ts.toLocaleDateString()}
+                            </p>
+                            <p className="text-[11px] text-gray-500">
+                              {ts.toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </p>
+                          </div>
                         </div>
-                        <div>
-                          <span className="text-gray-500 block">Items</span>
-                          <span className="font-medium text-gray-800">{o.items?.length || 0}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500 block">Date</span>
-                          <span className="font-medium text-gray-800">{new Date(o.created_at).toLocaleDateString()}</span>
-                        </div>
-                        <div>
-                          <span className="text-gray-500 block">Time</span>
-                          <span className="font-medium text-gray-800">{new Date(o.created_at).toLocaleTimeString()}</span>
-                        </div>
-                      </div>
 
-                      <div>
-                        <span className="text-gray-500 text-sm block mb-1">Status</span>
-                        <div className="flex items-center gap-2">
-                          <Select
-                            value={o.status} 
-                            onValueChange={(value) => handleStatusUpdate(o.id, value)}
-                            disabled={!!statusUpdatingIds[o.id] || isTerminal}
-                          >
-                            <SelectTrigger className="h-9 w-full text-sm font-medium">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {allowedStatusOptions.map((status) => (
-                                <SelectItem key={status} value={status}>
-                                  {status}
-                                </SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          {isTerminal && (
-                            <span className="inline-flex items-center px-2 py-1 rounded text-[10px] font-bold bg-amber-100 text-amber-800 border border-amber-200 uppercase whitespace-nowrap">
-                              Terminal
-                            </span>
-                          )}
-                        </div>
-                        {statusUpdatingIds[o.id] && !o.status.includes('CANCELLED') && (
-                          <span className="inline-flex items-center text-xs text-blue-600 mt-1">
-                            <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                            Updating...
-                          </span>
-                        )}
-                      </div>
-
-                      <div className="flex gap-2 mt-1">
-                        <Button 
-                          className="flex-1 flex items-center justify-center gap-2"
-                          variant="outline" 
-                          onClick={() => viewOrderDetail(o.id)}
-                        >
-                          <Eye className="w-4 h-4"/>
-                          View
-                        </Button>
-                        <Button
-                          className="flex-1 flex items-center justify-center gap-2 text-red-600 hover:text-red-700"
-                          variant="outline"
-                          onClick={() => confirmDelete(o.id)}
-                          disabled={!!statusUpdatingIds[o.id]}
-                        >
-                          <Trash2 className="w-4 h-4" />
-                          Delete
-                        </Button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-
-              {/* Desktop Table */}
-              <div className="hidden md:block overflow-hidden rounded-lg border border-gray-200">
-                <Table>
-                  <TableHeader className="bg-gray-50">
-                    <TableRow className="border-gray-200 hover:bg-gray-50">
-                      <TableHead className="px-4 py-3 text-sm font-medium text-black">Order #</TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black text-right">Total</TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black">Payment</TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black">Status</TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black text-center">Items</TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black">Date / Time</TableHead>
-                      <TableHead className="px-4 py-3 text-sm font-medium text-black text-right">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {paged.map((o) => {
-                      const allowedStatusOptions = getAllowedStatusOptions(o.status);
-                      const isTerminal = isTerminalOrderStatus(o.status);
-                      const ts = new Date(o.created_at);
-                      const statusStyle =
-                        o.status === "COMPLETED"
-                          ? "bg-green-100 text-green-800 border-green-200"
-                          : o.status === "PROCESSING"
-                            ? "bg-blue-100 text-blue-800 border-blue-200"
-                            : o.status === "PENDING"
-                              ? "bg-amber-100 text-amber-800 border-amber-200"
-                              : "bg-red-100 text-red-800 border-red-200";
-
-                      return (
-                        <TableRow
-                          key={o.id}
-                          className="border-gray-100 hover:bg-gray-50/60"
-                        >
-                          <TableCell className="px-4 py-3 text-sm font-mono text-black">
-                            {o.order_number}
-                          </TableCell>
-                          <TableCell className="py-3 text-sm font-semibold text-black text-right">
-                            Rs. {(Number(o.total_amount) || 0).toFixed(2)}
-                          </TableCell>
-                          <TableCell className="py-3 text-sm text-black">
-                            {o.payment_method || "CASH"}
-                          </TableCell>
-                          <TableCell className="py-3">
+                        <div className="mt-4">
+                          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                            Status
+                          </p>
+                          <div className="flex items-center gap-2">
                             {isTerminal ? (
                               <span
-                                className={`inline-flex items-center px-2 py-1 rounded-md text-xs font-medium border ${statusStyle}`}
+                                className={cn(
+                                  "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium",
+                                  statusStyle,
+                                )}
                               >
                                 {o.status}
                               </span>
                             ) : (
                               <Select
                                 value={o.status}
-                                onValueChange={(value) =>
-                                  handleStatusUpdate(o.id, value)
-                                }
+                                onValueChange={(value) => handleStatusUpdate(o.id, value)}
                                 disabled={!!statusUpdatingIds[o.id]}
                               >
                                 <SelectTrigger
-                                  className={`h-8 w-[140px] text-xs font-medium border ${statusStyle}`}
+                                  className={cn(
+                                    "h-9 w-full text-xs font-medium",
+                                    statusStyle,
+                                  )}
                                 >
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {allowedStatusOptions.map((status) => (
-                                    <SelectItem
-                                      key={status}
-                                      value={status}
-                                      className="text-sm"
-                                    >
+                                    <SelectItem key={status} value={status}>
                                       {status}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
                             )}
-                            {statusUpdatingIds[o.id] && (
-                              <span className="inline-flex items-center text-xs text-blue-600 mt-1">
-                                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                                Updating
+                            {isTerminal && (
+                              <span className="inline-flex items-center rounded border border-amber-200 bg-amber-100 px-2 py-1 text-[10px] font-bold uppercase text-amber-800">
+                                Terminal
                               </span>
                             )}
-                          </TableCell>
-                          <TableCell className="py-3 text-sm text-black text-center">
-                            {o.items?.length || 0}
-                          </TableCell>
-                          <TableCell className="py-3">
-                            <div className="flex flex-col">
-                              <span className="text-sm text-black">
-                                {ts.toLocaleDateString()}
-                              </span>
-                              <span className="text-xs text-gray-500">
-                                {ts.toLocaleTimeString([], {
-                                  hour: "2-digit",
-                                  minute: "2-digit",
-                                })}
-                              </span>
-                            </div>
-                          </TableCell>
-                          <TableCell className="px-4 py-3 text-right">
-                            <div className="flex items-center justify-end gap-1.5">
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => viewOrderDetail(o.id)}
-                                className="h-8 text-xs text-black"
-                              >
-                                <Eye className="w-3.5 h-3.5 mr-1" /> View
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() => confirmDelete(o.id)}
-                                className="h-8 w-8 p-0 text-red-600 hover:text-red-700 hover:bg-red-50"
-                                disabled={!!statusUpdatingIds[o.id]}
-                              >
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })}
-                  </TableBody>
-                </Table>
+                          </div>
+                          {statusUpdatingIds[o.id] && (
+                            <span className="mt-2 inline-flex items-center text-xs text-blue-600">
+                              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+                              Updating...
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="mt-4 flex gap-2">
+                          <Button
+                            variant="outline"
+                            className="flex-1"
+                            onClick={() => viewOrderDetail(o.id)}
+                          >
+                            <Eye className="mr-2 h-4 w-4" />
+                            View
+                          </Button>
+                          <Button
+                            variant="outline"
+                            className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                            onClick={() => confirmDelete(o.id)}
+                            disabled={!!statusUpdatingIds[o.id]}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
               </div>
 
               {/* Pagination */}

@@ -505,6 +505,8 @@ model Sale {
   user             User?         @relation(fields: [created_by], references: [id])
   sale_items       SaleItem[]
   original_sale_id String?
+  original_sale    Sale?         @relation("SaleReturnLink", fields: [original_sale_id], references: [id])
+  return_sales     Sale[]        @relation("SaleReturnLink")
   created_at       DateTime      @default(now())
   updated_at       DateTime      @default(now()) @updatedAt
 

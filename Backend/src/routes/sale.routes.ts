@@ -4,6 +4,7 @@ import { validate } from "../middleware/validation.middleware";
 import {
     getSalesController,
     getSalesForReturnsController,
+    getReturnTransactionsController,
     getSaleByIdController,
     createSaleController,
     refundSaleController,
@@ -41,6 +42,7 @@ router.use(authorize(saleManagementRoles));
 router.get("/recent", authorize(metadataRoles), getRecentSaleItemProductNameAndPrice);
 router.get("/today", getTodaySalesController);
 router.get("/for-returns", getSalesForReturnsController);
+router.get("/return-transactions", getReturnTransactionsController);
 router.get("/", getSalesController);
 router.get("/:saleId", getSaleByIdController);
 router.post("/", validate(createSaleSchema), createSaleController);

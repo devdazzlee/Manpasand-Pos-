@@ -100,7 +100,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
       case "sizes":
         return <Sizes />;
       case "returns":
-        return <Returns />;
+        return <Returns initialTab="returns" hideModuleTabs />;
+      case "exchanges":
+        return <Returns initialTab="exchanges" hideModuleTabs />;
       case "reservations":
         return <Reservations />;
       case "layaway-holds":

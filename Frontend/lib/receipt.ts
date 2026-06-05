@@ -2,9 +2,10 @@
 // receipt looks identical across the app (HTML preview + WhatsApp PDF +
 // browser print).
 
-import { type ReceiptData } from "@/lib/print-server";
+import { type ReceiptData, type ReceiptItem, type ReceiptSection, type ReceiptSummaryLine } from "@/lib/print-server";
+import { parseReturnNotes, formatSettlementLabel } from "@/components/returns/utils";
 
-export type { ReceiptData };
+export type { ReceiptData, ReceiptItem, ReceiptSection, ReceiptSummaryLine };
 
 // Loose Sale shape — both Sale (sales-history) and ReturnItem (returns)
 // satisfy this. Anything optional is `?` so callers don't have to fill in
@@ -29,6 +30,9 @@ export interface ReceiptSourceSale {
     line_total?: string | number | null;
     item_type?: string | null;
   }> | null;
+  original_sale_id?: string | null;
+  original_sale?: { sale_number?: string | null; total_amount?: string | number | null } | null;
+  status?: string | null;
 }
 
 export interface BranchInfoFallback {
@@ -52,6 +56,12 @@ const num = (v: any): number => {
   if (typeof v === "string") return parseFloat(v) || 0;
   return 0;
 };
+
+const money = (n: number) =>
+  Number(n || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
 
 export const prepareReceiptDataFromSale = (
   sale: ReceiptSourceSale,
@@ -115,27 +125,188 @@ export const prepareReceiptDataFromSale = (
   };
 };
 
-const money = (n: number) =>
-  Number(n || 0).toLocaleString("en-US", {
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
+const mapReceiptLineItem = (
+  item: NonNullable<ReceiptSourceSale["sale_items"]>[number],
+  lineKind: "RETURN" | "EXCHANGE",
+): ReceiptItem => {
+  const qty = Math.abs(num(item.quantity) || 1);
+  const unitPrice = Math.abs(num(item.unit_price));
+  const lineTotal = Math.abs(num(item.line_total)) || unitPrice * qty;
+  const unitLabel =
+    (item.product as any)?.unit?.name ||
+    (item.product as any)?.unit_name ||
+    (item as any)?.unit?.name ||
+    (item as any)?.unit_name ||
+    (item as any)?.unitName ||
+    undefined;
+
+  return {
+    name: item.product?.name || "Unnamed Item",
+    quantity: qty,
+    price: unitPrice,
+    unit: unitLabel,
+    lineTotal,
+    isCredit: lineKind === "RETURN",
+  };
+};
+
+/** Build receipt data for return / refund / exchange transactions (not regular sales). */
+export const prepareReturnReceiptDataFromSale = (
+  sale: ReceiptSourceSale,
+  branch: BranchInfoFallback,
+  opts?: { transactionLabel?: string; originalSaleNumber?: string },
+): ReceiptData => {
+  const { meta, userNotes } = parseReturnNotes(sale.notes);
+  const allItems = sale.sale_items || [];
+
+  const transactionType: "RETURN" | "EXCHANGE" =
+    meta.transactionType ||
+    (sale.status === "EXCHANGED" ? "EXCHANGE" : "RETURN");
+
+  const returnLines = allItems.filter(
+    (item) =>
+      item.item_type === "RETURN" || (item.item_type !== "EXCHANGE" && num(item.quantity) < 0),
+  );
+  const exchangeLines = allItems.filter((item) => item.item_type === "EXCHANGE");
+
+  const itemSections: ReceiptSection[] = [];
+  if (returnLines.length > 0) {
+    itemSections.push({
+      title: "RETURNED ITEMS",
+      items: returnLines.map((item) => mapReceiptLineItem(item, "RETURN")),
+    });
+  }
+  if (exchangeLines.length > 0) {
+    itemSections.push({
+      title: "NEW / REPLACEMENT ITEMS",
+      items: exchangeLines.map((item) => mapReceiptLineItem(item, "EXCHANGE")),
+    });
+  }
+
+  const returnValue =
+    meta.returnValue ??
+    returnLines.reduce((sum, item) => sum + Math.abs(num(item.line_total)), 0);
+  const exchangeValue =
+    meta.exchangeValue ??
+    exchangeLines.reduce((sum, item) => sum + Math.abs(num(item.line_total)), 0);
+  const balanceDue = meta.balanceDue ?? num(sale.total_amount);
+
+  const summaryLines: ReceiptSummaryLine[] = [];
+
+  const originalOrderAmount =
+    sale.original_sale?.total_amount != null
+      ? Math.abs(num(sale.original_sale.total_amount))
+      : undefined;
+
+  if (originalOrderAmount && originalOrderAmount > 0) {
+    summaryLines.push({
+      label: "Original order amount",
+      value: money(originalOrderAmount),
+    });
+  }
+
+  if (returnValue > 0) {
+    summaryLines.push({
+      label: "Returned items value",
+      value: money(returnValue),
+    });
+  }
+
+  if (transactionType === "EXCHANGE") {
+    if (exchangeValue > 0) {
+      summaryLines.push({
+        label: "Replacement items value",
+        value: money(exchangeValue),
+      });
+    }
+    if (balanceDue > 0.005) {
+      summaryLines.push({
+        label: "Additional Amount to Collect",
+        value: money(balanceDue),
+        emphasis: true,
+      });
+    } else if (balanceDue < -0.005) {
+      summaryLines.push({
+        label: "Refund to Customer",
+        value: money(Math.abs(balanceDue)),
+        emphasis: true,
+      });
+    } else {
+      summaryLines.push({ label: "Final balance", value: "No Difference", emphasis: true });
+    }
+  } else {
+    summaryLines.push({
+      label: "Refund to Customer",
+      value: money(returnValue),
+      emphasis: true,
+    });
+  }
+
+  summaryLines.push({
+    label: transactionType === "EXCHANGE" ? "Settlement" : "Refund method",
+    value: formatSettlementLabel(meta, sale.payment_method),
   });
 
-export const generateReceiptHtml = (data: ReceiptData, logoDataUri = ""): string => {
-  const subtotal = Number(data.subtotal || 0);
-  const discount = Number(data.discount || 0);
-  const taxPercent = data.taxPercent || 0;
-  const tax = taxPercent > 0 ? (subtotal - discount) * (taxPercent / 100) : 0;
-  const total = data.total ?? Math.max(0, subtotal - discount + tax);
-  const paid = data.amountPaid ?? total;
-  const change = data.changeAmount ?? 0;
-  const timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
+  if (meta.returnScope) {
+    summaryLines.push({
+      label: transactionType === "EXCHANGE" ? "Exchange type" : "Return type",
+      value: meta.returnScope === "FULL" ? "Full order" : "Partial",
+    });
+  }
 
-  const itemsHtml = (data.items || [])
+  const storeName = sale.branch?.name || branch.name || "MANPASAND GENERAL STORE";
+  const storeAddress = sale.branch?.address || branch.address || "";
+  const originalSaleNumber =
+    opts?.originalSaleNumber ||
+    sale.original_sale?.sale_number ||
+    undefined;
+
+  const flatItems = itemSections.flatMap((section) => section.items);
+
+  return {
+    storeName,
+    tagline: "Quality • Service • Value",
+    address: storeAddress,
+    documentTitle:
+      transactionType === "EXCHANGE" ? "EXCHANGE RECEIPT" : "RETURN / REFUND RECEIPT",
+    transactionId: opts?.transactionLabel || sale.sale_number || sale.id || "",
+    originalSaleNumber,
+    timestamp: sale.created_at || sale.sale_date || new Date().toISOString(),
+    cashier: "Walk-in",
+    customerType: sale.customer?.name || sale.customer?.email || "Walk-in",
+    items: flatItems,
+    itemSections,
+    summaryLines,
+    subtotal: returnValue,
+    total: Math.abs(balanceDue) || returnValue,
+    paymentMethod: sale.payment_method || "CASH",
+    amountPaid:
+      transactionType === "EXCHANGE" && balanceDue > 0 ? balanceDue : undefined,
+    changeAmount: 0,
+    promo: userNotes || undefined,
+    thankYouMessage:
+      transactionType === "EXCHANGE"
+        ? "Exchange completed. Thank you!"
+        : "Return processed. Thank you!",
+    footerMessage: "Visit us again soon!",
+  };
+};
+
+const formatItemRate = (item: ReceiptItem): string => {
+  const lineAmount =
+    item.lineTotal != null
+      ? Math.abs(item.lineTotal)
+      : Math.abs(Number(item.price || 0) * Number(item.quantity || 0));
+  return item.isCredit ? `- ${money(lineAmount)}` : money(lineAmount);
+};
+
+const renderReceiptItemRowsHtml = (items: ReceiptItem[]): string =>
+  items
     .map((item) => {
       const name = String(item.name || "");
-      const qty = (item.quantity ?? 0).toString() + (item.unit ? ` ${item.unit}` : "");
-      const rate = money(Number(item.price || 0) * Number(item.quantity || 0));
+      const qty =
+        (item.quantity ?? 0).toString() + (item.unit ? ` ${item.unit}` : "");
+      const rate = formatItemRate(item);
       return `<div class="item-row">
   <div class="item-name">${name}</div>
   <div class="item-qty">${qty}</div>
@@ -144,8 +315,68 @@ export const generateReceiptHtml = (data: ReceiptData, logoDataUri = ""): string
     })
     .join("");
 
-  const promoHtml = data.promo ? `<div class="promo">Promo: ${data.promo}</div>` : "";
+const renderReceiptSectionsHtml = (data: ReceiptData): string => {
+  if (data.itemSections && data.itemSections.length > 0) {
+    return data.itemSections
+      .map(
+        (section) => `
+<div class="section-title">${section.title}</div>
+${renderReceiptItemRowsHtml(section.items)}`,
+      )
+      .join("");
+  }
+  return renderReceiptItemRowsHtml(data.items || []);
+};
+
+const renderReceiptSummaryHtml = (data: ReceiptData): string => {
+  if (data.summaryLines && data.summaryLines.length > 0) {
+    return data.summaryLines
+      .map(
+        (line) =>
+          `<div class="row-lr${line.emphasis ? " total-row" : ""}"><span class="label">${line.label}</span><span class="value">${line.value}</span></div>`,
+      )
+      .join("");
+  }
+
+  const subtotal = Number(data.subtotal || 0);
+  const discount = Number(data.discount || 0);
+  const taxPercent = data.taxPercent || 0;
+  const tax = taxPercent > 0 ? (subtotal - discount) * (taxPercent / 100) : 0;
+  const total = data.total ?? Math.max(0, subtotal - discount + tax);
+  const paid = data.amountPaid ?? total;
+  const change = data.changeAmount ?? 0;
+
+  return `
+<div class="row-lr"><span class="label">Subtotal</span><span class="value">PKR ${money(subtotal)}</span></div>
+${
+  discount > 0
+    ? `<div class="row-lr"><span class="label">Discount</span><span class="value">- PKR ${money(discount)}</span></div>`
+    : ""
+}
+<div class="row-lr total-row"><span class="label">Grand Total</span><span class="value">PKR ${money(total)}</span></div>
+<div class="divider"></div>
+<div class="row-lr"><span class="label">Payment</span><span class="value">${(data.paymentMethod || "CASH").toUpperCase()}</span></div>
+${
+  paid !== undefined && paid !== null
+    ? `<div class="row-lr"><span class="label">Paid</span><span class="value">PKR ${money(paid)}</span></div>`
+    : ""
+}
+${
+  change > 0
+    ? `<div class="row-lr"><span class="label">Change</span><span class="value">PKR ${money(change)}</span></div>`
+    : ""
+}`;
+};
+
+export const generateReceiptHtml = (data: ReceiptData, logoDataUri = ""): string => {
+  const timestamp = data.timestamp ? new Date(data.timestamp) : new Date();
+  const itemsHtml = renderReceiptSectionsHtml(data);
+  const summaryHtml = renderReceiptSummaryHtml(data);
+  const promoHtml = data.promo ? `<div class="promo">Notes: ${data.promo}</div>` : "";
   const branchLine = buildReceiptBranchLine(data.storeName, data.address);
+  const docTitleHtml = data.documentTitle
+    ? `<div class="doc-title">${data.documentTitle}</div>`
+    : "";
   const footerLines = [
     "Branch: 021 34892110",
     "Delivery Hotline WhatsApp: +92 342 3344040",
@@ -165,11 +396,17 @@ export const generateReceiptHtml = (data: ReceiptData, logoDataUri = ""): string
 </div>
 <div class="store-name">${branchLine}</div>
 <div class="tagline">${data.tagline || "Quality - Service - Value"}</div>
+${docTitleHtml}
 ${data.strn ? `<div class="strn">${data.strn}</div>` : ""}
 
 <div class="divider"></div>
 
 <div class="row-lr"><span class="label">Receipt #</span><span class="value">${data.transactionId}</span></div>
+${
+  data.originalSaleNumber
+    ? `<div class="row-lr"><span class="label">Original sale</span><span class="value">${data.originalSaleNumber}</span></div>`
+    : ""
+}
 <div class="row-lr"><span class="label">Date</span><span class="value">${timestamp.toLocaleDateString()} ${timestamp.toLocaleTimeString()}</span></div>
 <div class="row-lr"><span class="label">Cashier</span><span class="value">${data.cashier || "Walk-in"}</span></div>
 <div class="row-lr"><span class="label">Customer</span><span class="value">${data.customerType || "Walk-in"}</span></div>
@@ -179,7 +416,7 @@ ${data.strn ? `<div class="strn">${data.strn}</div>` : ""}
 <div class="items-header">
   <div class="item-col">ITEM</div>
   <div class="qty-col">QTY</div>
-  <div class="rate-col">RATE</div>
+  <div class="rate-col">AMOUNT</div>
 </div>
 <div class="items-divider"></div>
 
@@ -189,27 +426,7 @@ ${itemsHtml}
 
 <div class="divider"></div>
 
-<div class="row-lr"><span class="label">Subtotal</span><span class="value">PKR ${money(subtotal)}</span></div>
-${
-  discount > 0
-    ? `<div class="row-lr"><span class="label">Discount</span><span class="value">- PKR ${money(discount)}</span></div>`
-    : ""
-}
-<div class="row-lr total-row"><span class="label">Grand Total</span><span class="value">PKR ${money(total)}</span></div>
-
-<div class="divider"></div>
-
-<div class="row-lr"><span class="label">Payment</span><span class="value">${(data.paymentMethod || "CASH").toUpperCase()}</span></div>
-${
-  paid !== undefined && paid !== null
-    ? `<div class="row-lr"><span class="label">Paid</span><span class="value">PKR ${money(paid)}</span></div>`
-    : ""
-}
-${
-  change > 0
-    ? `<div class="row-lr"><span class="label">Change</span><span class="value">PKR ${money(change)}</span></div>`
-    : ""
-}
+${summaryHtml}
 
 ${promoHtml}
 
@@ -315,6 +532,14 @@ body { display: block; width: 100%; box-sizing: border-box; padding: 0; }
   font-size: 9.4pt; text-align: center; margin: 2mm 0;
   color: #000000; font-weight: bold; line-height: 1.3; word-break: break-word;
 }
+.doc-title {
+  font-size: 11pt; text-align: center; margin: 2mm 0 1mm 0;
+  font-weight: bold; letter-spacing: 0.5px;
+}
+.section-title {
+  font-size: 9.8pt; font-weight: bold; margin: 3mm 0 1.5mm 0;
+  text-transform: uppercase; letter-spacing: 0.3px;
+}
 .powered-by {
   font-size: 8.5pt; text-align: center; margin: 3mm 0 1mm 0;
   color: #000000; font-weight: bold; line-height: 1.2;
@@ -417,10 +642,16 @@ export const buildReceiptPdfBlob = async (
   if (receiptData.storeName) writeCentered(receiptData.storeName, { bold: true, size: 11 });
   if (receiptData.address) writeCentered(receiptData.address, { size: 8.5 });
   writeCentered(receiptData.tagline || "Quality - Service - Value", { size: 8 });
+  if (receiptData.documentTitle) {
+    writeCentered(receiptData.documentTitle, { bold: true, size: 10 });
+  }
   hr();
 
   const when = receiptData.timestamp ? new Date(receiptData.timestamp) : new Date();
   writeRow("Receipt #", String(receiptData.transactionId));
+  if (receiptData.originalSaleNumber) {
+    writeRow("Original sale", String(receiptData.originalSaleNumber));
+  }
   writeRow("Date", `${when.toLocaleDateString()} ${when.toLocaleTimeString()}`);
   writeRow("Cashier", receiptData.cashier || "Walk-in");
   writeRow("Customer", receiptData.customerType || "Walk-in");
@@ -434,43 +665,69 @@ export const buildReceiptPdfBlob = async (
   doc.setFontSize(8.5);
   doc.text("ITEM", left, y);
   doc.text("QTY", qtyAnchor, y, { align: "right" });
-  doc.text("RATE", rateAnchor, y, { align: "right" });
+  doc.text("AMOUNT", rateAnchor, y, { align: "right" });
   y += 2;
   doc.setLineWidth(0.3);
   doc.line(left, y, right, y);
   y += 5;
 
-  doc.setFont("helvetica", "normal");
-  doc.setFontSize(8.5);
-  const rowGap = 4.5;
-  for (const it of receiptData.items || []) {
-    const name = String(it.name || "");
-    const qty = `${it.quantity}${it.unit ? ` ${it.unit}` : ""}`;
-    const rate = money(Number(it.price || 0) * Number(it.quantity || 0));
-    const nameLines: string[] = doc.splitTextToSize(name, colItemMaxWidth);
-    doc.text(nameLines, left, y);
-    doc.text(qty, qtyAnchor, y, { align: "right" });
-    doc.text(rate, rateAnchor, y, { align: "right" });
-    y += rowGap * Math.max(1, nameLines.length);
+  const writeItemRows = (items: ReceiptItem[]) => {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    const rowGap = 4.5;
+    for (const it of items) {
+      const name = String(it.name || "");
+      const qty = `${it.quantity}${it.unit ? ` ${it.unit}` : ""}`;
+      const rate = formatItemRate(it);
+      const nameLines: string[] = doc.splitTextToSize(name, colItemMaxWidth);
+      doc.text(nameLines, left, y);
+      doc.text(qty, qtyAnchor, y, { align: "right" });
+      doc.text(rate, rateAnchor, y, { align: "right" });
+      y += rowGap * Math.max(1, nameLines.length);
+    }
+  };
+
+  if (receiptData.itemSections && receiptData.itemSections.length > 0) {
+    for (const section of receiptData.itemSections) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(8.5);
+      doc.text(section.title, left, y);
+      y += lineGap;
+      writeItemRows(section.items);
+      y += 1;
+    }
+  } else {
+    writeItemRows(receiptData.items || []);
   }
+
   y += 1;
   hr();
 
-  writeRow("Subtotal", `PKR ${money(receiptData.subtotal || 0)}`);
-  if (receiptData.discount && Number(receiptData.discount) > 0) {
-    writeRow("Discount", `- PKR ${money(receiptData.discount)}`);
+  if (receiptData.summaryLines && receiptData.summaryLines.length > 0) {
+    for (const line of receiptData.summaryLines) {
+      writeRow(line.label, line.value, line.emphasis ? { bold: true, size: 10 } : undefined);
+    }
+  } else {
+    writeRow("Subtotal", `PKR ${money(receiptData.subtotal || 0)}`);
+    if (receiptData.discount && Number(receiptData.discount) > 0) {
+      writeRow("Discount", `- PKR ${money(receiptData.discount)}`);
+    }
+    writeRow("Grand Total", `PKR ${money(receiptData.total ?? 0)}`, { bold: true, size: 10 });
+    hr();
+    writeRow("Payment", String(receiptData.paymentMethod || "CASH").toUpperCase());
+    if (receiptData.amountPaid != null) {
+      writeRow("Paid", `PKR ${money(receiptData.amountPaid)}`);
+    }
+    if (receiptData.changeAmount && receiptData.changeAmount > 0) {
+      writeRow("Change", `PKR ${money(receiptData.changeAmount)}`);
+    }
   }
-  writeRow("Grand Total", `PKR ${money(receiptData.total ?? 0)}`, { bold: true, size: 10 });
   hr();
 
-  writeRow("Payment", String(receiptData.paymentMethod || "CASH").toUpperCase());
-  if (receiptData.amountPaid != null) {
-    writeRow("Paid", `PKR ${money(receiptData.amountPaid)}`);
+  if (receiptData.promo) {
+    writeCentered(`Notes: ${receiptData.promo}`, { size: 8 });
+    hr();
   }
-  if (receiptData.changeAmount && receiptData.changeAmount > 0) {
-    writeRow("Change", `PKR ${money(receiptData.changeAmount)}`);
-  }
-  hr();
 
   writeCentered(receiptData.thankYouMessage || "Thank you for shopping!", { bold: true, size: 9.5 });
   writeCentered("Branch: 021 34892110", { size: 8 });

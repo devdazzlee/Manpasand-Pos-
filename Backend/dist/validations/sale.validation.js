@@ -16,13 +16,37 @@ const createSaleSchema = zod_1.z.object({
     }),
 });
 exports.createSaleSchema = createSaleSchema;
+const returnReasonSchema = zod_1.z.enum([
+    "DAMAGED",
+    "DEFECTIVE",
+    "WRONG_ITEM",
+    "CUSTOMER_CHANGED_MIND",
+    "MISSING_PARTS",
+    "OTHER",
+]);
+const refundMethodSchema = zod_1.z.enum([
+    "original_payment",
+    "cash",
+    "card",
+    "bank_transfer",
+    "store_credit",
+    "no_refund",
+]);
+const dispositionSchema = zod_1.z.enum(["RESTOCK", "DAMAGED", "UNSELLABLE"]);
 const refundSaleSchema = zod_1.z.object({
     body: zod_1.z.object({
         customerId: zod_1.z.string().optional(),
+        branchId: zod_1.z.string().optional(),
+        transactionType: zod_1.z.enum(["RETURN", "EXCHANGE"]).optional(),
+        returnScope: zod_1.z.enum(["FULL", "PARTIAL"]).optional(),
+        returnReason: returnReasonSchema.optional(),
+        refundMethod: refundMethodSchema.optional(),
+        exchangeBalanceAction: zod_1.z.enum(["collect", "refund", "store_credit"]).optional(),
         returnedItems: zod_1.z
             .array(zod_1.z.object({
             productId: zod_1.z.string().min(1, "Product ID is required"),
             quantity: zod_1.z.number().positive("Quantity must be positive"),
+            disposition: dispositionSchema.optional().default("RESTOCK"),
         }))
             .optional()
             .default([]),
@@ -36,11 +60,19 @@ const refundSaleSchema = zod_1.z.object({
             .default([]),
         notes: zod_1.z.string().optional(),
     }).refine((data) => {
-        // Ensure at least one item is being returned or exchanged
         return data.returnedItems.length > 0 || data.exchangedItems.length > 0;
     }, {
         message: "At least one item must be returned or exchanged",
-        path: ["returnedItems"], // This will show the error on the returnedItems field
+        path: ["returnedItems"],
+    }).refine((data) => {
+        const isExchange = data.exchangedItems.length > 0;
+        if (!isExchange && !data.refundMethod) {
+            return false;
+        }
+        return true;
+    }, {
+        message: "Refund method is required for returns",
+        path: ["refundMethod"],
     }),
 });
 exports.refundSaleSchema = refundSaleSchema;

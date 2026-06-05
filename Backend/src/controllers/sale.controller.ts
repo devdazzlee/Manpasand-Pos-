@@ -122,12 +122,20 @@ const createSaleController = asyncHandler(async (req: Request, res: Response) =>
 });
 
 const refundSaleController = asyncHandler(async (req: Request, res: Response) => {
-    const { customerId, returnedItems = [], exchangedItems = [], notes, branchId: bodyBranchId } = req.body;
+    const {
+        customerId,
+        returnedItems = [],
+        exchangedItems = [],
+        notes,
+        branchId: bodyBranchId,
+        transactionType,
+        returnScope,
+        returnReason,
+        refundMethod,
+        exchangeBalanceAction,
+    } = req.body;
     const originalSaleId = req.params.saleId;
     const createdBy = req.user!.id;
-    // Admin/super-admin users have no `branch_id` on their JWT, so we let
-    // them either pass `branchId` in the body or fall back to the original
-    // sale's branch (resolved inside the service).
     const branchId: string | undefined =
         (typeof bodyBranchId === 'string' && bodyBranchId) ||
         req.user?.branch_id ||
@@ -141,9 +149,21 @@ const refundSaleController = asyncHandler(async (req: Request, res: Response) =>
         exchangedItems,
         notes,
         createdBy,
+        transactionType,
+        returnScope,
+        returnReason,
+        refundMethod,
+        exchangeBalanceAction,
     });
 
     new ApiResponse(sale, "Sale refunded/exchanged successfully").send(res);
+});
+
+const getReturnTransactionsController = asyncHandler(async (req: Request, res: Response) => {
+    const branchId = resolveBranchId(req);
+    const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+    const transactions = await saleService.getReturnTransactions({ branchId, search });
+    new ApiResponse(transactions, 'Return and exchange transactions fetched').send(res);
 });
 
 const getTodaySalesController = asyncHandler(async (req: Request, res: Response) => {
@@ -214,6 +234,7 @@ const deleteHoldSaleController = asyncHandler(async (req: Request, res: Response
 export {
     getSalesController,
     getSalesForReturnsController,
+    getReturnTransactionsController,
     getSaleByIdController,
     createSaleController,
     refundSaleController,

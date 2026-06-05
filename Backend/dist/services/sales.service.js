@@ -79,6 +79,47 @@ class SaleService {
             },
         };
     }
+    async getAlreadyReturnedQuantities(originalSaleId) {
+        const prior = await client_2.prisma.sale.findMany({
+            where: { original_sale_id: originalSaleId },
+            include: {
+                sale_items: { where: { item_type: client_1.SaleItemType.RETURN } },
+            },
+        });
+        const map = new Map();
+        for (const sale of prior) {
+            for (const item of sale.sale_items) {
+                const qty = Math.abs(item.quantity.toNumber());
+                map.set(item.product_id, (map.get(item.product_id) || 0) + qty);
+            }
+        }
+        return map;
+    }
+    async getReturnTransactions({ branchId, search, }) {
+        const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
+        return client_2.prisma.sale.findMany({
+            where: {
+                original_sale_id: { not: null },
+                ...(branchId ? { branch_id: branchId } : {}),
+                ...(normalizedSearch
+                    ? {
+                        OR: [
+                            { sale_number: { contains: normalizedSearch, mode: 'insensitive' } },
+                            { customer: { name: { contains: normalizedSearch, mode: 'insensitive' } } },
+                            { customer: { email: { contains: normalizedSearch, mode: 'insensitive' } } },
+                        ],
+                    }
+                    : {}),
+            },
+            include: {
+                sale_items: { include: { product: true } },
+                customer: true,
+                original_sale: { select: { sale_number: true, total_amount: true } },
+            },
+            orderBy: { sale_date: 'desc' },
+            take: 200,
+        });
+    }
     async getSalesForReturns({ branchId, search }) {
         const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
         return client_2.prisma.sale.findMany({
@@ -97,6 +138,7 @@ class SaleService {
             },
             include: {
                 sale_items: {
+                    where: { item_type: client_1.SaleItemType.ORIGINAL },
                     include: { product: true },
                 },
                 customer: true,
@@ -479,37 +521,36 @@ class SaleService {
     //         return sale;
     //     });
     // }
-    async createExchangeOrReturnSale({ originalSaleId, branchId, customerId, returnedItems, exchangedItems, notes, createdBy, }) {
+    async createExchangeOrReturnSale({ originalSaleId, branchId, customerId, returnedItems, exchangedItems, notes, createdBy, transactionType, returnScope, returnReason, refundMethod, exchangeBalanceAction, }) {
         if (!returnedItems.length && !exchangedItems.length) {
             throw new apiError_1.AppError(400, 'No return or exchange items provided');
         }
+        const isExchange = exchangedItems.length > 0;
+        const resolvedType = transactionType || (isExchange ? 'EXCHANGE' : 'RETURN');
         const uniqueProductIds = [...new Set([
                 ...returnedItems.map((item) => item.productId),
                 ...exchangedItems.map((item) => item.productId),
             ])];
         const uniqueExchangeProductIds = [...new Set(exchangedItems.map((item) => item.productId))];
-        // Step 1 — load the original sale first so we can derive the branch when
-        // the caller didn't (or couldn't) provide one. We MUST resolve a real
-        // branch_id before touching prisma.stock.findMany, which rejects null.
         const originalSale = await client_2.prisma.sale.findUnique({
             where: { id: originalSaleId },
-            include: { sale_items: true },
+            include: {
+                sale_items: { where: { item_type: client_1.SaleItemType.ORIGINAL } },
+            },
         });
         if (!originalSale)
             throw new apiError_1.AppError(400, 'Original sale not found');
-        // Guard against duplicate refunds/exchanges. Without this check the same
-        // sale can be refunded N times — the UI's "Ready for return" panel keeps
-        // showing it because the original sale stays COMPLETED, and stock keeps
-        // getting re-credited on every retry.
-        if (originalSale.status === client_1.SaleStatus.REFUNDED || originalSale.status === client_1.SaleStatus.EXCHANGED) {
-            throw new apiError_1.AppError(400, `This sale has already been ${originalSale.status === client_1.SaleStatus.REFUNDED ? 'refunded' : 'exchanged'}.`);
+        if (originalSale.status === client_1.SaleStatus.CANCELLED) {
+            throw new apiError_1.AppError(400, 'Cancelled sales cannot be returned');
         }
+        if (originalSale.status === client_1.SaleStatus.PENDING) {
+            throw new apiError_1.AppError(400, 'Pending sales cannot be returned');
+        }
+        const alreadyReturned = await this.getAlreadyReturnedQuantities(originalSaleId);
         const resolvedBranchId = (branchId && branchId.trim()) || originalSale.branch_id || null;
         if (!resolvedBranchId) {
             throw new apiError_1.AppError(400, 'Branch is required for a refund/exchange. Provide branchId in the request, or assign a branch to the original sale.');
         }
-        // Step 2 — now that branchId is guaranteed non-null, fan out the
-        // remaining lookups in parallel.
         const [branch, customer, exchangeProducts, stocks] = await Promise.all([
             client_2.prisma.branch.findUnique({
                 where: { id: resolvedBranchId },
@@ -524,7 +565,7 @@ class SaleService {
             uniqueExchangeProductIds.length
                 ? client_2.prisma.product.findMany({
                     where: { id: { in: uniqueExchangeProductIds } },
-                    select: { id: true },
+                    select: { id: true, name: true },
                 })
                 : Promise.resolve([]),
             uniqueProductIds.length
@@ -550,17 +591,21 @@ class SaleService {
             if (!originalItem) {
                 throw new apiError_1.AppError(400, `Product ${ret.productId} not found in original sale`);
             }
-            if (ret.quantity > originalItem.quantity.toNumber()) {
-                throw new apiError_1.AppError(400, `Return quantity (${ret.quantity}) exceeds original sale quantity (${originalItem.quantity}) for product ${ret.productId}`);
+            const purchased = originalItem.quantity.toNumber();
+            const prior = alreadyReturned.get(ret.productId) || 0;
+            const remaining = purchased - prior;
+            if (ret.quantity > remaining) {
+                throw new apiError_1.AppError(400, `Return quantity (${ret.quantity}) exceeds remaining returnable quantity (${remaining}) for this product`);
             }
         }
+        const stockQuantityMap = new Map(stocks.map((stock) => [stock.product_id, new client_1.Prisma.Decimal(stock.current_quantity)]));
         const saleItems = [];
         const movementRows = [];
         const stockNetChanges = new Map();
-        const stockQuantityMap = new Map(stocks.map((stock) => [stock.product_id, new client_1.Prisma.Decimal(stock.current_quantity)]));
         let total = new client_1.Prisma.Decimal(0);
-        const hasReturn = returnedItems.length > 0;
-        const hasExchange = exchangedItems.length > 0;
+        let returnValue = new client_1.Prisma.Decimal(0);
+        let exchangeValue = new client_1.Prisma.Decimal(0);
+        const itemDispositions = {};
         const recordMovement = ({ productId, change, movementType, referenceType, notes: movementNote, }) => {
             const previousQty = stockQuantityMap.get(productId) ?? new client_1.Prisma.Decimal(0);
             const newQty = previousQty.plus(change);
@@ -581,16 +626,21 @@ class SaleService {
             if (!originalItem) {
                 throw new apiError_1.AppError(400, `Product ${ret.productId} not in original sale`);
             }
+            const disposition = ret.disposition || 'RESTOCK';
+            itemDispositions[ret.productId] = disposition;
             const returnQuantity = new client_1.Prisma.Decimal(ret.quantity);
             const lineTotal = new client_1.Prisma.Decimal(originalItem.unit_price).mul(returnQuantity).mul(-1);
             total = total.plus(lineTotal);
-            recordMovement({
-                productId: ret.productId,
-                change: returnQuantity,
-                movementType: client_1.StockMovementType.RETURN,
-                referenceType: 'return',
-                notes: 'Returned by customer',
-            });
+            returnValue = returnValue.plus(lineTotal.abs());
+            if (disposition === 'RESTOCK') {
+                recordMovement({
+                    productId: ret.productId,
+                    change: returnQuantity,
+                    movementType: client_1.StockMovementType.RETURN,
+                    referenceType: resolvedType === 'EXCHANGE' ? 'exchange' : 'return',
+                    notes: `Returned by customer (${disposition.toLowerCase()})`,
+                });
+            }
             saleItems.push({
                 product_id: ret.productId,
                 quantity: returnQuantity.mul(-1),
@@ -609,6 +659,7 @@ class SaleService {
             const unitPrice = new client_1.Prisma.Decimal(item.price);
             const lineTotal = unitPrice.mul(exchangeQuantity);
             total = total.plus(lineTotal);
+            exchangeValue = exchangeValue.plus(lineTotal);
             recordMovement({
                 productId: item.productId,
                 change: exchangeQuantity.mul(-1),
@@ -628,47 +679,99 @@ class SaleService {
                 item_type: client_1.SaleItemType.EXCHANGE,
             });
         }
+        const balanceDue = total.toNumber();
+        const inferredScope = returnScope ||
+            (returnedItems.every((ret) => {
+                const originalItem = originalSale.sale_items.find((i) => i.product_id === ret.productId);
+                if (!originalItem)
+                    return false;
+                const prior = alreadyReturned.get(ret.productId) || 0;
+                return ret.quantity >= originalItem.quantity.toNumber() - prior;
+            }) &&
+                originalSale.sale_items.every((orig) => {
+                    const retQty = returnedItems.find((r) => r.productId === orig.product_id)?.quantity || 0;
+                    const prior = alreadyReturned.get(orig.product_id) || 0;
+                    return retQty >= orig.quantity.toNumber() - prior;
+                })
+                ? 'FULL'
+                : 'PARTIAL');
+        const mapRefundMethod = (method) => {
+            switch (method) {
+                case 'cash':
+                    return client_1.PaymentMethod.CASH;
+                case 'card':
+                    return client_1.PaymentMethod.CARD;
+                case 'bank_transfer':
+                    return client_1.PaymentMethod.BANK_TRANSFER;
+                case 'store_credit':
+                    return client_1.PaymentMethod.CREDIT;
+                case 'original_payment':
+                    return originalSale.payment_method;
+                case 'no_refund':
+                    return originalSale.payment_method;
+                default:
+                    return client_1.PaymentMethod.CASH;
+            }
+        };
+        const meta = {
+            transactionType: resolvedType,
+            returnScope: inferredScope,
+            returnReason: returnReason || null,
+            refundMethod: refundMethod || null,
+            exchangeBalanceAction: exchangeBalanceAction || null,
+            status: 'COMPLETED',
+            returnValue: returnValue.toNumber(),
+            exchangeValue: exchangeValue.toNumber(),
+            balanceDue,
+            itemDispositions,
+        };
+        const structuredNotes = `__META__${JSON.stringify(meta)}__ENDMETA__\n${notes || ''}`.trim();
+        const childStatus = resolvedType === 'EXCHANGE' ? client_1.SaleStatus.EXCHANGED : client_1.SaleStatus.REFUNDED;
         const ops = [];
         ops.push(client_2.prisma.sale.create({
             data: {
-                sale_number: `SALE-${Date.now()}`,
+                sale_number: `RTN-${Date.now()}`,
                 branch_id: resolvedBranchId,
-                customer_id: customerId,
+                customer_id: customerId || originalSale.customer_id,
                 original_sale_id: originalSaleId,
-                notes,
+                notes: structuredNotes,
                 subtotal: total,
                 total_amount: total,
-                payment_method: 'CASH',
+                payment_method: mapRefundMethod(refundMethod),
                 payment_status: 'PAID',
-                status: hasReturn && hasExchange
-                    ? client_1.SaleStatus.EXCHANGED
-                    : hasReturn
-                        ? client_1.SaleStatus.REFUNDED
-                        : client_1.SaleStatus.EXCHANGED,
+                status: childStatus,
                 created_by: createdBy,
                 sale_items: {
                     create: saleItems,
                 },
             },
             include: {
-                sale_items: true,
+                sale_items: { include: { product: true } },
+                customer: true,
+                original_sale: { select: { sale_number: true, total_amount: true } },
             },
         }));
-        // Flip the ORIGINAL sale into a terminal state so it stops appearing in
-        // "ready for return" lists and the duplicate-refund guard above can
-        // intercept any retry. This is what makes the UI eventually-consistent:
-        // - getSalesForReturns filters by status === COMPLETED → drops it.
-        // - The returns list filters by status in (REFUNDED, EXCHANGED) → includes it.
-        const originalNewStatus = hasReturn && hasExchange
-            ? client_1.SaleStatus.EXCHANGED
-            : hasReturn
-                ? client_1.SaleStatus.REFUNDED
-                : client_1.SaleStatus.EXCHANGED;
+        let allFullyReturned = true;
+        for (const orig of originalSale.sale_items) {
+            const retThisTxn = returnedItems.find((r) => r.productId === orig.product_id)?.quantity || 0;
+            const prior = alreadyReturned.get(orig.product_id) || 0;
+            if (prior + retThisTxn < orig.quantity.toNumber()) {
+                allFullyReturned = false;
+                break;
+            }
+        }
+        const originalNewStatus = allFullyReturned
+            ? resolvedType === 'EXCHANGE'
+                ? client_1.SaleStatus.EXCHANGED
+                : client_1.SaleStatus.REFUNDED
+            : client_1.SaleStatus.COMPLETED;
         ops.push(client_2.prisma.sale.update({
             where: { id: originalSaleId },
             data: { status: originalNewStatus },
         }));
         for (const [productId, quantityChange] of stockNetChanges.entries()) {
+            if (quantityChange.isZero())
+                continue;
             ops.push(client_2.prisma.stock.upsert({
                 where: {
                     product_id_branch_id: {

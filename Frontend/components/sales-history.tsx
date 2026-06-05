@@ -7,14 +7,6 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Popover,
   PopoverTrigger,
   PopoverContent,
@@ -34,6 +26,10 @@ import {
   ChevronLeft,
   ChevronRight,
   MessageCircle,
+  Receipt,
+  Building2,
+  User,
+  CreditCard,
 } from "lucide-react";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -42,6 +38,7 @@ import {
 } from "date-fns";
 import { isKioskMode } from "@/utils/kiosk-printing";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -1248,107 +1245,162 @@ ${aceHtml}
         </Popover>
       </div>
 
-      {/* Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Sales History ({totalSales})</CardTitle>
+      {/* Sales Grid */}
+      <Card className="border-gray-200 shadow-sm">
+        <CardHeader className="pb-4">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle>Sales History ({totalSales})</CardTitle>
+            <p className="text-sm text-gray-500">
+              Completed sales, returns, and refunds
+            </p>
+          </div>
         </CardHeader>
         <CardContent>
-          <div className="overflow-x-auto -mx-4 md:mx-0">
-            <div className="inline-block min-w-full align-middle">
-              <Table>
-                <TableHeader>
-                  <TableRow>
-                    <TableHead className="min-w-[120px]">Sale #</TableHead>
-                    <TableHead className="min-w-[120px]">Date</TableHead>
-                    <TableHead className="min-w-[150px]">Branch</TableHead>
-                    <TableHead className="min-w-[150px]">Customer</TableHead>
-                    <TableHead className="min-w-[100px]">Payment</TableHead>
-                    <TableHead className="min-w-[100px]">Total</TableHead>
-                    <TableHead className="min-w-[100px]">Type</TableHead>
-                    <TableHead className="min-w-[100px]">Status</TableHead>
-                    <TableHead className="min-w-[100px]">Actions</TableHead>
-                  </TableRow>
-                </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={9} className="text-center py-10">
-                      <PageLoader message="Loading sales..." />
-                    </TableCell>
-                  </TableRow>
-                ) : sales.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={9}
-                      className="text-center py-10 text-gray-500"
-                    >
-                      No sales found
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  sales.map((s) => {
-                    const saleType = getSaleType(s.total_amount);
-                    const isNegative = parseFloat(s.total_amount) < 0;
-
-                    return (
-                      <TableRow
-                        key={s.id}
-                        className={isNegative ? "bg-red-50" : ""}
-                      >
-                        <TableCell className="font-medium">
-                          {s.sale_number}
-                        </TableCell>
-                        <TableCell>
-                          {format(parseISO(s.sale_date), "MM/dd/yyyy")}
-                        </TableCell>
-                        <TableCell>
-                          {s.branch?.name || "—"}
-                        </TableCell>
-                        <TableCell>{s.customer?.email || "—"}</TableCell>
-                        <TableCell>{s.payment_method}</TableCell>
-                        <TableCell
-                          className={
-                            isNegative ? "text-red-600 font-medium" : ""
-                          }
-                        >
-                          {formatCurrency(s.total_amount)}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              saleType === "refund" ? "destructive" : "default"
-                            }
-                          >
-                            {saleType.toUpperCase()}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant={
-                              s.status === "COMPLETED" ? "default" : "outline"
-                            }
-                          >
-                            {s.status}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <Button
-                            size="sm"
-                            variant="ghost"
-                            onClick={() => handleViewSale(s.id)}
-                          >
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
+          {loading ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {Array.from({ length: 6 }).map((_, index) => (
+                <div
+                  key={index}
+                  className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
+                >
+                  <div className="h-14 rounded-xl bg-gray-100" />
+                  <div className="mt-4 h-4 w-2/3 rounded bg-gray-100" />
+                  <div className="mt-2 h-3 w-1/2 rounded bg-gray-100" />
+                  <div className="mt-4 grid grid-cols-2 gap-2">
+                    <div className="h-10 rounded-lg bg-gray-100" />
+                    <div className="h-10 rounded-lg bg-gray-100" />
+                  </div>
+                </div>
+              ))}
             </div>
-          </div>
+          ) : sales.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center">
+              <Receipt className="h-12 w-12 text-gray-400" />
+              <h3 className="mt-4 text-lg font-semibold text-gray-900">No sales found</h3>
+              <p className="mt-1 max-w-sm text-sm text-gray-500">
+                Adjust your search or date filters to find transactions.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+              {sales.map((s) => {
+                const saleType = getSaleType(s.total_amount);
+                const isNegative = parseFloat(s.total_amount) < 0;
+                const customerLabel =
+                  s.customer?.name ||
+                  s.customer?.email ||
+                  s.customer?.phone_number ||
+                  "Walk-in";
+
+                return (
+                  <div
+                    key={s.id}
+                    className={cn(
+                      "group flex flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md",
+                      isNegative
+                        ? "border-red-200 hover:border-red-300"
+                        : "border-gray-200 hover:border-gray-300",
+                    )}
+                  >
+                    <div
+                      className={cn(
+                        "border-b px-4 py-4",
+                        isNegative
+                          ? "border-red-100 bg-gradient-to-r from-red-50 to-rose-50/40"
+                          : "border-gray-100 bg-gradient-to-r from-slate-50 to-emerald-50/40",
+                      )}
+                    >
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 flex-1">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge
+                              variant={saleType === "refund" ? "destructive" : "default"}
+                              className="text-[10px] uppercase"
+                            >
+                              {saleType}
+                            </Badge>
+                            <Badge
+                              variant={s.status === "COMPLETED" ? "default" : "outline"}
+                              className="text-[10px] uppercase"
+                            >
+                              {s.status}
+                            </Badge>
+                          </div>
+                          <p className="mt-2 truncate font-mono text-sm font-semibold text-gray-900">
+                            {s.sale_number}
+                          </p>
+                          <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
+                            <CalendarIcon className="h-3.5 w-3.5" />
+                            {format(parseISO(s.sale_date), "MMM dd, yyyy · hh:mm a")}
+                          </p>
+                        </div>
+                        <div className="text-right">
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                            Total
+                          </p>
+                          <p
+                            className={cn(
+                              "text-xl font-bold",
+                              isNegative ? "text-red-600" : "text-emerald-700",
+                            )}
+                          >
+                            {formatCurrency(s.total_amount)}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="flex flex-1 flex-col p-4">
+                      <div className="space-y-2 text-sm">
+                        <div className="flex items-start gap-2 text-gray-700">
+                          <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                              Branch
+                            </p>
+                            <p className="truncate font-medium text-gray-900">
+                              {s.branch?.name || "—"}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2 text-gray-700">
+                          <User className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                              Customer
+                            </p>
+                            <p className="truncate font-medium text-gray-900">
+                              {customerLabel}
+                            </p>
+                          </div>
+                        </div>
+                        <div className="flex items-start gap-2 text-gray-700">
+                          <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
+                          <div className="min-w-0">
+                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                              Payment
+                            </p>
+                            <p className="font-medium text-gray-900">
+                              {s.payment_method}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+
+                      <Button
+                        variant="outline"
+                        className="mt-4 w-full"
+                        onClick={() => handleViewSale(s.id)}
+                      >
+                        <Eye className="mr-2 h-4 w-4" />
+                        View Details
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          )}
           
           {/* Pagination */}
           {totalSales > 0 && (

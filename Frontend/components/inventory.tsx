@@ -23,14 +23,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { ChevronDown } from "lucide-react"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
-import { Search, Plus, Edit, Package, AlertTriangle, Upload, X, ImageIcon, RefreshCw, Loader2 } from "lucide-react"
+import { Search, Plus, Edit, Package, AlertTriangle, Upload, X, ImageIcon, RefreshCw, Loader2, Trash2, Tag } from "lucide-react"
 import apiClient from "@/lib/apiClient"
 import { usePosData } from "@/hooks/use-pos-data"
 import { usePosBranch } from "@/hooks/use-pos-branch"
+import { cn } from "@/lib/utils"
 
 // Image compression utility
 const compressImage = (file: File, quality = 0.7, maxWidth = 800, maxHeight = 600): Promise<File> => {
@@ -127,6 +127,36 @@ interface Product {
   reserved_stock?: number
   minimum_stock?: number
   maximum_stock?: number
+}
+
+const getProductStock = (product: Product) =>
+  product.available_stock ?? product.current_stock ?? 0
+
+const getProductImageUrl = (product: Product) =>
+  product.images?.[0]?.image || null
+
+const getStockTone = (product: Product) => {
+  const stock = getProductStock(product)
+  const minStock = product.minimum_stock ?? product.min_qty ?? 0
+  if (stock <= 0) {
+    return {
+      label: "Out of stock",
+      className: "text-red-700 bg-red-50 border-red-200",
+      valueClassName: "text-red-700",
+    }
+  }
+  if (minStock > 0 && stock <= minStock) {
+    return {
+      label: "Low stock",
+      className: "text-amber-700 bg-amber-50 border-amber-200",
+      valueClassName: "text-amber-700",
+    }
+  }
+  return {
+    label: "In stock",
+    className: "text-green-700 bg-green-50 border-green-200",
+    valueClassName: "text-green-700",
+  }
 }
 
 interface ProductFormData {
@@ -1699,100 +1729,177 @@ export default function Inventory() {
           </Select>
         </div>
 
-        {/* Products Table */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Products ({totalProducts})</CardTitle>
+        {/* Products Grid */}
+        <Card className="border-gray-200 shadow-sm">
+          <CardHeader className="pb-4">
+            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+              <CardTitle>Products ({totalProducts})</CardTitle>
+              <p className="text-sm text-gray-500">
+                Browse, edit, and manage your catalog
+              </p>
+            </div>
           </CardHeader>
           <CardContent>
             {loading ? (
-              <PageLoader message="Loading products..." />
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+                {Array.from({ length: 8 }).map((_, index) => (
+                  <div
+                    key={index}
+                    className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
+                  >
+                    <div className="aspect-[4/3] rounded-xl bg-gray-100" />
+                    <div className="mt-4 h-4 rounded bg-gray-100" />
+                    <div className="mt-2 h-3 w-2/3 rounded bg-gray-100" />
+                    <div className="mt-4 grid grid-cols-2 gap-2">
+                      <div className="h-10 rounded-lg bg-gray-100" />
+                      <div className="h-10 rounded-lg bg-gray-100" />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : products.length === 0 ? (
+              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-100">
+                  <Package className="h-7 w-7 text-gray-400" />
+                </div>
+                <h3 className="mt-4 text-lg font-semibold text-gray-900">No products found</h3>
+                <p className="mt-1 max-w-sm text-sm text-gray-500">
+                  Try adjusting your search or category filter, or add a new product to get started.
+                </p>
+              </div>
             ) : (
               <>
-                <div className="overflow-x-auto -mx-4 md:mx-0">
-                  <div className="inline-block min-w-full align-middle">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="min-w-[150px]">Name</TableHead>
-                          <TableHead className="min-w-[120px]">SKU</TableHead>
-                          <TableHead className="min-w-[120px]">Category</TableHead>
-                          <TableHead className="min-w-[100px]">Unit</TableHead>
-                          <TableHead className="min-w-[100px]">Stock</TableHead>
-                          <TableHead className="min-w-[120px]">Purchase Rate</TableHead>
-                          <TableHead className="min-w-[120px]">Sales Rate</TableHead>
-                          <TableHead className="min-w-[100px]">Status</TableHead>
-                          <TableHead className="min-w-[150px]">Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                  <TableBody>
-                    {products.map((product) => (
-                      <TableRow key={product.id}>
-                        <TableCell className="font-medium">
-                          <div>
-                            <div>{product.name}</div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+                  {products.map((product) => {
+                    const imageUrl = getProductImageUrl(product)
+                    const stock = getProductStock(product)
+                    const stockTone = getStockTone(product)
+
+                    return (
+                      <div
+                        key={product.id}
+                        className="group flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md"
+                      >
+                        <div className="relative aspect-[4/3] overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100">
+                          {imageUrl ? (
+                            <img
+                              src={imageUrl}
+                              alt={product.name}
+                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
+                            />
+                          ) : (
+                            <div className="flex h-full w-full flex-col items-center justify-center text-gray-400">
+                              <ImageIcon className="h-10 w-10" />
+                              <span className="mt-2 text-xs font-medium">No image</span>
+                            </div>
+                          )}
+
+                          <div className="absolute left-3 top-3 flex flex-wrap gap-2">
+                            <Badge
+                              variant="outline"
+                              className={cn(
+                                "border backdrop-blur-sm",
+                                product.is_active
+                                  ? "bg-green-100/95 text-green-800 border-green-200"
+                                  : "bg-red-100/95 text-red-800 border-red-200",
+                              )}
+                            >
+                              {product.is_active ? "Active" : "Inactive"}
+                            </Badge>
                             {product.is_featured && (
-                              <Badge variant="secondary" className="text-xs mt-1">
+                              <Badge className="bg-blue-600 text-white hover:bg-blue-600">
                                 Featured
                               </Badge>
                             )}
                           </div>
-                        </TableCell>
-                        <TableCell>{product.sku}</TableCell>
-                        <TableCell>{product.category?.name || "-"}</TableCell>
-                        <TableCell>{product.unit?.name || "-"}</TableCell>
-                        <TableCell>
-                          <div className="text-sm">
-                            <div className="font-medium">
-                              {product.available_stock ?? product.current_stock ?? 0}
-                            </div>
-                            {/* Guard with a strict `> 0` check — `{0 && <JSX>}`
-                                renders the literal `0`, which was leaking an
-                                extra "0" under every stock value. */}
-                            {(product.reserved_stock ?? 0) > 0 && (
-                              <div className="text-xs text-gray-500">
-                                Reserved: {product.reserved_stock}
-                              </div>
-                            )}
+
+                          <div className="absolute right-3 top-3">
+                            <Badge
+                              variant="outline"
+                              className={cn("border backdrop-blur-sm", stockTone.className)}
+                            >
+                              {stockTone.label}
+                            </Badge>
                           </div>
-                        </TableCell>
-                        <TableCell>{product.purchase_rate.toFixed(2)}</TableCell>
-                        <TableCell>{product.sales_rate_exc_dis_and_tax.toFixed(2)}</TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={
-                              product.is_active
-                                ? "bg-green-100 text-green-800 border-green-200 hover:bg-green-100"
-                                : "bg-red-100 text-red-800 border-red-200 hover:bg-red-100"
-                            }
-                          >
-                            {product.is_active ? "Active" : "Inactive"}
-                          </Badge>
-                        </TableCell>
-                        <TableCell>
-                          <div className="flex space-x-2">
-                            <Button size="sm" variant="outline" onClick={() => openEditDialog(product)}>
-                              <Edit className="h-3 w-3" />
+                        </div>
+
+                        <div className="flex flex-1 flex-col p-4">
+                          <div className="space-y-2">
+                            <h3 className="line-clamp-2 min-h-[2.5rem] text-base font-semibold leading-snug text-gray-900">
+                              {product.name}
+                            </h3>
+                            <p className="font-mono text-xs text-gray-500">
+                              SKU {product.sku || "—"}
+                            </p>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="secondary" className="gap-1 bg-slate-100 text-slate-700">
+                                <Tag className="h-3 w-3" />
+                                {product.category?.name || "Uncategorized"}
+                              </Badge>
+                              <Badge variant="outline" className="text-gray-600">
+                                {product.unit?.name || "No unit"}
+                              </Badge>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3">
+                            <div>
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                                Stock
+                              </p>
+                              <p className={cn("mt-1 text-sm font-bold", stockTone.valueClassName)}>
+                                {stock}
+                              </p>
+                              {(product.reserved_stock ?? 0) > 0 && (
+                                <p className="mt-0.5 text-[11px] text-gray-500">
+                                  {product.reserved_stock} reserved
+                                </p>
+                              )}
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                                Purchase
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-gray-900">
+                                {product.purchase_rate.toFixed(2)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                                Sales
+                              </p>
+                              <p className="mt-1 text-sm font-semibold text-blue-700">
+                                {product.sales_rate_exc_dis_and_tax.toFixed(2)}
+                              </p>
+                            </div>
+                          </div>
+
+                          <div className="mt-4 flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="flex-1"
+                              onClick={() => openEditDialog(product)}
+                            >
+                              <Edit className="mr-2 h-3.5 w-3.5" />
+                              Edit
                             </Button>
                             <Button
                               size="sm"
                               variant="outline"
+                              className="text-red-600 hover:bg-red-50 hover:text-red-700"
                               onClick={() => setProductToDelete(product)}
-                              className="text-red-600 hover:text-red-700 hover:bg-red-50"
                             >
-                              Delete
+                              <Trash2 className="h-3.5 w-3.5" />
                             </Button>
                           </div>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-                  </div>
+                        </div>
+                      </div>
+                    )
+                  })}
                 </div>
-                {/* Pagination — matches the First/Prev/Page X of Y/Next/Last
-                    pattern used in Stock Management and other inventory tabs. */}
+
+                {/* Pagination */}
                 {totalProducts > 0 && (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 py-3 border-t mt-2">
                     <p className="text-sm text-black">

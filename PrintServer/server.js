@@ -548,6 +548,16 @@ app.post('/print-receipt', async (req, res) => {
     });
     y += lineH(usedTg) - 2;
 
+    if (receiptData.documentTitle) {
+      const usedDoc = drawFit(String(receiptData.documentTitle), margins.left, y, W, {
+        maxSize: 11,
+        minSize: 9,
+        align: 'center',
+        font: boldFont
+      });
+      y += lineH(usedDoc) - 1;
+    }
+
     if (receiptData.strn) {
       const usedStrn = drawFit(receiptData.strn, margins.left, y, W, {
         maxSize: BODY_MAX,
@@ -563,6 +573,11 @@ app.post('/print-receipt', async (req, res) => {
     const when = new Date(receiptData.timestamp || Date.now());
     const lh1 = rowLR('Receipt #', String(receiptData.transactionId), y);
     y += lh1;
+
+    if (receiptData.originalSaleNumber) {
+      const lhOrig = rowLR('Original sale', String(receiptData.originalSaleNumber), y);
+      y += lhOrig;
+    }
 
     const lh2 = rowLR(
       'Date',
@@ -596,33 +611,33 @@ app.post('/print-receipt', async (req, res) => {
     doc.text('RATE', X_RATE_C, y, { width: rateColW, align: 'right', lineBreak: false });
     y += lineH(TOTAL_MAX);
     y += hr(y, 'solid', 1);
-    // Extra breathing room between the header rule and the first row so the
-    // rule doesn't visually slice into the first item's text.
     y += 4;
 
-    // ===== ITEMS =====
-    // Real wrapping for long names. The old `rowIQR` used `lineBreak: false`
-    // which made long item names overflow into the QTY column, e.g.
-    // "Key Synthetic Vinegar (750 ml)" colliding with "1 Pcs".
-
-    for (const it of receiptData.items || []) {
-      const name = String(it.name || '');
+    const formatItemRate = (it) => {
       const qtyNumber = Number(it.quantity || 0);
       const unitPrice = Number(
         it.sellingPrice ?? it.actualUnitPrice ?? it.price ?? 0
       );
+      const lineAmount =
+        it.lineTotal != null
+          ? Math.abs(Number(it.lineTotal))
+          : Math.abs(unitPrice * qtyNumber);
+      return it.isCredit ? `- ${money(lineAmount)}` : money(lineAmount);
+    };
+
+    const printItemRow = (it) => {
+      const name = String(it.name || '');
+      const qtyNumber = Number(it.quantity || 0);
       const qty = qtyNumber.toString() + (it.unit ? ` ${it.unit}` : '');
-      const rate = `${money(unitPrice * qtyNumber)}`;
+      const rate = formatItemRate(it);
 
       doc.font(baseFont).fontSize(BODY_MAX);
       const itemH = doc.heightOfString(name, { width: itemColW });
 
-      // ITEM cell — wraps within its column.
       doc.text(name, X_ITEM_C, y, {
         width: itemColW,
         align: 'left',
       });
-      // QTY + RATE pinned to the first text line only.
       doc.text(qty, X_QTY_C, y, {
         width: qtyColW,
         align: 'right',
@@ -635,45 +650,73 @@ app.post('/print-receipt', async (req, res) => {
       });
 
       y += Math.max(itemH, lineH(BODY_MAX)) + 1;
+    };
+
+    const sections =
+      Array.isArray(receiptData.itemSections) && receiptData.itemSections.length > 0
+        ? receiptData.itemSections
+        : [{ title: null, items: receiptData.items || [] }];
+
+    for (const section of sections) {
+      if (section.title) {
+        doc.font(boldFont).fontSize(BODY_MAX);
+        doc.text(String(section.title), X_ITEM_C, y, {
+          width: W,
+          align: 'left',
+        });
+        y += lineH(BODY_MAX);
+      }
+      for (const it of section.items || []) {
+        printItemRow(it);
+      }
     }
 
     y += 2;
     y += hr(y, 'dotted');
 
-    // ===== TOTALS =====
-    const subtotal = Number(receiptData.subtotal || 0);
-    const discount = Number(receiptData.discount || 0);
-    const tax = receiptData.taxPercent
-      ? (subtotal - discount) * (receiptData.taxPercent / 100)
-      : 0;
-    const total = receiptData.total ?? Math.max(0, subtotal - discount + tax);
+    if (Array.isArray(receiptData.summaryLines) && receiptData.summaryLines.length > 0) {
+      for (const line of receiptData.summaryLines) {
+        y += rowLR(String(line.label || ''), String(line.value || ''), y, {
+          bold: !!line.emphasis,
+          maxSize: line.emphasis ? TOTAL_MAX : BODY_MAX,
+          minSize: line.emphasis ? TOTAL_MIN : BODY_MIN,
+        });
+      }
+    } else {
+      // ===== TOTALS (regular sale) =====
+      const subtotal = Number(receiptData.subtotal || 0);
+      const discount = Number(receiptData.discount || 0);
+      const tax = receiptData.taxPercent
+        ? (subtotal - discount) * (receiptData.taxPercent / 100)
+        : 0;
+      const total = receiptData.total ?? Math.max(0, subtotal - discount + tax);
 
-    y += rowLR('Subtotal', `PKR ${money(subtotal)}`, y);
-    if (receiptData.discount != null && receiptData.discount !== undefined && Number(receiptData.discount) > 0) {
-      y += rowLR('Discount', `- PKR ${money(discount)}`, y);
+      y += rowLR('Subtotal', `PKR ${money(subtotal)}`, y);
+      if (receiptData.discount != null && receiptData.discount !== undefined && Number(receiptData.discount) > 0) {
+        y += rowLR('Discount', `- PKR ${money(discount)}`, y);
+      }
+
+      y += rowLR('Grand Total', `PKR ${money(total)}`, y, {
+        bold: true,
+        maxSize: TOTAL_MAX,
+        minSize: TOTAL_MIN
+      });
+      y += hr(y, 'dotted');
+
+      const paymentMethod = String(receiptData.paymentMethod || 'CASH').toUpperCase();
+      y += rowLR('Payment', paymentMethod, y);
+      if (receiptData.amountPaid != null) {
+        y += rowLR('Paid', `PKR ${money(receiptData.amountPaid)}`, y);
+      }
+      if (receiptData.changeAmount && receiptData.changeAmount > 0) {
+        y += rowLR('Change', `PKR ${money(receiptData.changeAmount)}`, y);
+      }
     }
-
-    y += rowLR('Grand Total', `PKR ${money(total)}`, y, {
-      bold: true,
-      maxSize: TOTAL_MAX,
-      minSize: TOTAL_MIN
-    });
     y += hr(y, 'dotted');
 
-    // ===== PAYMENT =====
-    const paymentMethod = String(receiptData.paymentMethod || 'CASH').toUpperCase();
-    y += rowLR('Payment', paymentMethod, y);
-    if (receiptData.amountPaid != null) {
-      y += rowLR('Paid', `PKR ${money(receiptData.amountPaid)}`, y);
-    }
-    if (receiptData.changeAmount && receiptData.changeAmount > 0) {
-      y += rowLR('Change', `PKR ${money(receiptData.changeAmount)}`, y);
-    }
-    y += hr(y, 'dotted');
-
-    // Optional promo
+    // Optional notes
     if (receiptData.promo) {
-      const used = drawFit(`Promo: ${receiptData.promo}`, margins.left, y, W, {
+      const used = drawFit(`Notes: ${receiptData.promo}`, margins.left, y, W, {
         maxSize: BODY_MAX,
         minSize: BODY_MIN,
         align: 'center'

@@ -752,13 +752,12 @@ export function Branches() {
             </DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            {/* Urdu / Bilingual Explanations */}
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4 space-y-2 text-sm text-red-800">
+            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
               <p className="font-semibold">
-                Kya aap waqai is branch/warehouse ko delete karna chahte hain?
+                Are you sure you want to permanently delete this branch?
               </p>
-              <p className="text-xs leading-relaxed opacity-90">
-                Are you sure you want to permanently delete this branch? If this location has stock, sales, cash registers, or purchases, deletion will be blocked by the server to prevent database corruption.
+              <p className="mt-2 text-xs leading-relaxed opacity-90">
+                This will permanently remove the branch and all linked records for this location, including stock, sales, purchases, transfers, and cash drawer history. This action cannot be undone.
               </p>
             </div>
 

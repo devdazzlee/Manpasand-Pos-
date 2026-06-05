@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteHoldSaleController = exports.retrieveHoldSaleController = exports.createHoldSaleController = exports.getHoldSalesController = exports.getRecentSaleItemProductNameAndPrice = exports.getTodaySalesController = exports.refundSaleController = exports.createSaleController = exports.getSaleByIdController = exports.getSalesForReturnsController = exports.getSalesController = void 0;
+exports.deleteHoldSaleController = exports.retrieveHoldSaleController = exports.createHoldSaleController = exports.getHoldSalesController = exports.getRecentSaleItemProductNameAndPrice = exports.getTodaySalesController = exports.refundSaleController = exports.createSaleController = exports.getSaleByIdController = exports.getReturnTransactionsController = exports.getSalesForReturnsController = exports.getSalesController = void 0;
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const sales_service_1 = require("../services/sales.service");
 const apiResponse_1 = require("../utils/apiResponse");
@@ -108,12 +108,9 @@ const createSaleController = (0, asyncHandler_1.default)(async (req, res) => {
 });
 exports.createSaleController = createSaleController;
 const refundSaleController = (0, asyncHandler_1.default)(async (req, res) => {
-    const { customerId, returnedItems = [], exchangedItems = [], notes, branchId: bodyBranchId } = req.body;
+    const { customerId, returnedItems = [], exchangedItems = [], notes, branchId: bodyBranchId, transactionType, returnScope, returnReason, refundMethod, exchangeBalanceAction, } = req.body;
     const originalSaleId = req.params.saleId;
     const createdBy = req.user.id;
-    // Admin/super-admin users have no `branch_id` on their JWT, so we let
-    // them either pass `branchId` in the body or fall back to the original
-    // sale's branch (resolved inside the service).
     const branchId = (typeof bodyBranchId === 'string' && bodyBranchId) ||
         req.user?.branch_id ||
         undefined;
@@ -125,10 +122,22 @@ const refundSaleController = (0, asyncHandler_1.default)(async (req, res) => {
         exchangedItems,
         notes,
         createdBy,
+        transactionType,
+        returnScope,
+        returnReason,
+        refundMethod,
+        exchangeBalanceAction,
     });
     new apiResponse_1.ApiResponse(sale, "Sale refunded/exchanged successfully").send(res);
 });
 exports.refundSaleController = refundSaleController;
+const getReturnTransactionsController = (0, asyncHandler_1.default)(async (req, res) => {
+    const branchId = resolveBranchId(req);
+    const search = typeof req.query.search === 'string' ? req.query.search : undefined;
+    const transactions = await saleService.getReturnTransactions({ branchId, search });
+    new apiResponse_1.ApiResponse(transactions, 'Return and exchange transactions fetched').send(res);
+});
+exports.getReturnTransactionsController = getReturnTransactionsController;
 const getTodaySalesController = (0, asyncHandler_1.default)(async (req, res) => {
     const sales = await saleService.getTodaySales({ branchId: req.user?.branch_id });
     new apiResponse_1.ApiResponse(sales, "Today's sales fetched successfully").send(res);

@@ -36,13 +36,34 @@ import {
   ChevronDown,
   ChevronUp,
   Loader2,
+  CheckCircle,
+  Printer,
+  Download,
+  MessageCircle,
+  Mail,
 } from "lucide-react";
+import { toast } from "sonner";
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import {
+  downloadReceiptPdf,
+  shareReceiptOnWhatsApp,
+} from "@/lib/receipt";
 import apiClient from "@/lib/apiClient";
 import { offlineAPIClient } from "@/lib/offline-api-client";
 import { offlineDB } from "@/lib/offline-db";
 import { syncManager } from "@/lib/offline-sync";
 import { usePosData } from "@/hooks/use-pos-data";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
+import {
+  formatMoneyDisplay,
+  formatMoneyFixed,
+  isMoneyLessThan,
+  lineTotal,
+  moneyChange,
+  roundMoney,
+  subtractMoney,
+  sumMoney,
+} from "@/lib/money";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import {
@@ -142,6 +163,14 @@ export function NewSale() {
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(
     null
   );
+  const [saleSuccessOpen, setSaleSuccessOpen] = useState(false);
+  const [completedReceiptData, setCompletedReceiptData] =
+    useState<ReceiptData | null>(null);
+  const [completedSaleNumber, setCompletedSaleNumber] = useState("");
+  const [completedTotalReceived, setCompletedTotalReceived] = useState(0);
+  const [completedCustomerPhone, setCompletedCustomerPhone] = useState("");
+  const [completedCustomerEmail, setCompletedCustomerEmail] = useState("");
+  const logoDataUri = useLogoDataUri();
   const { loading: paymentLoading, withLoading: withPaymentLoading } =
     useLoading();
   const [scanLoading, setScanLoading] = useState(false);
@@ -533,16 +562,7 @@ export function NewSale() {
     return `${formatSmart(qty)} ${unitName}`;
   };
 
-  const formatMoney = (value: number) => {
-    const rounded = Number(value);
-    if (Number.isInteger(rounded)) {
-      return rounded.toLocaleString();
-    }
-    return rounded.toLocaleString(undefined, {
-      minimumFractionDigits: 0,
-      maximumFractionDigits: 2,
-    });
-  };
+  const formatMoney = (value: number) => formatMoneyDisplay(value);
 
   const formatQuantityValue = (value: number) => {
     if (Number.isInteger(value)) return String(value);
@@ -845,14 +865,18 @@ export function NewSale() {
     setGlobalDiscountValue("");
   };
 
-  const subtotal = cart.reduce((sum, item) => sum + getSellingPrice(item) * item.quantity, 0);
+  const subtotal = sumMoney(
+    ...cart.map((item) => lineTotal(getSellingPrice(item), item.quantity)),
+  );
 
   const parsedDiscount = parseFloat(globalDiscountValue) || 0;
-  const globalDiscountAmount = globalDiscountType === "percentage" 
-    ? (subtotal * parsedDiscount) / 100 
-    : parsedDiscount;
+  const globalDiscountAmount = roundMoney(
+    globalDiscountType === "percentage"
+      ? (subtotal * parsedDiscount) / 100
+      : parsedDiscount,
+  );
 
-  const total = Math.max(0, subtotal - globalDiscountAmount);
+  const total = Math.max(0, subtractMoney(subtotal, globalDiscountAmount));
   
   const totalQuantity = cart.reduce(
     (sum, item) => sum + item.quantity,
@@ -870,7 +894,7 @@ export function NewSale() {
       return;
     }
 
-    setCalculatedChange(Math.max(0, numericValue - total));
+    setCalculatedChange(moneyChange(numericValue, total));
   }, [paymentDialogOpen, tenderedAmount, total]);
 
   const generateTransactionId = () => {
@@ -900,6 +924,130 @@ export function NewSale() {
     };
   };
 
+  const buildReceiptDataForServer = (
+    transactionId: string,
+    method: "Cash" | "Card",
+    cartSnapshot: CartItem[],
+    amountPaid: number,
+    changeAmount: number,
+    timestamp: string
+  ): ReceiptData => ({
+    storeName: branchInfo.name,
+    tagline: "Quality • Service • Value",
+    address: branchInfo.address,
+    transactionId,
+    timestamp,
+    cashier: "Walk-in",
+    customerType: selectedCustomer
+      ? customers.find((c) => c.id === selectedCustomer)?.name || "Walk-in"
+      : "Walk-in",
+    items: cartSnapshot.map((item) => {
+      const unitLabel =
+        (item as any)?.unit?.name ||
+        (item as any)?.unitName ||
+        (item as any)?.unit_name ||
+        (item as any)?.unit ||
+        undefined;
+      return {
+        name: item.name,
+        quantity: item.quantity,
+        price: getSellingPrice(item),
+        unit: unitLabel,
+      };
+    }),
+    subtotal,
+    discount: globalDiscountAmount > 0 ? globalDiscountAmount : undefined,
+    total,
+    paymentMethod: method === "Cash" ? "CASH" : "CARD",
+    amountPaid,
+    changeAmount: changeAmount > 0 ? changeAmount : undefined,
+    thankYouMessage: "Thank you for shopping!",
+    footerMessage: "Visit us again soon!",
+  });
+
+  const handleStartNewSale = () => {
+    setSaleSuccessOpen(false);
+    setCompletedReceiptData(null);
+    setCompletedSaleNumber("");
+    setCompletedTotalReceived(0);
+    setCompletedCustomerPhone("");
+    setCompletedCustomerEmail("");
+    setCart([]);
+    setGlobalDiscountValue("");
+    setSelectedCustomer(null);
+    if (searchInputRef.current) {
+      searchInputRef.current.focus();
+    }
+  };
+
+  const handleSuccessPrint = async () => {
+    if (!completedReceiptData) return;
+    const printerInfo = getReceiptPrinterObj();
+    if (!printerInfo) {
+      toast.error("Please select a receipt printer in Printer Settings");
+      return;
+    }
+    try {
+      await printReceiptViaServer(
+        {
+          ...printerInfo,
+          columns: printerInfo.receiptProfile?.columns || { fontA: 48, fontB: 64 },
+        },
+        completedReceiptData,
+        { copies: 1, cut: true, openDrawer: false }
+      );
+      toast.success("Receipt sent to printer");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to print receipt");
+    }
+  };
+
+  const handleSuccessDownloadPdf = async () => {
+    if (!completedReceiptData) return;
+    try {
+      await downloadReceiptPdf(completedReceiptData, logoDataUri);
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to download receipt");
+    }
+  };
+
+  const handleSuccessShareWhatsApp = async () => {
+    if (!completedReceiptData) return;
+    try {
+      const { fellBack } = await shareReceiptOnWhatsApp(
+        completedReceiptData,
+        logoDataUri,
+        completedCustomerPhone
+      );
+      if (fellBack) {
+        toast.success("Receipt downloaded", {
+          description:
+            "Your browser doesn't support direct file share. Attach the PDF in the WhatsApp chat.",
+        });
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to share receipt");
+    }
+  };
+
+  const handleSuccessEmail = async () => {
+    if (!completedReceiptData) return;
+    try {
+      await downloadReceiptPdf(completedReceiptData, logoDataUri);
+      const customer = customers.find((c) => c.id === selectedCustomer);
+      const email = completedCustomerEmail || customer?.email || "";
+      const subject = encodeURIComponent(
+        `Receipt ${completedSaleNumber} — ${branchInfo.name}`
+      );
+      const body = encodeURIComponent(
+        `Sale ${completedSaleNumber} completed.\nTotal received: Rs ${formatMoneyDisplay(completedTotalReceived)}\n\nThe receipt PDF has been downloaded. Please attach it to this email.`
+      );
+      window.open(`mailto:${email}?subject=${subject}&body=${body}`, "_self");
+    } catch (err: any) {
+      toast.error(err?.message || "Failed to prepare email");
+    }
+  };
+
 
   const resetPaymentState = () => {
     setPaymentDialogOpen(false);
@@ -923,7 +1071,7 @@ export function NewSale() {
     }
 
     setPaymentMethodPending(method);
-    setTenderedAmount(total.toFixed(2));
+    setTenderedAmount(formatMoneyFixed(total));
     setPaymentError("");
     setCalculatedChange(0);
     setPaymentDialogOpen(true);
@@ -947,12 +1095,12 @@ export function NewSale() {
       return;
     }
 
-    if (amountNumber < total) {
+    if (isMoneyLessThan(amountNumber, total)) {
       setPaymentError("Received amount cannot be less than the payable total.");
       return;
     }
 
-    const change = Math.max(0, amountNumber - total);
+    const change = moneyChange(amountNumber, total);
     setPaymentError("");
 
     const success = await handlePayment(paymentMethodPending, amountNumber, change);
@@ -1094,6 +1242,30 @@ export function NewSale() {
           changeAmount
         );
 
+        const receiptDataForServer = buildReceiptDataForServer(
+          transactionId,
+          method,
+          cartSnapshot,
+          amountPaid,
+          changeAmount,
+          new Date(receiptData.timestamp).toISOString()
+        );
+
+        const customerAtSale = selectedCustomer
+          ? customers.find((c) => c.id === selectedCustomer)
+          : null;
+
+        setCompletedReceiptData(receiptDataForServer);
+        setCompletedSaleNumber(transactionId);
+        setCompletedTotalReceived(amountPaid);
+        setCompletedCustomerPhone(
+          customerAtSale?.phone_number ||
+            (customerAtSale as any)?.mobile_number ||
+            ""
+        );
+        setCompletedCustomerEmail(customerAtSale?.email || "");
+        setSaleSuccessOpen(true);
+
         // Save transaction to local storage (simulate database)
         const transactions = JSON.parse(
           localStorage.getItem("transactions") || "[]"
@@ -1106,41 +1278,6 @@ export function NewSale() {
         // Auto-print receipt
         if (autoPrint) {
           try {
-            const receiptDataForServer: ReceiptData = {
-              storeName: branchInfo.name,
-              tagline: "Quality • Service • Value",
-              address: branchInfo.address,
-              transactionId: transactionId,
-              timestamp: new Date(receiptData.timestamp).toISOString(),
-              cashier: receiptData.cashier || "Walk-in",
-              customerType: selectedCustomer
-                ? customers.find((c) => c.id === selectedCustomer)?.name ||
-                  "Walk-in"
-                : "Walk-in",
-              items: cartSnapshot.map((item) => {
-                const unitLabel =
-                  (item as any)?.unit?.name ||
-                  (item as any)?.unitName ||
-                  (item as any)?.unit_name ||
-                  (item as any)?.unit ||
-                  undefined;
-                return {
-                  name: item.name,
-                  quantity: item.quantity,
-                  price: getSellingPrice(item),
-                  unit: unitLabel,
-                };
-              }),
-              subtotal: subtotal,
-              discount: globalDiscountAmount > 0 ? globalDiscountAmount : undefined,
-              total: total,
-              paymentMethod: method === "Cash" ? "CASH" : "CARD",
-              amountPaid,
-              changeAmount: changeAmount > 0 ? changeAmount : undefined,
-              thankYouMessage: "Thank you for shopping!",
-              footerMessage: "Visit us again soon!",
-            };
-
             // Get printer from global settings (Printer Settings page)
             const printerToUse = getReceiptPrinterObj();
             if (!printerToUse) {
@@ -1158,8 +1295,6 @@ export function NewSale() {
               openDrawer: false,
             };
 
-            // Print via print server
-            // Use same API format as backend: printer, receiptData, job
             await printReceiptViaServer(
               printerObj,
               receiptDataForServer,
@@ -1167,7 +1302,6 @@ export function NewSale() {
             );
           } catch (printError) {
             console.error("Print error:", printError);
-            // Print failed - no toast shown
           }
         }
 
@@ -1901,9 +2035,10 @@ export function NewSale() {
             <div id="held-sales-list" className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3">
               <div className="max-h-60 pr-2 space-y-3 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
                   {holdSales.map((sale, index) => {
-                    const saleTotal = sale.items.reduce(
-                      (sum, item) => sum + getSellingPrice(item as CartItem) * item.quantity,
-                      0
+                    const saleTotal = sumMoney(
+                      ...sale.items.map((item) =>
+                        lineTotal(getSellingPrice(item as CartItem), item.quantity),
+                      ),
                     );
                     return (
                       <div key={sale.id} className="flex flex-col gap-2 rounded-md border border-gray-200 p-2.5 bg-gray-50/50 hover:border-blue-300 transition-colors">
@@ -2207,7 +2342,7 @@ export function NewSale() {
                           </label>
                           <div className="mt-1 rounded-md border border-blue-100 bg-blue-50 px-2 h-7 flex items-center">
                             <span className="text-xs font-semibold text-blue-900 whitespace-nowrap">
-                              Rs {formatMoney(effectiveUnitPrice * item.quantity)}
+                              Rs {formatMoney(lineTotal(effectiveUnitPrice, item.quantity))}
                             </span>
                           </div>
                         </div>
@@ -2382,6 +2517,87 @@ export function NewSale() {
                 : `Confirm ${paymentMethodPending ?? "Payment"}`}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={saleSuccessOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            handleStartNewSale();
+          }
+        }}
+      >
+        <DialogContent className="max-w-md text-center sm:rounded-2xl">
+          <div className="flex flex-col items-center pt-2 pb-1">
+            <div className="flex h-14 w-14 items-center justify-center rounded-full bg-green-100">
+              <CheckCircle className="h-8 w-8 text-green-600" />
+            </div>
+            <DialogHeader className="mt-4 space-y-2 text-center sm:text-center">
+              <DialogTitle className="text-2xl font-bold">
+                Payment Successful
+              </DialogTitle>
+              <DialogDescription className="text-base text-gray-600">
+                Sale{" "}
+                <span className="font-semibold text-gray-900">
+                  #{completedSaleNumber}
+                </span>{" "}
+                completed successfully.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="mt-6 w-full rounded-xl bg-slate-50 px-6 py-5">
+              <p className="text-sm font-medium text-gray-500">Total Received</p>
+              <p className="mt-1 text-3xl font-bold text-gray-900">
+                Rs {formatMoneyDisplay(completedTotalReceived)}
+              </p>
+            </div>
+
+            <div className="mt-6 grid w-full grid-cols-2 gap-3">
+              <Button
+                variant="outline"
+                className="h-12 border-blue-200 text-blue-700 hover:bg-blue-50"
+                onClick={handleSuccessDownloadPdf}
+                disabled={!completedReceiptData}
+              >
+                <Download className="mr-2 h-4 w-4" />
+                PDF
+              </Button>
+              <Button
+                variant="outline"
+                className="h-12"
+                onClick={handleSuccessPrint}
+                disabled={!completedReceiptData || !receiptPrinter}
+              >
+                <Printer className="mr-2 h-4 w-4" />
+                Print
+              </Button>
+              <Button
+                className="h-12 bg-[#25D366] text-white hover:bg-[#1ebe57]"
+                onClick={handleSuccessShareWhatsApp}
+                disabled={!completedReceiptData}
+              >
+                <MessageCircle className="mr-2 h-4 w-4" />
+                WhatsApp
+              </Button>
+              <Button
+                className="h-12 bg-orange-500 text-white hover:bg-orange-600"
+                onClick={handleSuccessEmail}
+                disabled={!completedReceiptData}
+              >
+                <Mail className="mr-2 h-4 w-4" />
+                Email
+              </Button>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleStartNewSale}
+              className="mt-6 text-sm font-semibold text-gray-700 underline-offset-4 hover:text-gray-900 hover:underline"
+            >
+              Start New Sale
+            </button>
+          </div>
         </DialogContent>
       </Dialog>
 

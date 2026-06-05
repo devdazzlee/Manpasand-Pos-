@@ -26,6 +26,7 @@ router.use((0, auth_middleware_1.authorize)(saleManagementRoles));
 router.get("/recent", (0, auth_middleware_1.authorize)(metadataRoles), sale_controller_1.getRecentSaleItemProductNameAndPrice);
 router.get("/today", sale_controller_1.getTodaySalesController);
 router.get("/for-returns", sale_controller_1.getSalesForReturnsController);
+router.get("/return-transactions", sale_controller_1.getReturnTransactionsController);
 router.get("/", sale_controller_1.getSalesController);
 router.get("/:saleId", sale_controller_1.getSaleByIdController);
 router.post("/", (0, validation_middleware_1.validate)(sale_validation_1.createSaleSchema), sale_controller_1.createSaleController);

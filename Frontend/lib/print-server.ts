@@ -24,6 +24,21 @@ export interface ReceiptItem {
   price: number;
   unit?: string;
   unitName?: string;
+  /** Return/credit line — amount shown as negative on receipt */
+  isCredit?: boolean;
+  /** Signed or absolute line total for display (overrides price × qty when set) */
+  lineTotal?: number;
+}
+
+export interface ReceiptSection {
+  title: string;
+  items: ReceiptItem[];
+}
+
+export interface ReceiptSummaryLine {
+  label: string;
+  value: string;
+  emphasis?: boolean;
 }
 
 export interface ReceiptData {
@@ -31,11 +46,19 @@ export interface ReceiptData {
   tagline?: string;
   address?: string;
   strn?: string;
+  /** e.g. RETURN RECEIPT, EXCHANGE RECEIPT, SALES RECEIPT */
+  documentTitle?: string;
   transactionId: string;
+  /** Original sale this return/exchange relates to */
+  originalSaleNumber?: string;
   timestamp?: string;
   cashier?: string;
   customerType?: string;
   items: ReceiptItem[];
+  /** When set, items are grouped under section headings on print/PDF */
+  itemSections?: ReceiptSection[];
+  /** When set, replaces generic Subtotal / Grand Total block */
+  summaryLines?: ReceiptSummaryLine[];
   subtotal: number;
   discount?: number;
   taxPercent?: number;

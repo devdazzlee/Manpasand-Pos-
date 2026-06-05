@@ -1,10 +1,11 @@
-import { Prisma, SaleItemType, SaleStatus, StockMovementType } from '@prisma/client';
+import { PaymentMethod, Prisma, SaleItemType, SaleStatus, StockMovementType } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 
 interface ReturnItem {
   productId: string;
   quantity: number;
+  disposition?: 'RESTOCK' | 'DAMAGED' | 'UNSELLABLE';
 }
 
 interface ExchangeItem {
@@ -122,6 +123,56 @@ class SaleService {
     };
   }
 
+  async getAlreadyReturnedQuantities(originalSaleId: string): Promise<Map<string, number>> {
+    const prior = await prisma.sale.findMany({
+      where: { original_sale_id: originalSaleId },
+      include: {
+        sale_items: { where: { item_type: SaleItemType.RETURN } },
+      },
+    });
+    const map = new Map<string, number>();
+    for (const sale of prior) {
+      for (const item of sale.sale_items) {
+        const qty = Math.abs(item.quantity.toNumber());
+        map.set(item.product_id, (map.get(item.product_id) || 0) + qty);
+      }
+    }
+    return map;
+  }
+
+  async getReturnTransactions({
+    branchId,
+    search,
+  }: {
+    branchId?: string;
+    search?: string;
+  }) {
+    const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
+
+    return prisma.sale.findMany({
+      where: {
+        original_sale_id: { not: null },
+        ...(branchId ? { branch_id: branchId } : {}),
+        ...(normalizedSearch
+          ? {
+              OR: [
+                { sale_number: { contains: normalizedSearch, mode: 'insensitive' } },
+                { customer: { name: { contains: normalizedSearch, mode: 'insensitive' } } },
+                { customer: { email: { contains: normalizedSearch, mode: 'insensitive' } } },
+              ],
+            }
+          : {}),
+      },
+      include: {
+        sale_items: { include: { product: true } },
+        customer: true,
+        original_sale: { select: { sale_number: true, total_amount: true } },
+      },
+      orderBy: { sale_date: 'desc' },
+      take: 200,
+    });
+  }
+
   async getSalesForReturns({ branchId, search }: { branchId?: string; search?: string }) {
     const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
 
@@ -141,6 +192,7 @@ class SaleService {
       },
       include: {
         sale_items: {
+          where: { item_type: SaleItemType.ORIGINAL },
           include: { product: true },
         },
         customer: true,
@@ -631,21 +683,31 @@ class SaleService {
     exchangedItems,
     notes,
     createdBy,
+    transactionType,
+    returnScope,
+    returnReason,
+    refundMethod,
+    exchangeBalanceAction,
   }: {
     originalSaleId: string;
-    // Optional: the controller couldn't know the right branch when an admin
-    // (with no `branch_id` on their JWT) hits this endpoint. We resolve the
-    // branch from the original sale before any stock-touching query runs.
     branchId?: string | null;
     customerId?: string;
     returnedItems: ReturnItem[];
     exchangedItems: ExchangeItem[];
     notes?: string;
     createdBy: string;
+    transactionType?: 'RETURN' | 'EXCHANGE';
+    returnScope?: 'FULL' | 'PARTIAL';
+    returnReason?: string;
+    refundMethod?: string;
+    exchangeBalanceAction?: string;
   }) {
     if (!returnedItems.length && !exchangedItems.length) {
       throw new AppError(400, 'No return or exchange items provided');
     }
+
+    const isExchange = exchangedItems.length > 0;
+    const resolvedType = transactionType || (isExchange ? 'EXCHANGE' : 'RETURN');
 
     const uniqueProductIds = [...new Set([
       ...returnedItems.map((item) => item.productId),
@@ -653,25 +715,22 @@ class SaleService {
     ])];
     const uniqueExchangeProductIds = [...new Set(exchangedItems.map((item) => item.productId))];
 
-    // Step 1 — load the original sale first so we can derive the branch when
-    // the caller didn't (or couldn't) provide one. We MUST resolve a real
-    // branch_id before touching prisma.stock.findMany, which rejects null.
     const originalSale = await prisma.sale.findUnique({
       where: { id: originalSaleId },
-      include: { sale_items: true },
+      include: {
+        sale_items: { where: { item_type: SaleItemType.ORIGINAL } },
+      },
     });
     if (!originalSale) throw new AppError(400, 'Original sale not found');
 
-    // Guard against duplicate refunds/exchanges. Without this check the same
-    // sale can be refunded N times — the UI's "Ready for return" panel keeps
-    // showing it because the original sale stays COMPLETED, and stock keeps
-    // getting re-credited on every retry.
-    if (originalSale.status === SaleStatus.REFUNDED || originalSale.status === SaleStatus.EXCHANGED) {
-      throw new AppError(
-        400,
-        `This sale has already been ${originalSale.status === SaleStatus.REFUNDED ? 'refunded' : 'exchanged'}.`,
-      );
+    if (originalSale.status === SaleStatus.CANCELLED) {
+      throw new AppError(400, 'Cancelled sales cannot be returned');
     }
+    if (originalSale.status === SaleStatus.PENDING) {
+      throw new AppError(400, 'Pending sales cannot be returned');
+    }
+
+    const alreadyReturned = await this.getAlreadyReturnedQuantities(originalSaleId);
 
     const resolvedBranchId: string | null =
       (branchId && branchId.trim()) || originalSale.branch_id || null;
@@ -682,8 +741,6 @@ class SaleService {
       );
     }
 
-    // Step 2 — now that branchId is guaranteed non-null, fan out the
-    // remaining lookups in parallel.
     const [branch, customer, exchangeProducts, stocks] = await Promise.all([
       prisma.branch.findUnique({
         where: { id: resolvedBranchId },
@@ -698,9 +755,9 @@ class SaleService {
       uniqueExchangeProductIds.length
         ? prisma.product.findMany({
             where: { id: { in: uniqueExchangeProductIds } },
-            select: { id: true },
+            select: { id: true, name: true },
           })
-        : Promise.resolve([] as Array<{ id: string }>),
+        : Promise.resolve([] as Array<{ id: string; name: string }>),
       uniqueProductIds.length
         ? prisma.stock.findMany({
             where: {
@@ -727,13 +784,23 @@ class SaleService {
       if (!originalItem) {
         throw new AppError(400, `Product ${ret.productId} not found in original sale`);
       }
-      if (ret.quantity > originalItem.quantity.toNumber()) {
+      const purchased = originalItem.quantity.toNumber();
+      const prior = alreadyReturned.get(ret.productId) || 0;
+      const remaining = purchased - prior;
+      if (ret.quantity > remaining) {
         throw new AppError(
           400,
-          `Return quantity (${ret.quantity}) exceeds original sale quantity (${originalItem.quantity}) for product ${ret.productId}`,
+          `Return quantity (${ret.quantity}) exceeds remaining returnable quantity (${remaining}) for this product`,
         );
       }
     }
+
+    const stockQuantityMap = new Map<string, Prisma.Decimal>(
+      stocks.map((stock) => [stock.product_id, new Prisma.Decimal(stock.current_quantity)]),
+    );
+
+    // Exchange replacement items decrement stock like a sale. Do not block when
+    // stock is missing or insufficient — same policy as createSale (negative OK).
 
     type MovementRow = {
       product_id: string;
@@ -748,12 +815,10 @@ class SaleService {
     const saleItems: Prisma.SaleItemUncheckedCreateWithoutSaleInput[] = [];
     const movementRows: MovementRow[] = [];
     const stockNetChanges = new Map<string, Prisma.Decimal>();
-    const stockQuantityMap = new Map<string, Prisma.Decimal>(
-      stocks.map((stock) => [stock.product_id, new Prisma.Decimal(stock.current_quantity)]),
-    );
     let total = new Prisma.Decimal(0);
-    const hasReturn = returnedItems.length > 0;
-    const hasExchange = exchangedItems.length > 0;
+    let returnValue = new Prisma.Decimal(0);
+    let exchangeValue = new Prisma.Decimal(0);
+    const itemDispositions: Record<string, string> = {};
 
     const recordMovement = ({
       productId,
@@ -772,7 +837,10 @@ class SaleService {
       const newQty = previousQty.plus(change);
 
       stockQuantityMap.set(productId, newQty);
-      stockNetChanges.set(productId, (stockNetChanges.get(productId) ?? new Prisma.Decimal(0)).plus(change));
+      stockNetChanges.set(
+        productId,
+        (stockNetChanges.get(productId) ?? new Prisma.Decimal(0)).plus(change),
+      );
       movementRows.push({
         product_id: productId,
         movement_type: movementType,
@@ -790,17 +858,23 @@ class SaleService {
         throw new AppError(400, `Product ${ret.productId} not in original sale`);
       }
 
+      const disposition = ret.disposition || 'RESTOCK';
+      itemDispositions[ret.productId] = disposition;
+
       const returnQuantity = new Prisma.Decimal(ret.quantity);
       const lineTotal = new Prisma.Decimal(originalItem.unit_price).mul(returnQuantity).mul(-1);
       total = total.plus(lineTotal);
+      returnValue = returnValue.plus(lineTotal.abs());
 
-      recordMovement({
-        productId: ret.productId,
-        change: returnQuantity,
-        movementType: StockMovementType.RETURN,
-        referenceType: 'return',
-        notes: 'Returned by customer',
-      });
+      if (disposition === 'RESTOCK') {
+        recordMovement({
+          productId: ret.productId,
+          change: returnQuantity,
+          movementType: StockMovementType.RETURN,
+          referenceType: resolvedType === 'EXCHANGE' ? 'exchange' : 'return',
+          notes: `Returned by customer (${disposition.toLowerCase()})`,
+        });
+      }
 
       saleItems.push({
         product_id: ret.productId,
@@ -821,6 +895,7 @@ class SaleService {
       const unitPrice = new Prisma.Decimal(item.price);
       const lineTotal = unitPrice.mul(exchangeQuantity);
       total = total.plus(lineTotal);
+      exchangeValue = exchangeValue.plus(lineTotal);
 
       recordMovement({
         productId: item.productId,
@@ -843,47 +918,103 @@ class SaleService {
       });
     }
 
+    const balanceDue = total.toNumber();
+    const inferredScope =
+      returnScope ||
+      (returnedItems.every((ret) => {
+        const originalItem = originalSale.sale_items.find((i) => i.product_id === ret.productId);
+        if (!originalItem) return false;
+        const prior = alreadyReturned.get(ret.productId) || 0;
+        return ret.quantity >= originalItem.quantity.toNumber() - prior;
+      }) &&
+      originalSale.sale_items.every((orig) => {
+        const retQty = returnedItems.find((r) => r.productId === orig.product_id)?.quantity || 0;
+        const prior = alreadyReturned.get(orig.product_id) || 0;
+        return retQty >= orig.quantity.toNumber() - prior;
+      })
+        ? 'FULL'
+        : 'PARTIAL');
+
+    const mapRefundMethod = (method?: string): PaymentMethod => {
+      switch (method) {
+        case 'cash':
+          return PaymentMethod.CASH;
+        case 'card':
+          return PaymentMethod.CARD;
+        case 'bank_transfer':
+          return PaymentMethod.BANK_TRANSFER;
+        case 'store_credit':
+          return PaymentMethod.CREDIT;
+        case 'original_payment':
+          return originalSale.payment_method;
+        case 'no_refund':
+          return originalSale.payment_method;
+        default:
+          return PaymentMethod.CASH;
+      }
+    };
+
+    const meta = {
+      transactionType: resolvedType,
+      returnScope: inferredScope,
+      returnReason: returnReason || null,
+      refundMethod: refundMethod || null,
+      exchangeBalanceAction: exchangeBalanceAction || null,
+      status: 'COMPLETED',
+      returnValue: returnValue.toNumber(),
+      exchangeValue: exchangeValue.toNumber(),
+      balanceDue,
+      itemDispositions,
+    };
+    const structuredNotes = `__META__${JSON.stringify(meta)}__ENDMETA__\n${notes || ''}`.trim();
+
+    const childStatus =
+      resolvedType === 'EXCHANGE' ? SaleStatus.EXCHANGED : SaleStatus.REFUNDED;
+
     const ops: Prisma.PrismaPromise<any>[] = [];
     ops.push(
       prisma.sale.create({
         data: {
-          sale_number: `SALE-${Date.now()}`,
+          sale_number: `RTN-${Date.now()}`,
           branch_id: resolvedBranchId,
-          customer_id: customerId,
+          customer_id: customerId || originalSale.customer_id,
           original_sale_id: originalSaleId,
-          notes,
+          notes: structuredNotes,
           subtotal: total,
           total_amount: total,
-          payment_method: 'CASH',
+          payment_method: mapRefundMethod(refundMethod),
           payment_status: 'PAID',
-          status:
-            hasReturn && hasExchange
-              ? SaleStatus.EXCHANGED
-              : hasReturn
-                ? SaleStatus.REFUNDED
-                : SaleStatus.EXCHANGED,
+          status: childStatus,
           created_by: createdBy,
           sale_items: {
             create: saleItems,
           },
         },
         include: {
-          sale_items: true,
+          sale_items: { include: { product: true } },
+          customer: true,
+          original_sale: { select: { sale_number: true, total_amount: true } },
         },
       }),
     );
 
-    // Flip the ORIGINAL sale into a terminal state so it stops appearing in
-    // "ready for return" lists and the duplicate-refund guard above can
-    // intercept any retry. This is what makes the UI eventually-consistent:
-    // - getSalesForReturns filters by status === COMPLETED → drops it.
-    // - The returns list filters by status in (REFUNDED, EXCHANGED) → includes it.
-    const originalNewStatus =
-      hasReturn && hasExchange
+    let allFullyReturned = true;
+    for (const orig of originalSale.sale_items) {
+      const retThisTxn =
+        returnedItems.find((r) => r.productId === orig.product_id)?.quantity || 0;
+      const prior = alreadyReturned.get(orig.product_id) || 0;
+      if (prior + retThisTxn < orig.quantity.toNumber()) {
+        allFullyReturned = false;
+        break;
+      }
+    }
+
+    const originalNewStatus = allFullyReturned
+      ? resolvedType === 'EXCHANGE'
         ? SaleStatus.EXCHANGED
-        : hasReturn
-          ? SaleStatus.REFUNDED
-          : SaleStatus.EXCHANGED;
+        : SaleStatus.REFUNDED
+      : SaleStatus.COMPLETED;
+
     ops.push(
       prisma.sale.update({
         where: { id: originalSaleId },
@@ -892,6 +1023,7 @@ class SaleService {
     );
 
     for (const [productId, quantityChange] of stockNetChanges.entries()) {
+      if (quantityChange.isZero()) continue;
       ops.push(
         prisma.stock.upsert({
           where: {
@@ -937,7 +1069,9 @@ class SaleService {
     }
 
     const [sale] = await prisma.$transaction(ops);
-    return sale as Prisma.SaleGetPayload<{ include: { sale_items: true } }>;
+    return sale as Prisma.SaleGetPayload<{
+      include: { sale_items: { include: { product: true } }; customer: true };
+    }>;
   }
 
   async getRecentSaleItemsProductNameAndPrice(branchId?: string) {

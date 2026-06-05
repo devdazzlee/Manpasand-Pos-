@@ -28,68 +28,56 @@ class BranchService {
         return branch;
     }
     async deleteBranch(id) {
-        // Surface a clear FK-block message rather than letting Prisma throw a raw
-        // P2003. Disabling is always recommended over deletion for branches that
-        // have ever participated in sales / stock movements.
-        const branch = await client_1.prisma.branch.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: {
-                        stock: true,
-                        sales: true,
-                        hold_sales: true,
-                        purchase_orders: true,
-                        stock_movements: true,
-                        Order: true,
-                        User: true,
-                        employees: true,
-                        purchases_from: true,
-                        transfers_from: true,
-                        transfers_to: true,
-                        stock_adjustments: true,
-                        cashflows: true,
-                        category: true,
-                    },
-                },
-            },
-        });
+        const branch = await client_1.prisma.branch.findUnique({ where: { id } });
         if (!branch)
             throw new apiError_1.AppError(404, 'Branch not found');
-        const counts = branch._count;
-        const parts = [];
-        if (counts.stock > 0)
-            parts.push(`${counts.stock} stock record${counts.stock === 1 ? '' : 's'}`);
-        if (counts.sales > 0)
-            parts.push(`${counts.sales} sale${counts.sales === 1 ? '' : 's'}`);
-        if (counts.hold_sales > 0)
-            parts.push(`${counts.hold_sales} held sale${counts.hold_sales === 1 ? '' : 's'}`);
-        if (counts.purchase_orders > 0)
-            parts.push(`${counts.purchase_orders} purchase order${counts.purchase_orders === 1 ? '' : 's'}`);
-        if (counts.purchases_from > 0)
-            parts.push(`${counts.purchases_from} purchase${counts.purchases_from === 1 ? '' : 's'}`);
-        if (counts.stock_movements > 0)
-            parts.push(`${counts.stock_movements} stock movement${counts.stock_movements === 1 ? '' : 's'}`);
-        if (counts.stock_adjustments > 0)
-            parts.push(`${counts.stock_adjustments} stock adjustment${counts.stock_adjustments === 1 ? '' : 's'}`);
-        if (counts.transfers_from > 0 || counts.transfers_to > 0) {
-            const t = counts.transfers_from + counts.transfers_to;
-            parts.push(`${t} transfer${t === 1 ? '' : 's'}`);
-        }
-        if (counts.Order > 0)
-            parts.push(`${counts.Order} order${counts.Order === 1 ? '' : 's'}`);
-        if (counts.User > 0)
-            parts.push(`${counts.User} user${counts.User === 1 ? '' : 's'}`);
-        if (counts.employees > 0)
-            parts.push(`${counts.employees} employee${counts.employees === 1 ? '' : 's'}`);
-        if (counts.cashflows > 0)
-            parts.push(`${counts.cashflows} cash drawer record${counts.cashflows === 1 ? '' : 's'}`);
-        if (counts.category > 0)
-            parts.push(`${counts.category} categor${counts.category === 1 ? 'y' : 'ies'}`);
-        if (parts.length > 0) {
-            throw new apiError_1.AppError(409, `Cannot delete branch — it is linked to ${parts.join(', ')}. Disable the branch instead.`);
-        }
-        await client_1.prisma.branch.delete({ where: { id } });
+        await client_1.prisma.$transaction(async (tx) => {
+            // Break return links before removing sales from this branch.
+            await tx.sale.updateMany({
+                where: { original_sale: { branch_id: id } },
+                data: { original_sale_id: null },
+            });
+            await tx.saleItem.deleteMany({
+                where: { sale: { branch_id: id } },
+            });
+            await tx.sale.deleteMany({ where: { branch_id: id } });
+            await tx.holdSale.deleteMany({ where: { branch_id: id } });
+            await tx.stockMovement.deleteMany({ where: { branch_id: id } });
+            await tx.stockAdjustment.deleteMany({ where: { branch_id: id } });
+            await tx.stock.deleteMany({ where: { branch_id: id } });
+            await tx.purchaseOrderItem.deleteMany({
+                where: { purchase_order: { branch_id: id } },
+            });
+            await tx.purchaseOrder.deleteMany({ where: { branch_id: id } });
+            await tx.purchase.deleteMany({ where: { warehouse_branch_id: id } });
+            await tx.transfer.deleteMany({
+                where: { OR: [{ from_branch_id: id }, { to_branch_id: id }] },
+            });
+            await tx.orderItem.deleteMany({
+                where: { order: { branch_id: id } },
+            });
+            await tx.order.deleteMany({ where: { branch_id: id } });
+            await tx.expense.deleteMany({
+                where: { cashflow: { branch_id: id } },
+            });
+            await tx.cashFlow.deleteMany({ where: { branch_id: id } });
+            await tx.category.updateMany({
+                where: { branch_id: id },
+                data: { branch_id: null },
+            });
+            await tx.user.updateMany({
+                where: { branch_id: id },
+                data: { branch_id: null },
+            });
+            await tx.employee.updateMany({
+                where: { branch_id: id },
+                data: { branch_id: null },
+            });
+            await tx.branch.delete({ where: { id } });
+        }, {
+            maxWait: 30000,
+            timeout: 120000,
+        });
         return { message: 'Branch deleted successfully' };
     }
     async getBranchById(id) {
