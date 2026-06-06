@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateSubcategoryInput, UpdateSubcategoryInput } from '../validations/subcategory.validation';
+import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
 
 export class SubcategoryService {
     async createSubcategory(data: CreateSubcategoryInput) {
@@ -68,6 +69,24 @@ export class SubcategoryService {
             where: { id },
             data: { is_active: !subcategory.is_active },
         });
+    }
+
+    async deleteSubcategory(id: string) {
+        const subcategory = await prisma.subcategory.findUnique({ where: { id } });
+        if (!subcategory) {
+            throw new AppError(404, 'Subcategory not found');
+        }
+
+        await prisma.$transaction(async (tx) => {
+            const defaultSubcategoryId = await catalogDefaults.ensureDefaultSubcategory(tx, id);
+            await tx.product.updateMany({
+                where: { subcategory_id: id },
+                data: { subcategory_id: defaultSubcategoryId },
+            });
+            await tx.subcategory.delete({ where: { id } });
+        }, catalogDeleteOptions);
+
+        return { message: 'Subcategory deleted successfully' };
     }
 
     async listSubcategories({

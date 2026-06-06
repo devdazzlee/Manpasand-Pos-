@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateColorInput, UpdateColorInput } from '../validations/color.validation';
+import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
 
 export class ColorService {
     async createColor(data: CreateColorInput) {
@@ -108,25 +109,18 @@ export class ColorService {
     }
 
     async deleteColor(id: string) {
-        const color = await prisma.color.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: { products: true },
-                },
-            },
-        });
-
+        const color = await prisma.color.findUnique({ where: { id } });
         if (!color) throw new AppError(404, 'Color not found');
 
-        if (color._count.products > 0) {
-            throw new AppError(
-                409,
-                `Cannot delete color — it is linked to ${color._count.products} product${color._count.products === 1 ? '' : 's'}. Disable the color instead.`,
-            );
-        }
+        await prisma.$transaction(async (tx) => {
+            const defaultColorId = await catalogDefaults.ensureDefaultColor(tx, id);
+            await tx.product.updateMany({
+                where: { color_id: id },
+                data: { color_id: defaultColorId },
+            });
+            await tx.color.delete({ where: { id } });
+        }, catalogDeleteOptions);
 
-        await prisma.color.delete({ where: { id } });
         return { message: 'Color deleted successfully' };
     }
 }

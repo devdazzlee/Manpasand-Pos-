@@ -2,13 +2,13 @@ import { z } from 'zod';
 
 export const createEmployeeSchema = z.object({
   body: z.object({
-    name: z.string(),
-    email: z.string().email().optional(),
+    name: z.string().trim().min(2, 'Full name must be at least 2 characters'),
+    email: z.string().email(),
     phone_number: z.string().optional(),
     cnic: z.string().optional(),
     gender: z.string().optional(),
-    join_date: z.string().datetime(),
-    employee_type_id: z.string().uuid(),
+    join_date: z.string().datetime().optional(),
+    employee_type_id: z.string().uuid().optional(),
   }),
 });
 

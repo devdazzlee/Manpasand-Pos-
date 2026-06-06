@@ -15,5 +15,6 @@ router.get('/', (0, validation_middleware_1.validate)(subcategory_validation_1.l
 router.get('/:id', (0, validation_middleware_1.validate)(subcategory_validation_1.getSubcategorySchema), subcategory_controller_1.getSubcategory);
 router.patch('/:id', (0, validation_middleware_1.validate)(subcategory_validation_1.updateSubcategorySchema), subcategory_controller_1.updateSubcategory);
 router.patch('/:id/toggle-status', (0, validation_middleware_1.validate)(subcategory_validation_1.getSubcategorySchema), subcategory_controller_1.toggleSubcategoryStatus);
+router.delete('/:id', (0, validation_middleware_1.validate)(subcategory_validation_1.getSubcategorySchema), subcategory_controller_1.deleteSubcategory);
 exports.default = router;
 //# sourceMappingURL=subcategory.routes.js.map

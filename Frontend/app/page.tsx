@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { LoginForm } from "@/components/login-form";
 import { Dashboard } from "@/components/dashboard";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
+import { clearTabFromUrl } from "@/lib/dashboard-tabs";
 
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
@@ -103,6 +104,7 @@ export default function Home() {
     localStorage.removeItem("branch");
     localStorage.removeItem("branchName");
     localStorage.removeItem("branchAddress");
+    clearTabFromUrl();
     setToken(null);
   };
   if (checking) {

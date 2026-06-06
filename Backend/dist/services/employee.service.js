@@ -4,9 +4,34 @@ exports.EmployeeService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 class EmployeeService {
+    async resolveEmployeeTypeId(employeeTypeId) {
+        if (employeeTypeId)
+            return employeeTypeId;
+        const existing = await client_1.prisma.employeeType.findFirst({
+            where: { is_active: true },
+            orderBy: { name: 'asc' },
+        });
+        if (existing)
+            return existing.id;
+        const created = await client_1.prisma.employeeType.create({
+            data: { name: 'General' },
+        });
+        return created.id;
+    }
     async createEmployee(data, branch_id) {
+        const joinDate = data.join_date ? new Date(data.join_date) : new Date();
+        const employee_type_id = await this.resolveEmployeeTypeId(data.employee_type_id);
         const employee = await client_1.prisma.employee.create({
-            data: { ...data, branch_id },
+            data: {
+                name: data.name.trim(),
+                email: data.email,
+                phone_number: data.phone_number,
+                cnic: data.cnic,
+                gender: data.gender,
+                join_date: joinDate,
+                employee_type_id,
+                branch_id,
+            },
         });
         return employee;
     }
@@ -38,36 +63,18 @@ class EmployeeService {
         return employee;
     }
     async deleteEmployee(id) {
-        // Hard-deleting an employee that already has shift_assignments or
-        // salary records would either fail with Prisma's P2003 (which surfaces
-        // as a cryptic stack trace) or — worse, if we cascaded — silently wipe
-        // payroll and attendance history. Detect those dependents up front and
-        // return a clear 409 telling the user to deactivate instead.
-        const counts = await client_1.prisma.employee.findUnique({
-            where: { id },
-            select: {
-                _count: {
-                    select: {
-                        shift_assignments: true,
-                        salaries: true,
-                    },
-                },
-            },
-        });
-        if (!counts) {
+        const employee = await client_1.prisma.employee.findUnique({ where: { id } });
+        if (!employee) {
             throw new apiError_1.AppError(404, 'Employee not found');
         }
-        const shifts = counts._count.shift_assignments;
-        const salaries = counts._count.salaries;
-        if (shifts > 0 || salaries > 0) {
-            const parts = [];
-            if (shifts > 0)
-                parts.push(`${shifts} shift assignment${shifts === 1 ? '' : 's'}`);
-            if (salaries > 0)
-                parts.push(`${salaries} salary record${salaries === 1 ? '' : 's'}`);
-            throw new apiError_1.AppError(409, `Cannot delete this employee — they still have ${parts.join(' and ')} on file. Mark them inactive instead.`);
-        }
-        const employee = await client_1.prisma.employee.delete({ where: { id } });
+        await client_1.prisma.$transaction(async (tx) => {
+            await tx.salary.deleteMany({ where: { employee_id: id } });
+            await tx.shiftAssignment.deleteMany({ where: { employee_id: id } });
+            await tx.employee.delete({ where: { id } });
+        }, {
+            maxWait: 30000,
+            timeout: 120000,
+        });
         return employee;
     }
 }

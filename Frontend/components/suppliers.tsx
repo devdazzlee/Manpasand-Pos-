@@ -17,7 +17,6 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   Search,
@@ -45,6 +44,8 @@ import { z } from "zod";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { PageLoader } from "@/components/ui/page-loader";
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
+import { Checkbox } from "@/components/ui/checkbox";
+import { cn } from "@/lib/utils";
 
 interface Supplier {
   id: string;
@@ -102,7 +103,7 @@ const supplierFormSchema = z.object({
   strn: z.string().trim().optional(),
   gov_id: z.string().trim().optional(),
   address: z.string().trim().optional(),
-  is_active: z.boolean().optional(),
+  display_on_pos: z.boolean().optional(),
 });
 
 type SupplierFormErrors = Partial<
@@ -147,21 +148,122 @@ const emptyForm: SupplierForm = {
   strn: "",
   gov_id: "",
   address: "",
-  is_active: true,
+  display_on_pos: true,
 };
 
-const FIELDS: { label: string; key: keyof SupplierForm; required?: boolean; placeholder?: string }[] = [
-  { label: "Name", key: "name", required: true, placeholder: "Enter supplier name" },
-  { label: "Email", key: "email", placeholder: "supplier@example.com" },
-  { label: "Mobile", key: "mobile_number", placeholder: "Enter mobile number" },
-  { label: "Phone", key: "phone_number", placeholder: "Enter phone number" },
-  { label: "Fax", key: "fax_number", placeholder: "Enter fax number" },
-  { label: "Country", key: "country", placeholder: "Enter country" },
-  { label: "City", key: "city", placeholder: "Enter city" },
-  { label: "NTN", key: "ntn", placeholder: "Enter NTN" },
-  { label: "STRN", key: "strn", placeholder: "Enter STRN" },
-  { label: "Gov ID", key: "gov_id", placeholder: "Enter government ID" },
-];
+const supplierDialogContentClass =
+  "grid w-[min(580px,calc(100vw-2rem))] max-w-none gap-4 p-5 sm:rounded-lg";
+const supplierDialogTitleClass = "text-base font-semibold text-gray-900";
+const supplierFieldLabelClass = "text-xs font-medium text-gray-900";
+const supplierFieldControlClass = "h-9 rounded-md border-gray-200 text-sm";
+const supplierSubmitButtonClass = "h-10 w-full text-sm font-medium";
+
+interface SupplierFormFieldsProps {
+  idPrefix: string;
+  form: SupplierForm;
+  errors: SupplierFormErrors;
+  onFieldChange: <K extends keyof SupplierForm>(key: K, value: SupplierForm[K]) => void;
+  disabled?: boolean;
+}
+
+function SupplierFormFields({
+  idPrefix,
+  form,
+  errors,
+  onFieldChange,
+  disabled = false,
+}: SupplierFormFieldsProps) {
+  const renderInput = (
+    key: keyof SupplierForm,
+    label: string,
+    placeholder: string,
+    required = false,
+  ) => (
+    <div className="space-y-1">
+      <Label htmlFor={`${idPrefix}-${key}`} className={supplierFieldLabelClass}>
+        {label}
+        {required && <span className="text-red-500">*</span>}
+      </Label>
+      <Input
+        id={`${idPrefix}-${key}`}
+        value={(form[key] as string) ?? ""}
+        onChange={(e) => onFieldChange(key, e.target.value as SupplierForm[typeof key])}
+        placeholder={placeholder}
+        disabled={disabled}
+        aria-invalid={errors[key] ? true : undefined}
+        className={cn(
+          supplierFieldControlClass,
+          errors[key] && "border-red-500 focus-visible:ring-red-500",
+        )}
+      />
+      {errors[key] && (
+        <p className="mt-1 text-xs text-red-600" role="alert">
+          {errors[key]}
+        </p>
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {renderInput("name", "Name", "Enter name", true)}
+        {renderInput("phone_number", "Phone", "Enter phone")}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {renderInput("fax_number", "Fax", "Enter fax")}
+        {renderInput("mobile_number", "Mobile", "Enter mobile")}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {renderInput("email", "Email", "Enter email")}
+        {renderInput("country", "Country", "Enter country")}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {renderInput("city", "City", "Enter city")}
+        {renderInput("ntn", "NTN", "Enter ntn")}
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {renderInput("strn", "STRN", "Enter strn")}
+        {renderInput("gov_id", "Gov ID", "Enter gov id")}
+      </div>
+
+      <div className="flex items-center gap-2">
+        <Checkbox
+          id={`${idPrefix}-display_on_pos`}
+          checked={form.display_on_pos ?? true}
+          onCheckedChange={(checked) =>
+            onFieldChange("display_on_pos", checked === true)
+          }
+          disabled={disabled}
+        />
+        <Label
+          htmlFor={`${idPrefix}-display_on_pos`}
+          className="text-sm font-normal text-gray-900 cursor-pointer"
+        >
+          Display on POS
+        </Label>
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor={`${idPrefix}-address`} className={supplierFieldLabelClass}>
+          Address
+        </Label>
+        <Input
+          id={`${idPrefix}-address`}
+          value={form.address || ""}
+          onChange={(e) => onFieldChange("address", e.target.value)}
+          placeholder="Enter address"
+          disabled={disabled}
+          className={supplierFieldControlClass}
+        />
+      </div>
+    </div>
+  );
+}
 
 const Suppliers: React.FC = () => {
   const [list, setList] = useState<Supplier[]>([]);
@@ -225,7 +327,7 @@ const Suppliers: React.FC = () => {
       strn: s.strn || "",
       gov_id: s.gov_id || "",
       address: s.address || "",
-      is_active: s.status === "active",
+      display_on_pos: s.display_on_pos,
     });
     setErrors({});
     setEditOpen(true);
@@ -242,7 +344,6 @@ const Suppliers: React.FC = () => {
   };
 
   const submit = async () => {
-    console.log("[supplier] submit", { editing: !!current, form });
     const parsed = supplierFormSchema.safeParse(form);
     if (!parsed.success) {
       const map = zodErrorsToMap(parsed.error);
@@ -253,18 +354,16 @@ const Suppliers: React.FC = () => {
     setErrors({});
     setSubmitting(true);
     try {
-      // Strip "" for cleared optional fields so the backend doesn't store empty strings.
       const data = parsed.data;
       const payload: Record<string, any> = {
         name: data.name,
-        // Always visible on POS — there's no UI toggle for this anymore.
-        display_on_pos: true,
-        status: (data.is_active ?? true) ? "active" : "inactive",
+        display_on_pos: data.display_on_pos ?? true,
+        status: current?.status === "inactive" ? "inactive" : "active",
       };
       (["phone_number", "fax_number", "mobile_number", "email", "country", "city", "ntn", "strn", "gov_id", "address"] as const).forEach((k) => {
         const v = data[k];
         if (v && v.length > 0) payload[k] = v;
-        else if (current) payload[k] = null; // editing → clear field
+        else if (current) payload[k] = null;
       });
 
       if (current) {
@@ -326,29 +425,6 @@ const Suppliers: React.FC = () => {
   if (isInitialLoading) {
     return <PageLoader message="Loading suppliers..." />;
   }
-
-  const renderField = (key: keyof SupplierForm, label: string, required: boolean | undefined, placeholder?: string) => (
-    <div key={key}>
-      <Label htmlFor={key}>
-        {label}
-        {required && <span className="text-red-600 ml-1">*</span>}
-      </Label>
-      <Input
-        id={key}
-        value={(form[key] as string) ?? ""}
-        onChange={(e) => setField(key, e.target.value as any)}
-        placeholder={placeholder || `Enter ${label.toLowerCase()}`}
-        className={errors[key] ? "border-red-500" : ""}
-        aria-invalid={!!errors[key]}
-        disabled={submitting}
-      />
-      {errors[key] && (
-        <p className="text-sm text-red-600 mt-1" role="alert">
-          {errors[key]}
-        </p>
-      )}
-    </div>
-  );
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
@@ -525,67 +601,33 @@ const Suppliers: React.FC = () => {
             setAddOpen(false);
             setEditOpen(false);
             setErrors({});
+            setCurrent(null);
           }
         }}
       >
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{current ? "Edit Supplier" : "Create Supplier"}</DialogTitle>
+        <DialogContent className={supplierDialogContentClass}>
+          <DialogHeader className="space-y-0">
+            <DialogTitle className={supplierDialogTitleClass}>
+              {current ? "Edit Supplier" : "Create Supplier"}
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            {Object.values(errors).filter(Boolean).length > 0 && (
-              <div className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700" role="alert">
-                Please fix the highlighted fields below.
-              </div>
-            )}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {FIELDS.map(({ label, key, required, placeholder }) =>
-                renderField(key, label, required, placeholder),
-              )}
-              <div className="col-span-full">
-                <Label htmlFor="address">Address</Label>
-                <Input
-                  id="address"
-                  value={form.address || ""}
-                  onChange={(e) => setField("address", e.target.value)}
-                  placeholder="Enter address"
-                  disabled={submitting}
-                  className={errors.address ? "border-red-500" : ""}
-                />
-                {errors.address && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {errors.address}
-                  </p>
-                )}
-              </div>
-              <div className="col-span-full flex items-center justify-between rounded-md border p-3">
-                <div className="space-y-0.5">
-                  <Label htmlFor="status" className="text-sm font-medium">
-                    Status
-                  </Label>
-                  <p className="text-xs text-gray-500">
-                    {form.is_active
-                      ? "Active — available for new purchases"
-                      : "Inactive — disabled from new purchases"}
-                  </p>
-                </div>
-                <Switch
-                  id="status"
-                  checked={!!form.is_active}
-                  onCheckedChange={(checked) => setField("is_active", checked)}
-                  disabled={submitting}
-                />
-              </div>
-            </div>
-            <LoadingButton
-              onClick={submit}
-              loading={submitting}
-              className="w-full"
-              disabled={submitting}
-            >
-              {current ? "Update Supplier" : "Create Supplier"}
-            </LoadingButton>
-          </div>
+
+          <SupplierFormFields
+            idPrefix={current ? "edit" : "add"}
+            form={form}
+            errors={errors}
+            onFieldChange={setField}
+            disabled={submitting}
+          />
+
+          <LoadingButton
+            onClick={submit}
+            loading={submitting}
+            className={supplierSubmitButtonClass}
+            disabled={submitting}
+          >
+            {current ? "Update Supplier" : "Create"}
+          </LoadingButton>
         </DialogContent>
       </Dialog>
 
@@ -751,9 +793,8 @@ const Suppliers: React.FC = () => {
             <AlertDialogTitle>Delete supplier?</AlertDialogTitle>
             <AlertDialogDescription>
               This will permanently delete{" "}
-              <span className="font-semibold">{deleteTarget?.name || "this supplier"}</span>. If
-              the supplier has products, purchases, or purchase orders, deletion will be blocked
-              and you'll need to disable it instead. This action cannot be undone.
+              <span className="font-semibold">{deleteTarget?.name || "this supplier"}</span>.
+              Linked products will be moved to the default supplier. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

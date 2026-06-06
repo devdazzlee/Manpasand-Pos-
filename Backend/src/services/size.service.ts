@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateSizeInput, UpdateSizeInput } from '../validations/size.validation';
+import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
 
 export class SizeService {
     async createSize(data: CreateSizeInput) {
@@ -116,25 +117,18 @@ export class SizeService {
     }
 
     async deleteSize(id: string) {
-        const size = await prisma.size.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: { products: true },
-                },
-            },
-        });
-
+        const size = await prisma.size.findUnique({ where: { id } });
         if (!size) throw new AppError(404, 'Size not found');
 
-        if (size._count.products > 0) {
-            throw new AppError(
-                409,
-                `Cannot delete size — it is linked to ${size._count.products} product${size._count.products === 1 ? '' : 's'}. Disable the size instead.`,
-            );
-        }
+        await prisma.$transaction(async (tx) => {
+            const defaultSizeId = await catalogDefaults.ensureDefaultSize(tx, id);
+            await tx.product.updateMany({
+                where: { size_id: id },
+                data: { size_id: defaultSizeId },
+            });
+            await tx.size.delete({ where: { id } });
+        }, catalogDeleteOptions);
 
-        await prisma.size.delete({ where: { id } });
         return { message: 'Size deleted successfully' };
     }
 }

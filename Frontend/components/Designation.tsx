@@ -311,7 +311,7 @@ return (
           <AlertDialogHeader>
             <AlertDialogTitle>Are you sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the employee type "{types.find(t => t.id === typeToDelete)?.name}".
+              This will permanently delete this designation and any linked employees, shift records, and salary records.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -1246,7 +1246,7 @@ export function Categories() {
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the category and remove its data from our servers.
+              This will permanently delete this category. Linked products will be moved to the default category (&quot;General&quot;). Products are not deleted. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

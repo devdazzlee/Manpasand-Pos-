@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.BrandService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
+const catalog_defaults_service_1 = require("./catalog-defaults.service");
 class BrandService {
     async createBrand(data) {
         const [existingBrand, allBrands] = await Promise.all([
@@ -97,20 +98,17 @@ class BrandService {
         };
     }
     async deleteBrand(id) {
-        const brand = await client_1.prisma.brand.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: { products: true },
-                },
-            },
-        });
+        const brand = await client_1.prisma.brand.findUnique({ where: { id } });
         if (!brand)
             throw new apiError_1.AppError(404, 'Brand not found');
-        if (brand._count.products > 0) {
-            throw new apiError_1.AppError(409, `Cannot delete brand — it is linked to ${brand._count.products} product${brand._count.products === 1 ? '' : 's'}. Disable the brand instead.`);
-        }
-        await client_1.prisma.brand.delete({ where: { id } });
+        await client_1.prisma.$transaction(async (tx) => {
+            const defaultBrandId = await catalog_defaults_service_1.catalogDefaults.ensureDefaultBrand(tx, id);
+            await tx.product.updateMany({
+                where: { brand_id: id },
+                data: { brand_id: defaultBrandId },
+            });
+            await tx.brand.delete({ where: { id } });
+        }, catalog_defaults_service_1.catalogDeleteOptions);
         return { message: 'Brand deleted successfully' };
     }
 }

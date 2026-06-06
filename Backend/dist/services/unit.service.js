@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.UnitService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
+const catalog_defaults_service_1 = require("./catalog-defaults.service");
 class UnitService {
     async createUnit(data) {
         const [existingUnit, allUnits] = await Promise.all([
@@ -55,20 +56,17 @@ class UnitService {
         });
     }
     async deleteUnit(id) {
-        const unit = await client_1.prisma.unit.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: { products: true },
-                },
-            },
-        });
+        const unit = await client_1.prisma.unit.findUnique({ where: { id } });
         if (!unit)
             throw new apiError_1.AppError(404, 'Unit not found');
-        if (unit._count.products > 0) {
-            throw new apiError_1.AppError(409, `Cannot delete unit — it is linked to ${unit._count.products} product${unit._count.products === 1 ? '' : 's'}. Disable the unit instead.`);
-        }
-        await client_1.prisma.unit.delete({ where: { id } });
+        await client_1.prisma.$transaction(async (tx) => {
+            const defaultUnitId = await catalog_defaults_service_1.catalogDefaults.ensureDefaultUnit(tx, id);
+            await tx.product.updateMany({
+                where: { unit_id: id },
+                data: { unit_id: defaultUnitId },
+            });
+            await tx.unit.delete({ where: { id } });
+        }, catalog_defaults_service_1.catalogDeleteOptions);
         return { message: 'Unit deleted successfully' };
     }
     async listUnits({ page = 1, limit = 10, search, is_active, display_on_pos, }) {

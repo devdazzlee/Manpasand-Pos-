@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateCategoryInput, UpdateCategoryInput } from '../validations/category.validation';
 import { s3Service } from './common/s3BucketService';
+import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
 
 export class CategoryService {
   async createCategory(data: CreateCategoryInput) {
@@ -220,20 +221,16 @@ export class CategoryService {
   async deleteCategory(id: string) {
     const category = await this.getCategoryById(id);
 
-    // Check if category has products
-    const productCount = await prisma.product.count({
-      where: { category_id: id },
-    });
-
-    if (productCount > 0) {
-      throw new AppError(400, `Cannot delete category "${category.name}" — it has ${productCount} product(s). Remove or reassign them first.`);
-    }
-
-    // Delete images first, then the category
     await prisma.$transaction(async (tx) => {
+      const defaultCategoryId = await catalogDefaults.ensureDefaultCategory(tx, id);
+
+      await tx.product.updateMany({
+        where: { category_id: id },
+        data: { category_id: defaultCategoryId },
+      });
       await tx.categoryImages.deleteMany({ where: { category_id: id } });
-      await tx.category.delete({ where: { id } });
-    });
+      await tx.category.delete({ where: { id: category.id } });
+    }, catalogDeleteOptions);
 
     return category;
   }

@@ -9,8 +9,17 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Label } from "@/components/ui/label";
 import {
   Table,
@@ -26,12 +35,19 @@ import {
   Loader2,
   Edit,
   Eye,
+  Trash2,
   ToggleRight,
   ToggleLeft,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { PageLoader } from "@/components/ui/page-loader";
+import { useToast } from "@/hooks/use-toast";
+
+const extractApiError = (err: any, fallback: string = "Something went wrong"): string => {
+  const data = err?.response?.data;
+  return data?.errors?.[0]?.message || data?.message || err?.message || fallback;
+};
 
 interface Subcategory {
   id: string;
@@ -45,6 +61,7 @@ interface Subcategory {
 }
 
 const Subcategories: React.FC = () => {
+  const { toast } = useToast();
   const [list, setList] = useState<Subcategory[]>([]);
   const [search, setSearch] = useState("");
   const [loading, setLoading] = useState(false);
@@ -54,6 +71,8 @@ const Subcategories: React.FC = () => {
   const [addOpen, setAddOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [detailOpen, setDetailOpen] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Subcategory | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
   const [current, setCurrent] = useState<Subcategory | null>(null);
 
   // form.image now holds base64 string or URL
@@ -155,6 +174,28 @@ const Subcategories: React.FC = () => {
     }
   };
 
+  const handleDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleteLoading(true);
+    try {
+      await apiClient.delete(`${API_BASE}/subcategories/${deleteTarget.id}`);
+      toast({
+        title: "Success",
+        description: "Subcategory deleted successfully",
+      });
+      setDeleteTarget(null);
+      fetchList();
+    } catch (err: any) {
+      toast({
+        title: "Error",
+        description: extractApiError(err, "Failed to delete subcategory"),
+        variant: "destructive",
+      });
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
   const handleSearchChange = (v: string) => {
     setSearch(v);
     fetchList(v);
@@ -246,6 +287,14 @@ const Subcategories: React.FC = () => {
                         onClick={() => toggleStatus(sub.id)}
                       >
                         {sub.is_active ? "Disable" : "Enable"}
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="text-red-600 hover:text-red-700"
+                        onClick={() => setDeleteTarget(sub)}
+                      >
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     </TableCell>
                   </TableRow>
@@ -379,6 +428,44 @@ const Subcategories: React.FC = () => {
           )}
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !deleteLoading) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete subcategory?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will permanently delete{" "}
+              <span className="font-semibold">{deleteTarget?.name || "this subcategory"}</span>.
+              Linked products will be moved to the default subcategory (&quot;General&quot;). Products are not deleted. This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deleteLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleDelete();
+              }}
+              disabled={deleteLoading}
+              className="bg-red-600 hover:bg-red-700"
+            >
+              {deleteLoading ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Deleting...
+                </>
+              ) : (
+                "Delete"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 };

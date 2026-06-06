@@ -4,6 +4,7 @@ exports.CategoryService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const s3BucketService_1 = require("./common/s3BucketService");
+const catalog_defaults_service_1 = require("./catalog-defaults.service");
 class CategoryService {
     async createCategory(data) {
         const [existingSlug, allCategories] = await Promise.all([
@@ -180,18 +181,15 @@ class CategoryService {
     }
     async deleteCategory(id) {
         const category = await this.getCategoryById(id);
-        // Check if category has products
-        const productCount = await client_1.prisma.product.count({
-            where: { category_id: id },
-        });
-        if (productCount > 0) {
-            throw new apiError_1.AppError(400, `Cannot delete category "${category.name}" — it has ${productCount} product(s). Remove or reassign them first.`);
-        }
-        // Delete images first, then the category
         await client_1.prisma.$transaction(async (tx) => {
+            const defaultCategoryId = await catalog_defaults_service_1.catalogDefaults.ensureDefaultCategory(tx, id);
+            await tx.product.updateMany({
+                where: { category_id: id },
+                data: { category_id: defaultCategoryId },
+            });
             await tx.categoryImages.deleteMany({ where: { category_id: id } });
-            await tx.category.delete({ where: { id } });
-        });
+            await tx.category.delete({ where: { id: category.id } });
+        }, catalog_defaults_service_1.catalogDeleteOptions);
         return category;
     }
     async deleteAllCategories() {

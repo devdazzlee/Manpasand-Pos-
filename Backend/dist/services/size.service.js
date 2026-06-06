@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SizeService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
+const catalog_defaults_service_1 = require("./catalog-defaults.service");
 class SizeService {
     async createSize(data) {
         const existingSize = await client_1.prisma.size.findFirst({
@@ -92,20 +93,17 @@ class SizeService {
         };
     }
     async deleteSize(id) {
-        const size = await client_1.prisma.size.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: { products: true },
-                },
-            },
-        });
+        const size = await client_1.prisma.size.findUnique({ where: { id } });
         if (!size)
             throw new apiError_1.AppError(404, 'Size not found');
-        if (size._count.products > 0) {
-            throw new apiError_1.AppError(409, `Cannot delete size — it is linked to ${size._count.products} product${size._count.products === 1 ? '' : 's'}. Disable the size instead.`);
-        }
-        await client_1.prisma.size.delete({ where: { id } });
+        await client_1.prisma.$transaction(async (tx) => {
+            const defaultSizeId = await catalog_defaults_service_1.catalogDefaults.ensureDefaultSize(tx, id);
+            await tx.product.updateMany({
+                where: { size_id: id },
+                data: { size_id: defaultSizeId },
+            });
+            await tx.size.delete({ where: { id } });
+        }, catalog_defaults_service_1.catalogDeleteOptions);
         return { message: 'Size deleted successfully' };
     }
 }

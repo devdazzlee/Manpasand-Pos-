@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.ExpenseService = void 0;
 const client_1 = require("../prisma/client");
+const apiError_1 = require("../utils/apiError");
 class ExpenseService {
     async createExpense(data) {
         return await client_1.prisma.expense.create({ data });
@@ -38,7 +39,24 @@ class ExpenseService {
         return client_1.prisma.employeeType.update({ where: { id }, data });
     }
     async delete(id) {
-        return client_1.prisma.employeeType.delete({ where: { id } });
+        const type = await client_1.prisma.employeeType.findUnique({ where: { id } });
+        if (!type) {
+            throw new apiError_1.AppError(404, 'Employee type not found');
+        }
+        await client_1.prisma.$transaction(async (tx) => {
+            await tx.salary.deleteMany({
+                where: { employee: { employee_type_id: id } },
+            });
+            await tx.shiftAssignment.deleteMany({
+                where: { employee: { employee_type_id: id } },
+            });
+            await tx.employee.deleteMany({ where: { employee_type_id: id } });
+            await tx.employeeType.delete({ where: { id } });
+        }, {
+            maxWait: 30000,
+            timeout: 120000,
+        });
+        return type;
     }
 }
 exports.ExpenseService = ExpenseService;

@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateSupplierInput, UpdateSupplierInput } from '../validations/supplier.validation';
+import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
 
 export class SupplierService {
     async createSupplier(data: CreateSupplierInput) {
@@ -76,37 +77,28 @@ export class SupplierService {
     }
 
     async deleteSupplier(id: string) {
-        const supplier = await prisma.supplier.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: {
-                        products: true,
-                        purchase_orders: true,
-                        purchases: true,
-                    },
-                },
-            },
-        });
-
+        const supplier = await prisma.supplier.findUnique({ where: { id } });
         if (!supplier) throw new AppError(404, 'Supplier not found');
 
-        // Prisma would throw a P2003 FK violation on delete — surface a clear,
-        // actionable message instead so the UI can offer "disable" as the
-        // recommended path.
-        const { products, purchase_orders, purchases } = supplier._count;
-        if (products > 0 || purchase_orders > 0 || purchases > 0) {
-            const parts: string[] = [];
-            if (products > 0) parts.push(`${products} product${products === 1 ? '' : 's'}`);
-            if (purchases > 0) parts.push(`${purchases} purchase${purchases === 1 ? '' : 's'}`);
-            if (purchase_orders > 0) parts.push(`${purchase_orders} purchase order${purchase_orders === 1 ? '' : 's'}`);
-            throw new AppError(
-                409,
-                `Cannot delete supplier — it is linked to ${parts.join(', ')}. Disable the supplier instead.`,
-            );
-        }
+        await prisma.$transaction(async (tx) => {
+            const defaultSupplierId = await catalogDefaults.ensureDefaultSupplier(tx, id);
 
-        await prisma.supplier.delete({ where: { id } });
+            await tx.product.updateMany({
+                where: { supplier_id: id },
+                data: { supplier_id: defaultSupplierId },
+            });
+            await tx.purchaseOrder.updateMany({
+                where: { supplier_id: id },
+                data: { supplier_id: defaultSupplierId },
+            });
+            await tx.purchase.updateMany({
+                where: { supplier_id: id },
+                data: { supplier_id: defaultSupplierId },
+            });
+
+            await tx.supplier.delete({ where: { id } });
+        }, catalogDeleteOptions);
+
         return { message: 'Supplier deleted successfully' };
     }
 
@@ -114,14 +106,16 @@ export class SupplierService {
         page = 1,
         limit = 10,
         search,
-        is_active = true,
-        display_on_pos = true,
+        is_active,
+        display_on_pos,
+        fetch_all,
     }: {
         page?: number;
         limit?: number;
         search?: string;
         is_active?: boolean;
         display_on_pos?: boolean;
+        fetch_all?: boolean;
     }) {
         const where: Prisma.SupplierWhereInput = {};
 
@@ -141,11 +135,14 @@ export class SupplierService {
             where.display_on_pos = display_on_pos;
         }
 
+        const take = fetch_all ? 1000 : limit;
+        const skip = fetch_all ? 0 : (page - 1) * limit;
+
         const [suppliers, total] = await Promise.all([
             prisma.supplier.findMany({
                 where,
-                skip: (page - 1) * limit,
-                take: limit,
+                skip,
+                take,
                 orderBy: { created_at: 'desc' },
                 include: {
                     _count: {

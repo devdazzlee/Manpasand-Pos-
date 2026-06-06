@@ -25,6 +25,11 @@ export const toggleSubcategoryStatus = asyncHandler(async (req: Request, res: Re
     new ApiResponse(null, 'Subcategory status changed successfully').send(res);
 });
 
+export const deleteSubcategory = asyncHandler(async (req: Request, res: Response) => {
+    await subcategoryService.deleteSubcategory(req.params.id);
+    new ApiResponse(null, 'Subcategory deleted successfully').send(res);
+});
+
 export const listSubcategories = asyncHandler(async (req: Request, res: Response) => {
     const { page = 1, limit = 10, search, is_active } = req.query;
 

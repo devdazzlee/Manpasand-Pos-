@@ -41,6 +41,9 @@ import {
   Download,
   MessageCircle,
   Mail,
+  Check,
+  ChevronsUpDown,
+  User,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
@@ -66,13 +69,16 @@ import {
 } from "@/lib/money";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
 import { ScrollArea } from "@/components/ui/scroll-area";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
 import { useHoldSales } from "@/hooks/use-hold-sales";
 import { usePosBranch } from "@/hooks/use-pos-branch";
 
@@ -112,6 +118,141 @@ interface Product {
 // Printer type from global hook
 type Printer = ReturnType<typeof usePrinterSettings>["printers"][number];
 
+type PosCustomer = {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  phone?: string | null;
+  is_active?: boolean;
+};
+
+function getCustomerDisplayName(customer: PosCustomer): string {
+  return (
+    customer.name?.trim() ||
+    customer.phone_number ||
+    customer.phone ||
+    "Unnamed customer"
+  );
+}
+
+function getCustomerSearchValue(customer: PosCustomer): string {
+  const email =
+    customer.email && !customer.email.includes("@pos.local") ? customer.email : "";
+  return [customer.name, customer.phone_number, customer.phone, email]
+    .filter(Boolean)
+    .join(" ");
+}
+
+interface CustomerSearchComboboxProps {
+  customers: PosCustomer[];
+  loading?: boolean;
+  value: string | null;
+  onChange: (customerId: string | null) => void;
+  disabled?: boolean;
+}
+
+function CustomerSearchCombobox({
+  customers,
+  loading = false,
+  value,
+  onChange,
+  disabled = false,
+}: CustomerSearchComboboxProps) {
+  const [open, setOpen] = useState(false);
+
+  const activeCustomers = useMemo(
+    () => customers.filter((customer) => customer.is_active !== false),
+    [customers],
+  );
+
+  const selectedCustomer =
+    activeCustomers.find((customer) => customer.id === value) || null;
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled || loading}
+          className="h-10 w-full justify-between bg-white font-normal"
+        >
+          <span className="flex min-w-0 items-center gap-2 truncate">
+            <User className="h-4 w-4 shrink-0 text-gray-500" />
+            <span className="truncate">
+              {loading
+                ? "Loading customers..."
+                : selectedCustomer
+                  ? getCustomerDisplayName(selectedCustomer)
+                  : "Walk-in customer"}
+            </span>
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent
+        className="w-[var(--radix-popover-trigger-width)] p-0"
+        align="start"
+      >
+        <Command>
+          <CommandInput placeholder="Search by name, phone, or email..." />
+          <CommandList>
+            <CommandEmpty>No customer found.</CommandEmpty>
+            <CommandGroup>
+              <CommandItem
+                value="walk-in customer"
+                onSelect={() => {
+                  onChange(null);
+                  setOpen(false);
+                }}
+              >
+                <Check
+                  className={cn("mr-2 h-4 w-4", !value ? "opacity-100" : "opacity-0")}
+                />
+                Walk-in customer
+              </CommandItem>
+              {activeCustomers.map((customer) => (
+                <CommandItem
+                  key={customer.id}
+                  value={`${customer.id} ${getCustomerSearchValue(customer)}`}
+                  onSelect={() => {
+                    onChange(customer.id);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4 shrink-0",
+                      value === customer.id ? "opacity-100" : "opacity-0",
+                    )}
+                  />
+                  <div className="min-w-0 flex flex-col">
+                    <span className="truncate">{getCustomerDisplayName(customer)}</span>
+                    {(customer.phone_number || customer.phone || customer.email) && (
+                      <span className="truncate text-xs text-muted-foreground">
+                        {[
+                          customer.phone_number || customer.phone,
+                          customer.email && !customer.email.includes("@pos.local")
+                            ? customer.email
+                            : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ")}
+                      </span>
+                    )}
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 
 export function NewSale() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -133,11 +274,8 @@ export function NewSale() {
     return true;
   });
   const {
-    adminMode,
     branchLoading,
-    branches: availableBranches,
     selectedBranchId,
-    setSelectedBranchId,
     branchInfo,
     hasBranch,
   } = usePosBranch();
@@ -1752,33 +1890,22 @@ export function NewSale() {
               )}
             </div>
           </div>
-          {adminMode && (
-            <div className="mb-4 max-w-sm">
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-                POS Branch
-              </label>
-              <Select
-                value={selectedBranchId || "none"}
-                onValueChange={(value) => setSelectedBranchId(value === "none" ? "" : value)}
-              >
-                <SelectTrigger className="bg-white">
-                  <SelectValue placeholder={branchLoading ? "Loading branches..." : "Select branch"} />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Select branch</SelectItem>
-                  {availableBranches.map((branch) => (
-                    <SelectItem key={branch.id} value={branch.id}>
-                      {branch.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {!hasBranch && !branchLoading && (
-                <p className="mt-2 text-sm text-amber-700">
-                  Select a branch to use Hold Sale and complete sales.
-                </p>
-              )}
-            </div>
+          <div className="mb-4 max-w-sm">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Customer
+            </label>
+            <CustomerSearchCombobox
+              customers={customers}
+              loading={customersLoading}
+              value={selectedCustomer}
+              onChange={setSelectedCustomer}
+              disabled={paymentLoading}
+            />
+          </div>
+          {!hasBranch && !branchLoading && (
+            <p className="mb-4 max-w-sm text-sm text-amber-700">
+              Branch is not configured. Hold Sale and checkout may fail until a branch is assigned.
+            </p>
           )}
           <div className="flex items-center space-x-4">
             <div className="relative flex-1 max-w-md">

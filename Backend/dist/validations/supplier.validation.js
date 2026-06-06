@@ -49,6 +49,9 @@ exports.listSuppliersSchema = zod_1.z.object({
         limit: zod_1.z.string().optional().default('10'),
         search: zod_1.z.string().optional(),
         status: zod_1.z.string().optional(),
+        is_active: zod_1.z.enum(['true', 'false']).optional(),
+        display_on_pos: zod_1.z.enum(['true', 'false']).optional(),
+        fetch_all: zod_1.z.enum(['true', 'false']).optional(),
     }),
 });
 //# sourceMappingURL=supplier.validation.js.map

@@ -615,7 +615,7 @@ model Customer {
   ntn                String?
   mobile_number      String?
   strn               String?
-  email              String
+  email              String?
   password           String?
   dob                DateTime?
   customer_cat       String[]
@@ -624,6 +624,8 @@ model Customer {
   is_active          Boolean         @default(true)
   ref_by             String?
   ref_contact_number String?
+  credit_limit       Decimal?
+  previous_credit_balance Decimal?     @default(0)
   orders             Order[]
   sales              Sale[] // NEW: Link to sales
   hold_sales         HoldSale[]

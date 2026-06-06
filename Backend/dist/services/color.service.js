@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.ColorService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
+const catalog_defaults_service_1 = require("./catalog-defaults.service");
 class ColorService {
     async createColor(data) {
         const [existingColor, allColors] = await Promise.all([
@@ -90,20 +91,17 @@ class ColorService {
         };
     }
     async deleteColor(id) {
-        const color = await client_1.prisma.color.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: { products: true },
-                },
-            },
-        });
+        const color = await client_1.prisma.color.findUnique({ where: { id } });
         if (!color)
             throw new apiError_1.AppError(404, 'Color not found');
-        if (color._count.products > 0) {
-            throw new apiError_1.AppError(409, `Cannot delete color — it is linked to ${color._count.products} product${color._count.products === 1 ? '' : 's'}. Disable the color instead.`);
-        }
-        await client_1.prisma.color.delete({ where: { id } });
+        await client_1.prisma.$transaction(async (tx) => {
+            const defaultColorId = await catalog_defaults_service_1.catalogDefaults.ensureDefaultColor(tx, id);
+            await tx.product.updateMany({
+                where: { color_id: id },
+                data: { color_id: defaultColorId },
+            });
+            await tx.color.delete({ where: { id } });
+        }, catalog_defaults_service_1.catalogDeleteOptions);
         return { message: 'Color deleted successfully' };
     }
 }

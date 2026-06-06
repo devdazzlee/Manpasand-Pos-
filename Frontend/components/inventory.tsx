@@ -933,7 +933,9 @@ export default function Inventory() {
     },
 
     async getSuppliers() {
-      const response = await apiClient.get("/suppliers", { params: { limit: 1000 } })
+      const response = await apiClient.get("/suppliers", {
+        params: { fetch_all: true },
+      })
       return response.data
     },
 
@@ -1475,6 +1477,14 @@ export default function Inventory() {
         is_featured: fresh.is_featured ?? false,
         images: existingUrls,
       })
+
+      if (fresh.supplier?.id && fresh.supplier?.name) {
+        setSuppliers((prev) =>
+          prev.some((item) => item.id === fresh.supplier.id)
+            ? prev
+            : [...prev, { id: fresh.supplier.id, name: fresh.supplier.name }]
+        )
+      }
       setImagePreviews(existingUrls)
       setExistingImageUrls(existingUrls)
 

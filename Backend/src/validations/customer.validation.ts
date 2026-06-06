@@ -1,4 +1,22 @@
-import { z } from "zod";
+import { z } from 'zod';
+
+const phoneRegex = /^[0-9+\-\s]+$/;
+
+const optionalEmail = z
+    .string()
+    .trim()
+    .optional()
+    .refine((v) => !v || z.string().email().safeParse(v).success, {
+        message: 'Invalid email address',
+    });
+
+const optionalMoney = z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? undefined : Number(v)),
+    z
+        .number({ invalid_type_error: 'Must be a valid number' })
+        .nonnegative('Amount cannot be negative')
+        .optional(),
+);
 
 // Customer self-registration — only email is required (the password is
 // generated / sent separately in the existing flow).
@@ -15,46 +33,50 @@ const customerLoginSchema = z.object({
     }),
 });
 
-// Admin / staff creating a customer from the POS Customers screen. Email is
-// required and the other contact fields are optional but format-checked
-// when present. Phone allows digits / +/- /space — the frontend mirrors
-// these rules so the user gets instant feedback.
+// Admin / staff creating a customer from the POS Customers screen.
 const customerCreateByAdminSchema = z.object({
     body: z.object({
-        email: z.string().email('Invalid email address'),
-        name: z.string().trim().min(1, 'Name is required').optional(),
+        name: z.string().trim().min(1, 'Name is required'),
         phone_number: z
             .string()
             .trim()
+            .min(1, 'Phone number is required')
             .min(7, 'Phone number must be at least 7 digits')
             .max(20, 'Phone number is too long')
-            .regex(/^[0-9+\-\s]+$/, 'Phone number must contain only digits, +, -, or spaces')
-            .optional(),
-        address: z.string().trim().min(1, 'Address is required').optional(),
-        billing_address: z.string().trim().min(1, 'Billing address is required').optional(),
+            .regex(phoneRegex, 'Phone number must contain only digits, +, -, or spaces'),
+        email: optionalEmail,
+        address: z.string().trim().optional(),
+        billing_address: z.string().trim().optional(),
+        credit_limit: optionalMoney,
+        previous_credit_balance: optionalMoney,
         is_active: z.boolean().optional(),
     }),
 });
 
 const customerUpdateSchema = z.object({
     body: z.object({
-        // Email can be edited; if present must be valid. Nullable so a
-        // future "clear email" action is supported without another schema.
-        email: z.string().email('Invalid email address').nullable().optional(),
         name: z.string().trim().min(1, 'Name is required').nullable().optional(),
         phone_number: z
             .string()
             .trim()
             .min(7, 'Phone number must be at least 7 digits')
             .max(20, 'Phone number is too long')
-            .regex(/^[0-9+\-\s]+$/, 'Phone number must contain only digits, +, -, or spaces')
+            .regex(phoneRegex, 'Phone number must contain only digits, +, -, or spaces')
             .nullable()
             .optional(),
-        address: z.string().trim().min(1, 'Address is required').nullable().optional(),
-        billing_address: z
-            .string()
-            .trim()
-            .min(1, 'Billing address is required')
+        email: z
+            .union([
+                z.string().trim().email('Invalid email address'),
+                z.literal(''),
+                z.null(),
+            ])
+            .optional(),
+        address: z.string().trim().nullable().optional(),
+        billing_address: z.string().trim().nullable().optional(),
+        credit_limit: z.number().nonnegative('Credit limit cannot be negative').nullable().optional(),
+        previous_credit_balance: z
+            .number()
+            .nonnegative('Previous credit balance cannot be negative')
             .nullable()
             .optional(),
         is_active: z.boolean().optional(),
@@ -66,4 +88,4 @@ export {
     customerLoginSchema,
     customerCreateByAdminSchema,
     customerUpdateSchema,
-}
+};

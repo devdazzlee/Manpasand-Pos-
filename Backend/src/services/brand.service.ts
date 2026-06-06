@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateBrandInput, UpdateBrandInput } from '../validations/brand.validation';
+import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
 
 export class BrandService {
     async createBrand(data: CreateBrandInput) {
@@ -116,25 +117,18 @@ export class BrandService {
     }
 
     async deleteBrand(id: string) {
-        const brand = await prisma.brand.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: { products: true },
-                },
-            },
-        });
-
+        const brand = await prisma.brand.findUnique({ where: { id } });
         if (!brand) throw new AppError(404, 'Brand not found');
 
-        if (brand._count.products > 0) {
-            throw new AppError(
-                409,
-                `Cannot delete brand — it is linked to ${brand._count.products} product${brand._count.products === 1 ? '' : 's'}. Disable the brand instead.`,
-            );
-        }
+        await prisma.$transaction(async (tx) => {
+            const defaultBrandId = await catalogDefaults.ensureDefaultBrand(tx, id);
+            await tx.product.updateMany({
+                where: { brand_id: id },
+                data: { brand_id: defaultBrandId },
+            });
+            await tx.brand.delete({ where: { id } });
+        }, catalogDeleteOptions);
 
-        await prisma.brand.delete({ where: { id } });
         return { message: 'Brand deleted successfully' };
     }
 }

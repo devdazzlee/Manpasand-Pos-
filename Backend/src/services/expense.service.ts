@@ -1,4 +1,5 @@
 import { prisma } from '../prisma/client';
+import { AppError } from '../utils/apiError';
 import { CreateExpenseInput } from '../validations/expense.validation';
 
 export class ExpenseService {
@@ -44,6 +45,28 @@ export class ExpenseService {
     }
 
     async delete(id: string) {
-        return prisma.employeeType.delete({ where: { id } });
+        const type = await prisma.employeeType.findUnique({ where: { id } });
+        if (!type) {
+            throw new AppError(404, 'Employee type not found');
+        }
+
+        await prisma.$transaction(
+            async (tx) => {
+                await tx.salary.deleteMany({
+                    where: { employee: { employee_type_id: id } },
+                });
+                await tx.shiftAssignment.deleteMany({
+                    where: { employee: { employee_type_id: id } },
+                });
+                await tx.employee.deleteMany({ where: { employee_type_id: id } });
+                await tx.employeeType.delete({ where: { id } });
+            },
+            {
+                maxWait: 30000,
+                timeout: 120000,
+            },
+        );
+
+        return type;
     }
 }

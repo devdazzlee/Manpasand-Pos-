@@ -1,17 +1,17 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactNode } from "react"
 import { z } from "zod"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Search, Plus, Edit, Trash2, Loader2, Users } from "lucide-react"
+import { Search, Plus, Edit, Trash2, Loader2, Users, CalendarIcon } from "lucide-react"
 import apiClient from "@/lib/apiClient"
 // sonner is the toast system that's already mounted in app/layout.tsx with
 // richColors + bottom-right position. The shadcn useToast() variant in this
@@ -28,57 +28,40 @@ import { cn } from "@/lib/utils"
 // the backend stays authoritative — any server-side rejection bubbles up
 // verbatim in the toast (we never invent a friendlier message).
 const employeeFormSchema = z.object({
-  // refine() runs on the value AS-IS (no trim transform in front) so an
-  // empty string or whitespace-only input is caught reliably across all
-  // Zod versions. min(2) alone has surprised us before when chained after
-  // .trim() — refine sidesteps that entirely.
   name: z
     .string({ required_error: "Full name is required" })
     .refine((v) => v.trim().length >= 2, {
       message: "Full name must be at least 2 characters",
     }),
   email: z
-    .string()
+    .string({ required_error: "Email is required" })
     .trim()
-    .optional()
-    .refine((v) => !v || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v), {
-      message: "Email is not valid",
-    }),
+    .min(1, "Email is required")
+    .email("Email is not valid"),
   phone_number: z.string().trim().optional(),
   cnic: z.string().trim().optional(),
   gender: z.string().trim().optional(),
-  // Preprocess so `null` from the date picker maps to `undefined` — that
-  // triggers the friendly required_error instead of Zod's "expected date,
-  // received null".
   join_date: z.preprocess(
     (v) => (v instanceof Date ? v : undefined),
-    z.date({ required_error: "Join date is required" }),
+    z.date().optional(),
   ),
-  employee_type_id: z
-    .string({ required_error: "Please select an employee type" })
-    .uuid("Please select an employee type"),
+  employee_type_id: z.string().uuid().optional().or(z.literal("")),
 })
 
-// Extract the first validation error string from a ZodError so we can hand
-// it straight to a toast.
+const employeeDialogContentClass =
+  "grid w-[min(580px,calc(100vw-2rem))] max-w-none gap-4 p-5 sm:rounded-lg"
+const employeeDialogTitleClass = "text-base font-semibold text-gray-900"
+const employeeFieldLabelClass = "text-xs font-medium text-gray-900"
+const employeeFieldControlClass = "h-9 rounded-md border-gray-200 text-sm"
+const employeeDialogFooterClass = "gap-2 sm:justify-end pt-1"
+const employeeDialogButtonClass = "h-9 px-4 text-xs"
+
 const firstZodError = (err: z.ZodError): string =>
   err.errors[0]?.message || "Please check the form fields"
 
-// join_date is a pure calendar date (no clock time). Naive `toISOString()`
-// on a Date created from a local-zone day-picker shifts the day in any
-// non-UTC timezone (e.g. PKT/UTC+5 → "May 28 local" becomes "May 27 UTC").
-// Build a UTC-midnight ISO from the local date PARTS so the day stays
-// identical no matter where the user lives.
 const toUtcMidnightIso = (d: Date): string =>
   new Date(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate())).toISOString()
 
-// Format the stored ISO back to YYYY-MM-DD.
-//
-// New records saved by this file are exactly UTC-midnight (00:00:00 UTC) —
-// we read those with UTC accessors so the day component is identical for
-// every user. Legacy records saved by the previous buggy code carry a
-// timezone offset (e.g. ...T19:00:00.000Z for a PKT user) — those need
-// LOCAL accessors to reverse back to the day the user originally picked.
 const formatJoinDate = (iso: string | Date | null | undefined): string => {
   if (!iso) return "-"
   const d = iso instanceof Date ? iso : new Date(iso)
@@ -89,6 +72,266 @@ const formatJoinDate = (iso: string | Date | null | undefined): string => {
   const m = String((isCleanUtcMidnight ? d.getUTCMonth() : d.getMonth()) + 1).padStart(2, "0")
   const day = String(isCleanUtcMidnight ? d.getUTCDate() : d.getDate()).padStart(2, "0")
   return `${y}-${m}-${day}`
+}
+
+type EmployeeFormErrors = Partial<
+  Record<
+    "name" | "email" | "phone_number" | "cnic" | "gender" | "join_date" | "employee_type_id",
+    string
+  >
+>
+
+interface EmployeeFormValues {
+  name: string
+  email: string
+  phone_number: string
+  cnic: string
+  gender: string
+  join_date: Date | null
+  employee_type_id: string
+}
+
+interface EmployeeType {
+  id: string
+  name: string
+}
+
+interface EmployeeFormFieldsProps {
+  idPrefix: string
+  values: EmployeeFormValues
+  errors: EmployeeFormErrors
+  onChange: (patch: Partial<EmployeeFormValues>) => void
+  onClearError: (field: keyof EmployeeFormErrors) => void
+  employeeTypes: EmployeeType[]
+  typesLoading: boolean
+  actionLoading: boolean
+  designationName: string
+  onDesignationNameChange: (value: string) => void
+  onAddDesignation: () => void
+  addingDesignation: boolean
+}
+
+function EmployeeFormFields({
+  idPrefix,
+  values,
+  errors,
+  onChange,
+  onClearError,
+  employeeTypes,
+  typesLoading,
+  actionLoading,
+  designationName,
+  onDesignationNameChange,
+  onAddDesignation,
+  addingDesignation,
+}: EmployeeFormFieldsProps) {
+  return (
+    <div className="space-y-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor={`${idPrefix}-name`} className={employeeFieldLabelClass}>
+            Full Name<span className="text-red-500">*</span>
+          </Label>
+          <Input
+            id={`${idPrefix}-name`}
+            value={values.name}
+            onChange={(e) => {
+              onChange({ name: e.target.value })
+              if (errors.name) onClearError("name")
+            }}
+            placeholder="Enter full name"
+            disabled={actionLoading}
+            aria-invalid={errors.name ? true : undefined}
+            className={cn(
+              employeeFieldControlClass,
+              errors.name && "border-red-500 focus-visible:ring-red-500",
+            )}
+          />
+          {errors.name && (
+            <p className="mt-1 text-xs text-red-600" role="alert">{errors.name}</p>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor={`${idPrefix}-email`} className={employeeFieldLabelClass}>
+            Email<span className="text-red-500">*</span>
+          </Label>
+          <Input
+            id={`${idPrefix}-email`}
+            type="email"
+            value={values.email}
+            onChange={(e) => {
+              onChange({ email: e.target.value })
+              if (errors.email) onClearError("email")
+            }}
+            placeholder="Enter email address"
+            disabled={actionLoading}
+            aria-invalid={errors.email ? true : undefined}
+            className={cn(
+              employeeFieldControlClass,
+              errors.email && "border-red-500 focus-visible:ring-red-500",
+            )}
+          />
+          {errors.email && (
+            <p className="mt-1 text-xs text-red-600" role="alert">{errors.email}</p>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor={`${idPrefix}-join_date`} className={employeeFieldLabelClass}>
+            Join Date (optional)
+          </Label>
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                id={`${idPrefix}-join_date`}
+                variant="outline"
+                disabled={actionLoading}
+                className={cn(
+                  employeeFieldControlClass,
+                  "w-full justify-start text-left font-normal",
+                  !values.join_date && "text-gray-500",
+                )}
+              >
+                <CalendarIcon className="mr-2 h-3.5 w-3.5 shrink-0" />
+                {values.join_date ? formatJoinDate(values.join_date) : "Pick a date"}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <Calendar
+                mode="single"
+                selected={values.join_date ?? undefined}
+                onSelect={(date) => {
+                  onChange({ join_date: date ?? null })
+                  if (errors.join_date) onClearError("join_date")
+                }}
+                initialFocus
+              />
+            </PopoverContent>
+          </Popover>
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor={`${idPrefix}-phone_number`} className={employeeFieldLabelClass}>
+            Phone (optional)
+          </Label>
+          <Input
+            id={`${idPrefix}-phone_number`}
+            value={values.phone_number}
+            onChange={(e) => onChange({ phone_number: e.target.value })}
+            placeholder="Phone number"
+            disabled={actionLoading}
+            className={employeeFieldControlClass}
+          />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor={`${idPrefix}-cnic`} className={employeeFieldLabelClass}>
+            CNIC (optional)
+          </Label>
+          <Input
+            id={`${idPrefix}-cnic`}
+            value={values.cnic}
+            onChange={(e) => onChange({ cnic: e.target.value })}
+            placeholder="CNIC"
+            disabled={actionLoading}
+            className={employeeFieldControlClass}
+          />
+        </div>
+
+        <div className="space-y-1">
+          <Label htmlFor={`${idPrefix}-gender`} className={employeeFieldLabelClass}>
+            Gender (optional)
+          </Label>
+          <Input
+            id={`${idPrefix}-gender`}
+            value={values.gender}
+            onChange={(e) => onChange({ gender: e.target.value })}
+            placeholder="Gender"
+            disabled={actionLoading}
+            className={employeeFieldControlClass}
+          />
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor={`${idPrefix}-employee_type_id`} className={employeeFieldLabelClass}>
+          Employee designation (optional)
+        </Label>
+        <Select
+          value={values.employee_type_id || undefined}
+          onValueChange={(val) => {
+            onChange({ employee_type_id: val })
+            if (errors.employee_type_id) onClearError("employee_type_id")
+          }}
+          disabled={actionLoading || typesLoading}
+        >
+          <SelectTrigger id={`${idPrefix}-employee_type_id`} className={employeeFieldControlClass}>
+            <SelectValue placeholder={typesLoading ? "Loading..." : "Select designation"} />
+          </SelectTrigger>
+          <SelectContent>
+            {employeeTypes.map((type) => (
+              <SelectItem key={type.id} value={type.id}>
+                {type.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <span className="text-xs text-gray-500 shrink-0">Or add new:</span>
+          <Input
+            value={designationName}
+            onChange={(e) => onDesignationNameChange(e.target.value)}
+            placeholder="e.g. Cashier, Manager"
+            disabled={actionLoading || addingDesignation}
+            className={cn(employeeFieldControlClass, "flex-1")}
+          />
+          <Button
+            type="button"
+            variant="outline"
+            className={cn(employeeDialogButtonClass, "shrink-0")}
+            onClick={onAddDesignation}
+            disabled={actionLoading || addingDesignation}
+          >
+            {addingDesignation ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : "Add"}
+          </Button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+interface EmployeeFormDialogProps {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  title: string
+  footer: ReactNode
+  children: ReactNode
+}
+
+function EmployeeFormDialog({
+  open,
+  onOpenChange,
+  title,
+  footer,
+  children,
+}: EmployeeFormDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={employeeDialogContentClass}>
+        <DialogHeader className="space-y-0">
+          <DialogTitle className={employeeDialogTitleClass}>{title}</DialogTitle>
+        </DialogHeader>
+        {children}
+        <DialogFooter className={employeeDialogFooterClass}>{footer}</DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 // Pull the most descriptive message off an Axios error response. Backend may
@@ -127,11 +370,6 @@ interface NewEmployeeForm {
   employee_type_id: string
 }
 
-interface EmployeeType {
-  id: string
-  name: string
-}
-
 export function EmployeeManagement() {
   const [employees, setEmployees] = useState<Employee[]>([])
   const [employeeTypes, setEmployeeTypes] = useState<EmployeeType[]>([])
@@ -157,14 +395,11 @@ export function EmployeeManagement() {
 
   // Field-level validation errors. Toast is still fired for the top-level
   // failure, but inline errors are what stays in front of the user.
-  type EmployeeFormErrors = Partial<
-    Record<
-      "name" | "email" | "phone_number" | "cnic" | "gender" | "join_date" | "employee_type_id",
-      string
-    >
-  >
   const [addErrors, setAddErrors] = useState<EmployeeFormErrors>({})
   const [editErrors, setEditErrors] = useState<EmployeeFormErrors>({})
+  const [newDesignationName, setNewDesignationName] = useState("")
+  const [editDesignationName, setEditDesignationName] = useState("")
+  const [addingDesignation, setAddingDesignation] = useState(false)
 
   // Reduce a ZodError to a per-field map for inline rendering.
   const zodErrorsToMap = (err: z.ZodError): EmployeeFormErrors => {
@@ -211,19 +446,62 @@ export function EmployeeManagement() {
     getEmployeeTypes()
   }, [])
 
+  const resetNewEmployeeForm = () => {
+    setNewEmployee({
+      name: "",
+      email: "",
+      phone_number: "",
+      cnic: "",
+      gender: "",
+      join_date: null,
+      employee_type_id: "",
+    })
+    setNewDesignationName("")
+    setAddErrors({})
+  }
+
+  const handleAddDesignation = async (target: "add" | "edit" = "add") => {
+    const name = (target === "add" ? newDesignationName : editDesignationName).trim()
+    if (name.length < 2) {
+      toast.error("Enter a designation name")
+      return
+    }
+
+    setAddingDesignation(true)
+    try {
+      const res = await apiClient.post("/employee/type", { name })
+      const created = res.data.data
+      await getEmployeeTypes()
+      if (target === "add") {
+        setNewEmployee((prev) => ({ ...prev, employee_type_id: created.id }))
+        setNewDesignationName("")
+      } else {
+        setEditingEmployee((prev) =>
+          prev ? { ...prev, employee_type_id: created.id } : null,
+        )
+        setEditDesignationName("")
+      }
+      toast.success("Designation added")
+    } catch (error: any) {
+      toast.error("Failed to add designation", {
+        description: extractApiError(error, "Could not create designation."),
+      })
+    } finally {
+      setAddingDesignation(false)
+    }
+  }
+
   // Add employee — validates with Zod first, then sends to backend. Any
   // backend rejection is surfaced verbatim in the toast (we do not paper
   // over it with a generic "Failed to add employee" string).
   const handleAddEmployee = async () => {
-    // Explicit pre-check for the three required fields. This guarantees an
-    // inline error renders even in the (rare) edge case where Zod's check
-    // chain doesn't fire — e.g. an unexpected value type slipping through.
     const preErrors: EmployeeFormErrors = {}
     if (!newEmployee.name || newEmployee.name.trim().length < 2)
       preErrors.name = "Full name must be at least 2 characters"
-    if (!newEmployee.join_date) preErrors.join_date = "Join date is required"
-    if (!newEmployee.employee_type_id)
-      preErrors.employee_type_id = "Please select an employee type"
+    if (!newEmployee.email || !newEmployee.email.trim())
+      preErrors.email = "Email is required"
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(newEmployee.email.trim()))
+      preErrors.email = "Email is not valid"
     if (Object.keys(preErrors).length > 0) {
       setAddErrors(preErrors)
       toast.error("Please fix the form", { description: Object.values(preErrors)[0]! })
@@ -243,11 +521,11 @@ export function EmployeeManagement() {
 
     const data = parsed.data
     const payload: Record<string, string> = {
-      name: data.name,
-      join_date: toUtcMidnightIso(data.join_date),
-      employee_type_id: data.employee_type_id,
+      name: data.name.trim(),
+      email: data.email.trim(),
+      join_date: toUtcMidnightIso(data.join_date ?? new Date()),
     }
-    if (data.email) payload.email = data.email
+    if (data.employee_type_id) payload.employee_type_id = data.employee_type_id
     if (data.phone_number) payload.phone_number = data.phone_number
     if (data.cnic) payload.cnic = data.cnic
     if (data.gender) payload.gender = data.gender
@@ -255,9 +533,9 @@ export function EmployeeManagement() {
     setActionLoading(true)
     try {
       await apiClient.post("/employee", payload)
-      toast.success("Employee added", { description: `${data.name} has been added.` })
+      toast.success("Employee added", { description: `${data.name.trim()} has been added.` })
       setIsAddDialogOpen(false)
-      setNewEmployee({ name: "", email: "", phone_number: "", cnic: "", gender: "", join_date: null, employee_type_id: "" })
+      resetNewEmployeeForm()
       getEmployees()
     } catch (error: any) {
       toast.error("Failed to add employee", {
@@ -268,38 +546,27 @@ export function EmployeeManagement() {
     }
   }
 
-  // Edit employee
   const openEditDialog = (employee: Employee) => {
-    setEditingEmployee({ ...employee, join_date: employee.join_date ? new Date(employee.join_date) : null })
+    setEditErrors({})
+    setEditDesignationName("")
+    setEditingEmployee({
+      ...employee,
+      join_date: employee.join_date ? new Date(employee.join_date) : null,
+    })
     setIsEditDialogOpen(true)
   }
 
-  // Edit employee — same pipeline: Zod first, then PUT. Backend error
-  // messages are shown verbatim.
   const handleEditEmployee = async () => {
-    // Trace so we can confirm in the browser console exactly which path
-    // ran. If this log doesn't appear when you click Update, your browser
-    // is running stale code — hard-refresh (Ctrl+Shift+R).
-    console.log("[handleEditEmployee] click", {
-      hasEditing: !!editingEmployee,
-      name: editingEmployee?.name,
-      join_date: editingEmployee?.join_date,
-      employee_type_id: editingEmployee?.employee_type_id,
-    })
-
     if (!editingEmployee) return
 
-    // Explicit pre-check. Edit is where the user most easily clears a
-    // required field by hitting backspace on Name, so this guard matters
-    // most here.
     const preErrors: EmployeeFormErrors = {}
     if (!editingEmployee.name || editingEmployee.name.trim().length < 2)
       preErrors.name = "Full name must be at least 2 characters"
-    if (!editingEmployee.join_date) preErrors.join_date = "Join date is required"
-    if (!editingEmployee.employee_type_id)
-      preErrors.employee_type_id = "Please select an employee type"
+    if (!editingEmployee.email || !editingEmployee.email.trim())
+      preErrors.email = "Email is required"
+    else if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(editingEmployee.email.trim()))
+      preErrors.email = "Email is not valid"
     if (Object.keys(preErrors).length > 0) {
-      console.warn("[handleEditEmployee] blocked by pre-check", preErrors)
       setEditErrors(preErrors)
       toast.error("Please fix the form", { description: Object.values(preErrors)[0]! })
       return
@@ -307,12 +574,12 @@ export function EmployeeManagement() {
 
     const parsed = employeeFormSchema.safeParse({
       name: editingEmployee.name,
-      email: editingEmployee.email || undefined,
+      email: editingEmployee.email,
       phone_number: editingEmployee.phone_number || undefined,
       cnic: editingEmployee.cnic || undefined,
       gender: editingEmployee.gender || undefined,
       join_date: editingEmployee.join_date,
-      employee_type_id: editingEmployee.employee_type_id,
+      employee_type_id: editingEmployee.employee_type_id || "",
     })
     if (!parsed.success) {
       setEditErrors(zodErrorsToMap(parsed.error))
@@ -322,18 +589,15 @@ export function EmployeeManagement() {
     setEditErrors({})
 
     const data = parsed.data
-    // Send `null` for cleared optional fields (instead of omitting them) so
-    // the backend actually clears the value in the DB. The backend's
-    // updateEmployeeSchema accepts `.nullable().optional()` for these.
     const payload: Record<string, string | null> = {
-      name: data.name,
-      join_date: toUtcMidnightIso(data.join_date),
-      employee_type_id: data.employee_type_id,
-      email: data.email ? data.email : null,
+      name: data.name.trim(),
+      email: data.email.trim(),
+      join_date: toUtcMidnightIso(data.join_date ?? editingEmployee.join_date ?? new Date()),
       phone_number: data.phone_number ? data.phone_number : null,
       cnic: data.cnic ? data.cnic : null,
       gender: data.gender ? data.gender : null,
     }
+    if (data.employee_type_id) payload.employee_type_id = data.employee_type_id
 
     setActionLoading(true)
     try {
@@ -369,9 +633,6 @@ export function EmployeeManagement() {
       setDeletingEmployee(null)
       getEmployees()
     } catch (error: any) {
-      // Surface the backend's exact message (e.g. the 409 from
-      // deleteEmployee about lingering shift assignments / salaries). No
-      // hardcoded fallback text — just whatever the server actually said.
       toast.error("Failed to delete employee", {
         description: extractApiError(error, "Server rejected the request."),
       })
@@ -389,6 +650,28 @@ export function EmployeeManagement() {
 
   // Stats
   const totalEmployees = employees.length
+
+  const addFormValues: EmployeeFormValues = {
+    name: newEmployee.name,
+    email: newEmployee.email,
+    phone_number: newEmployee.phone_number,
+    cnic: newEmployee.cnic,
+    gender: newEmployee.gender,
+    join_date: newEmployee.join_date,
+    employee_type_id: newEmployee.employee_type_id,
+  }
+
+  const editFormValues: EmployeeFormValues | null = editingEmployee
+    ? {
+        name: editingEmployee.name,
+        email: editingEmployee.email || "",
+        phone_number: editingEmployee.phone_number || "",
+        cnic: editingEmployee.cnic || "",
+        gender: editingEmployee.gender || "",
+        join_date: editingEmployee.join_date,
+        employee_type_id: editingEmployee.employee_type_id || "",
+      }
+    : null
 
   if (isInitialLoading) {
     return <PageLoader message="Loading employees data..." />
@@ -417,165 +700,14 @@ export function EmployeeManagement() {
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Employee Management</h1>
           <p className="text-sm md:text-base text-gray-600">Manage your team</p>
         </div>
-        {/* Add Employee Dialog */}
-        <Dialog
-          open={isAddDialogOpen}
-          onOpenChange={(open) => {
-            // Clear inline errors when the dialog closes so they don't
-            // appear pre-marked the next time it opens.
-            if (!open) setAddErrors({})
-            setIsAddDialogOpen(open)
+        <Button
+          onClick={() => {
+            resetNewEmployeeForm()
+            setIsAddDialogOpen(true)
           }}
         >
-          <DialogTrigger asChild>
-            <Button>Add Employee</Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add New Employee</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="name">Full Name<span className="text-red-500">*</span></Label>
-                <Input
-                  id="name"
-                  value={newEmployee.name}
-                  onChange={(e) => {
-                    setNewEmployee({ ...newEmployee, name: e.target.value })
-                    if (addErrors.name) setAddErrors((p) => ({ ...p, name: undefined }))
-                  }}
-                  placeholder="Enter full name"
-                  disabled={actionLoading}
-                  aria-invalid={addErrors.name ? true : undefined}
-                  className={addErrors.name ? "border-red-500 focus-visible:ring-red-500" : ""}
-                  required
-                />
-                {addErrors.name && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{addErrors.name}</p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="join_date">Join Date<span className="text-red-500">*</span></Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !newEmployee.join_date && "text-muted-foreground",
-                        addErrors.join_date && "border-red-500 focus-visible:ring-red-500",
-                      )}
-                    >
-                      {newEmployee.join_date ? formatJoinDate(newEmployee.join_date) : "Pick a date"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={newEmployee.join_date}
-                      onSelect={(date) => {
-                        setNewEmployee({ ...newEmployee, join_date: date })
-                        if (addErrors.join_date) setAddErrors((p) => ({ ...p, join_date: undefined }))
-                      }}
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-                {addErrors.join_date && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{addErrors.join_date}</p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="employee_type_id">Employee Type<span className="text-red-500">*</span></Label>
-                <Select
-                  value={newEmployee.employee_type_id}
-                  onValueChange={(val) => {
-                    setNewEmployee({ ...newEmployee, employee_type_id: val })
-                    if (addErrors.employee_type_id)
-                      setAddErrors((p) => ({ ...p, employee_type_id: undefined }))
-                  }}
-                  disabled={actionLoading || typesLoading || employeeTypes.length === 0}
-                >
-                  <SelectTrigger
-                    id="employee_type_id"
-                    aria-invalid={addErrors.employee_type_id ? true : undefined}
-                    className={
-                      addErrors.employee_type_id ? "border-red-500 focus-visible:ring-red-500" : ""
-                    }
-                  >
-                    <SelectValue placeholder={typesLoading ? "Loading..." : employeeTypes.length === 0 ? "No types found" : "Select type"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {employeeTypes.map((type) => (
-                      <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {addErrors.employee_type_id && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{addErrors.employee_type_id}</p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="email">Email</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={newEmployee.email}
-                  onChange={(e) => {
-                    setNewEmployee({ ...newEmployee, email: e.target.value })
-                    if (addErrors.email) setAddErrors((p) => ({ ...p, email: undefined }))
-                  }}
-                  placeholder="Enter email address (optional)"
-                  disabled={actionLoading}
-                  aria-invalid={addErrors.email ? true : undefined}
-                  className={addErrors.email ? "border-red-500 focus-visible:ring-red-500" : ""}
-                />
-                {addErrors.email && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{addErrors.email}</p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="phone_number">Phone</Label>
-                <Input
-                  id="phone_number"
-                  value={newEmployee.phone_number}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, phone_number: e.target.value })}
-                  placeholder="Enter phone number (optional)"
-                  disabled={actionLoading}
-                />
-              </div>
-              <div>
-                <Label htmlFor="cnic">CNIC</Label>
-                <Input
-                  id="cnic"
-                  value={newEmployee.cnic}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, cnic: e.target.value })}
-                  placeholder="Enter CNIC (optional)"
-                  disabled={actionLoading}
-                />
-              </div>
-              <div>
-                <Label htmlFor="gender">Gender</Label>
-                <Input
-                  id="gender"
-                  value={newEmployee.gender}
-                  onChange={(e) => setNewEmployee({ ...newEmployee, gender: e.target.value })}
-                  placeholder="Enter gender (optional)"
-                  disabled={actionLoading}
-                />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={actionLoading}>
-                Cancel
-              </Button>
-              <Button onClick={handleAddEmployee} disabled={actionLoading}>
-                {actionLoading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
-                Add Employee
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          Add Employee
+        </Button>
       </div>
       {/* Search */}
       <div className="relative max-w-md">
@@ -650,186 +782,96 @@ export function EmployeeManagement() {
           )}
         </CardContent>
       </Card>
-      {/* Edit Employee Dialog */}
-      <Dialog
-        open={isEditDialogOpen}
+
+      <EmployeeFormDialog
+        open={isAddDialogOpen}
         onOpenChange={(open) => {
-          if (!open) setEditErrors({})
-          setIsEditDialogOpen(open)
+          if (open) resetNewEmployeeForm()
+          else setAddErrors({})
+          setIsAddDialogOpen(open)
         }}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Employee</DialogTitle>
-          </DialogHeader>
-          {editingEmployee && (
-            <div className="space-y-4">
-              {/* Top-of-form summary banner. Renders whenever any required
-                  field is invalid — impossible to miss. */}
-              {(() => {
-                const missing: string[] = []
-                if (!editingEmployee.name || editingEmployee.name.trim().length < 2)
-                  missing.push("Full Name")
-                if (!editingEmployee.join_date) missing.push("Join Date")
-                if (!editingEmployee.employee_type_id) missing.push("Employee Type")
-                if (missing.length === 0) return null
-                return (
-                  <div className="rounded-md border border-red-200 bg-red-50 p-3">
-                    <p className="text-sm font-semibold text-red-700">
-                      Missing required information
-                    </p>
-                    <p className="mt-1 text-sm text-red-600">
-                      Please fill in: {missing.join(", ")}
-                    </p>
-                  </div>
-                )
-              })()}
-              <div>
-                <Label htmlFor="edit-name">Full Name<span className="text-red-500">*</span></Label>
-                <Input
-                  id="edit-name"
-                  value={editingEmployee.name}
-                  onChange={(e) => {
-                    const v = e.target.value
-                    setEditingEmployee({ ...editingEmployee, name: v })
-                    // Live re-validate so the user sees the red state the
-                    // instant they clear a required field — no need to wait
-                    // until they hit Update.
-                    setEditErrors((p) => ({
-                      ...p,
-                      name:
-                        !v || v.trim().length < 2
-                          ? "Full name must be at least 2 characters"
-                          : undefined,
-                    }))
-                  }}
-                  disabled={actionLoading}
-                  aria-invalid={editErrors.name ? true : undefined}
-                  className={editErrors.name ? "border-red-500 focus-visible:ring-red-500" : ""}
-                />
-                {editErrors.name && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{editErrors.name}</p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="edit-email">Email</Label>
-                <Input
-                  id="edit-email"
-                  type="email"
-                  value={editingEmployee.email}
-                  onChange={(e) => {
-                    setEditingEmployee({ ...editingEmployee, email: e.target.value })
-                    if (editErrors.email) setEditErrors((p) => ({ ...p, email: undefined }))
-                  }}
-                  disabled={actionLoading}
-                  aria-invalid={editErrors.email ? true : undefined}
-                  className={editErrors.email ? "border-red-500 focus-visible:ring-red-500" : ""}
-                />
-                {editErrors.email && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{editErrors.email}</p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="edit-phone_number">Phone</Label>
-                <Input
-                  id="edit-phone_number"
-                  value={editingEmployee.phone_number}
-                  onChange={(e) => setEditingEmployee({ ...editingEmployee, phone_number: e.target.value })}
-                  disabled={actionLoading}
-                />
-              </div>
-              <div>
-                <Label htmlFor="edit-cnic">CNIC</Label>
-                <Input
-                  id="edit-cnic"
-                  value={editingEmployee.cnic}
-                  onChange={(e) => setEditingEmployee({ ...editingEmployee, cnic: e.target.value })}
-                  disabled={actionLoading}
-                />
-              </div>
-              <div>
-                <Label htmlFor="edit-gender">Gender</Label>
-                <Input
-                  id="edit-gender"
-                  value={editingEmployee.gender}
-                  onChange={(e) => setEditingEmployee({ ...editingEmployee, gender: e.target.value })}
-                  disabled={actionLoading}
-                />
-              </div>
-              <div>
-                <Label htmlFor="edit-join_date">Join Date<span className="text-red-500">*</span></Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className={cn(
-                        "w-full justify-start text-left font-normal",
-                        !editingEmployee?.join_date && "text-muted-foreground",
-                        editErrors.join_date && "border-red-500 focus-visible:ring-red-500",
-                      )}
-                    >
-                      {editingEmployee?.join_date ? formatJoinDate(editingEmployee.join_date) : "Pick a date"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={editingEmployee?.join_date || null}
-                      onSelect={(date) => {
-                        setEditingEmployee(editingEmployee ? { ...editingEmployee, join_date: date } : null)
-                        if (editErrors.join_date) setEditErrors((p) => ({ ...p, join_date: undefined }))
-                      }}
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-                {editErrors.join_date && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{editErrors.join_date}</p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="edit-employee_type_id">Employee Type<span className="text-red-500">*</span></Label>
-                <Select
-                  value={editingEmployee.employee_type_id}
-                  onValueChange={(val) => {
-                    setEditingEmployee({ ...editingEmployee, employee_type_id: val })
-                    if (editErrors.employee_type_id)
-                      setEditErrors((p) => ({ ...p, employee_type_id: undefined }))
-                  }}
-                  disabled={actionLoading || typesLoading || employeeTypes.length === 0}
-                >
-                  <SelectTrigger
-                    id="edit-employee_type_id"
-                    aria-invalid={editErrors.employee_type_id ? true : undefined}
-                    className={
-                      editErrors.employee_type_id ? "border-red-500 focus-visible:ring-red-500" : ""
-                    }
-                  >
-                    <SelectValue placeholder={typesLoading ? "Loading..." : employeeTypes.length === 0 ? "No types found" : "Select type"} />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {employeeTypes.map((type) => (
-                      <SelectItem key={type.id} value={type.id}>{type.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {editErrors.employee_type_id && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{editErrors.employee_type_id}</p>
-                )}
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setIsEditDialogOpen(false)} disabled={actionLoading}>
+        title="Add New Employee"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              className={employeeDialogButtonClass}
+              onClick={() => setIsAddDialogOpen(false)}
+              disabled={actionLoading}
+            >
               Cancel
             </Button>
-            <Button onClick={handleEditEmployee} disabled={actionLoading}>
-              {actionLoading ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
+            <Button className={employeeDialogButtonClass} onClick={handleAddEmployee} disabled={actionLoading}>
+              {actionLoading ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
+              Add Employee
+            </Button>
+          </>
+        }
+      >
+        <EmployeeFormFields
+          idPrefix="add"
+          values={addFormValues}
+          errors={addErrors}
+          onChange={(patch) => setNewEmployee((prev) => ({ ...prev, ...patch }))}
+          onClearError={(field) => setAddErrors((p) => ({ ...p, [field]: undefined }))}
+          employeeTypes={employeeTypes}
+          typesLoading={typesLoading}
+          actionLoading={actionLoading}
+          designationName={newDesignationName}
+          onDesignationNameChange={setNewDesignationName}
+          onAddDesignation={() => handleAddDesignation("add")}
+          addingDesignation={addingDesignation}
+        />
+      </EmployeeFormDialog>
+
+      <EmployeeFormDialog
+        open={isEditDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setEditErrors({})
+            setEditDesignationName("")
+            setEditingEmployee(null)
+          }
+          setIsEditDialogOpen(open)
+        }}
+        title="Edit Employee"
+        footer={
+          <>
+            <Button
+              variant="outline"
+              className={employeeDialogButtonClass}
+              onClick={() => setIsEditDialogOpen(false)}
+              disabled={actionLoading}
+            >
+              Cancel
+            </Button>
+            <Button className={employeeDialogButtonClass} onClick={handleEditEmployee} disabled={actionLoading}>
+              {actionLoading ? <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" /> : null}
               Update Employee
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+          </>
+        }
+      >
+        {editFormValues && (
+          <EmployeeFormFields
+            idPrefix="edit"
+            values={editFormValues}
+            errors={editErrors}
+            onChange={(patch) =>
+              setEditingEmployee((prev) => (prev ? { ...prev, ...patch } : null))
+            }
+            onClearError={(field) => setEditErrors((p) => ({ ...p, [field]: undefined }))}
+            employeeTypes={employeeTypes}
+            typesLoading={typesLoading}
+            actionLoading={actionLoading}
+            designationName={editDesignationName}
+            onDesignationNameChange={setEditDesignationName}
+            onAddDesignation={() => handleAddDesignation("edit")}
+            addingDesignation={addingDesignation}
+          />
+        )}
+      </EmployeeFormDialog>
+
       {/* Delete Confirmation Dialog */}
       <Dialog open={isDeleteDialogOpen} onOpenChange={setIsDeleteDialogOpen}>
         <DialogContent>
@@ -840,7 +882,9 @@ export function EmployeeManagement() {
             <p>
               Are you sure you want to delete <strong>{deletingEmployee?.name}</strong>?
             </p>
-            <p className="text-sm text-gray-500 mt-2">This action cannot be undone.</p>
+            <p className="text-sm text-gray-500 mt-2">
+              This will also delete their shift and salary records. This action cannot be undone.
+            </p>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setIsDeleteDialogOpen(false)} disabled={actionLoading}>

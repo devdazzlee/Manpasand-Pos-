@@ -30,13 +30,29 @@ export const deleteSupplier = asyncHandler(async (req: Request, res: Response) =
     new ApiResponse(null, 'Supplier deleted successfully').send(res);
 });
 
+const parseOptionalBoolean = (value: unknown): boolean | undefined => {
+    if (value === undefined || value === null || value === '') {
+        return undefined;
+    }
+    if (value === 'true' || value === true) {
+        return true;
+    }
+    if (value === 'false' || value === false) {
+        return false;
+    }
+    return undefined;
+};
+
 export const listSuppliers = asyncHandler(async (req: Request, res: Response) => {
-    const { page = 1, limit = 10, search } = req.query;
+    const { page = 1, limit = 10, search, fetch_all } = req.query;
 
     const result = await supplierService.listSuppliers({
         page: Number(page),
         limit: Number(limit),
         search: search as string | undefined,
+        is_active: parseOptionalBoolean(req.query.is_active),
+        display_on_pos: parseOptionalBoolean(req.query.display_on_pos),
+        fetch_all: String(fetch_all) === 'true',
     });
 
     new ApiResponse(result.data, 'Suppliers retrieved successfully', 200).send(res);

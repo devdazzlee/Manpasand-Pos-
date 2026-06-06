@@ -153,7 +153,7 @@ function TimePicker({ value, onChange, disabled }: { value: string; onChange: (v
   const minutes = Array.from({ length: 60 }, (_, i) => String(i).padStart(2, "0"));
 
   return (
-    <div className="flex items-center space-x-1 bg-white border border-gray-200 rounded-lg p-1 shadow-sm w-full max-w-[240px]">
+    <div className="flex w-full items-center space-x-1 rounded-lg border border-gray-200 bg-white p-1 shadow-sm">
       <Select
         disabled={disabled}
         value={hour}
@@ -199,6 +199,13 @@ function TimePicker({ value, onChange, disabled }: { value: string; onChange: (v
     </div>
   );
 }
+
+const shiftDialogContentClass =
+  "flex max-h-[min(720px,90vh)] w-[calc(100%-2rem)] max-w-[580px] flex-col gap-0 overflow-hidden p-0 sm:rounded-lg";
+const shiftDialogHeaderClass = "shrink-0 space-y-1 px-5 pb-3 pt-5";
+const shiftDialogBodyClass = "min-h-0 flex-1 overflow-y-auto px-5 pb-4";
+const shiftDialogFooterClass =
+  "shrink-0 gap-2 border-t border-gray-100 px-5 py-4 sm:justify-end";
 
 const shiftFormSchema = z.object({
   employeeId: z.string().min(1, "Employee selection is required"),
@@ -748,12 +755,14 @@ export function Shifts() {
               Schedule Shift
             </Button>
           </DialogTrigger>
-          <DialogContent className="sm:max-w-[480px]">
-            <DialogHeader>
-              <DialogTitle>Schedule New Shift</DialogTitle>
-              <DialogDescription>Create a new shift for an employee</DialogDescription>
+          <DialogContent className={shiftDialogContentClass}>
+            <DialogHeader className={shiftDialogHeaderClass}>
+              <DialogTitle className="text-base font-semibold">Schedule New Shift</DialogTitle>
+              <DialogDescription className="text-xs">
+                Create a new shift for an employee
+              </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4 pt-2">
+            <div className={cn(shiftDialogBodyClass, "space-y-3 pt-1")}>
               <div className="space-y-2">
                 <Label htmlFor="employee">Employee</Label>
                 <Select value={newShift.employeeId} onValueChange={handleEmployeeSelect}>
@@ -796,7 +805,7 @@ export function Shifts() {
 
               <div className="space-y-2">
                 <Label>Shift Type</Label>
-                <div className="grid grid-cols-2 gap-3">
+                <div className="grid grid-cols-2 gap-2">
                   {[
                     { id: "morning", name: "Morning", time: "9AM - 5PM", icon: Sun, color: "text-amber-500 bg-amber-50 border-amber-200" },
                     { id: "evening", name: "Evening", time: "1PM - 9PM", icon: Sunset, color: "text-orange-500 bg-orange-50 border-orange-200" },
@@ -811,7 +820,7 @@ export function Shifts() {
                         type="button"
                         onClick={() => handleShiftTypeChange(type.id)}
                         className={cn(
-                          "flex flex-col items-start p-3 border rounded-xl text-left transition-all duration-200 hover:shadow-sm focus:outline-none w-full",
+                          "flex flex-col items-start rounded-lg border p-2.5 text-left transition-all duration-200 hover:shadow-sm focus:outline-none w-full",
                           isSelected 
                             ? "border-blue-600 bg-blue-50/40 ring-1 ring-blue-500" 
                             : "border-gray-200 bg-white hover:border-gray-300"
@@ -874,11 +883,16 @@ export function Shifts() {
                 )}
               </div>
             </div>
-            <DialogFooter className="pt-2">
-              <Button variant="outline" onClick={() => setIsCreateShiftOpen(false)} disabled={loading}>
+            <DialogFooter className={shiftDialogFooterClass}>
+              <Button
+                variant="outline"
+                className="h-9 px-4 text-xs"
+                onClick={() => setIsCreateShiftOpen(false)}
+                disabled={loading}
+              >
                 Cancel
               </Button>
-              <Button onClick={handleCreateShift} disabled={loading}>
+              <Button className="h-9 px-4 text-xs" onClick={handleCreateShift} disabled={loading}>
                 {loading ? (
                   <>
                     Scheduling...
@@ -1153,12 +1167,12 @@ export function Shifts() {
           }
         }}
       >
-        <DialogContent className="sm:max-w-[480px]">
-          <DialogHeader>
-            <DialogTitle>Edit Shift</DialogTitle>
+        <DialogContent className={shiftDialogContentClass}>
+          <DialogHeader className={shiftDialogHeaderClass}>
+            <DialogTitle className="text-base font-semibold">Edit Shift</DialogTitle>
           </DialogHeader>
           {editingShift && (
-            <div className="space-y-4 pt-2">
+            <div className={cn(shiftDialogBodyClass, "space-y-3 pt-1")}>
               <div className="space-y-2">
                 <Label>Date</Label>
                 <Popover>
@@ -1254,11 +1268,16 @@ export function Shifts() {
               )}
             </div>
           )}
-          <DialogFooter className="pt-2">
-            <Button variant="outline" onClick={() => setIsEditShiftOpen(false)} disabled={loading}>
+          <DialogFooter className={shiftDialogFooterClass}>
+            <Button
+              variant="outline"
+              className="h-9 px-4 text-xs"
+              onClick={() => setIsEditShiftOpen(false)}
+              disabled={loading}
+            >
               Cancel
             </Button>
-            <Button onClick={handleUpdateShift} disabled={loading}>
+            <Button className="h-9 px-4 text-xs" onClick={handleUpdateShift} disabled={loading}>
               {loading ? (
                 <>
                   Updating...

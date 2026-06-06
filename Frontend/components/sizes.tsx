@@ -168,7 +168,7 @@ const Sizes: React.FC = () => {
     } catch (err: any) {
       const errMsg = extractApiError(err, "Failed to delete size");
       toast({
-        title: "Deletion Blocked",
+        title: "Error",
         description: errMsg,
         variant: "destructive",
       });
@@ -488,7 +488,7 @@ const Sizes: React.FC = () => {
                   You are about to permanently delete the size <strong className="text-rose-600 font-bold">"{deleteTarget?.name}"</strong> (Code: {deleteTarget?.code}).
                 </p>
                 <p className="bg-amber-50 border border-amber-200 text-amber-800 p-2.5 rounded text-xs text-left">
-                  ⚠️ <strong>Important Note / Warning:</strong> If this size is linked to any active products in the system, deletion will be blocked and you must disable it instead to preserve sales history.
+                  Linked products will be moved to the default size (&quot;General&quot;). Products are not deleted. This action cannot be undone.
                 </p>
               </div>
             </div>

@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { DashboardHome } from "@/components/dashboard-home";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
-import { getDefaultDashboardTab } from "@/lib/role-utils";
+import { useDashboardTab } from "@/lib/dashboard-tabs";
 
 import { Customers } from "@/components/customers";
 import { Reports } from "@/components/reports";
@@ -66,16 +66,8 @@ interface DashboardProps {
 }
 
 export function Dashboard({ onLogout }: DashboardProps) {
-  const [activeTab, setActiveTab] = useState("dashboard");
+  const { activeTab, setActiveTab } = useDashboardTab();
   const [sidebarOpen, setSidebarOpen] = useState(false);
-
-  useEffect(() => {
-    const preferredTab = getDefaultDashboardTab(localStorage.getItem("role"));
-
-    if (preferredTab !== "dashboard") {
-      setActiveTab(preferredTab);
-    }
-  }, []);
 
   const renderContent = () => {
     switch (activeTab) {

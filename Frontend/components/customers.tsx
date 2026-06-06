@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useEffect, useState, type ReactNode } from "react";
+import { z } from "zod";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -15,10 +16,8 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -45,9 +44,7 @@ import {
   Users,
   Phone,
   Mail,
-  MapPin,
   Loader2,
-  DollarSign,
   UserCheck,
   UserX,
   UserPlus,
@@ -55,53 +52,101 @@ import {
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { toast } from "sonner";
-import { z } from "zod";
 import { PageLoader } from "@/components/ui/page-loader";
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
+import { cn } from "@/lib/utils";
+import { formatMoneyDisplay } from "@/lib/money";
 
 interface Customer {
   id: string;
   name: string | null;
-  email: string;
+  email: string | null;
   phone_number: string | null;
   address: string | null;
+  billing_address?: string | null;
+  credit_limit?: number | string | null;
+  previous_credit_balance?: number | string | null;
   is_active: boolean;
   created_at: string;
+  total_sale_amount?: number;
+  sale_count?: number;
+  last_sale_date?: string | null;
 }
 
-// Mirrors backend customerCreateByAdminSchema. Optional fields use refine so
-// "" doesn't trip min checks — only a present non-empty value is validated.
 const phoneRegex = /^[0-9+\-\s]+$/;
 
+const optionalMoneyField = z.preprocess(
+  (v) => (v === "" || v === null || v === undefined ? undefined : Number(v)),
+  z
+    .number({ invalid_type_error: "Must be a valid number" })
+    .nonnegative("Amount cannot be negative")
+    .optional(),
+);
+
 const customerFormSchema = z.object({
-  email: z
-    .string({ required_error: "Email is required" })
-    .trim()
-    .min(1, "Email is required")
-    .email("Invalid email address"),
   name: z
-    .string()
+    .string({ required_error: "Name is required" })
     .trim()
-    .optional()
-    .refine((v) => !v || v.length >= 1, { message: "Name is required" }),
+    .min(1, "Name is required"),
   phone_number: z
+    .string({ required_error: "Phone number is required" })
+    .trim()
+    .min(1, "Phone number is required")
+    .min(7, "Phone number must be at least 7 digits")
+    .max(20, "Phone number is too long")
+    .regex(phoneRegex, "Phone number must contain only digits, +, -, or spaces"),
+  email: z
     .string()
     .trim()
     .optional()
-    .refine((v) => !v || (v.length >= 7 && v.length <= 20), {
-      message: "Phone number must be 7-20 digits",
-    })
-    .refine((v) => !v || phoneRegex.test(v), {
-      message: "Phone number must contain only digits, +, -, or spaces",
+    .refine((v) => !v || z.string().email().safeParse(v).success, {
+      message: "Invalid email address",
     }),
   address: z.string().trim().optional(),
   billing_address: z.string().trim().optional(),
-  is_active: z.boolean().optional(),
+  credit_limit: optionalMoneyField,
+  previous_credit_balance: optionalMoneyField,
 });
 
+type CustomerFormValues = {
+  name: string;
+  phone_number: string;
+  email: string;
+  address: string;
+  billing_address: string;
+  credit_limit: string;
+  previous_credit_balance: string;
+};
+
 type CustomerFormErrors = Partial<
-  Record<"email" | "name" | "phone_number" | "address" | "billing_address", string>
+  Record<
+    | "name"
+    | "phone_number"
+    | "email"
+    | "address"
+    | "billing_address"
+    | "credit_limit"
+    | "previous_credit_balance",
+    string
+  >
 >;
+
+const customerDialogContentClass =
+  "grid w-[min(580px,calc(100vw-2rem))] max-w-none gap-4 p-5 sm:rounded-lg";
+const customerDialogTitleClass = "text-base font-semibold text-gray-900";
+const customerFieldLabelClass = "text-xs font-medium text-gray-900";
+const customerFieldControlClass = "h-9 rounded-md border-gray-200 text-sm";
+const customerSubmitButtonClass = "h-10 w-full text-sm font-medium";
+
+const emptyCustomerForm = (): CustomerFormValues => ({
+  name: "",
+  phone_number: "",
+  email: "",
+  address: "",
+  billing_address: "",
+  credit_limit: "",
+  previous_credit_balance: "",
+});
 
 const zodErrorsToMap = (err: z.ZodError): CustomerFormErrors => {
   const map: CustomerFormErrors = {};
@@ -115,7 +160,6 @@ const zodErrorsToMap = (err: z.ZodError): CustomerFormErrors => {
 const firstZodError = (err: z.ZodError) =>
   err.errors[0]?.message || "Please fix the highlighted fields";
 
-// Surface the exact backend message verbatim — never hardcode generic copy.
 const extractApiError = (err: any, fallback: string) => {
   const data = err?.response?.data;
   if (data?.errors && Array.isArray(data.errors) && data.errors.length > 0) {
@@ -128,6 +172,292 @@ const extractApiError = (err: any, fallback: string) => {
   return fallback;
 };
 
+const toFormValues = (
+  customer?: Partial<Customer> | null,
+): CustomerFormValues => ({
+  name: customer?.name || "",
+  phone_number: customer?.phone_number || "",
+  email: customer?.email?.includes("@pos.local") ? "" : customer?.email || "",
+  address: customer?.address || "",
+  billing_address: customer?.billing_address || "",
+  credit_limit:
+    customer?.credit_limit != null && customer.credit_limit !== ""
+      ? String(customer.credit_limit)
+      : "",
+  previous_credit_balance:
+    customer?.previous_credit_balance != null &&
+    customer.previous_credit_balance !== ""
+      ? String(customer.previous_credit_balance)
+      : "",
+});
+
+const buildPayload = (data: z.infer<typeof customerFormSchema>) => ({
+  name: data.name.trim(),
+  phone_number: data.phone_number.trim(),
+  email: data.email?.trim() || undefined,
+  address: data.address?.trim() || undefined,
+  billing_address: data.billing_address?.trim() || undefined,
+  credit_limit: data.credit_limit ?? null,
+  previous_credit_balance: data.previous_credit_balance ?? undefined,
+});
+
+const formatLastVisit = (customer: Customer): string => {
+  if (customer.last_sale_date) {
+    return customer.last_sale_date.split("T")[0];
+  }
+  return "-";
+};
+
+const formatSaleAmount = (customer: Customer): string => {
+  const amount = Number(customer.total_sale_amount ?? 0);
+  return `Rs ${formatMoneyDisplay(amount)}`;
+};
+
+interface CustomerFormFieldsProps {
+  idPrefix: string;
+  values: CustomerFormValues;
+  errors: CustomerFormErrors;
+  onChange: (patch: Partial<CustomerFormValues>) => void;
+  onClearError: (field: keyof CustomerFormErrors) => void;
+  disabled?: boolean;
+}
+
+function CustomerFormFields({
+  idPrefix,
+  values,
+  errors,
+  onChange,
+  onClearError,
+  disabled = false,
+}: CustomerFormFieldsProps) {
+  return (
+    <div className="space-y-4">
+      <div className="space-y-1">
+        <Label htmlFor={`${idPrefix}-name`} className={customerFieldLabelClass}>
+          Name<span className="text-red-500">*</span>
+        </Label>
+        <Input
+          id={`${idPrefix}-name`}
+          value={values.name}
+          onChange={(e) => {
+            onChange({ name: e.target.value });
+            if (errors.name) onClearError("name");
+          }}
+          placeholder="Enter customer name"
+          disabled={disabled}
+          aria-invalid={errors.name ? true : undefined}
+          className={cn(
+            customerFieldControlClass,
+            errors.name && "border-red-500 focus-visible:ring-red-500",
+          )}
+        />
+        {errors.name && (
+          <p className="mt-1 text-xs text-red-600" role="alert">
+            {errors.name}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor={`${idPrefix}-phone_number`} className={customerFieldLabelClass}>
+          Phone Number<span className="text-red-500">*</span>
+        </Label>
+        <Input
+          id={`${idPrefix}-phone_number`}
+          type="tel"
+          value={values.phone_number}
+          onChange={(e) => {
+            onChange({ phone_number: e.target.value });
+            if (errors.phone_number) onClearError("phone_number");
+          }}
+          placeholder="Enter phone number"
+          disabled={disabled}
+          aria-invalid={errors.phone_number ? true : undefined}
+          className={cn(
+            customerFieldControlClass,
+            errors.phone_number && "border-red-500 focus-visible:ring-red-500",
+          )}
+        />
+        {errors.phone_number && (
+          <p className="mt-1 text-xs text-red-600" role="alert">
+            {errors.phone_number}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor={`${idPrefix}-email`} className={customerFieldLabelClass}>
+          Email (optional)
+        </Label>
+        <Input
+          id={`${idPrefix}-email`}
+          type="email"
+          value={values.email}
+          onChange={(e) => {
+            onChange({ email: e.target.value });
+            if (errors.email) onClearError("email");
+          }}
+          placeholder="customer@example.com"
+          disabled={disabled}
+          aria-invalid={errors.email ? true : undefined}
+          className={cn(
+            customerFieldControlClass,
+            errors.email && "border-red-500 focus-visible:ring-red-500",
+          )}
+        />
+        {errors.email && (
+          <p className="mt-1 text-xs text-red-600" role="alert">
+            {errors.email}
+          </p>
+        )}
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor={`${idPrefix}-address`} className={customerFieldLabelClass}>
+          Address (optional)
+        </Label>
+        <Input
+          id={`${idPrefix}-address`}
+          value={values.address}
+          onChange={(e) => onChange({ address: e.target.value })}
+          placeholder="Enter address"
+          disabled={disabled}
+          className={customerFieldControlClass}
+        />
+      </div>
+
+      <div className="space-y-1">
+        <Label htmlFor={`${idPrefix}-billing_address`} className={customerFieldLabelClass}>
+          Billing Address (optional)
+        </Label>
+        <Input
+          id={`${idPrefix}-billing_address`}
+          value={values.billing_address}
+          onChange={(e) => onChange({ billing_address: e.target.value })}
+          placeholder="Enter billing address"
+          disabled={disabled}
+          className={customerFieldControlClass}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="space-y-1">
+          <Label htmlFor={`${idPrefix}-credit_limit`} className={customerFieldLabelClass}>
+            Credit limit (Rs) (empty = unlimited)
+          </Label>
+          <Input
+            id={`${idPrefix}-credit_limit`}
+            type="number"
+            min="0"
+            step="0.01"
+            value={values.credit_limit}
+            onChange={(e) => {
+              onChange({ credit_limit: e.target.value });
+              if (errors.credit_limit) onClearError("credit_limit");
+            }}
+            placeholder="Leave empty for unlimited"
+            disabled={disabled}
+            aria-invalid={errors.credit_limit ? true : undefined}
+            className={cn(
+              customerFieldControlClass,
+              errors.credit_limit && "border-red-500 focus-visible:ring-red-500",
+            )}
+          />
+          {errors.credit_limit && (
+            <p className="mt-1 text-xs text-red-600" role="alert">
+              {errors.credit_limit}
+            </p>
+          )}
+        </div>
+
+        <div className="space-y-1">
+          <Label
+            htmlFor={`${idPrefix}-previous_credit_balance`}
+            className={customerFieldLabelClass}
+          >
+            Previous credit balance (Rs) (optional)
+          </Label>
+          <Input
+            id={`${idPrefix}-previous_credit_balance`}
+            type="number"
+            min="0"
+            step="0.01"
+            value={values.previous_credit_balance}
+            onChange={(e) => {
+              onChange({ previous_credit_balance: e.target.value });
+              if (errors.previous_credit_balance) onClearError("previous_credit_balance");
+            }}
+            placeholder="Amount owed before POS"
+            disabled={disabled}
+            aria-invalid={errors.previous_credit_balance ? true : undefined}
+            className={cn(
+              customerFieldControlClass,
+              errors.previous_credit_balance &&
+                "border-red-500 focus-visible:ring-red-500",
+            )}
+          />
+          {errors.previous_credit_balance && (
+            <p className="mt-1 text-xs text-red-600" role="alert">
+              {errors.previous_credit_balance}
+            </p>
+          )}
+        </div>
+      </div>
+
+      <p className="text-xs text-gray-500">
+        Use for existing customers who already owed you money before using this software.
+      </p>
+    </div>
+  );
+}
+
+interface CustomerFormDialogProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  title: string;
+  submitLabel: string;
+  loadingLabel: string;
+  loading: boolean;
+  onSubmit: () => void;
+  children: ReactNode;
+}
+
+function CustomerFormDialog({
+  open,
+  onOpenChange,
+  title,
+  submitLabel,
+  loadingLabel,
+  loading,
+  onSubmit,
+  children,
+}: CustomerFormDialogProps) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className={customerDialogContentClass}>
+        <DialogHeader className="space-y-0">
+          <DialogTitle className={customerDialogTitleClass}>{title}</DialogTitle>
+        </DialogHeader>
+        {children}
+        <Button
+          className={customerSubmitButtonClass}
+          onClick={onSubmit}
+          disabled={loading}
+        >
+          {loading ? (
+            <>
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              {loadingLabel}
+            </>
+          ) : (
+            submitLabel
+          )}
+        </Button>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function Customers() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [searchTerm, setSearchTerm] = useState("");
@@ -136,21 +466,21 @@ export function Customers() {
   const [isAdding, setIsAdding] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false);
-  const [newCustomer, setNewCustomer] = useState<Partial<Customer & { billing_address?: string }>>({});
-  const [editingCustomer, setEditingCustomer] = useState<(Customer & { billing_address?: string }) | null>(null);
+  const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
+  const [addForm, setAddForm] = useState<CustomerFormValues>(emptyCustomerForm());
+  const [editForm, setEditForm] = useState<CustomerFormValues>(emptyCustomerForm());
+  const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null);
   const [deleteTargetCustomer, setDeleteTargetCustomer] = useState<Customer | null>(null);
   const [isDeletingCustomer, setIsDeletingCustomer] = useState(false);
   const [addErrors, setAddErrors] = useState<CustomerFormErrors>({});
   const [editErrors, setEditErrors] = useState<CustomerFormErrors>({});
 
-  // 1) Fetch customers
   const fetchCustomers = async () => {
     setIsLoading(true);
     try {
       const res = await apiClient.get(`${API_BASE}/customer`);
       setCustomers(res.data.data);
     } catch (err: any) {
-      console.log(err);
       toast.error(extractApiError(err, "Failed to load customers"));
     } finally {
       setIsLoading(false);
@@ -169,91 +499,78 @@ export function Customers() {
     loadData();
   }, []);
 
-  // 2) Create customer (all fields)
+  const resetAddForm = () => {
+    setAddForm(emptyCustomerForm());
+    setAddErrors({});
+  };
+
+  const openEditDialog = (customer: Customer) => {
+    setEditForm(toFormValues(customer));
+    setEditErrors({});
+    setEditingCustomerId(customer.id);
+    setIsEditDialogOpen(true);
+  };
+
   const handleAddCustomer = async () => {
-    console.log("[customer] add submit", newCustomer);
-    const parsed = customerFormSchema.safeParse({
-      email: newCustomer.email ?? "",
-      name: newCustomer.name ?? "",
-      phone_number: newCustomer.phone_number ?? "",
-      address: newCustomer.address ?? "",
-      billing_address: newCustomer.billing_address ?? "",
-      is_active: newCustomer.is_active ?? true,
-    });
+    const parsed = customerFormSchema.safeParse(addForm);
     if (!parsed.success) {
-      const map = zodErrorsToMap(parsed.error);
-      setAddErrors(map);
+      setAddErrors(zodErrorsToMap(parsed.error));
       toast.error(firstZodError(parsed.error));
       return;
     }
+
     setAddErrors({});
     setIsAdding(true);
     try {
-      const data = parsed.data;
       await apiClient.post(`${API_BASE}/customer`, {
-        email: data.email,
-        name: data.name || undefined,
-        phone_number: data.phone_number || undefined,
-        address: data.address || undefined,
-        billing_address: data.billing_address || undefined,
-        is_active: data.is_active ?? true,
+        ...buildPayload(parsed.data),
+        is_active: true,
       });
-      setNewCustomer({});
+      resetAddForm();
       setIsAddDialogOpen(false);
       toast.success("Customer created successfully");
       fetchCustomers();
     } catch (err: any) {
-      console.log(err);
       toast.error(extractApiError(err, "Failed to create customer"));
     } finally {
       setIsAdding(false);
     }
   };
 
-  // Edit customer (all fields, use PUT)
   const handleEditCustomer = async () => {
-    if (!editingCustomer) return;
-    console.log("[customer] edit submit", editingCustomer);
-    const parsed = customerFormSchema.safeParse({
-      email: editingCustomer.email ?? "",
-      name: editingCustomer.name ?? "",
-      phone_number: editingCustomer.phone_number ?? "",
-      address: editingCustomer.address ?? "",
-      billing_address: editingCustomer.billing_address ?? "",
-      is_active: editingCustomer.is_active,
-    });
+    if (!editingCustomerId) return;
+
+    const parsed = customerFormSchema.safeParse(editForm);
     if (!parsed.success) {
-      const map = zodErrorsToMap(parsed.error);
-      setEditErrors(map);
+      setEditErrors(zodErrorsToMap(parsed.error));
       toast.error(firstZodError(parsed.error));
       return;
     }
+
     setEditErrors({});
     setIsEditing(true);
     try {
       const data = parsed.data;
-      // Send null for cleared optional fields so the backend (nullable+optional)
-      // can clear them; otherwise pass the trimmed value.
-      await apiClient.put(`${API_BASE}/customer/${editingCustomer.id}`, {
-        email: data.email,
-        name: data.name ? data.name : null,
-        phone_number: data.phone_number ? data.phone_number : null,
-        address: data.address ? data.address : null,
-        billing_address: data.billing_address ? data.billing_address : null,
-        is_active: data.is_active ?? true,
+      await apiClient.put(`${API_BASE}/customer/${editingCustomerId}`, {
+        name: data.name.trim(),
+        phone_number: data.phone_number.trim(),
+        email: data.email?.trim() ? data.email.trim() : null,
+        address: data.address?.trim() ? data.address.trim() : null,
+        billing_address: data.billing_address?.trim() ? data.billing_address.trim() : null,
+        credit_limit: data.credit_limit ?? null,
+        previous_credit_balance: data.previous_credit_balance ?? null,
       });
-      setEditingCustomer(null);
+      setIsEditDialogOpen(false);
+      setEditingCustomerId(null);
       toast.success("Customer updated successfully");
       fetchCustomers();
     } catch (err: any) {
-      console.log(err);
       toast.error(extractApiError(err, "Failed to update customer"));
     } finally {
       setIsEditing(false);
     }
   };
 
-  // Delete customer
   const handleDeleteCustomer = async () => {
     if (!deleteTargetCustomer) return;
     setIsDeletingCustomer(true);
@@ -263,15 +580,12 @@ export function Customers() {
       setDeleteTargetCustomer(null);
       fetchCustomers();
     } catch (err: any) {
-      console.log(err);
       toast.error(extractApiError(err, "Failed to delete customer"));
     } finally {
       setIsDeletingCustomer(false);
     }
   };
 
-  // Stats derived from the customer list. Revenue isn't returned by /customer
-  // so we drop it and surface signals that are actually useful from this screen.
   const activeCount = customers.filter((c) => c.is_active).length;
   const inactiveCount = customers.length - activeCount;
   const monthStart = new Date();
@@ -281,211 +595,38 @@ export function Customers() {
     (c) => new Date(c.created_at) >= monthStart,
   ).length;
 
-  // Filter by name/email/phone
   const filteredCustomers = customers.filter((customer) =>
     (customer.name || customer.email || customer.phone_number || "")
       .toLowerCase()
-      .includes(searchTerm.toLowerCase())
+      .includes(searchTerm.toLowerCase()),
   );
 
   if (isInitialLoading) {
-    return <PageLoader message="Loading customers data..." />
+    return <PageLoader message="Loading customers data..." />;
   }
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-      {/* Header & Add Dialog */}
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">
             Customer Management
           </h1>
-          <p className="text-sm md:text-base text-gray-600">Manage your customer database</p>
+          <p className="text-sm md:text-base text-gray-600">
+            Manage your customer database
+          </p>
         </div>
-        <Dialog
-          open={isAddDialogOpen}
-          onOpenChange={(open) => {
-            setIsAddDialogOpen(open);
-            if (!open) {
-              setAddErrors({});
-              setNewCustomer({});
-            }
+        <Button
+          onClick={() => {
+            resetAddForm();
+            setIsAddDialogOpen(true);
           }}
         >
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Customer
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add New Customer</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              {Object.keys(addErrors).length > 0 && (
-                <div
-                  className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-                  role="alert"
-                >
-                  Please fix the highlighted fields below.
-                </div>
-              )}
-              <div>
-                <Label htmlFor="email">
-                  Email <span className="text-red-600">*</span>
-                </Label>
-                <Input
-                  id="email"
-                  type="email"
-                  value={newCustomer.email || ""}
-                  onChange={(e) => {
-                    setNewCustomer({ ...newCustomer, email: e.target.value });
-                    if (addErrors.email)
-                      setAddErrors((p) => ({ ...p, email: undefined }));
-                  }}
-                  placeholder="Enter customer email"
-                  className={addErrors.email ? "border-red-500" : ""}
-                  aria-invalid={!!addErrors.email}
-                />
-                {addErrors.email && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {addErrors.email}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="name">Name</Label>
-                <Input
-                  id="name"
-                  type="text"
-                  value={newCustomer.name || ""}
-                  onChange={(e) => {
-                    setNewCustomer({ ...newCustomer, name: e.target.value });
-                    if (addErrors.name)
-                      setAddErrors((p) => ({ ...p, name: undefined }));
-                  }}
-                  placeholder="Enter customer name"
-                  className={addErrors.name ? "border-red-500" : ""}
-                  aria-invalid={!!addErrors.name}
-                />
-                {addErrors.name && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {addErrors.name}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="phone_number">Phone Number</Label>
-                <Input
-                  id="phone_number"
-                  type="tel"
-                  value={newCustomer.phone_number || ""}
-                  onChange={(e) => {
-                    setNewCustomer({
-                      ...newCustomer,
-                      phone_number: e.target.value,
-                    });
-                    if (addErrors.phone_number)
-                      setAddErrors((p) => ({ ...p, phone_number: undefined }));
-                  }}
-                  placeholder="Enter phone number"
-                  className={addErrors.phone_number ? "border-red-500" : ""}
-                  aria-invalid={!!addErrors.phone_number}
-                />
-                {addErrors.phone_number && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {addErrors.phone_number}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="address">Address</Label>
-                <Input
-                  id="address"
-                  type="text"
-                  value={newCustomer.address || ""}
-                  onChange={(e) => {
-                    setNewCustomer({ ...newCustomer, address: e.target.value });
-                    if (addErrors.address)
-                      setAddErrors((p) => ({ ...p, address: undefined }));
-                  }}
-                  placeholder="Enter address"
-                  className={addErrors.address ? "border-red-500" : ""}
-                  aria-invalid={!!addErrors.address}
-                />
-                {addErrors.address && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {addErrors.address}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="billing_address">Billing Address</Label>
-                <Input
-                  id="billing_address"
-                  type="text"
-                  value={newCustomer.billing_address || ""}
-                  onChange={(e) => {
-                    setNewCustomer({
-                      ...newCustomer,
-                      billing_address: e.target.value,
-                    });
-                    if (addErrors.billing_address)
-                      setAddErrors((p) => ({
-                        ...p,
-                        billing_address: undefined,
-                      }));
-                  }}
-                  placeholder="Enter billing address"
-                  className={addErrors.billing_address ? "border-red-500" : ""}
-                  aria-invalid={!!addErrors.billing_address}
-                />
-                {addErrors.billing_address && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {addErrors.billing_address}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="space-y-0.5">
-                  <Label htmlFor="add-is-active" className="text-sm font-medium">
-                    Status
-                  </Label>
-                  <p className="text-xs text-gray-500">
-                    {(newCustomer.is_active ?? true)
-                      ? "Customer is active and can be used in sales"
-                      : "Customer is inactive and hidden from sales selection"}
-                  </p>
-                </div>
-                <Switch
-                  id="add-is-active"
-                  checked={newCustomer.is_active ?? true}
-                  onCheckedChange={(checked) =>
-                    setNewCustomer({ ...newCustomer, is_active: checked })
-                  }
-                />
-              </div>
-              <Button
-                onClick={handleAddCustomer}
-                className="w-full"
-                disabled={isAdding}
-              >
-                {isAdding ? (
-                  <>
-                    <Loader2 className="animate-spin h-4 w-4 mr-2" />
-                    Creating Customer...
-                  </>
-                ) : (
-                  "Create Customer"
-                )}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Customer
+        </Button>
       </div>
 
-      {/* Stats Cards */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
         {isLoading ? (
           <>
@@ -498,9 +639,7 @@ export function Customers() {
           <>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Total Customers
-                </CardTitle>
+                <CardTitle className="text-sm font-medium">Total Customers</CardTitle>
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
@@ -512,15 +651,11 @@ export function Customers() {
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Active Customers
-                </CardTitle>
+                <CardTitle className="text-sm font-medium">Active Customers</CardTitle>
                 <UserCheck className="h-4 w-4 text-green-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-green-600">
-                  {activeCount}
-                </div>
+                <div className="text-2xl font-bold text-green-600">{activeCount}</div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Available for new sales
                 </p>
@@ -528,15 +663,11 @@ export function Customers() {
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  Inactive Customers
-                </CardTitle>
+                <CardTitle className="text-sm font-medium">Inactive Customers</CardTitle>
                 <UserX className="h-4 w-4 text-red-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-red-600">
-                  {inactiveCount}
-                </div>
+                <div className="text-2xl font-bold text-red-600">{inactiveCount}</div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Hidden from sales selection
                 </p>
@@ -544,15 +675,11 @@ export function Customers() {
             </Card>
             <Card>
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">
-                  New This Month
-                </CardTitle>
+                <CardTitle className="text-sm font-medium">New This Month</CardTitle>
                 <UserPlus className="h-4 w-4 text-blue-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-blue-600">
-                  {newThisMonth}
-                </div>
+                <div className="text-2xl font-bold text-blue-600">{newThisMonth}</div>
                 <p className="text-xs text-muted-foreground mt-1">
                   Added since{" "}
                   {monthStart.toLocaleDateString(undefined, {
@@ -566,7 +693,6 @@ export function Customers() {
         )}
       </div>
 
-      {/* Search */}
       <div className="relative max-w-md">
         <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
         <Input
@@ -577,7 +703,6 @@ export function Customers() {
         />
       </div>
 
-      {/* Table with Loader */}
       <Card>
         <CardHeader>
           <CardTitle>Customers ({filteredCustomers.length})</CardTitle>
@@ -597,272 +722,138 @@ export function Customers() {
                   <TableHeader>
                     <TableRow>
                       <TableHead className="min-w-[200px]">Contact</TableHead>
+                      <TableHead className="min-w-[130px]">Total Sales</TableHead>
+                      <TableHead className="min-w-[90px]">Sales</TableHead>
                       <TableHead className="min-w-[120px]">Last Visit</TableHead>
                       <TableHead className="min-w-[100px]">Status</TableHead>
                       <TableHead className="min-w-[120px]">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
-              <TableBody>
-                {filteredCustomers.map((customer) => (
-                  <TableRow key={customer.id}>
-                    <TableCell>
-                      <div className="space-y-1">
-                        <div className="flex items-center text-sm">
-                          <Mail className="h-3 w-3 mr-1" />
-                          {customer.email}
-                        </div>
-                        {customer.name && (
-                          <div className="flex items-center text-sm text-gray-500">
-                            <Users className="h-3 w-3 mr-1" />
-                            {customer.name}
+                  <TableBody>
+                    {filteredCustomers.map((customer) => (
+                      <TableRow key={customer.id}>
+                        <TableCell>
+                          <div className="space-y-1">
+                            {customer.name && (
+                              <div className="flex items-center text-sm font-medium">
+                                <Users className="h-3 w-3 mr-1" />
+                                {customer.name}
+                              </div>
+                            )}
+                            {customer.email && !customer.email.includes("@pos.local") && (
+                              <div className="flex items-center text-sm text-gray-500">
+                                <Mail className="h-3 w-3 mr-1" />
+                                {customer.email}
+                              </div>
+                            )}
+                            {customer.phone_number && (
+                              <div className="flex items-center text-sm text-gray-500">
+                                <Phone className="h-3 w-3 mr-1" />
+                                {customer.phone_number}
+                              </div>
+                            )}
                           </div>
-                        )}
-                        {customer.phone_number && (
-                          <div className="flex items-center text-sm text-gray-500">
-                            <Phone className="h-3 w-3 mr-1" />
-                            {customer.phone_number}
+                        </TableCell>
+                        <TableCell className="font-medium text-gray-900">
+                          {formatSaleAmount(customer)}
+                        </TableCell>
+                        <TableCell>
+                          {customer.sale_count ?? 0}
+                        </TableCell>
+                        <TableCell>{formatLastVisit(customer)}</TableCell>
+                        <TableCell>
+                          <Badge
+                            variant={customer.is_active ? "default" : "secondary"}
+                            className={
+                              customer.is_active
+                                ? "bg-green-100 text-green-800"
+                                : "bg-red-100 text-red-800"
+                            }
+                          >
+                            {customer.is_active ? "Active" : "Inactive"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex space-x-2">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => openEditDialog(customer)}
+                            >
+                              <Edit className="h-3 w-3" />
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={() => setDeleteTargetCustomer(customer)}
+                              disabled={isDeletingCustomer}
+                              className="text-red-600 hover:text-red-700"
+                            >
+                              {isDeletingCustomer &&
+                              deleteTargetCustomer?.id === customer.id ? (
+                                <Loader2 className="h-3 w-3 animate-spin" />
+                              ) : (
+                                <Trash2 className="h-3 w-3" />
+                              )}
+                            </Button>
                           </div>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell>
-                      {customer.created_at.split("T")[0]}
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant={
-                          customer.is_active ? "default" : "secondary"
-                        }
-                        className={
-                          customer.is_active
-                            ? "bg-green-100 text-green-800"
-                            : "bg-red-100 text-red-800"
-                        }
-                      >
-                        {customer.is_active ? "Active" : "Inactive"}
-                      </Badge>
-                    </TableCell>
-                    <TableCell>
-                      <div className="flex space-x-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() =>
-                            setEditingCustomer(customer)
-                          }
-                        >
-                          <Edit className="h-3 w-3" />
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={() => setDeleteTargetCustomer(customer)}
-                          disabled={isDeletingCustomer}
-                          className="text-red-600 hover:text-red-700"
-                        >
-                          {isDeletingCustomer && deleteTargetCustomer?.id === customer.id ? (
-                            <Loader2 className="h-3 w-3 animate-spin" />
-                          ) : (
-                            <Trash2 className="h-3 w-3" />
-                          )}
-                        </Button>
-                      </div>
-                    </TableCell>
-                    </TableRow>
-                  ))}
-              </TableBody>
-            </Table>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
               </div>
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Edit Dialog */}
-      <Dialog
-        open={!!editingCustomer}
+      <CustomerFormDialog
+        open={isAddDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) resetAddForm();
+          setIsAddDialogOpen(open);
+        }}
+        title="Add New Customer"
+        submitLabel="Create Customer"
+        loadingLabel="Creating Customer..."
+        loading={isAdding}
+        onSubmit={handleAddCustomer}
+      >
+        <CustomerFormFields
+          idPrefix="add"
+          values={addForm}
+          errors={addErrors}
+          onChange={(patch) => setAddForm((prev) => ({ ...prev, ...patch }))}
+          onClearError={(field) => setAddErrors((p) => ({ ...p, [field]: undefined }))}
+          disabled={isAdding}
+        />
+      </CustomerFormDialog>
+
+      <CustomerFormDialog
+        open={isEditDialogOpen}
         onOpenChange={(open) => {
           if (!open) {
-            setEditingCustomer(null);
             setEditErrors({});
+            setEditingCustomerId(null);
           }
+          setIsEditDialogOpen(open);
         }}
+        title="Edit Customer"
+        submitLabel="Update Customer"
+        loadingLabel="Updating Customer..."
+        loading={isEditing}
+        onSubmit={handleEditCustomer}
       >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Edit Customer</DialogTitle>
-          </DialogHeader>
-          {editingCustomer && (
-            <div className="space-y-4">
-              {Object.keys(editErrors).length > 0 && (
-                <div
-                  className="rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700"
-                  role="alert"
-                >
-                  Please fix the highlighted fields below.
-                </div>
-              )}
-              <div>
-                <Label htmlFor="edit-email">
-                  Email <span className="text-red-600">*</span>
-                </Label>
-                <Input
-                  id="edit-email"
-                  type="email"
-                  value={editingCustomer.email || ""}
-                  onChange={(e) => {
-                    setEditingCustomer({
-                      ...editingCustomer,
-                      email: e.target.value,
-                    });
-                    if (editErrors.email)
-                      setEditErrors((p) => ({ ...p, email: undefined }));
-                  }}
-                  className={editErrors.email ? "border-red-500" : ""}
-                  aria-invalid={!!editErrors.email}
-                />
-                {editErrors.email && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {editErrors.email}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="edit-name">Name</Label>
-                <Input
-                  id="edit-name"
-                  type="text"
-                  value={editingCustomer.name || ""}
-                  onChange={(e) => {
-                    setEditingCustomer({
-                      ...editingCustomer,
-                      name: e.target.value,
-                    });
-                    if (editErrors.name)
-                      setEditErrors((p) => ({ ...p, name: undefined }));
-                  }}
-                  placeholder="Enter customer name"
-                  className={editErrors.name ? "border-red-500" : ""}
-                  aria-invalid={!!editErrors.name}
-                />
-                {editErrors.name && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {editErrors.name}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="edit-phone">Phone Number</Label>
-                <Input
-                  id="edit-phone"
-                  type="tel"
-                  value={editingCustomer.phone_number || ""}
-                  onChange={(e) => {
-                    setEditingCustomer({
-                      ...editingCustomer,
-                      phone_number: e.target.value,
-                    });
-                    if (editErrors.phone_number)
-                      setEditErrors((p) => ({ ...p, phone_number: undefined }));
-                  }}
-                  placeholder="Enter phone number"
-                  className={editErrors.phone_number ? "border-red-500" : ""}
-                  aria-invalid={!!editErrors.phone_number}
-                />
-                {editErrors.phone_number && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {editErrors.phone_number}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="edit-address">Address</Label>
-                <Input
-                  id="edit-address"
-                  type="text"
-                  value={editingCustomer.address || ""}
-                  onChange={(e) => {
-                    setEditingCustomer({
-                      ...editingCustomer,
-                      address: e.target.value,
-                    });
-                    if (editErrors.address)
-                      setEditErrors((p) => ({ ...p, address: undefined }));
-                  }}
-                  placeholder="Enter address"
-                  className={editErrors.address ? "border-red-500" : ""}
-                  aria-invalid={!!editErrors.address}
-                />
-                {editErrors.address && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {editErrors.address}
-                  </p>
-                )}
-              </div>
-              <div>
-                <Label htmlFor="edit-billing-address">Billing Address</Label>
-                <Input
-                  id="edit-billing-address"
-                  type="text"
-                  value={editingCustomer.billing_address || ""}
-                  onChange={(e) => {
-                    setEditingCustomer({
-                      ...editingCustomer,
-                      billing_address: e.target.value,
-                    });
-                    if (editErrors.billing_address)
-                      setEditErrors((p) => ({
-                        ...p,
-                        billing_address: undefined,
-                      }));
-                  }}
-                  placeholder="Enter billing address"
-                  className={editErrors.billing_address ? "border-red-500" : ""}
-                  aria-invalid={!!editErrors.billing_address}
-                />
-                {editErrors.billing_address && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">
-                    {editErrors.billing_address}
-                  </p>
-                )}
-              </div>
-              <div className="flex items-center justify-between rounded-md border p-3">
-                <div className="space-y-0.5">
-                  <Label htmlFor="edit-is-active" className="text-sm font-medium">
-                    Status
-                  </Label>
-                  <p className="text-xs text-gray-500">
-                    {editingCustomer.is_active
-                      ? "Customer is active and can be used in sales"
-                      : "Customer is inactive and hidden from sales selection"}
-                  </p>
-                </div>
-                <Switch
-                  id="edit-is-active"
-                  checked={editingCustomer.is_active}
-                  onCheckedChange={(checked) =>
-                    setEditingCustomer({ ...editingCustomer, is_active: checked })
-                  }
-                />
-              </div>
-              <Button
-                onClick={handleEditCustomer}
-                className="w-full"
-                disabled={isEditing}
-              >
-                {isEditing ? (
-                  <>
-                    <Loader2 className="animate-spin h-4 w-4 mr-2" />
-                    Updating Customer...
-                  </>
-                ) : (
-                  "Update Customer"
-                )}
-              </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+        <CustomerFormFields
+          idPrefix="edit"
+          values={editForm}
+          errors={editErrors}
+          onChange={(patch) => setEditForm((prev) => ({ ...prev, ...patch }))}
+          onClearError={(field) => setEditErrors((p) => ({ ...p, [field]: undefined }))}
+          disabled={isEditing}
+        />
+      </CustomerFormDialog>
 
       <AlertDialog
         open={!!deleteTargetCustomer}
@@ -878,9 +869,11 @@ export function Customers() {
             <AlertDialogDescription>
               This will permanently delete{" "}
               <span className="font-semibold">
-                {deleteTargetCustomer?.name || deleteTargetCustomer?.email || "this customer"}
-              </span>
-              . This action cannot be undone.
+                {deleteTargetCustomer?.name ||
+                  deleteTargetCustomer?.email ||
+                  "this customer"}
+              </span>{" "}
+              and any linked sales, orders, and hold records. This action cannot be undone.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

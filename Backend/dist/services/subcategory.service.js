@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SubcategoryService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
+const catalog_defaults_service_1 = require("./catalog-defaults.service");
 class SubcategoryService {
     async createSubcategory(data) {
         const existingSubcategory = await client_1.prisma.subcategory.findFirst({
@@ -58,6 +59,21 @@ class SubcategoryService {
             where: { id },
             data: { is_active: !subcategory.is_active },
         });
+    }
+    async deleteSubcategory(id) {
+        const subcategory = await client_1.prisma.subcategory.findUnique({ where: { id } });
+        if (!subcategory) {
+            throw new apiError_1.AppError(404, 'Subcategory not found');
+        }
+        await client_1.prisma.$transaction(async (tx) => {
+            const defaultSubcategoryId = await catalog_defaults_service_1.catalogDefaults.ensureDefaultSubcategory(tx, id);
+            await tx.product.updateMany({
+                where: { subcategory_id: id },
+                data: { subcategory_id: defaultSubcategoryId },
+            });
+            await tx.subcategory.delete({ where: { id } });
+        }, catalog_defaults_service_1.catalogDeleteOptions);
+        return { message: 'Subcategory deleted successfully' };
     }
     async listSubcategories({ page = 1, limit = 10, search, is_active = true, display_on_pos = true, }) {
         const where = {};

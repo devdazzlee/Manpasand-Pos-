@@ -52,6 +52,9 @@ export const listSuppliersSchema = z.object({
         limit: z.string().optional().default('10'),
         search: z.string().optional(),
         status: z.string().optional(),
+        is_active: z.enum(['true', 'false']).optional(),
+        display_on_pos: z.enum(['true', 'false']).optional(),
+        fetch_all: z.enum(['true', 'false']).optional(),
     }),
 });
 

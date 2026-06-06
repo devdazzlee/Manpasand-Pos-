@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateUnitInput, UpdateUnitInput } from '../validations/unit.validation';
+import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
 
 export class UnitService {
     async createUnit(data: CreateUnitInput) {
@@ -62,25 +63,18 @@ export class UnitService {
     }
 
     async deleteUnit(id: string) {
-        const unit = await prisma.unit.findUnique({
-            where: { id },
-            include: {
-                _count: {
-                    select: { products: true },
-                },
-            },
-        });
-
+        const unit = await prisma.unit.findUnique({ where: { id } });
         if (!unit) throw new AppError(404, 'Unit not found');
 
-        if (unit._count.products > 0) {
-            throw new AppError(
-                409,
-                `Cannot delete unit — it is linked to ${unit._count.products} product${unit._count.products === 1 ? '' : 's'}. Disable the unit instead.`,
-            );
-        }
+        await prisma.$transaction(async (tx) => {
+            const defaultUnitId = await catalogDefaults.ensureDefaultUnit(tx, id);
+            await tx.product.updateMany({
+                where: { unit_id: id },
+                data: { unit_id: defaultUnitId },
+            });
+            await tx.unit.delete({ where: { id } });
+        }, catalogDeleteOptions);
 
-        await prisma.unit.delete({ where: { id } });
         return { message: 'Unit deleted successfully' };
     }
 

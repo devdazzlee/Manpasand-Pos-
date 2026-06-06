@@ -4,13 +4,13 @@ exports.updateEmployeeTypeSchema = exports.createEmployeeTypeSchema = exports.li
 const zod_1 = require("zod");
 exports.createEmployeeSchema = zod_1.z.object({
     body: zod_1.z.object({
-        name: zod_1.z.string(),
-        email: zod_1.z.string().email().optional(),
+        name: zod_1.z.string().trim().min(2, 'Full name must be at least 2 characters'),
+        email: zod_1.z.string().email(),
         phone_number: zod_1.z.string().optional(),
         cnic: zod_1.z.string().optional(),
         gender: zod_1.z.string().optional(),
-        join_date: zod_1.z.string().datetime(),
-        employee_type_id: zod_1.z.string().uuid(),
+        join_date: zod_1.z.string().datetime().optional(),
+        employee_type_id: zod_1.z.string().uuid().optional(),
     }),
 });
 exports.updateEmployeeSchema = zod_1.z.object({

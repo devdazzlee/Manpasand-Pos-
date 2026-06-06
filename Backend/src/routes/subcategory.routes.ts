@@ -4,6 +4,7 @@ import {
     getSubcategory,
     updateSubcategory,
     toggleSubcategoryStatus,
+    deleteSubcategory,
     listSubcategories,
 } from '../controllers/subcategory.controller';
 import {
@@ -24,5 +25,6 @@ router.get('/', validate(listSubcategoriesSchema), listSubcategories);
 router.get('/:id', validate(getSubcategorySchema), getSubcategory);
 router.patch('/:id', validate(updateSubcategorySchema), updateSubcategory);
 router.patch('/:id/toggle-status', validate(getSubcategorySchema), toggleSubcategoryStatus);
+router.delete('/:id', validate(getSubcategorySchema), deleteSubcategory);
 
 export default router;

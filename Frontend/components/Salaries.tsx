@@ -4,10 +4,12 @@ import React, { useEffect, useState } from "react";
 import apiClient from "@/lib/apiClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Edit, Trash2, Plus } from "lucide-react";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Loader2, Edit, Trash2, Plus, CalendarIcon } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
@@ -18,6 +20,7 @@ import { Badge } from "@/components/ui/badge";
 import { DollarSign, CheckCircle2, XCircle, Users } from "lucide-react";
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
+import { cn } from "@/lib/utils";
 import { z } from "zod";
 
 const salarySchema = z.object({
@@ -59,6 +62,212 @@ const parseToLocalDate = (dateStr?: string) => {
     return new Date(year, month - 1, day);
 };
 
+const getDefaultSalaryForm = (): Partial<Salary> => ({
+    amount: undefined,
+    is_paid: false,
+    paid_date: undefined,
+    notes: "",
+});
+
+interface SalaryFormFieldsProps {
+    form: Partial<Salary>;
+    setForm: React.Dispatch<React.SetStateAction<Partial<Salary>>>;
+    employees: Employee[];
+    years: number[];
+    error?: string | null;
+}
+
+const salaryFieldLabelClass = "text-xs font-medium text-gray-900";
+const salaryFieldControlClass =
+    "h-9 rounded-md border-gray-200 bg-white text-sm text-gray-900 shadow-none";
+
+function SalaryFormFields({
+    form,
+    setForm,
+    employees,
+    years,
+    error,
+}: SalaryFormFieldsProps) {
+    return (
+        <div className="space-y-4">
+            <div className="space-y-1">
+                <Label htmlFor="salary-employee" className={salaryFieldLabelClass}>
+                    Employee
+                </Label>
+                <Select
+                    value={form.employee_id || ""}
+                    onValueChange={(val) => setForm((f) => ({ ...f, employee_id: val }))}
+                >
+                    <SelectTrigger id="salary-employee" className={salaryFieldControlClass}>
+                        <SelectValue placeholder="Select employee" />
+                    </SelectTrigger>
+                    <SelectContent>
+                        {employees.map((emp) => (
+                            <SelectItem key={emp.id} value={emp.id} className="text-sm">
+                                {emp.name}
+                            </SelectItem>
+                        ))}
+                    </SelectContent>
+                </Select>
+            </div>
+
+            <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1">
+                    <Label htmlFor="salary-month" className={salaryFieldLabelClass}>
+                        Month
+                    </Label>
+                    <Select
+                        value={form.month ? String(form.month) : ""}
+                        onValueChange={(val) => setForm((f) => ({ ...f, month: Number(val) }))}
+                    >
+                        <SelectTrigger id="salary-month" className={salaryFieldControlClass}>
+                            <SelectValue placeholder="Select month" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {months.map((m, idx) => (
+                                <SelectItem key={m} value={String(idx + 1)} className="text-sm">
+                                    {m}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+
+                <div className="space-y-1">
+                    <Label htmlFor="salary-year" className={salaryFieldLabelClass}>
+                        Year
+                    </Label>
+                    <Select
+                        value={form.year ? String(form.year) : ""}
+                        onValueChange={(val) => setForm((f) => ({ ...f, year: Number(val) }))}
+                    >
+                        <SelectTrigger id="salary-year" className={salaryFieldControlClass}>
+                            <SelectValue placeholder="Select year" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {[...years].reverse().map((y) => (
+                                <SelectItem key={y} value={String(y)} className="text-sm">
+                                    {y}
+                                </SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                </div>
+            </div>
+
+            <div className="w-1/2 space-y-1">
+                <Label htmlFor="salary-amount" className={salaryFieldLabelClass}>
+                    Amount (Rs)
+                </Label>
+                <Input
+                    id="salary-amount"
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    placeholder="0"
+                    value={form.amount ?? ""}
+                    onChange={(e) => {
+                        const val = e.target.value;
+                        setForm((f) => ({
+                            ...f,
+                            amount: val === "" ? undefined : Number(val),
+                        }));
+                    }}
+                    className={cn(
+                        salaryFieldControlClass,
+                        "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                    )}
+                />
+            </div>
+
+            <div className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2.5">
+                <div>
+                    <p className="text-xs font-semibold text-gray-900">Mark as paid</p>
+                    <p className="text-[11px] leading-snug text-gray-500">
+                        Leave off if not paid yet
+                    </p>
+                </div>
+                <Switch
+                    checked={!!form.is_paid}
+                    onCheckedChange={(checked) =>
+                        setForm((f) => ({
+                            ...f,
+                            is_paid: checked,
+                            paid_date: checked ? f.paid_date : undefined,
+                        }))
+                    }
+                />
+            </div>
+
+            <div className="space-y-1">
+                <Label htmlFor="salary-paid-date" className={salaryFieldLabelClass}>
+                    Paid date
+                </Label>
+                <Popover>
+                    <PopoverTrigger asChild>
+                        <Button
+                            id="salary-paid-date"
+                            variant="outline"
+                            disabled={!form.is_paid}
+                            className={cn(
+                                salaryFieldControlClass,
+                                "w-full justify-start text-left font-normal",
+                                !form.is_paid && "cursor-not-allowed opacity-50",
+                                !form.paid_date && "text-gray-500",
+                            )}
+                        >
+                            <CalendarIcon className="mr-2 h-3.5 w-3.5 shrink-0" />
+                            {form.paid_date
+                                ? format(parseToLocalDate(form.paid_date)!, "PPP")
+                                : "Pick a date"}
+                        </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                        <Calendar
+                            mode="single"
+                            selected={form.paid_date ? parseToLocalDate(form.paid_date) : undefined}
+                            onSelect={(date) => {
+                                if (!date) {
+                                    setForm((f) => ({ ...f, paid_date: undefined }));
+                                    return;
+                                }
+                                const utcDate = new Date(
+                                    Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()),
+                                );
+                                setForm((f) => ({ ...f, paid_date: utcDate.toISOString() }));
+                            }}
+                            initialFocus
+                        />
+                    </PopoverContent>
+                </Popover>
+            </div>
+
+            <div className="space-y-1">
+                <Label htmlFor="salary-notes" className={salaryFieldLabelClass}>
+                    Notes (optional)
+                </Label>
+                <Input
+                    id="salary-notes"
+                    type="text"
+                    value={form.notes || ""}
+                    onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+                    placeholder="Optional notes"
+                    className={cn(salaryFieldControlClass, "placeholder:text-gray-400")}
+                />
+            </div>
+
+            {error && <div className="text-xs text-red-600">{error}</div>}
+        </div>
+    );
+}
+
+const salaryDialogContentClass =
+    "max-w-[420px] w-[calc(100%-2rem)] gap-4 p-5 sm:rounded-lg";
+const salaryDialogTitleClass = "text-base font-semibold text-gray-900";
+const salaryDialogFooterClass = "gap-2 sm:justify-end pt-1";
+const salaryDialogCancelClass = "h-9 px-4 text-xs";
+const salaryDialogSubmitClass = "h-9 px-4 text-xs";
+
 export function Salaries() {
     const { toast } = useToast();
     const [salaries, setSalaries] = useState<Salary[]>([]);
@@ -67,8 +276,6 @@ export function Salaries() {
     const [isInitialLoading, setIsInitialLoading] = useState(true);
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [isEditDialogOpen, setIsEditDialogOpen] = useState(false);
-    const [isAddYearOpen, setIsAddYearOpen] = useState(false);
-    const [isEditYearOpen, setIsEditYearOpen] = useState(false);
     const [form, setForm] = useState<Partial<Salary>>({});
     const [editId, setEditId] = useState<string | null>(null);
     const [isSubmitting, setIsSubmitting] = useState(false);
@@ -308,12 +515,13 @@ export function Salaries() {
                     <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Salary Management</h1>
                     <p className="text-sm md:text-base text-gray-600">Manage employee salary records</p>
                 </div>
-                <Dialog 
-                    open={isDialogOpen} 
+                <Dialog
+                    open={isDialogOpen}
                     onOpenChange={(open) => {
                         setIsDialogOpen(open);
                         if (open) {
-                            setForm({}); // Clear the form when opening the Add dialog
+                            setForm(getDefaultSalaryForm());
+                            setError(null);
                         }
                     }}
                 >
@@ -322,146 +530,46 @@ export function Salaries() {
                             <Plus className="h-4 w-4 mr-2" /> Add Salary
                         </Button>
                     </DialogTrigger>
-                    <DialogContent>
-                        <DialogHeader>
-                            <DialogTitle>Add Salary</DialogTitle>
+                    <DialogContent className={salaryDialogContentClass}>
+                        <DialogHeader className="space-y-0">
+                            <DialogTitle className={salaryDialogTitleClass}>
+                                Add Salary
+                            </DialogTitle>
                         </DialogHeader>
-                        <div className="space-y-4">
-                            <div>
-                                <label>Employee</label>
-                                <Select
-                                    value={form.employee_id || ""}
-                                    onValueChange={val => setForm(f => ({ ...f, employee_id: val }))}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select employee" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {employees.map(emp => (
-                                            <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div>
-                                <label>Month</label>
-                                <Select
-                                    value={form.month ? String(form.month) : ""}
-                                    onValueChange={val => setForm(f => ({ ...f, month: Number(val) }))}
-                                >
-                                    <SelectTrigger>
-                                        <SelectValue placeholder="Select month" />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                        {months.map((m, idx) => (
-                                            <SelectItem key={m} value={String(idx + 1)}>{m}</SelectItem>
-                                        ))}
-                                    </SelectContent>
-                                </Select>
-                            </div>
-                            <div>
-                                <label className="block mb-1 font-medium">Year</label>
-                                <Popover open={isAddYearOpen} onOpenChange={setIsAddYearOpen}>
-                                    <PopoverTrigger asChild>
-                                        <Button
-                                            variant="outline"
-                                            className="w-full justify-between text-left font-normal border-gray-300"
-                                        >
-                                            <span>{form.year ? String(form.year) : "Select year"}</span>
-                                            <span className="text-gray-400 font-sans text-xs">▼</span>
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-64 p-3" align="start">
-                                        <div 
-                                            className="max-h-48 overflow-y-auto pr-1"
-                                            onWheel={(e) => e.stopPropagation()}
-                                            onTouchMove={(e) => e.stopPropagation()}
-                                        >
-                                            <div className="grid grid-cols-3 gap-2">
-                                                {years.map((y) => (
-                                                    <Button
-                                                        key={y}
-                                                        variant={form.year === y ? "default" : "outline"}
-                                                        size="sm"
-                                                        className="w-full"
-                                                        onClick={() => {
-                                                            setForm(f => ({ ...f, year: y }));
-                                                            setIsAddYearOpen(false);
-                                                        }}
-                                                    >
-                                                        {y}
-                                                    </Button>
-                                                ))}
-                                            </div>
-                                        </div>
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
-                            <div>
-                                <label>Amount</label>
-                                <Input
-                                    type="number"
-                                    value={form.amount || ""}
-                                    onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))}
-                                    placeholder="Amount"
-                                    className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                                />
-                            </div>
-                            <div className="flex items-center space-x-3 py-2.5 border rounded-lg px-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
-                                <input
-                                    type="checkbox"
-                                    id="add-paid-checkbox"
-                                    checked={!!form.is_paid}
-                                    onChange={e => setForm(f => ({ ...f, is_paid: e.target.checked }))}
-                                    className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                                />
-                                <label htmlFor="add-paid-checkbox" className="text-base font-semibold text-gray-900 cursor-pointer select-none">
-                                    Paid
-                                </label>
-                            </div>
-                            <div>
-                                <label className="block mb-1 font-medium">Paid Date</label>
-                                <Popover>
-                                    <PopoverTrigger asChild>
-                                        <Button
-                                            variant={form.paid_date ? "default" : "outline"}
-                                            className="w-full justify-start text-left font-normal"
-                                        >
-                                            {form.paid_date ? form.paid_date.split("T")[0] : "Pick a date"}
-                                        </Button>
-                                    </PopoverTrigger>
-                                    <PopoverContent className="w-auto p-0">
-                                        <Calendar
-                                            mode="single"
-                                            selected={form.paid_date ? parseToLocalDate(form.paid_date) : undefined}
-                                            onSelect={date => {
-                                                if (!date) {
-                                                    setForm(f => ({ ...f, paid_date: undefined }));
-                                                    return;
-                                                }
-                                                const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-                                                setForm(f => ({ ...f, paid_date: utcDate.toISOString() }));
-                                            }}
-                                            initialFocus
-                                        />
-                                    </PopoverContent>
-                                </Popover>
-                            </div>
-                            <div>
-                                <label>Notes</label>
-                                <Input
-                                    type="text"
-                                    value={form.notes || ""}
-                                    onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                                    placeholder="Notes"
-                                />
-                            </div>
-                            {error && <div className="text-red-600 text-sm">{error}</div>}
-                            <Button onClick={handleAddSalary} disabled={isSubmitting || !form.employee_id || !form.month || !form.year || !form.amount}>
-                                {isSubmitting ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
+                        <SalaryFormFields
+                            form={form}
+                            setForm={setForm}
+                            employees={employees}
+                            years={years}
+                            error={error}
+                        />
+                        <DialogFooter className={salaryDialogFooterClass}>
+                            <Button
+                                variant="outline"
+                                onClick={() => setIsDialogOpen(false)}
+                                disabled={isSubmitting}
+                                className={salaryDialogCancelClass}
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                onClick={handleAddSalary}
+                                disabled={
+                                    isSubmitting ||
+                                    !form.employee_id ||
+                                    !form.month ||
+                                    !form.year ||
+                                    !form.amount ||
+                                    Number(form.amount) <= 0
+                                }
+                                className={salaryDialogSubmitClass}
+                            >
+                                {isSubmitting ? (
+                                    <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                                ) : null}
                                 Add Salary
                             </Button>
-                        </div>
+                        </DialogFooter>
                     </DialogContent>
                 </Dialog>
             </div>
@@ -602,156 +710,57 @@ export function Salaries() {
             </Card>
 
             {/* Edit Salary Dialog */}
-            <Dialog 
-                open={isEditDialogOpen} 
+            <Dialog
+                open={isEditDialogOpen}
                 onOpenChange={(open) => {
                     setIsEditDialogOpen(open);
                     if (!open) {
-                        setForm({}); // Clear the form when closing the Edit dialog
+                        setForm({});
                         setEditId(null);
+                        setError(null);
                     }
                 }}
             >
-                <DialogContent>
-                    <DialogHeader>
-                        <DialogTitle>Edit Salary</DialogTitle>
+                <DialogContent className={salaryDialogContentClass}>
+                    <DialogHeader className="space-y-0">
+                        <DialogTitle className={salaryDialogTitleClass}>
+                            Edit Salary
+                        </DialogTitle>
                     </DialogHeader>
-                    <div className="space-y-4">
-                        <div>
-                            <label>Employee</label>
-                            <Select
-                                value={form.employee_id || ""}
-                                onValueChange={val => setForm(f => ({ ...f, employee_id: val }))}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select employee" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {employees.map(emp => (
-                                        <SelectItem key={emp.id} value={emp.id}>{emp.name}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <label>Month</label>
-                            <Select
-                                value={form.month ? String(form.month) : ""}
-                                onValueChange={val => setForm(f => ({ ...f, month: Number(val) }))}
-                            >
-                                <SelectTrigger>
-                                    <SelectValue placeholder="Select month" />
-                                </SelectTrigger>
-                                <SelectContent>
-                                    {months.map((m, idx) => (
-                                        <SelectItem key={m} value={String(idx + 1)}>{m}</SelectItem>
-                                    ))}
-                                </SelectContent>
-                            </Select>
-                        </div>
-                        <div>
-                            <label className="block mb-1 font-medium">Year</label>
-                            <Popover open={isEditYearOpen} onOpenChange={setIsEditYearOpen}>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        variant="outline"
-                                        className="w-full justify-between text-left font-normal border-gray-300"
-                                    >
-                                        <span>{form.year ? String(form.year) : "Select year"}</span>
-                                        <span className="text-gray-400 font-sans text-xs">▼</span>
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-64 p-3" align="start">
-                                    <div 
-                                        className="max-h-48 overflow-y-auto pr-1"
-                                        onWheel={(e) => e.stopPropagation()}
-                                        onTouchMove={(e) => e.stopPropagation()}
-                                    >
-                                        <div className="grid grid-cols-3 gap-2">
-                                            {years.map((y) => (
-                                                <Button
-                                                    key={y}
-                                                    variant={form.year === y ? "default" : "outline"}
-                                                    size="sm"
-                                                    className="w-full"
-                                                    onClick={() => {
-                                                        setForm(f => ({ ...f, year: y }));
-                                                        setIsEditYearOpen(false);
-                                                    }}
-                                                >
-                                                    {y}
-                                                </Button>
-                                            ))}
-                                        </div>
-                                    </div>
-                                </PopoverContent>
-                            </Popover>
-                        </div>
-                        <div>
-                            <label>Amount</label>
-                            <Input
-                                type="number"
-                                value={form.amount || ""}
-                                onChange={e => setForm(f => ({ ...f, amount: Number(e.target.value) }))}
-                                placeholder="Amount"
-                                className="[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                            />
-                        </div>
-                        <div className="flex items-center space-x-3 py-2.5 border rounded-lg px-3 bg-gray-50/50 hover:bg-gray-50 transition-colors">
-                            <input
-                                type="checkbox"
-                                id="edit-paid-checkbox"
-                                checked={!!form.is_paid}
-                                onChange={e => setForm(f => ({ ...f, is_paid: e.target.checked }))}
-                                className="h-5 w-5 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-                            />
-                            <label htmlFor="edit-paid-checkbox" className="text-base font-semibold text-gray-900 cursor-pointer select-none">
-                                Paid
-                            </label>
-                        </div>
-                        <div>
-                            <label className="block mb-1 font-medium">Paid Date</label>
-                            <Popover>
-                                <PopoverTrigger asChild>
-                                    <Button
-                                        variant={form.paid_date ? "default" : "outline"}
-                                        className="w-full justify-start text-left font-normal"
-                                    >
-                                        {form.paid_date ? form.paid_date.split("T")[0] : "Pick a date"}
-                                    </Button>
-                                </PopoverTrigger>
-                                <PopoverContent className="w-auto p-0">
-                                    <Calendar
-                                        mode="single"
-                                        selected={form.paid_date ? parseToLocalDate(form.paid_date) : undefined}
-                                        onSelect={date => {
-                                            if (!date) {
-                                                setForm(f => ({ ...f, paid_date: undefined }));
-                                                return;
-                                            }
-                                            const utcDate = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
-                                            setForm(f => ({ ...f, paid_date: utcDate.toISOString() }));
-                                        }}
-                                        initialFocus
-                                    />
-                                </PopoverContent>
-                            </Popover>
-                        </div>
-                        <div>
-                            <label>Notes</label>
-                            <Input
-                                type="text"
-                                value={form.notes || ""}
-                                onChange={e => setForm(f => ({ ...f, notes: e.target.value }))}
-                                placeholder="Notes"
-                            />
-                        </div>
-                        {error && <div className="text-red-600 text-sm">{error}</div>}
-                        <Button onClick={handleEditSalary} disabled={isSubmitting || !form.employee_id || !form.month || !form.year || !form.amount}>
-                            {isSubmitting ? <Loader2 className="animate-spin h-4 w-4 mr-2" /> : null}
+                    <SalaryFormFields
+                        form={form}
+                        setForm={setForm}
+                        employees={employees}
+                        years={years}
+                        error={error}
+                    />
+                    <DialogFooter className={salaryDialogFooterClass}>
+                        <Button
+                            variant="outline"
+                            onClick={() => setIsEditDialogOpen(false)}
+                            disabled={isSubmitting}
+                            className={salaryDialogCancelClass}
+                        >
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handleEditSalary}
+                            disabled={
+                                isSubmitting ||
+                                !form.employee_id ||
+                                !form.month ||
+                                !form.year ||
+                                !form.amount ||
+                                Number(form.amount) <= 0
+                            }
+                            className={salaryDialogSubmitClass}
+                        >
+                            {isSubmitting ? (
+                                <Loader2 className="mr-2 h-3.5 w-3.5 animate-spin" />
+                            ) : null}
                             Update Salary
                         </Button>
-                    </div>
+                    </DialogFooter>
                 </DialogContent>
             </Dialog>
         </div>
