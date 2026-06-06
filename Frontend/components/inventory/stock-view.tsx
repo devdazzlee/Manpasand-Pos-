@@ -19,7 +19,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
   DialogContent,
@@ -32,23 +31,41 @@ import {
   Search,
   ArrowUpDown,
   AlertTriangle,
-  CheckCircle2,
-  XCircle,
   ChevronRight,
   ChevronLeft,
   Boxes,
   Loader2,
+  ArrowRightLeft,
+  MapPin,
+  DollarSign,
+  Truck,
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/ui/page-loader";
 import { usePosData } from "@/hooks/use-pos-data";
-import { cn } from "@/lib/utils";
+import {
+  StockStatusBadge,
+} from "@/components/inventory/stock-ops/stock-status-badge";
+import {
+  ALL_BRANCHES,
+  ALL_BRANDS,
+  ALL_CATEGORIES,
+} from "@/components/inventory/stock-ops/constants";
+import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
+import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
+import { useInventoryDashboard } from "@/components/inventory/stock-ops/use-inventory-dashboard";
+import {
+  downloadCsv,
+  downloadExcel,
+  formatMoney,
+  getProductBarcode,
+  printHtmlDocument,
+} from "@/components/inventory/stock-ops/export-utils";
 
 /** Sentinel values - must not match a real branch/category id from the API. */
-const ALL_BRANCHES = "__all_branches__";
-const ALL_CATEGORIES = "__all_categories__";
+const ALL_WAREHOUSES = "__all_warehouses__";
 /** Plain ASCII placeholder for empty fields (avoids em-dash encoding issues on Windows). */
 const EMPTY = "-";
 
@@ -105,13 +122,16 @@ function StatCard({
   );
 }
 
-export function StockView() {
+export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+  const { stats: dashboardStats, loading: dashboardLoading } = useInventoryDashboard();
   const {
     branches,
     categories,
     fetchBranches,
     fetchCategories,
   } = usePosData();
+
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
 
   const [stocks, setStocks] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -121,7 +141,9 @@ export function StockView() {
   const [detailError, setDetailError] = useState<string | null>(null);
 
   const [branchFilter, setBranchFilter] = useState(ALL_BRANCHES);
+  const [warehouseFilter, setWarehouseFilter] = useState(ALL_WAREHOUSES);
   const [categoryFilter, setCategoryFilter] = useState(ALL_CATEGORIES);
+  const [brandFilter, setBrandFilter] = useState(ALL_BRANDS);
   const [search, setSearch] = useState("");
   const [sortField, setSortField] = useState("current_quantity");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
@@ -136,8 +158,14 @@ export function StockView() {
       const params: Record<string, string | number> = {
         page: currentPage,
         limit: itemsPerPage,
-        branchId: branchFilter === ALL_BRANCHES ? "" : branchFilter,
+        branchId:
+          branchFilter === ALL_BRANCHES
+            ? warehouseFilter === ALL_WAREHOUSES
+              ? ""
+              : warehouseFilter
+            : branchFilter,
         categoryId: categoryFilter === ALL_CATEGORIES ? "" : categoryFilter,
+        brandId: brandFilter === ALL_BRANDS ? "" : brandFilter,
         search: search.trim(),
       };
 
@@ -149,12 +177,16 @@ export function StockView() {
     } finally {
       setLoading(false);
     }
-  }, [branchFilter, categoryFilter, search, currentPage, itemsPerPage]);
+  }, [branchFilter, warehouseFilter, categoryFilter, brandFilter, search, currentPage, itemsPerPage]);
 
   useEffect(() => {
     fetchStocks();
     fetchBranches();
     fetchCategories();
+    apiClient
+      .get(`${API_BASE}/brands`, { params: { limit: 1000 } })
+      .then((res) => setBrands(res.data?.data || res.data || []))
+      .catch(() => setBrands([]));
   }, [fetchStocks, fetchBranches, fetchCategories]);
 
   const categoryNameById = useMemo(() => {
@@ -207,59 +239,78 @@ export function StockView() {
     return { totalItems, lowStock, outOfStock };
   }, [stocks]);
 
-  const getStatusDisplay = (s: any) => {
-    const qty = Number(s.current_quantity || 0);
-    const min = Number(
-      s.minimum_quantity ?? s.product?.min_qty ?? 0,
-    );
-
-    if (qty <= 0) {
-      return {
-        label: "Out of stock",
-        className: "bg-gray-100 text-gray-700 border-gray-200",
-        icon: XCircle,
-      };
-    }
-    if (qty <= min) {
-      return {
-        label: "Low stock",
-        className: "bg-amber-50 text-amber-800 border-amber-200",
-        icon: AlertTriangle,
-      };
-    }
-    return {
-      label: "In stock",
-      className: "bg-green-50 text-green-800 border-green-200",
-      icon: CheckCircle2,
-    };
-  };
-
   const exportCSV = () => {
-    const headers = ["Product", "SKU", "Branch", "Category", "Quantity", "Status"];
+    const headers = [
+      "Product",
+      "SKU",
+      "Barcode",
+      "Branch",
+      "Available",
+      "Reserved",
+      "Inventory Value",
+      "Last Updated",
+    ];
     const rows = stocks.map((s) => {
-      const status = getStatusDisplay(s).label;
+      const qty = Number(s.current_quantity || 0);
+      const reserved = Number(s.reserved_quantity || 0);
+      const cost = Number(s.product?.purchase_rate || 0);
       return [
         s.product?.name || "",
         s.product?.sku || "",
+        getProductBarcode(s.product),
         s.branch?.name || "",
-        s.product?.category?.name || "",
-        s.current_quantity,
-        status,
+        qty - reserved,
+        reserved,
+        qty * cost,
+        s.last_updated ? new Date(s.last_updated).toLocaleString() : "",
       ];
     });
-    const csv = [
-      headers.join(","),
-      ...rows.map((r) => r.map((c) => `"${c}"`).join(",")),
-    ].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `stock-by-location-${Date.now()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
+    downloadCsv(`stock-by-location-${Date.now()}.csv`, headers, rows);
     toast.success("CSV downloaded");
   };
+
+  const exportExcel = () => {
+    const headers = [
+      "Product",
+      "SKU",
+      "Barcode",
+      "Branch",
+      "Available",
+      "Reserved",
+      "Inventory Value",
+      "Last Updated",
+    ];
+    const rows = stocks.map((s) => {
+      const qty = Number(s.current_quantity || 0);
+      const reserved = Number(s.reserved_quantity || 0);
+      const cost = Number(s.product?.purchase_rate || 0);
+      return [
+        s.product?.name || "",
+        s.product?.sku || "",
+        getProductBarcode(s.product),
+        s.branch?.name || "",
+        qty - reserved,
+        reserved,
+        qty * cost,
+        s.last_updated ? new Date(s.last_updated).toLocaleString() : "",
+      ];
+    });
+    downloadExcel(`stock-by-location-${Date.now()}.xlsx`, "Stock", headers, rows);
+    toast.success("Excel downloaded");
+  };
+
+  const warehouses = useMemo(
+    () => branches.filter((b) => (b.branch_type || "").toUpperCase() === "WAREHOUSE"),
+    [branches],
+  );
+
+  const locationValue = useMemo(() => {
+    return stocks.reduce((acc, s) => {
+      const qty = Number(s.current_quantity || 0);
+      const cost = Number(s.product?.purchase_rate || 0);
+      return acc + qty * cost;
+    }, 0);
+  }, [stocks]);
 
   const toggleSort = (field: string) => {
     if (sortField === field) {
@@ -328,9 +379,6 @@ export function StockView() {
     setDetailError(null);
   };
 
-  const detailStatus = detailRow ? getStatusDisplay(detailRow) : null;
-  const DetailStatusIcon = detailStatus?.icon;
-
   const detailMinStock = detailRow
     ? Number(
         detailRow.minimum_quantity ??
@@ -353,49 +401,87 @@ export function StockView() {
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6 text-black">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="bg-gray-900 text-white p-2 rounded-md">
-            <Boxes className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-black">Stock by Location</h1>
-            <p className="text-sm text-gray-600 mt-1">
-              See how much stock each product has at each branch.
-            </p>
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="bg-gray-900 text-white p-2.5 rounded-lg shrink-0">
+          <Boxes className="h-5 w-5" />
         </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={exportCSV}
-          disabled={loading || stocks.length === 0}
-          className="text-sm text-black"
-        >
-          <Download className="h-4 w-4 mr-2" />
-          Export CSV
-        </Button>
+        <div>
+          <h1 className="text-2xl font-bold text-black tracking-tight">Stock by Location</h1>
+          <p className="text-sm text-gray-600 mt-1 max-w-2xl">
+            Branch and warehouse inventory, valuation, transfers, and low-stock alerts.
+          </p>
+        </div>
       </div>
 
-      {/* Summary (current page) */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <StatCard
-          label="Total units on this page"
-          value={stats.totalItems.toLocaleString()}
-          loading={loading}
-        />
-        <StatCard
-          label="Low stock on this page"
-          value={stats.lowStock}
-          loading={loading}
-        />
-        <StatCard
-          label="Out of stock on this page"
-          value={stats.outOfStock}
-          loading={loading}
-        />
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm px-4 py-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm text-gray-600">
+            Filter by branch or warehouse below, then export or transfer stock.
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            {onNavigate ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-9 text-sm text-black"
+                onClick={() => onNavigate("transfers")}
+              >
+                <ArrowRightLeft className="h-4 w-4 mr-1.5" />
+                Transfers
+              </Button>
+            ) : null}
+            <StockOpsActions
+              onNavigate={onNavigate}
+              onExportCsv={exportCSV}
+              onExportExcel={exportExcel}
+              onPrint={() => {
+                if (stocks.length === 0) return;
+                const body = stocks
+                  .map((s) => {
+                    const qty = Number(s.current_quantity || 0);
+                    const reserved = Number(s.reserved_quantity || 0);
+                    const cost = Number(s.product?.purchase_rate || 0);
+                    return `<tr><td>${s.product?.name || ""}</td><td>${s.product?.sku || ""}</td><td>${s.branch?.name || ""}</td><td class="num">${qty - reserved}</td><td class="num">${formatMoney(qty * cost)}</td></tr>`;
+                  })
+                  .join("");
+                printHtmlDocument(
+                  "Location Inventory",
+                  `<h1>Stock by Location</h1><p class="meta">${new Date().toLocaleString()}</p><table><thead><tr><th>Product</th><th>SKU</th><th>Branch</th><th>Available</th><th>Value</th></tr></thead><tbody>${body}</tbody></table>`,
+                );
+              }}
+              disabled={loading || stocks.length === 0}
+            />
+          </div>
+        </div>
       </div>
+
+      <InventoryKpiGrid
+        columns={4}
+        loading={dashboardLoading || loading}
+        items={[
+          {
+            label: "Total Locations",
+            value: dashboardStats.totalLocations.toLocaleString(),
+            icon: MapPin,
+          },
+          {
+            label: "Inventory Value (page)",
+            value: formatMoney(locationValue),
+            icon: DollarSign,
+          },
+          {
+            label: "Low Stock (page)",
+            value: stats.lowStock.toLocaleString(),
+            icon: AlertTriangle,
+            tone: "warning",
+          },
+          {
+            label: "Pending Transfers",
+            value: dashboardStats.pendingTransferCount.toLocaleString(),
+            icon: Truck,
+          },
+        ]}
+      />
 
       {/* Filters */}
       <Card className="p-4 border border-gray-200">
@@ -413,9 +499,32 @@ export function StockView() {
             />
           </div>
           <Select
+            value={warehouseFilter}
+            onValueChange={(v) => {
+              setWarehouseFilter(v);
+              if (v !== ALL_WAREHOUSES) setBranchFilter(ALL_BRANCHES);
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 w-full lg:w-[200px] text-sm text-black">
+              <SelectValue placeholder="All warehouses" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_WAREHOUSES} className="text-sm">
+                All warehouses
+              </SelectItem>
+              {warehouses.map((b) => (
+                <SelectItem key={b.id} value={b.id} className="text-sm">
+                  {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
             value={branchFilter}
             onValueChange={(v) => {
               setBranchFilter(v);
+              if (v !== ALL_BRANCHES) setWarehouseFilter(ALL_WAREHOUSES);
               setCurrentPage(1);
             }}
           >
@@ -454,6 +563,27 @@ export function StockView() {
               ))}
             </SelectContent>
           </Select>
+          <Select
+            value={brandFilter}
+            onValueChange={(v) => {
+              setBrandFilter(v);
+              setCurrentPage(1);
+            }}
+          >
+            <SelectTrigger className="h-9 w-full lg:w-[200px] text-sm text-black">
+              <SelectValue placeholder="All brands" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_BRANDS} className="text-sm">
+                All brands
+              </SelectItem>
+              {brands.map((b) => (
+                <SelectItem key={b.id} value={b.id} className="text-sm">
+                  {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </Card>
 
@@ -481,6 +611,7 @@ export function StockView() {
                     </button>
                   </TableHead>
                   <TableHead className="text-sm text-gray-600">SKU</TableHead>
+                  <TableHead className="text-sm text-gray-600">Barcode</TableHead>
                   <TableHead className="text-sm text-gray-600">
                     <button
                       type="button"
@@ -492,16 +623,18 @@ export function StockView() {
                     </button>
                   </TableHead>
                   <TableHead className="text-sm text-gray-600 text-right">
-                    <button
-                      type="button"
-                      className="inline-flex items-center ml-auto text-sm text-gray-600 hover:text-black"
-                      onClick={() => toggleSort("quantity")}
-                    >
-                      Quantity
-                      <ArrowUpDown className="ml-1 h-3 w-3" />
-                    </button>
+                    Available
                   </TableHead>
-                  <TableHead className="text-sm text-gray-600 text-center">
+                  <TableHead className="text-sm text-gray-600 text-right">
+                    Reserved
+                  </TableHead>
+                  <TableHead className="text-sm text-gray-600 text-right">
+                    Value
+                  </TableHead>
+                  <TableHead className="text-sm text-gray-600">
+                    Updated
+                  </TableHead>
+                  <TableHead className="text-sm text-gray-600 text-center min-w-[108px]">
                     Status
                   </TableHead>
                   <TableHead className="text-sm text-gray-600 text-right w-[72px]">
@@ -512,14 +645,14 @@ export function StockView() {
               <TableBody>
                 {loading ? (
                   <TableRow>
-                    <TableCell colSpan={6} className="h-48">
+                    <TableCell colSpan={10} className="h-48">
                       <PageLoader message="Loading stock..." />
                     </TableCell>
                   </TableRow>
                 ) : stocks.length === 0 ? (
                   <TableRow>
                     <TableCell
-                      colSpan={6}
+                      colSpan={10}
                       className="h-32 text-center text-sm text-gray-500"
                     >
                       No stock found for these filters.
@@ -527,40 +660,44 @@ export function StockView() {
                   </TableRow>
                 ) : (
                   sortedStocks.map((s) => {
-                    const status = getStatusDisplay(s);
-                    const StatusIcon = status.icon;
+                    const qty = Number(s.current_quantity || 0);
+                    const reserved = Number(s.reserved_quantity || 0);
+                    const cost = Number(s.product?.purchase_rate || 0);
+                    const minQty = Number(
+                      s.minimum_quantity ?? s.product?.min_qty ?? 0,
+                    );
                     return (
                       <TableRow key={s.id} className="border-gray-100">
                         <TableCell className="py-3">
                           <span className="text-sm text-black block">
                             {s.product?.name || "-"}
                           </span>
-                          <span className="text-xs text-gray-500 block mt-0.5">
-                            {s.product?.category?.name ||
-                              categoryNameById.get(s.product?.category_id) ||
-                              "Uncategorized"}
-                          </span>
                         </TableCell>
                         <TableCell className="text-sm text-gray-600">
                           {s.product?.sku || "-"}
+                        </TableCell>
+                        <TableCell className="text-sm text-gray-600">
+                          {getProductBarcode(s.product)}
                         </TableCell>
                         <TableCell className="text-sm text-black">
                           {s.branch?.name || "-"}
                         </TableCell>
                         <TableCell className="text-sm text-black text-right">
-                          {Number(s.current_quantity || 0).toLocaleString()}
+                          {(qty - reserved).toLocaleString()}
                         </TableCell>
-                        <TableCell className="text-center">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "text-xs gap-1",
-                              status.className,
-                            )}
-                          >
-                            <StatusIcon className="h-3 w-3" />
-                            {status.label}
-                          </Badge>
+                        <TableCell className="text-sm text-gray-600 text-right">
+                          {reserved.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-sm text-black text-right">
+                          {formatMoney(qty * cost)}
+                        </TableCell>
+                        <TableCell className="text-sm text-gray-600">
+                          {s.last_updated
+                            ? new Date(s.last_updated).toLocaleDateString()
+                            : "-"}
+                        </TableCell>
+                        <TableCell className="text-center whitespace-nowrap">
+                          <StockStatusBadge qty={qty} minQty={minQty} showIcon />
                         </TableCell>
                         <TableCell className="text-right pr-4">
                           <Button
@@ -769,17 +906,12 @@ export function StockView() {
                   <DetailRow
                     label="Stock status"
                     value={
-                      detailStatus && DetailStatusIcon ? (
-                        <Badge
-                          variant="outline"
-                          className={cn(
-                            "text-xs gap-1 font-normal",
-                            detailStatus.className,
-                          )}
-                        >
-                          <DetailStatusIcon className="h-3 w-3" />
-                          {detailStatus.label}
-                        </Badge>
+                      detailRow ? (
+                        <StockStatusBadge
+                          qty={Number(detailRow.current_quantity || 0)}
+                          minQty={detailMinStock}
+                          showIcon
+                        />
                       ) : (
                         "-"
                       )

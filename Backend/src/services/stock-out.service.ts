@@ -180,7 +180,7 @@ export class StockOutService {
       quantity_change: { lt: 0 },
       movement_type: params.reason
         ? params.reason
-        : { in: ['SALE', 'DAMAGE', 'LOSS', 'EXPIRED'] as any },
+        : { in: ['SALE', 'DAMAGE', 'LOSS', 'EXPIRED', 'RETURN'] as any },
     };
 
     if (params.branchId) where.branch_id = params.branchId;

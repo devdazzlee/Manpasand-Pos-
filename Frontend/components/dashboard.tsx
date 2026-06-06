@@ -118,21 +118,21 @@ export function Dashboard({ onLogout }: DashboardProps) {
       case "loyalty":
         return <Stocks />;
       case "stock-management":
-        return <StockManagement />;
+        return <StockManagement onNavigate={setActiveTab} />;
       case "inventory-dashboard":
         return <InventoryDashboard onNavigate={setActiveTab} />;
       case "purchases":
-        return <Purchases />;
+        return <Purchases onNavigate={setActiveTab} />;
       case "transfers":
         return <Transfers />;
       case "stock-out":
-        return <StockOut />;
+        return <StockOut onNavigate={setActiveTab} />;
       case "stock-movement-log":
         return <StockMovementLog />;
       case "stock-adjustment":
         return <StockAdjustment />;
       case "stock-view":
-        return <StockView />;
+        return <StockView onNavigate={setActiveTab} />;
       case "bulk-product-upload":
         return <BulkProductUpload />;
       case "inventory-reports":

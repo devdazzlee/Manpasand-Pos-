@@ -57,6 +57,12 @@ import { API_BASE } from "@/config/constants";
 import { toast } from "sonner";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ExcelUploadDialog, type ExcelField } from "@/components/inventory/excel-upload-dialog";
+import { STOCK_IN_SOURCES } from "@/components/inventory/stock-ops/constants";
+import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
+import { StockModuleToolbar } from "@/components/inventory/stock-ops/stock-module-toolbar";
+import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
+import { useInventoryDashboard } from "@/components/inventory/stock-ops/use-inventory-dashboard";
+import { formatMoney } from "@/components/inventory/stock-ops/export-utils";
 import * as XLSX from "xlsx";
 import { z } from "zod";
 
@@ -113,7 +119,8 @@ interface PurchaseRow {
   user?: { email?: string | null } | null;
 }
 
-export function Purchases() {
+export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+  const { stats: dashboardStats, loading: dashboardLoading } = useInventoryDashboard();
   // ------- shared metadata -------
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -275,6 +282,8 @@ export function Purchases() {
   const [warehouseBranchId, setWarehouseBranchId] = useState<string>("");
   const [purchaseDate, setPurchaseDate] = useState<Date>(new Date());
   const [invoiceRef, setInvoiceRef] = useState<string>("");
+  const [referenceNumber, setReferenceNumber] = useState<string>("");
+  const [stockInSource, setStockInSource] = useState<string>("SUPPLIER_DELIVERY");
   const [batchNo, setBatchNo] = useState<string>("");
   const [expiryDate, setExpiryDate] = useState<Date | undefined>(undefined);
   const [notes, setNotes] = useState<string>("");
@@ -434,12 +443,25 @@ export function Purchases() {
 
     setSaving(true);
     try {
+      const sourceLabel =
+        STOCK_IN_SOURCES.find((s) => s.value === stockInSource)?.label ||
+        stockInSource;
+      const composedNotes = [
+        `Source: ${sourceLabel}`,
+        referenceNumber ? `Ref: ${referenceNumber}` : "",
+        batchNo ? `Batch: ${batchNo}` : "",
+        expiryDate ? `Expiry: ${format(expiryDate, "PPP")}` : "",
+        notes || "",
+      ]
+        .filter(Boolean)
+        .join(" | ");
+
       await apiClient.post(`${API_BASE}/purchases/bulk`, {
         supplierId,
         warehouseBranchId,
         purchaseDate: purchaseDate.toISOString(),
         invoiceRef: invoiceRef || undefined,
-        notes: notes || undefined,
+        notes: composedNotes || undefined,
         batchNo: batchNo || undefined,
         expiryDate: expiryDate ? expiryDate.toISOString() : undefined,
         lines: lines.map((l) => ({
@@ -455,6 +477,8 @@ export function Purchases() {
       setLines([]);
       setNotes("");
       setInvoiceRef("");
+      setReferenceNumber("");
+      setStockInSource("SUPPLIER_DELIVERY");
       setBatchNo("");
       setExpiryDate(undefined);
       resetAddLine();
@@ -474,42 +498,45 @@ export function Purchases() {
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6 text-black">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="bg-gray-900 text-white p-2 rounded-md">
-            <PackagePlus className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-black">Stock In</h1>
-            <p className="text-sm text-gray-600 mt-1 max-w-2xl">
-              <span className="font-medium">Excel</span> adds many new products and
-              opening stock. <span className="font-medium">Supplier form</span> records
-              one delivery (invoice) and the lines you add below.
-            </p>
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="bg-gray-900 text-white p-2.5 rounded-lg shrink-0">
+          <PackagePlus className="h-5 w-5" />
         </div>
-        <div className="inline-flex rounded-md border border-gray-200 overflow-hidden text-sm">
-          <button
-            type="button"
-            onClick={() => setTab("history")}
-            className={`px-4 py-2 ${
-              tab === "history" ? "bg-black text-white" : "bg-white text-gray-600"
-            }`}
-          >
-            History Logs
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("new")}
-            className={`px-4 py-2 border-l border-gray-200 ${
-              tab === "new" ? "bg-black text-white" : "bg-white text-gray-600"
-            }`}
-          >
-            New Entry
-          </button>
+        <div>
+          <h1 className="text-2xl font-bold text-black tracking-tight">Stock In</h1>
+          <p className="text-sm text-gray-600 mt-1 max-w-2xl">
+            Record purchase orders, supplier deliveries, returns, opening stock, adjustments, and production receipts with GRN workflow.
+          </p>
         </div>
       </div>
+
+      <StockModuleToolbar
+        tabs={[
+          { id: "history", label: "History" },
+          { id: "new", label: "New entry" },
+        ]}
+        activeTab={tab}
+        onTabChange={(id) => setTab(id as "history" | "new")}
+      >
+        <StockOpsActions
+          onNavigate={onNavigate}
+          onImport={() => setExcelDialogOpen(true)}
+          disabled={false}
+        />
+      </StockModuleToolbar>
+
+      {tab === "new" ? (
+        <InventoryKpiGrid
+          columns={4}
+          loading={dashboardLoading}
+          items={[
+            { label: "Inventory Value", value: formatMoney(dashboardStats.totalInventoryValue) },
+            { label: "Low Stock Alerts", value: dashboardStats.lowStockCount, tone: "warning" },
+            { label: "Pending Transfers", value: dashboardStats.pendingTransferCount },
+            { label: "Out of Stock", value: dashboardStats.outOfStockCount, tone: "danger" },
+          ]}
+        />
+      ) : null}
 
       {tab === "history" ? (
         <HistoryView
@@ -560,6 +587,10 @@ export function Purchases() {
           setPurchaseDate={setPurchaseDate}
           invoiceRef={invoiceRef}
           setInvoiceRef={setInvoiceRef}
+          stockInSource={stockInSource}
+          setStockInSource={setStockInSource}
+          referenceNumber={referenceNumber}
+          setReferenceNumber={setReferenceNumber}
           batchNo={batchNo}
           setBatchNo={setBatchNo}
           expiryDate={expiryDate}
@@ -1197,6 +1228,10 @@ interface NewEntryViewProps {
   setPurchaseDate: (d: Date) => void;
   invoiceRef: string;
   setInvoiceRef: (v: string) => void;
+  stockInSource: string;
+  setStockInSource: (v: string) => void;
+  referenceNumber: string;
+  setReferenceNumber: (v: string) => void;
   batchNo: string;
   setBatchNo: (v: string) => void;
   expiryDate?: Date;
@@ -1242,6 +1277,10 @@ function NewEntryView(props: NewEntryViewProps) {
     setPurchaseDate,
     invoiceRef,
     setInvoiceRef,
+    stockInSource,
+    setStockInSource,
+    referenceNumber,
+    setReferenceNumber,
     batchNo,
     setBatchNo,
     expiryDate,
@@ -1369,6 +1408,30 @@ function NewEntryView(props: NewEntryViewProps) {
                     />
                   </PopoverContent>
                 </Popover>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm text-black">Stock In source</Label>
+                <Select value={stockInSource} onValueChange={setStockInSource}>
+                  <SelectTrigger className="h-9 text-sm text-black">
+                    <SelectValue placeholder="Select source" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {STOCK_IN_SOURCES.map((s) => (
+                      <SelectItem key={s.value} value={s.value} className="text-sm">
+                        {s.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm text-black">Reference number</Label>
+                <Input
+                  placeholder="PO / delivery note ref"
+                  value={referenceNumber}
+                  onChange={(e) => setReferenceNumber(e.target.value)}
+                  className="h-9 text-sm text-black"
+                />
               </div>
               <div className="space-y-1.5">
                 <Label className="text-sm text-black">Invoice / GRN reference</Label>
@@ -1574,14 +1637,23 @@ function NewEntryView(props: NewEntryViewProps) {
                       <TableHead className="px-4 py-3 text-sm font-medium text-black">
                         Product
                       </TableHead>
+                      <TableHead className="py-3 text-sm font-medium text-black">
+                        SKU
+                      </TableHead>
                       <TableHead className="py-3 text-sm font-medium text-black text-right">
                         Qty
                       </TableHead>
                       <TableHead className="py-3 text-sm font-medium text-black text-right">
-                        Unit cost
+                        Cost
+                      </TableHead>
+                      <TableHead className="py-3 text-sm font-medium text-black">
+                        Batch
+                      </TableHead>
+                      <TableHead className="py-3 text-sm font-medium text-black">
+                        Expiry
                       </TableHead>
                       <TableHead className="py-3 text-sm font-medium text-black text-right">
-                        Line total
+                        Total cost
                       </TableHead>
                       <TableHead className="px-4 py-3 w-[60px]" />
                     </TableRow>
@@ -1589,7 +1661,7 @@ function NewEntryView(props: NewEntryViewProps) {
                   <TableBody>
                     {lines.length === 0 ? (
                       <TableRow>
-                        <TableCell colSpan={5} className="py-10 text-center">
+                        <TableCell colSpan={8} className="py-10 text-center">
                           <div className="flex flex-col items-center gap-2">
                             <Box className="h-8 w-8 text-gray-300" />
                             <p className="text-sm text-black">No lines yet</p>
@@ -1618,6 +1690,9 @@ function NewEntryView(props: NewEntryViewProps) {
                               )}
                             </div>
                           </TableCell>
+                          <TableCell className="py-3 text-sm text-gray-600">
+                            {l.sku || "—"}
+                          </TableCell>
                           <TableCell className="py-3 text-right text-sm text-black">
                             {l.quantity}
                           </TableCell>
@@ -1627,6 +1702,12 @@ function NewEntryView(props: NewEntryViewProps) {
                               minimumFractionDigits: 2,
                               maximumFractionDigits: 2,
                             })}
+                          </TableCell>
+                          <TableCell className="py-3 text-sm text-gray-600">
+                            {batchNo || "—"}
+                          </TableCell>
+                          <TableCell className="py-3 text-sm text-gray-600">
+                            {expiryDate ? format(expiryDate, "PP") : "—"}
                           </TableCell>
                           <TableCell className="py-3 text-right text-sm text-black">
                             Rs{" "}

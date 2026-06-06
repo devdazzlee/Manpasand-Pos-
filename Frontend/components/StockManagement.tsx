@@ -11,7 +11,6 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -33,6 +32,10 @@ import {
   X,
   FileDown,
   Eye,
+  AlertTriangle,
+  Boxes,
+  DollarSign,
+  MinusCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -42,9 +45,28 @@ import { API_BASE } from "@/config/constants";
 import { usePosData } from "@/hooks/use-pos-data";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Textarea } from "@/components/ui/textarea";
-
-const ALL_BRANCHES = "__all_branches__";
-const ALL_CATEGORIES = "__all_categories__";
+import {
+  ALL_BRANCHES,
+  ALL_BRANDS,
+  ALL_CATEGORIES,
+  ALL_STOCK_STATUS,
+  ALL_SUPPLIERS,
+  STOCK_STATUS_OPTIONS,
+} from "@/components/inventory/stock-ops/constants";
+import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
+import { StockManagementToolbar } from "@/components/inventory/stock-ops/stock-management-toolbar";
+import { useInventoryDashboard } from "@/components/inventory/stock-ops/use-inventory-dashboard";
+import {
+  downloadCsv,
+  downloadExcel,
+  getProductBarcode,
+  getStockRowImage,
+  printHtmlDocument,
+} from "@/components/inventory/stock-ops/export-utils";
+import {
+  getStockStatusDisplay,
+  StockStatusBadge,
+} from "@/components/inventory/stock-ops/stock-status-badge";
 
 const DLG = {
   content: "max-w-2xl border border-gray-200 p-0 gap-0 max-h-[90vh] overflow-y-auto",
@@ -154,10 +176,23 @@ interface Branch {
 
 interface Stock {
   id: string;
-  product: Product;
+  product: Product & {
+    purchase_rate?: number | string;
+    sales_rate_inc_dis_and_tax?: number | string;
+    brand?: { id: string; name: string } | null;
+    category?: { id: string; name: string } | null;
+    supplier?: { id: string; name: string } | null;
+    ProductImage?: { image: string }[];
+    code?: string;
+  };
   branch: Branch;
   current_quantity: number;
+  reserved_quantity?: number | string;
   last_updated: string;
+}
+
+interface StockManagementProps {
+  onNavigate?: (tab: string) => void;
 }
 
 interface Movement {
@@ -173,29 +208,49 @@ interface Movement {
   user?: { email: string };
 }
 
-export function StockManagement() {
+export function StockManagement({ onNavigate }: StockManagementProps) {
+  const { stats: dashboardStats, loading: dashboardLoading, refresh: refreshDashboard } =
+    useInventoryDashboard();
+
   // Global store data
   const { 
     products: globalProducts, 
     categories,
     isAnyLoading: globalLoading,
-    refreshAllData: triggerGlobalRefresh 
+    refreshAllData: triggerGlobalRefresh,
   } = usePosData();
   
   // Data lists
   const [branches, setBranches] = useState<Branch[]>([]);
+  const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
+  const [supplierOptions, setSupplierOptions] = useState<{ id: string; name: string }[]>([]);
   const [allStocks, setAllStocks] = useState<Stock[]>([]);
   const [history, setHistory] = useState<Movement[]>([]);
   const [todayMovements, setTodayMovements] = useState<Movement[]>([]);
   
   // Pagination and meta
   const [totalStocks, setTotalStocks] = useState(0);
-  const [stockMeta, setStockMeta] = useState({ page: 1, limit: 20, totalPages: 1, totalQuantity: 0, lowStockCount: 0 });
+  const [stockMeta, setStockMeta] = useState({
+    page: 1,
+    limit: 20,
+    totalPages: 1,
+    totalQuantity: 0,
+    lowStockCount: 0,
+    outOfStockCount: 0,
+    negativeStockCount: 0,
+    totalInventoryValue: 0,
+    totalProducts: 0,
+  });
 
   // UI state
   const [branchFilter, setBranchFilter] = useState<string>(ALL_BRANCHES);
   const [categoryFilter, setCategoryFilter] = useState<string>(ALL_CATEGORIES);
+  const [brandFilter, setBrandFilter] = useState<string>(ALL_BRANDS);
+  const [supplierFilter, setSupplierFilter] = useState<string>(ALL_SUPPLIERS);
+  const [stockStatusFilter, setStockStatusFilter] = useState<string>(ALL_STOCK_STATUS);
   const [searchTerm, setSearchTerm] = useState("");
+  const [skuSearch, setSkuSearch] = useState("");
+  const [barcodeSearch, setBarcodeSearch] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
   // Apply the filter bar to Movement Log + Today too — currently only the
@@ -318,8 +373,14 @@ export function StockManagement() {
     const loadMeta = async () => {
       setIsInitialLoading(true);
       try {
-        const bRes = await apiClient.get(`${API_BASE}/branches?fetch_all=true`);
+        const [bRes, brandRes, supplierRes] = await Promise.all([
+          apiClient.get(`${API_BASE}/branches?fetch_all=true`),
+          apiClient.get(`${API_BASE}/brands`, { params: { limit: 1000 } }),
+          apiClient.get(`${API_BASE}/suppliers`, { params: { fetch_all: true } }),
+        ]);
         setBranches(bRes.data.data);
+        setBrands(brandRes.data?.data || brandRes.data || []);
+        setSupplierOptions(supplierRes.data?.data || supplierRes.data || []);
       } catch (e: any) {
         console.error(e);
         toast.error("Failed to load branches");
@@ -339,7 +400,11 @@ export function StockManagement() {
   // Reset to page 1 when search changes
   useEffect(() => {
     setStockPage(1);
-  }, [searchTerm]);
+  }, [searchTerm, skuSearch, barcodeSearch, brandFilter, supplierFilter, stockStatusFilter]);
+
+  const combinedSearch = useMemo(() => {
+    return [searchTerm, skuSearch, barcodeSearch].filter(Boolean).join(" ").trim();
+  }, [searchTerm, skuSearch, barcodeSearch]);
 
   const refreshAllData = useCallback(async () => {
       setIsLoading(true);
@@ -351,7 +416,10 @@ export function StockManagement() {
         
         if (branchFilter && branchFilter !== ALL_BRANCHES) params.append('branchId', branchFilter);
         if (categoryFilter && categoryFilter !== ALL_CATEGORIES) params.append('categoryId', categoryFilter);
-        if (searchTerm.trim()) params.append('search', searchTerm.trim());
+        if (brandFilter && brandFilter !== ALL_BRANDS) params.append('brandId', brandFilter);
+        if (supplierFilter && supplierFilter !== ALL_SUPPLIERS) params.append('supplierId', supplierFilter);
+        if (stockStatusFilter && stockStatusFilter !== ALL_STOCK_STATUS) params.append('stockStatus', stockStatusFilter);
+        if (combinedSearch) params.append('search', combinedSearch);
         
         const [sRes, hRes, tRes] = await Promise.all([
           apiClient.get(`${API_BASE}/stock?${params}`),
@@ -364,24 +432,106 @@ export function StockManagement() {
         if (sRes.data.meta) setStockMeta(sRes.data.meta);
         setHistory(hRes.data.data || []);
         setTodayMovements(tRes.data.data || []);
+        refreshDashboard();
       } catch (e: any) {
         toast.error("Failed to load stock data");
       } finally {
         setIsLoading(false);
       }
-    }, [branchFilter, categoryFilter, stockPage, stockPageSize, searchTerm]);
+    }, [
+      branchFilter,
+      categoryFilter,
+      brandFilter,
+      supplierFilter,
+      stockStatusFilter,
+      combinedSearch,
+      stockPage,
+      stockPageSize,
+      refreshDashboard,
+    ]);
 
-    useEffect(() => {
-      refreshAllData();
-    }, [refreshAllData]);
-
-  // Fetch initial data
-  const { suppliers, fetchSuppliers } = usePosData();
   useEffect(() => {
-    fetchSuppliers();
-  }, [fetchSuppliers]);
+    refreshAllData();
+  }, [refreshAllData]);
 
-  // Handle clicks outside dropdowns to close them
+  const buildExportRows = useCallback(() => {
+    return allStocks.map((s) => {
+      const qty = Number(s.current_quantity || 0);
+      const reserved = Number(s.reserved_quantity || 0);
+      const cost = Number(s.product?.purchase_rate || 0);
+      const sell = Number(s.product?.sales_rate_inc_dis_and_tax || 0);
+      return [
+        s.product?.name || "",
+        s.product?.sku || "",
+        getProductBarcode(s.product),
+        s.product?.category?.name || categories.find((c) => c.id === s.product?.category_id)?.name || "",
+        s.product?.brand?.name || "",
+        cost,
+        sell,
+        qty,
+        reserved,
+        qty - reserved,
+        qty * cost,
+        s.branch?.name || "",
+      ];
+    });
+  }, [allStocks, categories]);
+
+  const exportHeaders = [
+    "Product",
+    "SKU",
+    "Barcode",
+    "Category",
+    "Brand",
+    "Cost Price",
+    "Selling Price",
+    "Current Stock",
+    "Reserved",
+    "Available",
+    "Inventory Value",
+    "Branch",
+  ];
+
+  const handleExport = () => {
+    if (allStocks.length === 0) return;
+    downloadCsv(
+      `inventory_export_${new Date().toISOString().split("T")[0]}.csv`,
+      exportHeaders,
+      buildExportRows(),
+    );
+    toast.success("CSV downloaded");
+  };
+
+  const handleExportExcel = () => {
+    if (allStocks.length === 0) return;
+    downloadExcel(
+      `inventory_export_${new Date().toISOString().split("T")[0]}.xlsx`,
+      "Inventory",
+      exportHeaders,
+      buildExportRows(),
+    );
+    toast.success("Excel downloaded");
+  };
+
+  const handlePrintReport = () => {
+    if (allStocks.length === 0) return;
+    const rows = buildExportRows()
+      .map(
+        (row) =>
+          `<tr>${row
+            .map((cell, idx) =>
+              `<td class="${idx >= 5 ? "num" : ""}">${cell}</td>`,
+            )
+            .join("")}</tr>`,
+      )
+      .join("");
+    printHtmlDocument(
+      "Inventory Report",
+      `<h1>Inventory Report</h1>
+      <p class="meta">Generated ${new Date().toLocaleString()} · ${totalStocks} records</p>
+      <table><thead><tr>${exportHeaders.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`,
+    );
+  };
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
       if (addProductDropdownRef.current && !addProductDropdownRef.current.contains(event.target as Node)) setAddProductDropdownOpen(false);
@@ -544,11 +694,7 @@ export function StockManagement() {
     return num.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   };
 
-  const getStockStatusMeta = (qty: number, minQty = 10) => {
-    if (qty <= 0) return { label: "Out of stock", className: "bg-gray-100 text-gray-700 border-gray-200" };
-    if (qty <= minQty) return { label: "Low stock", className: "bg-gray-100 text-gray-700 border-gray-200" };
-    return { label: "In stock", className: "bg-gray-100 text-gray-700 border-gray-200" };
-  };
+  const getStockStatusMeta = (qty: number, minQty = 10) => getStockStatusDisplay(qty, minQty);
 
   const openStockView = useCallback(async (row: Stock) => {
     setViewRow(row);
@@ -609,34 +755,6 @@ export function StockManagement() {
     setTransferForm({ productId: "", fromBranchId: "", toBranchId: "", quantity: "", notes: "" });
   };
 
-  const handleExport = () => {
-    if (allStocks.length === 0) return;
-    
-    const headers = ["Product", "Branch", "SKU", "Category", "Quantity", "Last Updated"];
-    const csvContent = [
-      headers.join(","),
-      ...allStocks.map(s => [
-        `"${s.product.name}"`,
-        `"${s.branch?.name || 'N/A'}"`,
-        `"${s.product.sku || 'N/A'}"`,
-        `"${categories.find(c => c.id === s.product.category_id)?.name || 'N/A'}"`,
-        s.current_quantity,
-        new Date(s.last_updated).toLocaleString()
-      ].join(","))
-    ].join("\n");
-
-    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-    const link = document.createElement("a");
-    const url = URL.createObjectURL(blob);
-    link.setAttribute("href", url);
-    link.setAttribute("download", `inventory_export_${new Date().toISOString().split('T')[0]}.csv`);
-    link.style.visibility = 'hidden';
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    toast.success("CSV downloaded");
-  };
-
   if (isInitialLoading) {
     return (
       <PageLoader message="Loading stock..." />
@@ -645,43 +763,39 @@ export function StockManagement() {
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6 text-black min-h-screen">
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="bg-gray-900 text-white p-2 rounded-md">
-            <Package className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-black">Stock Management</h1>
-            <p className="text-sm text-gray-600 mt-1">
-              View stock, record additions, adjustments, removals, and transfers.
-            </p>
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="bg-gray-900 text-white p-2.5 rounded-lg shrink-0">
+          <Package className="h-5 w-5" />
         </div>
+        <div>
+          <h1 className="text-2xl font-bold text-black tracking-tight">Stock Management</h1>
+          <p className="text-sm text-gray-600 mt-1 max-w-2xl">
+            Central inventory dashboard — stock levels, valuation, adjustments, and movement history.
+          </p>
+        </div>
+      </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-           <Button 
-             variant="outline" 
-             size="sm"
-             onClick={handleExport}
-             disabled={allStocks.length === 0}
-             className="text-sm text-black"
-           >
-             <FileDown className="h-4 w-4 mr-2" /> Export CSV
-           </Button>
-           <div className="flex flex-wrap items-center gap-2">
-              <Dialog 
-                open={isAddOpen} 
-                onOpenChange={(open) => {
-                  setIsAddOpen(open);
-                  if (!open) { clearProductUI(); setAddErrors({}); }
-                }}
-              >
-                <DialogTrigger asChild>
-                  <Button size="sm" className="text-sm">
-                    <Plus className="h-4 w-4 mr-2" /> Add stock
-                  </Button>
-                </DialogTrigger>
-                <DialogContent className={DLG.content}>
+      <StockManagementToolbar
+        onAddStock={() => setIsAddOpen(true)}
+        onAdjustStock={() => setIsAdjustOpen(true)}
+        onRemoveStock={() => setIsRemoveOpen(true)}
+        onTransferStock={() => setIsTransferOpen(true)}
+        onNavigate={onNavigate}
+        onExportCsv={handleExport}
+        onExportExcel={handleExportExcel}
+        onPrint={handlePrintReport}
+        onImport={() => onNavigate?.("purchases")}
+        exportDisabled={allStocks.length === 0}
+      />
+
+      <Dialog
+        open={isAddOpen}
+        onOpenChange={(open) => {
+          setIsAddOpen(open);
+          if (!open) { clearProductUI(); setAddErrors({}); }
+        }}
+      >
+        <DialogContent className={DLG.content}>
                   <DialogHeader className={DLG.header}>
                     <DialogTitle className={DLG.title}>Add stock</DialogTitle>
                     <p className={DLG.desc}>Add quantity to a product at a branch.</p>
@@ -809,7 +923,7 @@ export function StockManagement() {
                             <SelectValue placeholder="Select Supplier" />
                           </SelectTrigger>
                           <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
-                            {suppliers?.map((s: any) => <SelectItem key={s.id} value={s.id} className="font-normal text-sm py-2">{s.name}</SelectItem>)}
+                            {supplierOptions.map((s) => <SelectItem key={s.id} value={s.id} className="font-normal text-sm py-2">{s.name}</SelectItem>)}
                           </SelectContent>
                         </Select>
                       </div>
@@ -868,18 +982,13 @@ export function StockManagement() {
                 </DialogContent>
               </Dialog>
 
-              <Dialog 
-                open={isAdjustOpen} 
+              <Dialog
+                open={isAdjustOpen}
                 onOpenChange={(open) => {
                   setIsAdjustOpen(open);
                   if (!open) { clearProductUI(); setAdjustErrors({}); }
                 }}
               >
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="text-sm text-black">
-                    <Edit className="h-4 w-4 mr-2" /> Adjust
-                  </Button>
-                </DialogTrigger>
                 <DialogContent className={DLG.content}>
                   <DialogHeader className={DLG.header}>
                     <DialogTitle className={DLG.title}>Adjust stock</DialogTitle>
@@ -1042,18 +1151,13 @@ export function StockManagement() {
                   </div>
                 </DialogContent>
               </Dialog>
-              <Dialog 
-                open={isRemoveOpen} 
+              <Dialog
+                open={isRemoveOpen}
                 onOpenChange={(open) => {
                   setIsRemoveOpen(open);
                   if (!open) { clearProductUI(); setRemoveErrors({}); }
                 }}
               >
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="text-sm text-black">
-                    <TrendingDown className="h-4 w-4 mr-2" /> Remove
-                  </Button>
-                </DialogTrigger>
                 <DialogContent className={DLG.content}>
                   <DialogHeader className={DLG.header}>
                     <DialogTitle className={DLG.title}>Remove stock</DialogTitle>
@@ -1219,18 +1323,13 @@ export function StockManagement() {
                   </div>
                 </DialogContent>
               </Dialog>
-              <Dialog 
-                open={isTransferOpen} 
+              <Dialog
+                open={isTransferOpen}
                 onOpenChange={(open) => {
                   setIsTransferOpen(open);
                   if (!open) { clearProductUI(); setTransferErrors({}); }
                 }}
               >
-                <DialogTrigger asChild>
-                  <Button variant="outline" size="sm" className="text-sm text-black">
-                    <ArrowRightLeft className="h-4 w-4 mr-2" /> Transfer
-                  </Button>
-                </DialogTrigger>
                 <DialogContent className={DLG.content}>
                   <DialogHeader className={DLG.header}>
                     <DialogTitle className={DLG.title}>Transfer stock</DialogTitle>
@@ -1441,30 +1540,81 @@ export function StockManagement() {
                 </DialogContent>
               </Dialog>
 
-           </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard label="Products on this page" value={totalStocks} loading={isLoading} />
-        <StatCard label="Total units on this page" value={formatQty(totalUnits)} loading={isLoading} />
-        <StatCard label="Low stock on this page" value={alerts} loading={isLoading} />
-        <StatCard label="Today's movements" value={todayMovements.length} loading={isLoading} />
-      </div>
+      <InventoryKpiGrid
+        columns={6}
+        loading={dashboardLoading || isLoading}
+        items={[
+          { label: "Total Products", value: dashboardStats.totalSkus.toLocaleString(), icon: Package },
+          {
+            label: "Total Stock Quantity",
+            value: formatQty(dashboardStats.totalStockQuantity),
+            icon: Boxes,
+          },
+          {
+            label: "Inventory Value",
+            value: formatMoney(dashboardStats.totalInventoryValue),
+            icon: DollarSign,
+          },
+          {
+            label: "Low Stock Products",
+            value: dashboardStats.lowStockCount.toLocaleString(),
+            icon: AlertTriangle,
+            tone: "warning",
+          },
+          {
+            label: "Out of Stock",
+            value: dashboardStats.outOfStockCount.toLocaleString(),
+            icon: MinusCircle,
+            tone: "danger",
+          },
+          {
+            label: "Negative Stock",
+            value: dashboardStats.negativeStockCount.toLocaleString(),
+            icon: TrendingDown,
+            tone: "danger",
+          },
+        ]}
+      />
 
       <Card className="p-4 border border-gray-200">
-        <div className="flex flex-col lg:flex-row gap-3">
-          <div className="relative flex-1">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+          <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
-              placeholder="Search by product name or SKU..."
+              placeholder="Product name..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="pl-9 h-9 text-sm text-black"
             />
           </div>
+          <Input
+            placeholder="SKU..."
+            value={skuSearch}
+            onChange={(e) => setSkuSearch(e.target.value)}
+            className="h-9 text-sm text-black"
+          />
+          <Input
+            placeholder="Barcode / code..."
+            value={barcodeSearch}
+            onChange={(e) => setBarcodeSearch(e.target.value)}
+            className="h-9 text-sm text-black"
+          />
+          <Select value={stockStatusFilter} onValueChange={setStockStatusFilter}>
+            <SelectTrigger className="h-9 text-sm text-black">
+              <SelectValue placeholder="Stock status" />
+            </SelectTrigger>
+            <SelectContent>
+              {STOCK_STATUS_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value} className="text-sm">
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-3">
           <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 w-full lg:w-[200px] text-sm text-black">
+            <SelectTrigger className="h-9 text-sm text-black">
               <SelectValue placeholder="All branches" />
             </SelectTrigger>
             <SelectContent>
@@ -1475,7 +1625,7 @@ export function StockManagement() {
             </SelectContent>
           </Select>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="h-9 w-full lg:w-[200px] text-sm text-black">
+            <SelectTrigger className="h-9 text-sm text-black">
               <SelectValue placeholder="All categories" />
             </SelectTrigger>
             <SelectContent>
@@ -1485,32 +1635,65 @@ export function StockManagement() {
               ))}
             </SelectContent>
           </Select>
-          {/* Clear filters — only renders when any filter is active so the
-              row stays uncluttered for users who haven't filtered. */}
-          {(searchTerm || branchFilter !== ALL_BRANCHES || categoryFilter !== ALL_CATEGORIES) && (
+          <Select value={brandFilter} onValueChange={setBrandFilter}>
+            <SelectTrigger className="h-9 text-sm text-black">
+              <SelectValue placeholder="All brands" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_BRANDS} className="text-sm">All brands</SelectItem>
+              {brands.map((b) => (
+                <SelectItem key={b.id} value={b.id} className="text-sm">{b.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+            <SelectTrigger className="h-9 text-sm text-black">
+              <SelectValue placeholder="All suppliers" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_SUPPLIERS} className="text-sm">All suppliers</SelectItem>
+              {supplierOptions.map((s) => (
+                <SelectItem key={s.id} value={s.id} className="text-sm">{s.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        {(searchTerm ||
+          skuSearch ||
+          barcodeSearch ||
+          branchFilter !== ALL_BRANCHES ||
+          categoryFilter !== ALL_CATEGORIES ||
+          brandFilter !== ALL_BRANDS ||
+          supplierFilter !== ALL_SUPPLIERS ||
+          stockStatusFilter !== ALL_STOCK_STATUS) && (
+          <div className="mt-3">
             <Button
               variant="outline"
               size="sm"
               className="h-9 text-sm text-black"
               onClick={() => {
                 setSearchTerm("");
+                setSkuSearch("");
+                setBarcodeSearch("");
                 setBranchFilter(ALL_BRANCHES);
                 setCategoryFilter(ALL_CATEGORIES);
+                setBrandFilter(ALL_BRANDS);
+                setSupplierFilter(ALL_SUPPLIERS);
+                setStockStatusFilter(ALL_STOCK_STATUS);
               }}
             >
               <X className="h-4 w-4 mr-1.5" />
-              Clear filters
+              Clear all filters
             </Button>
-          )}
-        </div>
+          </div>
+        )}
       </Card>
 
-      <div className="flex flex-wrap items-center gap-2 px-2">
-        <span className="text-sm text-gray-600 mr-2">Status:</span>
-        <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 font-normal text-xs px-3 py-1 rounded-lg">In Stock</Badge>
-        <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 font-normal text-xs px-3 py-1 rounded-lg">Low</Badge>
-        <Badge variant="outline" className="bg-slate-50 text-slate-700 border-slate-200 font-normal text-xs px-3 py-1 rounded-lg">Out</Badge>
-      </div>
+      <p className="text-xs text-gray-500 px-1">
+        Filtered view: {totalStocks.toLocaleString()} rows ·{" "}
+        {formatQty(stockMeta.totalQuantity || 0)} units · value{" "}
+        {formatMoney(stockMeta.totalInventoryValue || 0)}
+      </p>
 
       {/* Tabs for Stock and History */}
       <Tabs defaultValue="stock" className="space-y-6">
@@ -1528,8 +1711,8 @@ export function StockManagement() {
             <CardHeader className="px-6 py-4 border-b border-gray-200">
                <div className="flex items-center justify-between">
                  <div>
-                   <CardTitle className="text-base font-bold text-black">Stock list</CardTitle>
-                   <p className="text-sm text-gray-600 mt-0.5">{totalStocks} products on this page</p>
+                   <CardTitle className="text-base font-bold text-black">Inventory List</CardTitle>
+                   <p className="text-sm text-gray-600 mt-0.5">{totalStocks.toLocaleString()} stock records</p>
                  </div>
                </div>
             </CardHeader>
@@ -1540,19 +1723,31 @@ export function StockManagement() {
                 </div>
               )}
               
+              <div className="overflow-x-auto">
               <Table>
                 <TableHeader className="bg-slate-50/30">
                   <TableRow className="hover:bg-transparent border-slate-100">
-                    <TableHead className="text-sm text-gray-600 py-3">Product</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-center">Quantity</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">Status</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 w-12"></TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 min-w-[160px]">Product</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3">SKU</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3">Barcode</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3">Category</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3">Brand</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3">Branch</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 text-right">Cost</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 text-right">Sell</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 text-right">Current</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 text-right">Reserved</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 text-right">Available</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 text-right">Value</TableHead>
+                    <TableHead className="text-sm text-gray-600 py-3 min-w-[108px]">Status</TableHead>
                     <TableHead className="text-sm text-gray-600 py-3 text-right w-[72px]">View</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {allStocks.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={4} className="text-center p-24">
+                      <TableCell colSpan={15} className="text-center p-24">
                         <div className="flex flex-col items-center opacity-20">
                           <Package className="h-12 w-12 mb-3 text-slate-300" />
                           <p className="text-sm text-gray-500">No stock found</p>
@@ -1562,25 +1757,49 @@ export function StockManagement() {
                   ) : (
                     allStocks.map((s) => {
                       const qty = Number(s.current_quantity || 0);
+                      const reserved = Number(s.reserved_quantity || 0);
+                      const available = qty - reserved;
+                      const cost = Number(s.product?.purchase_rate || 0);
+                      const sell = Number(s.product?.sales_rate_inc_dis_and_tax || 0);
                       const minQty = Number(
                         (s.product as { min_qty?: number }).min_qty ?? 10,
                       );
-                      const status = getStockStatusMeta(qty, minQty);
+                      const imageUrl = getStockRowImage(s.product);
                       return (
                         <TableRow key={s.id} className="border-gray-100 hover:bg-gray-50">
-                          <TableCell className="py-3">
-                            <div className="flex flex-col">
-                              <span className="text-sm text-black">{s.product.name}</span>
-                              <span className="text-xs text-gray-500 mt-0.5">{s.branch?.name}</span>
-                            </div>
+                          <TableCell className="py-2">
+                            {imageUrl ? (
+                              <img
+                                src={imageUrl}
+                                alt=""
+                                className="h-9 w-9 rounded object-cover border border-gray-200"
+                              />
+                            ) : (
+                              <div className="h-9 w-9 rounded bg-gray-100 flex items-center justify-center">
+                                <Package className="h-4 w-4 text-gray-400" />
+                              </div>
+                            )}
                           </TableCell>
-                          <TableCell className="text-center py-3">
-                            <span className="text-sm text-black">{formatQty(qty)}</span>
-                          </TableCell>
                           <TableCell className="py-3">
-                            <Badge variant="outline" className={cn("text-xs font-normal", status.className)}>
-                              {status.label}
-                            </Badge>
+                            <span className="text-sm text-black">{s.product.name}</span>
+                          </TableCell>
+                          <TableCell className="text-sm text-gray-600 py-3">{s.product.sku || "—"}</TableCell>
+                          <TableCell className="text-sm text-gray-600 py-3">{getProductBarcode(s.product)}</TableCell>
+                          <TableCell className="text-sm text-gray-600 py-3">
+                            {s.product.category?.name ||
+                              categories.find((c) => c.id === s.product.category_id)?.name ||
+                              "—"}
+                          </TableCell>
+                          <TableCell className="text-sm text-gray-600 py-3">{s.product.brand?.name || "—"}</TableCell>
+                          <TableCell className="text-sm text-gray-600 py-3">{s.branch?.name || "—"}</TableCell>
+                          <TableCell className="text-sm text-black py-3 text-right">{formatMoney(cost)}</TableCell>
+                          <TableCell className="text-sm text-black py-3 text-right">{formatMoney(sell)}</TableCell>
+                          <TableCell className="text-sm text-black py-3 text-right">{formatQty(qty)}</TableCell>
+                          <TableCell className="text-sm text-gray-600 py-3 text-right">{formatQty(reserved)}</TableCell>
+                          <TableCell className="text-sm text-black py-3 text-right">{formatQty(available)}</TableCell>
+                          <TableCell className="text-sm text-black py-3 text-right">{formatMoney(qty * cost)}</TableCell>
+                          <TableCell className="py-3 whitespace-nowrap">
+                            <StockStatusBadge qty={qty} minQty={minQty} />
                           </TableCell>
                           <TableCell className="text-right py-3 pr-4">
                             <Button
@@ -1600,6 +1819,7 @@ export function StockManagement() {
                   )}
                 </TableBody>
               </Table>
+              </div>
               
               {/* Pagination — First / Prev / Page X of Y / Next / Last with
                   an inline rows-per-page selector and a "Showing 1–20 of N"

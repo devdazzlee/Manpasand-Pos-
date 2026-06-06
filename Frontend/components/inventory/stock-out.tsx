@@ -44,22 +44,26 @@ import { toast } from "sonner";
 import { usePosData } from "@/hooks/use-pos-data";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ExcelUploadDialog, type ExcelField } from "@/components/inventory/excel-upload-dialog";
+import { STOCK_OUT_REASONS } from "@/components/inventory/stock-ops/constants";
+import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
+import { StockModuleToolbar } from "@/components/inventory/stock-ops/stock-module-toolbar";
+import { useInventoryDashboard } from "@/components/inventory/stock-ops/use-inventory-dashboard";
+import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
+import { formatMoney } from "@/components/inventory/stock-ops/export-utils";
 
-type Reason = "SALE" | "DAMAGE" | "LOSS" | "EXPIRED";
+type Reason = "SALE" | "DAMAGE" | "LOSS" | "EXPIRED" | "RETURN";
 
-const REASON_OPTIONS: { value: Reason; label: string }[] = [
-  { value: "SALE", label: "Sale" },
-  { value: "DAMAGE", label: "Damage" },
-  { value: "LOSS", label: "Loss" },
-  { value: "EXPIRED", label: "Expired" },
-];
+const REASON_OPTIONS = STOCK_OUT_REASONS.filter(
+  (r): r is { value: Reason; label: string } =>
+    ["SALE", "DAMAGE", "LOSS", "EXPIRED", "RETURN"].includes(r.value),
+);
 
 // Zod schema for the dispatch form. Kept narrow on purpose — only the fields
 // the user might forget. Errors land next to the offending input so they
 // don't have to hunt for what's missing.
 const dispatchSchema = z.object({
   branchId: z.string().min(1, "Pick a branch before saving"),
-  reason: z.enum(["SALE", "DAMAGE", "LOSS", "EXPIRED"], {
+  reason: z.enum(["SALE", "DAMAGE", "LOSS", "EXPIRED", "RETURN"], {
     errorMap: () => ({ message: "Pick a reason" }),
   }),
   lines: z
@@ -89,7 +93,8 @@ interface MovementRow {
   user?: { email?: string | null } | null;
 }
 
-export function StockOut() {
+export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+  const { stats: dashboardStats, loading: dashboardLoading } = useInventoryDashboard();
   const { products, branches, fetchProducts, fetchBranches } = usePosData();
 
   const [tab, setTab] = useState<"history" | "new">("history");
@@ -464,41 +469,39 @@ export function StockOut() {
 
   return (
     <div className="p-6 max-w-[1600px] mx-auto space-y-6 text-black">
-      {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="bg-gray-900 text-white p-2 rounded-md">
-            <PackageMinus className="h-5 w-5" />
-          </div>
-          <div>
-            <h1 className="text-2xl font-bold text-black">Stock Out</h1>
-            <p className="text-sm text-gray-600 mt-1 max-w-2xl">
-              Pre-fill from Excel or add lines manually. Saving the dispatch removes
-              stock and updates on-hand counts (same idea as Stock In, but outbound).
-            </p>
-          </div>
+      <div className="flex items-start gap-3">
+        <div className="bg-gray-900 text-white p-2.5 rounded-lg shrink-0">
+          <PackageMinus className="h-5 w-5" />
         </div>
-        <div className="inline-flex rounded-md border border-gray-200 overflow-hidden text-sm">
-          <button
-            type="button"
-            onClick={() => setTab("history")}
-            className={`px-4 py-2 ${
-              tab === "history" ? "bg-black text-white" : "bg-white text-gray-600"
-            }`}
-          >
-            History Logs
-          </button>
-          <button
-            type="button"
-            onClick={() => setTab("new")}
-            className={`px-4 py-2 border-l border-gray-200 ${
-              tab === "new" ? "bg-black text-white" : "bg-white text-gray-600"
-            }`}
-          >
-            New Dispatch
-          </button>
+        <div>
+          <h1 className="text-2xl font-bold text-black tracking-tight">Stock Out</h1>
+          <p className="text-sm text-gray-600 mt-1 max-w-2xl">
+            Bulk stock deductions for damage, expiry, consumption, supplier returns, and adjustments with availability validation.
+          </p>
         </div>
       </div>
+
+      <StockModuleToolbar
+        tabs={[
+          { id: "history", label: "History" },
+          { id: "new", label: "New dispatch" },
+        ]}
+        activeTab={tab}
+        onTabChange={(id) => setTab(id as "history" | "new")}
+      >
+        <StockOpsActions onNavigate={onNavigate} disabled={false} />
+      </StockModuleToolbar>
+
+      <InventoryKpiGrid
+        columns={4}
+        loading={dashboardLoading}
+        items={[
+          { label: "Inventory Value", value: formatMoney(dashboardStats.totalInventoryValue) },
+          { label: "Out of Stock SKUs", value: dashboardStats.outOfStockCount, tone: "danger" },
+          { label: "Low Stock Alerts", value: dashboardStats.lowStockCount, tone: "warning" },
+          { label: "Negative Stock Rows", value: dashboardStats.negativeStockCount, tone: "danger" },
+        ]}
+      />
 
       {tab === "history" ? (
         <HistoryView
@@ -821,7 +824,7 @@ export function StockOut() {
                           <TableHead className="px-4 py-3 text-sm font-medium text-black">Item</TableHead>
                           <TableHead className="py-3 text-sm font-medium text-black text-right">Available</TableHead>
                           <TableHead className="py-3 text-sm font-medium text-black text-right">Qty</TableHead>
-                          <TableHead className="py-3 text-sm font-medium text-black text-right">Value</TableHead>
+                          <TableHead className="py-3 text-sm font-medium text-black text-right">Cost impact</TableHead>
                           <TableHead className="px-4 py-3 text-sm font-medium text-black text-right w-[60px]" />
                         </TableRow>
                       </TableHeader>

@@ -30,6 +30,8 @@ export class InventoryService {
     });
 
     let totalInventoryValue = 0;
+    let totalStockQuantity = 0;
+    let negativeStockCount = 0;
     const branchSummary: Record<
       string,
       { name: string; value: number; items: number; type: string }
@@ -37,6 +39,8 @@ export class InventoryService {
 
     for (const s of stocks) {
       const qty = asNumber(s.current_quantity);
+      totalStockQuantity += qty;
+      if (qty < 0) negativeStockCount += 1;
       const cost = asNumber((s.product as any).purchase_rate || 0);
       const value = qty * cost;
       const bid = s.branch_id;
@@ -169,10 +173,17 @@ export class InventoryService {
       0
     );
 
+    const activeBranches = await prisma.branch.count({ where: { is_active: true } });
+
     return {
       totalInventoryValue,
+      totalStockQuantity,
+      negativeStockCount,
+      lowStockCount: lowStockItems.length,
       totalSkus: await prisma.product.count({ where: { is_active: true } }),
       outOfStockCount: outOfStockItems.length,
+      totalLocations: activeBranches,
+      pendingTransferCount: pendingTransfers.length,
       branchSummary: sortedTopValued,
       categorySummary: Object.entries(categorySummary).map(([name, v]) => ({ name, ...v })),
       velocity: topMovingWithNames,
