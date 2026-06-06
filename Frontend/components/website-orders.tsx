@@ -26,6 +26,12 @@ import { PageLoader } from "@/components/ui/page-loader";
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import {
+  downloadReceiptPdf,
+  generateReceiptHtml,
+  receiptPageWrapper,
+} from "@/lib/receipt";
 import { cn } from "@/lib/utils";
 
 interface OrderItem { 
@@ -213,6 +219,7 @@ const getAllowedStatusOptions = (status: string): OrderStatusOption[] => {
 
 const WebsiteOrders: React.FC = () => {
   const { toast } = useToast();
+  const logoDataUri = useLogoDataUri();
   // Global printer settings (configured in Printer Settings page)
   const { receiptPrinter, getReceiptPrinterObj, printers } = usePrinterSettings();
 
@@ -301,98 +308,66 @@ const WebsiteOrders: React.FC = () => {
   };
 
   const buildReceiptData = (order: WebsiteOrder): ReceiptData => {
+    const branchName =
+      (typeof window !== "undefined" && localStorage.getItem("branchName")) ||
+      "MANPASAND GENERAL STORE";
+    const branchAddress =
+      (typeof window !== "undefined" && localStorage.getItem("branchAddress")) ||
+      "Karachi, Pakistan";
+
     const items = (order.items || []).map((item) => {
       const qty = parseOrderQuantity(item.quantity);
       const unitPrice = parseOrderQuantity(item.price);
+      const unitLabel = item.unit_name || item.product?.unit?.name;
       return {
         name: getOrderItemLabel(item),
         quantity: qty,
         price: unitPrice,
+        unit: unitLabel,
       };
     });
 
     const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
     const orderTotal = Number(order.total_amount) || subtotal;
 
+    const customerLabel =
+      order.customer_name?.trim() ||
+      order.customer_phone?.trim() ||
+      order.customer_email?.trim() ||
+      "Walk-in";
+
+    const noteParts = [
+      order.order_notes?.trim(),
+      order.delivery_address
+        ? `Delivery: ${order.delivery_address}${order.delivery_city ? `, ${order.delivery_city}` : ""}`
+        : "",
+    ].filter(Boolean);
+
     return {
-      storeName: "MANPASAND GENERAL STORE",
+      storeName: branchName,
       tagline: "Quality • Service • Value",
-      address: "Karachi",
+      address: branchAddress,
       transactionId: order.order_number,
       timestamp: order.created_at,
-      cashier: "Website",
-      customerType: "Guest Customer",
+      cashier: "Website Order",
+      customerType: customerLabel,
       items,
       subtotal: subtotal || orderTotal,
       total: orderTotal,
-      paymentMethod: order.payment_method || "CASH",
+      paymentMethod: (order.payment_method || "CASH").toUpperCase(),
       amountPaid: orderTotal,
       changeAmount: 0,
+      promo: noteParts.length > 0 ? noteParts.join(" | ") : undefined,
       thankYouMessage: "Thank you for shopping!",
       footerMessage: "Visit us again soon!",
     };
   };
 
-  const buildReceiptHtml = (order: WebsiteOrder): string => {
-    const itemsHtml = (order.items || [])
-      .map((item) => {
-        const name = getOrderItemLabel(item);
-        const qty = parseOrderQuantity(item.quantity);
-        const unitPrice = parseOrderQuantity(item.price);
-        const lineTotal = parseOrderQuantity(item.total_price) || unitPrice * qty;
-        return `
-          <tr>
-            <td>${name}</td>
-            <td style="text-align:center;">${qty}</td>
-            <td style="text-align:right;">Rs. ${unitPrice.toFixed(2)}</td>
-            <td style="text-align:right;">Rs. ${lineTotal.toFixed(2)}</td>
-          </tr>
-        `;
-      })
-      .join("");
-
-    return `
-      <html>
-        <head>
-          <title>Receipt ${order.order_number}</title>
-          <style>
-            body { font-family: Arial, sans-serif; padding: 20px; color: #000; }
-            .receipt { max-width: 720px; margin: 0 auto; border: 1px solid #ddd; padding: 20px; }
-            .title { font-size: 24px; font-weight: 700; margin-bottom: 4px; }
-            .meta { color: #555; margin-bottom: 16px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; }
-            th, td { border-bottom: 1px solid #e5e5e5; padding: 10px 8px; font-size: 14px; }
-            th { text-align: left; background: #f8f8f8; }
-            .total { margin-top: 14px; text-align: right; font-size: 20px; font-weight: 700; color: #1b8f4b; }
-          </style>
-        </head>
-        <body>
-          <div class="receipt">
-            <div class="title">Website Order Receipt</div>
-            <div class="meta">Order: ${order.order_number} | Date: ${new Date(order.created_at).toLocaleString()} | Status: ${order.status}</div>
-            <table>
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th style="text-align:center;">Qty</th>
-                  <th style="text-align:right;">Unit Price</th>
-                  <th style="text-align:right;">Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${itemsHtml || `<tr><td colspan="4" style="text-align:center;">No item details available</td></tr>`}
-              </tbody>
-            </table>
-            <div class="total">Grand Total: Rs. ${(Number(order.total_amount) || 0).toFixed(2)}</div>
-          </div>
-        </body>
-      </html>
-    `;
-  };
-
   const handleBrowserPrint = (order: WebsiteOrder) => {
-    const html = buildReceiptHtml(order);
-    const printWindow = window.open("", "_blank", "width=900,height=700");
+    const receiptData = buildReceiptData(order);
+    const content = generateReceiptHtml(receiptData, logoDataUri);
+    const html = receiptPageWrapper(content);
+    const printWindow = window.open("", "_blank", "width=420,height=600");
     if (!printWindow) {
       toast({ title: "Unable to open print window", variant: "destructive" });
       return;
@@ -401,7 +376,13 @@ const WebsiteOrders: React.FC = () => {
     printWindow.document.write(html);
     printWindow.document.close();
     printWindow.focus();
-    setTimeout(() => printWindow.print(), 400);
+    setTimeout(() => {
+      try {
+        printWindow.print();
+      } catch (error) {
+        console.error("Print failed", error);
+      }
+    }, 500);
   };
 
   const handlePrinterPrint = async (order: WebsiteOrder) => {
@@ -418,7 +399,7 @@ const WebsiteOrders: React.FC = () => {
     setIsPrinting(true);
     try {
       const printerObj = {
-        name: printerInfo.name,
+        ...printerInfo,
         columns: printerInfo.receiptProfile?.columns || { fontA: 48, fontB: 64 },
       };
       const result = await printReceiptViaServer(printerObj, buildReceiptData(order), {
@@ -447,66 +428,11 @@ const WebsiteOrders: React.FC = () => {
   const handleDownloadPdf = async (order: WebsiteOrder) => {
     setIsDownloadingPdf(true);
     try {
-      const { jsPDF } = await import("jspdf");
-      const doc = new jsPDF({ unit: "mm", format: "a4" });
-      let y = 15;
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(18);
-      doc.text("Website Order Receipt", 15, y);
-      y += 8;
-
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(11);
-      doc.text(`Order #: ${order.order_number}`, 15, y);
-      y += 6;
-      doc.text(`Date: ${new Date(order.created_at).toLocaleString()}`, 15, y);
-      y += 6;
-      doc.text(`Status: ${order.status}`, 15, y);
-      y += 8;
-
-      doc.setFont("helvetica", "bold");
-      doc.text("Items", 15, y);
-      y += 6;
-
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(10);
-      doc.text("Product", 15, y);
-      doc.text("Qty", 115, y, { align: "right" });
-      doc.text("Unit Price", 150, y, { align: "right" });
-      doc.text("Total", 195, y, { align: "right" });
-      y += 4;
-      doc.line(15, y, 195, y);
-      y += 5;
-
-      doc.setFont("helvetica", "normal");
-      for (const item of order.items || []) {
-        const name = getOrderItemLabel(item);
-        const qty = parseOrderQuantity(item.quantity);
-        const unitPrice = parseOrderQuantity(item.price);
-        const lineTotal = parseOrderQuantity(item.total_price) || unitPrice * qty;
-
-        const splitName = doc.splitTextToSize(name, 90);
-        doc.text(splitName, 15, y);
-        doc.text(formatOrderItemQuantity(item), 115, y, { align: "right" });
-        doc.text(`Rs. ${unitPrice.toFixed(2)}`, 150, y, { align: "right" });
-        doc.text(`Rs. ${lineTotal.toFixed(2)}`, 195, y, { align: "right" });
-        y += Math.max(6, splitName.length * 5);
-
-        if (y > 270) {
-          doc.addPage();
-          y = 15;
-        }
-      }
-
-      y += 2;
-      doc.line(15, y, 195, y);
-      y += 8;
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(13);
-      doc.text(`Grand Total: Rs. ${(Number(order.total_amount) || 0).toFixed(2)}`, 195, y, { align: "right" });
-
-      doc.save(`receipt-${order.order_number}.pdf`);
+      await downloadReceiptPdf(buildReceiptData(order), logoDataUri);
+      toast({
+        title: "PDF downloaded",
+        description: `Receipt saved for order ${order.order_number}`,
+      });
     } catch (error: any) {
       toast({
         title: "PDF download failed",
