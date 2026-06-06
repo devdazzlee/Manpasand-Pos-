@@ -10,15 +10,18 @@ const apiClient = axios.create({
   },
 });
 
-// Request interceptor to add auth token
+// Request interceptor to add auth token and prevent stale HTTP cache hits.
 apiClient.interceptors.request.use(
   (config: InternalAxiosRequestConfig) => {
-    // Get token from localStorage
     const token = localStorage.getItem("token");
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
+
+    // Cache busting is handled via `_t` query params and server response headers.
+    // Do NOT set Cache-Control on requests — it triggers CORS preflight and is
+    // not listed in the backend allowedHeaders, which blocks all API calls.
 
     return config;
   },

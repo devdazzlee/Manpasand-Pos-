@@ -46,14 +46,12 @@ import cron from 'node-cron';
 const vAPI = process.env.vAPI || '/api/v1';
 const app = express();
 
-connectDB();
-
-// Middleware
+// Middleware — CORS must run before route handlers and cache headers.
 app.use(cors({
   origin: function (origin, callback) {
     // Allow requests with no origin (like mobile apps or curl requests)
     if (!origin) return callback(null, true);
-    
+
     const allowedOrigins = [
       'https://pos.manpasandstore.com',
       'https://manpasand-pos-t623.vercel.app',
@@ -62,15 +60,19 @@ app.use(cors({
       'http://localhost:3001',
       'http://localhost:5173',
       'https://manpasandstore.com',
-      'https://www.manpasandstore.com'
+      'https://www.manpasandstore.com',
     ];
-    
-    // Check if origin matches (with or without trailing slash)
-    const originMatch = allowedOrigins.some(allowed => 
-      origin === allowed || origin === `${allowed}/`
+
+    const originMatch = allowedOrigins.some(
+      (allowed) => origin === allowed || origin === `${allowed}/`,
     );
-    
-    if (originMatch) {
+
+    // In local dev, allow any localhost port (Next.js may use 3000, 3001, etc.)
+    const isLocalDev =
+      process.env.NODE_ENV !== 'production' &&
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
+    if (originMatch || isLocalDev) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));
@@ -78,9 +80,27 @@ app.use(cors({
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-  exposedHeaders: ['Content-Range', 'X-Content-Range']
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'Cache-Control',
+    'Pragma',
+  ],
+  exposedHeaders: ['Content-Range', 'X-Content-Range'],
 }));
+
+// Disable ETag + set no-store on API responses (prevents stale 304 product lists).
+app.set('etag', false);
+app.use(`${vAPI}`, (_req, res, next) => {
+  res.set('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.set('Pragma', 'no-cache');
+  res.set('Expires', '0');
+  next();
+});
+
+connectDB();
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" }
 }));

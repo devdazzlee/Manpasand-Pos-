@@ -104,11 +104,100 @@ interface StoreState {
   fetchCustomers: (force?: boolean) => Promise<void>
   fetchBranches: (force?: boolean) => Promise<void>
   fetchSuppliers: (force?: boolean) => Promise<void>
+  upsertProductFromApi: (rawProduct: any) => void
+  removeProductFromStore: (productId: string) => void
   clearStore: () => void
 }
 
 // Cache duration in milliseconds (5 minutes)
 const CACHE_DURATION = 5 * 60 * 1000
+
+const aggregateStockFields = (item: any) => {
+  if (item.available_stock != null || item.current_stock != null) {
+    return {
+      stock: item.available_stock ?? item.current_stock ?? 0,
+      current_stock: item.current_stock ?? 0,
+      available_stock: item.available_stock ?? 0,
+      reserved_stock: item.reserved_stock ?? 0,
+      minimum_stock: item.minimum_stock ?? 0,
+      maximum_stock: item.maximum_stock ?? 0,
+    }
+  }
+
+  const rows = Array.isArray(item.stock) ? item.stock : []
+  let current = 0
+  let reserved = 0
+  let minimum = 0
+  let maximum = 0
+
+  for (const row of rows) {
+    current += Number(row.current_quantity ?? 0)
+    reserved += Number(row.reserved_quantity ?? 0)
+    minimum += Number(row.minimum_quantity ?? 0)
+    maximum += Number(row.maximum_quantity ?? 0)
+  }
+
+  const available = current - reserved
+  return {
+    stock: available,
+    current_stock: current,
+    available_stock: available,
+    reserved_stock: reserved,
+    minimum_stock: minimum,
+    maximum_stock: maximum,
+  }
+}
+
+export const mapApiProductToStoreProduct = (item: any): Product => {
+  const stockFields = aggregateStockFields(item)
+
+  return {
+    id: item.id,
+    name: item.name,
+    price: Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? item.purchase_rate ?? 0),
+    category: item.category?.name,
+    categoryId: item.category?.id,
+    barcode: item.barcode || item.sku || item.code,
+    code: item.code,
+    ...stockFields,
+    sku: item.sku,
+    subcategoryId: item.subcategory?.id,
+    subcategory: item.subcategory?.name,
+    unitId: item.unit?.id,
+    unitName: item.unit?.name,
+    taxId: item.tax?.id,
+    taxName: item.tax?.name,
+    supplierId: item.supplier?.id,
+    supplierName: item.supplier?.name,
+    brandId: item.brand?.id,
+    brandName: item.brand?.name,
+    colorId: item.color?.id,
+    colorName: item.color?.name,
+    sizeId: item.size?.id,
+    sizeName: item.size?.name,
+    purchase_rate: Number(item.purchase_rate) || 0,
+    sales_rate_exc_dis_and_tax: Number(item.sales_rate_exc_dis_and_tax) || 0,
+    sales_rate_inc_dis_and_tax: Number(item.sales_rate_inc_dis_and_tax) || 0,
+    discount_amount: item.discount_amount ? Number(item.discount_amount) : undefined,
+    min_qty: item.min_qty ? Number(item.min_qty) : undefined,
+    max_qty: item.max_qty ? Number(item.max_qty) : undefined,
+    is_active: item.is_active ?? true,
+    display_on_pos: item.display_on_pos ?? true,
+    is_batch: item.is_batch ?? false,
+    auto_fill_on_demand_sheet: item.auto_fill_on_demand_sheet ?? false,
+    non_inventory_item: item.non_inventory_item ?? false,
+    is_deal: item.is_deal ?? false,
+    is_featured: item.is_featured ?? false,
+    pct_or_hs_code: item.pct_or_hs_code,
+    description: item.description,
+    created_at: item.created_at,
+    updated_at: item.updated_at,
+    images:
+      item.ProductImage?.map((img: { image: string }) => ({ id: img.image, image: img.image })) ||
+      item.images ||
+      [],
+  }
+}
 
 export const useStore = create<StoreState>()(
   persist(
@@ -152,55 +241,6 @@ export const useStore = create<StoreState>()(
 
         set({ productsLoading: true })
 
-        const mapProduct = (item: any): Product => ({
-          id: item.id,
-          name: item.name,
-          price: Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? item.purchase_rate ?? 0),
-          category: item.category?.name,
-          categoryId: item.category?.id,
-          barcode: item.barcode || item.sku || item.code, // Include code as fallback for barcode
-          code: item.code, // Explicitly include code field for barcode matching
-          stock: item.available_stock ?? item.current_stock ?? 0,
-          current_stock: item.current_stock ?? 0,
-          available_stock: item.available_stock ?? 0,
-          reserved_stock: item.reserved_stock ?? 0,
-          minimum_stock: item.minimum_stock ?? 0,
-          maximum_stock: item.maximum_stock ?? 0,
-          sku: item.sku,
-          subcategoryId: item.subcategory?.id,
-          subcategory: item.subcategory?.name,
-          unitId: item.unit?.id,
-          unitName: item.unit?.name,
-          taxId: item.tax?.id,
-          taxName: item.tax?.name,
-          supplierId: item.supplier?.id,
-          supplierName: item.supplier?.name,
-          brandId: item.brand?.id,
-          brandName: item.brand?.name,
-          colorId: item.color?.id,
-          colorName: item.color?.name,
-          sizeId: item.size?.id,
-          sizeName: item.size?.name,
-          purchase_rate: Number(item.purchase_rate) || 0,
-          sales_rate_exc_dis_and_tax: Number(item.sales_rate_exc_dis_and_tax) || 0,
-          sales_rate_inc_dis_and_tax: Number(item.sales_rate_inc_dis_and_tax) || 0,
-          discount_amount: item.discount_amount ? Number(item.discount_amount) : undefined,
-          min_qty: item.min_qty ? Number(item.min_qty) : undefined,
-          max_qty: item.max_qty ? Number(item.max_qty) : undefined,
-          is_active: item.is_active ?? true,
-          display_on_pos: item.display_on_pos ?? true,
-          is_batch: item.is_batch ?? false,
-          auto_fill_on_demand_sheet: item.auto_fill_on_demand_sheet ?? false,
-          non_inventory_item: item.non_inventory_item ?? false,
-          is_deal: item.is_deal ?? false,
-          is_featured: item.is_featured ?? false,
-          pct_or_hs_code: item.pct_or_hs_code,
-          description: item.description,
-          created_at: item.created_at,
-          updated_at: item.updated_at,
-          images: item.ProductImage?.map((img: { image: string }) => ({ id: img.image, image: img.image })) || item.images || [],
-        })
-
         try {
           // Check if online
           const isOnline = syncManager.canMakeRequest()
@@ -210,7 +250,7 @@ export const useStore = create<StoreState>()(
             console.log('📡 Offline mode - loading products from IndexedDB')
             const offlineProducts = await offlineDB.getProducts()
             if (offlineProducts.length > 0) {
-              const mappedProducts = offlineProducts.map(p => mapProduct(p.data || p))
+              const mappedProducts = offlineProducts.map(p => mapApiProductToStoreProduct(p.data || p))
               set({
                 products: mappedProducts,
                 productsLoading: false,
@@ -244,9 +284,11 @@ export const useStore = create<StoreState>()(
 
           const params: Record<string, any> = {
             fetch_all: true,
-            // For admin users, don't filter by branch_id to get all products
-            // For branch users, filter by their branch_id
             ...(branchId && !isAdmin ? { branch_id: branchId } : {}),
+          }
+
+          if (force) {
+            params._t = Date.now()
           }
 
           if (search) {
@@ -259,7 +301,7 @@ export const useStore = create<StoreState>()(
 
           const res = await apiClient.get("/products", { params })
           const rawProducts = Array.isArray(res.data?.data) ? res.data.data : []
-          const apiProducts = rawProducts.map(mapProduct)
+          const apiProducts = rawProducts.map(mapApiProductToStoreProduct)
 
           // Save products to IndexedDB for offline use
           if (apiProducts.length > 0) {
@@ -281,7 +323,7 @@ export const useStore = create<StoreState>()(
             try {
               const offlineProducts = await offlineDB.getProducts()
               if (offlineProducts.length > 0) {
-                const mappedProducts = offlineProducts.map(p => mapProduct(p.data || p))
+                const mappedProducts = offlineProducts.map(p => mapApiProductToStoreProduct(p.data || p))
                 set({
                   products: mappedProducts,
                   productsLoading: false,
@@ -436,6 +478,35 @@ export const useStore = create<StoreState>()(
         }
       },
 
+      upsertProductFromApi: (rawProduct: any) => {
+        if (!rawProduct?.id) return
+
+        const mapped = mapApiProductToStoreProduct(rawProduct)
+        set((state) => {
+          const index = state.products.findIndex((product) => product.id === mapped.id)
+          if (index === -1) {
+            return {
+              products: [mapped, ...state.products],
+              lastProductsFetch: Date.now(),
+            }
+          }
+
+          const nextProducts = [...state.products]
+          nextProducts[index] = mapped
+          return {
+            products: nextProducts,
+            lastProductsFetch: Date.now(),
+          }
+        })
+      },
+
+      removeProductFromStore: (productId: string) => {
+        set((state) => ({
+          products: state.products.filter((product) => product.id !== productId),
+          lastProductsFetch: Date.now(),
+        }))
+      },
+
       // Clear all cached data
       clearStore: () => {
         set({
@@ -453,9 +524,18 @@ export const useStore = create<StoreState>()(
       },
     }),
     {
-      name: 'pos-store', // localStorage key
+      name: 'pos-store',
+      version: 2,
+      migrate: (persistedState) => {
+        const state = (persistedState || {}) as Partial<StoreState>
+        return {
+          ...state,
+          products: [],
+        } as StoreState
+      },
       partialize: (state) => ({
-        products: state.products,
+        // Products are fetched fresh on load — persisting 800+ records caused
+        // stale cards after edits and on browser refresh (304 + localStorage).
         categories: state.categories,
         customers: state.customers,
         branches: state.branches,

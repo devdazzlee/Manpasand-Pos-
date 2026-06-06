@@ -23,6 +23,8 @@ export function usePosData() {
   const fetchCustomersAction = useStore(state => state.fetchCustomers)
   const fetchBranchesAction = useStore(state => state.fetchBranches)
   const fetchSuppliersAction = useStore(state => state.fetchSuppliers)
+  const upsertProductFromApiAction = useStore(state => state.upsertProductFromApi)
+  const removeProductFromStoreAction = useStore(state => state.removeProductFromStore)
   const clearStoreAction = useStore(state => state.clearStore)
 
   const isAnyLoading = productsLoading || categoriesLoading || customersLoading || branchesLoading || suppliersLoading
@@ -51,6 +53,10 @@ export function usePosData() {
   const fetchProducts = useCallback((options?: { force?: boolean; search?: string; categoryId?: string }) => 
     fetchProductsAction(options), [fetchProductsAction])
 
+  const refreshProducts = useCallback(async () => {
+    await fetchProductsAction({ force: true })
+  }, [fetchProductsAction])
+
   // 6. Memoize final output
   return useMemo(() => ({
     // Data
@@ -70,7 +76,10 @@ export function usePosData() {
     
     // Actions
     refreshAllData,
+    refreshProducts,
     fetchProducts,
+    upsertProductFromApi: upsertProductFromApiAction,
+    removeProductFromStore: removeProductFromStoreAction,
     fetchCategories: fetchCategoriesAction,
     fetchCustomers: fetchCustomersAction,
     fetchBranches: fetchBranchesAction,
@@ -79,7 +88,8 @@ export function usePosData() {
   }), [
     products, categories, customers, branches, suppliers,
     productsLoading, categoriesLoading, customersLoading, branchesLoading, suppliersLoading,
-    isAnyLoading, refreshAllData, fetchProducts, 
+    isAnyLoading, refreshAllData, refreshProducts, fetchProducts,
+    upsertProductFromApiAction, removeProductFromStoreAction,
     fetchCategoriesAction, fetchCustomersAction, fetchBranchesAction, fetchSuppliersAction, clearStoreAction
   ])
-}
+}

@@ -1099,7 +1099,7 @@ export class ProductService {
             },
         };
 
-        const select = fetchAll ? minimalSelect : detailedSelect;
+        const select = detailedSelect;
 
         const fetchPage = async (pageNumber: number) =>
             prisma.product.findMany({

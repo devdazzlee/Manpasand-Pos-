@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useMemo } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -129,11 +129,53 @@ interface Product {
   maximum_stock?: number
 }
 
+const mapStoreProductToCard = (product: any): Product => ({
+  id: product.id,
+  name: product.name,
+  sku: product.sku || "",
+  code: product.code || "",
+  pct_or_hs_code: product.pct_or_hs_code,
+  description: product.description,
+  purchase_rate: product.purchase_rate || 0,
+  sales_rate_exc_dis_and_tax: product.sales_rate_exc_dis_and_tax || 0,
+  sales_rate_inc_dis_and_tax: product.sales_rate_inc_dis_and_tax || 0,
+  discount_amount: product.discount_amount,
+  min_qty: product.min_qty,
+  max_qty: product.max_qty,
+  is_active: product.is_active ?? true,
+  display_on_pos: product.display_on_pos ?? true,
+  is_batch: product.is_batch ?? false,
+  auto_fill_on_demand_sheet: product.auto_fill_on_demand_sheet ?? false,
+  non_inventory_item: product.non_inventory_item ?? false,
+  is_deal: product.is_deal ?? false,
+  is_featured: product.is_featured ?? false,
+  unit: { id: product.unitId, name: product.unitName },
+  tax: { id: product.taxId, name: product.taxName },
+  category: { id: product.categoryId, name: product.category },
+  subcategory: { id: product.subcategoryId, name: product.subcategory },
+  supplier: { id: product.supplierId, name: product.supplierName },
+  brand: { id: product.brandId, name: product.brandName },
+  color: { id: product.colorId, name: product.colorName },
+  size: { id: product.sizeId, name: product.sizeName },
+  available_stock: product.available_stock ?? product.stock ?? 0,
+  current_stock: product.current_stock ?? product.stock ?? 0,
+  reserved_stock: product.reserved_stock ?? 0,
+  minimum_stock: product.minimum_stock ?? 0,
+  maximum_stock: product.maximum_stock ?? 0,
+  created_at: product.created_at || new Date().toISOString(),
+  updated_at: product.updated_at || new Date().toISOString(),
+  images: product.images || [],
+})
+
 const getProductStock = (product: Product) =>
   product.available_stock ?? product.current_stock ?? 0
 
-const getProductImageUrl = (product: Product) =>
-  product.images?.[0]?.image || null
+const getProductImageUrl = (product: Product) => {
+  const url = product.images?.[0]?.image
+  if (!url) return null
+  const version = encodeURIComponent(product.updated_at || product.id)
+  return `${url}${url.includes("?") ? "&" : "?"}v=${version}`
+}
 
 const getStockTone = (product: Product) => {
   const stock = getProductStock(product)
@@ -814,18 +856,18 @@ export default function Inventory() {
     products: globalProducts,
     categories: globalCategories,
     isAnyLoading: globalLoading,
-    refreshAllData
+    fetchProducts,
+    refreshProducts,
+    upsertProductFromApi,
+    removeProductFromStore,
   } = usePosData()
 
   // Branch context — used for the optional "Add Stock" field in the product
   // form. Stock is per-branch, so we need to know which branch to write to.
   const { branches: posBranches, selectedBranchId } = usePosBranch()
 
-  // State for products and pagination
-  const [products, setProducts] = useState<Product[]>([])
-  const [loading, setLoading] = useState(false)
+  // Product cards are derived from the global store — single source of truth.
   const [isInitialLoading, setIsInitialLoading] = useState(true)
-  const [totalProducts, setTotalProducts] = useState(0)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(10)
   const [gotoPage, setGotoPage] = useState<string>("")
@@ -1023,9 +1065,9 @@ export default function Inventory() {
     },
 
     async getProductById(id: string) {
-      // Used by the Edit dialog to always work off fresh data instead of the
-      // possibly-stale list cache.
-      const response = await apiClient.get(`/products/${id}`)
+      const response = await apiClient.get(`/products/${id}`, {
+        params: { _t: Date.now() },
+      })
       return response.data
     },
   }
@@ -1035,6 +1077,16 @@ export default function Inventory() {
     loadDropdownData()
   }, [])
 
+  useEffect(() => {
+    if (!globalLoading) {
+      setIsInitialLoading(false)
+    }
+  }, [globalLoading])
+
+  useEffect(() => {
+    fetchProducts({ force: true }).catch(() => undefined)
+  }, [fetchProducts])
+
   // Seed the stock branch selection from the user's current POS branch the
   // first time we know it. Don't clobber an explicit user pick afterwards.
   useEffect(() => {
@@ -1043,19 +1095,104 @@ export default function Inventory() {
     }
   }, [selectedBranchId, stockBranchIds.length])
 
-  // Load products when filters change or global products change
-  useEffect(() => {
-    if (globalProducts.length > 0) {
-      loadProducts()
-    } else if (globalLoading) {
-      // Still loading from global store
-      setLoading(true)
-    } else {
-      // Global store finished loading but no products
-      setIsInitialLoading(false)
-      setLoading(false)
+  const filteredProductsAll = useMemo(() => {
+    let filtered = [...globalProducts]
+
+    if (searchTerm) {
+      const term = searchTerm.toLowerCase()
+      filtered = filtered.filter(
+        (product) =>
+          product.name.toLowerCase().includes(term) ||
+          (product.sku && product.sku.toLowerCase().includes(term)),
+      )
     }
-  }, [currentPage, searchTerm, selectedCategory, selectedSubcategory, pageSize, sortBy, globalProducts, globalLoading])
+
+    if (selectedCategory !== "__all__") {
+      filtered = filtered.filter((product) => product.categoryId === selectedCategory)
+    }
+
+    if (selectedSubcategory !== "__all__") {
+      filtered = filtered.filter(
+        (product) => product.subcategoryId && product.subcategoryId === selectedSubcategory,
+      )
+    }
+
+    const nameOf = (p: any) => String(p?.name || "").toLowerCase()
+    const stockOf = (p: any) => Number(p?.available_stock ?? p?.current_stock ?? p?.stock ?? 0)
+    const priceOf = (p: any) => Number(p?.sales_rate_exc_dis_and_tax ?? 0)
+    const createdOf = (p: any) => new Date(p?.created_at || 0).getTime()
+
+    switch (sortBy) {
+      case "name-asc":
+        filtered.sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
+        break
+      case "name-desc":
+        filtered.sort((a, b) => nameOf(b).localeCompare(nameOf(a)))
+        break
+      case "stock-asc":
+        filtered.sort((a, b) => stockOf(a) - stockOf(b))
+        break
+      case "stock-desc":
+        filtered.sort((a, b) => stockOf(b) - stockOf(a))
+        break
+      case "price-asc":
+        filtered.sort((a, b) => priceOf(a) - priceOf(b))
+        break
+      case "price-desc":
+        filtered.sort((a, b) => priceOf(b) - priceOf(a))
+        break
+      case "newest":
+        filtered.sort((a, b) => createdOf(b) - createdOf(a))
+        break
+      case "oldest":
+        filtered.sort((a, b) => createdOf(a) - createdOf(b))
+        break
+    }
+
+    return filtered
+  }, [globalProducts, searchTerm, selectedCategory, selectedSubcategory, sortBy])
+
+  const totalProducts = filteredProductsAll.length
+  const activeProductCount = useMemo(
+    () => globalProducts.filter((product) => product.is_active).length,
+    [globalProducts],
+  )
+  const featuredProductCount = useMemo(
+    () => globalProducts.filter((product) => product.is_featured).length,
+    [globalProducts],
+  )
+
+  const products = useMemo(() => {
+    let paginated = filteredProductsAll
+    if (pageSize !== 0) {
+      const startIndex = (currentPage - 1) * pageSize
+      paginated = filteredProductsAll.slice(startIndex, startIndex + pageSize)
+    }
+    return paginated.map(mapStoreProductToCard)
+  }, [filteredProductsAll, currentPage, pageSize])
+
+  const syncProductInStore = async (productId: string, imageUrls?: string[]) => {
+    const detail = await apiService.getProductById(productId)
+    const fresh = detail?.data ?? detail
+    if (!fresh?.id) return
+
+    upsertProductFromApi({
+      ...fresh,
+      ...(imageUrls?.length
+        ? { ProductImage: imageUrls.map((url) => ({ image: url })) }
+        : {}),
+    })
+  }
+
+  const applyProductPatchToStore = (patchPayload: any, imageUrls: string[]) => {
+    if (!patchPayload?.id) return
+
+    upsertProductFromApi({
+      ...patchPayload,
+      ProductImage: imageUrls.map((url) => ({ image: url })),
+      updated_at: patchPayload.updated_at || new Date().toISOString(),
+    })
+  }
 
   const loadDropdownData = async () => {
     try {
@@ -1094,138 +1231,6 @@ export default function Inventory() {
         description: "Failed to load dropdown data",
         variant: "destructive",
       })
-    }
-  }
-
-  const loadProducts = async () => {
-    setLoading(true)
-    try {
-      // Use global products data instead of making API calls
-      let filteredProducts = [...globalProducts]
-      
-      // Mark initial loading as complete once we have data
-      if (isInitialLoading && filteredProducts.length > 0) {
-        setIsInitialLoading(false)
-      }
-
-      // Apply search filter
-      if (searchTerm) {
-        filteredProducts = filteredProducts.filter(product =>
-          product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-          (product.sku && product.sku.toLowerCase().includes(searchTerm.toLowerCase()))
-        )
-      }
-
-      // Apply category filter
-      if (selectedCategory !== "__all__") {
-        filteredProducts = filteredProducts.filter(product =>
-          product.categoryId === selectedCategory
-        )
-      }
-
-      // Apply subcategory filter
-      if (selectedSubcategory !== "__all__") {
-        filteredProducts = filteredProducts.filter(product =>
-          product.subcategoryId && product.subcategoryId === selectedSubcategory
-        )
-      }
-
-      // Apply sort (in-memory — the table is paginated client-side already).
-      const nameOf = (p: any) => String(p?.name || "").toLowerCase()
-      const stockOf = (p: any) => Number(p?.available_stock ?? p?.current_stock ?? 0)
-      const priceOf = (p: any) => Number(p?.sales_rate_exc_dis_and_tax ?? 0)
-      const createdOf = (p: any) =>
-        new Date(p?.created_at || p?.createdAt || 0).getTime()
-      switch (sortBy) {
-        case "name-asc":
-          filteredProducts.sort((a, b) => nameOf(a).localeCompare(nameOf(b)))
-          break
-        case "name-desc":
-          filteredProducts.sort((a, b) => nameOf(b).localeCompare(nameOf(a)))
-          break
-        case "stock-asc":
-          filteredProducts.sort((a, b) => stockOf(a) - stockOf(b))
-          break
-        case "stock-desc":
-          filteredProducts.sort((a, b) => stockOf(b) - stockOf(a))
-          break
-        case "price-asc":
-          filteredProducts.sort((a, b) => priceOf(a) - priceOf(b))
-          break
-        case "price-desc":
-          filteredProducts.sort((a, b) => priceOf(b) - priceOf(a))
-          break
-        case "newest":
-          filteredProducts.sort((a, b) => createdOf(b) - createdOf(a))
-          break
-        case "oldest":
-          filteredProducts.sort((a, b) => createdOf(a) - createdOf(b))
-          break
-      }
-
-      // Apply pagination
-      const total = filteredProducts.length
-      let paginatedProducts = filteredProducts
-      
-      if (pageSize !== 0) {
-        const startIndex = (currentPage - 1) * pageSize
-        const endIndex = startIndex + pageSize
-        paginatedProducts = filteredProducts.slice(startIndex, endIndex)
-      }
-
-      // Transform to match the Product interface
-      const productsData = paginatedProducts.map((product: any) => ({
-        id: product.id,
-        name: product.name,
-        sku: product.sku || "",
-        code: product.code || "",
-        pct_or_hs_code: product.pct_or_hs_code,
-        description: product.description,
-        purchase_rate: product.purchase_rate || 0,
-        sales_rate_exc_dis_and_tax: product.sales_rate_exc_dis_and_tax || 0,
-        sales_rate_inc_dis_and_tax: product.sales_rate_inc_dis_and_tax || 0,
-        discount_amount: product.discount_amount,
-        min_qty: product.min_qty,
-        max_qty: product.max_qty,
-        is_active: product.is_active ?? true,
-        display_on_pos: product.display_on_pos ?? true,
-        is_batch: product.is_batch ?? false,
-        auto_fill_on_demand_sheet: product.auto_fill_on_demand_sheet ?? false,
-        non_inventory_item: product.non_inventory_item ?? false,
-        is_deal: product.is_deal ?? false,
-        is_featured: product.is_featured ?? false,
-        unit: { id: product.unitId, name: product.unitName },
-        tax: { id: product.taxId, name: product.taxName },
-        category: { id: product.categoryId, name: product.category },
-        subcategory: { id: product.subcategoryId, name: product.subcategory },
-        supplier: { id: product.supplierId, name: product.supplierName },
-        brand: { id: product.brandId, name: product.brandName },
-        color: { id: product.colorId, name: product.colorName },
-        size: { id: product.sizeId, name: product.sizeName },
-        // Stock totals come pre-aggregated from the global store. Without
-        // these the Stock column always rendered 0 because the table reads
-        // `product.available_stock ?? product.current_stock ?? 0`.
-        available_stock: product.available_stock ?? product.stock ?? 0,
-        current_stock: product.current_stock ?? product.stock ?? 0,
-        reserved_stock: product.reserved_stock ?? 0,
-        minimum_stock: product.minimum_stock ?? 0,
-        maximum_stock: product.maximum_stock ?? 0,
-        created_at: product.created_at || new Date().toISOString(),
-        updated_at: product.updated_at || new Date().toISOString(),
-        images: product.images || [],
-      }))
-
-      setProducts(productsData)
-      setTotalProducts(total)
-    } catch (error) {
-      console.log("Failed to load products:", error)
-      toast({
-        title: "Error",
-        description: "Failed to load products",
-        variant: "destructive",
-      })
-    } finally {
-      setLoading(false)
     }
   }
 
@@ -1270,9 +1275,11 @@ export default function Inventory() {
 
       setIsAddDialogOpen(false)
       resetForm()
-      // Await so the table re-renders with the new product (and its stock)
-      // before the user can interact with the list.
-      await refreshAllData()
+      if (createdId) {
+        await syncProductInStore(createdId)
+      } else {
+        await refreshProducts()
+      }
     } catch (error) {
       toast({
         title: "Error",
@@ -1295,7 +1302,13 @@ export default function Inventory() {
         pct_or_hs_code: formData.pct_or_hs_code ? String(formData.pct_or_hs_code) : undefined,
       }
       // All images are already Cloudinary URLs — no base64, no large payload
-      await apiService.updateProduct(editingProduct.id, dataToSubmit, existingImageUrls)
+      const updateResponse = await apiService.updateProduct(
+        editingProduct.id,
+        dataToSubmit,
+        existingImageUrls,
+      )
+      const patchPayload = updateResponse?.data ?? updateResponse
+      applyProductPatchToStore(patchPayload, existingImageUrls)
 
       // Edit-time stock entry is additive (matches POST /stock semantics —
       // a positive number is added to existing branch stock and a
@@ -1317,6 +1330,8 @@ export default function Inventory() {
         }
       }
 
+      const updatedProductId = editingProduct.id
+
       toast({
         title: "Success",
         description: "Product updated successfully",
@@ -1325,7 +1340,10 @@ export default function Inventory() {
       setIsEditDialogOpen(false)
       setEditingProduct(null)
       resetForm()
-      await refreshAllData()
+
+      if (stockToAdd > 0 && stockBranchIds.length > 0) {
+        await syncProductInStore(updatedProductId, existingImageUrls)
+      }
     } catch (error) {
       toast({
         title: "Error",
@@ -1343,12 +1361,7 @@ export default function Inventory() {
     setToggleStatusProductId(product.id)
     try {
       await apiService.toggleProductStatus(product.id)
-      setProducts((prev) =>
-        prev.map((item) =>
-          item.id === product.id ? { ...item, is_active: !item.is_active } : item
-        )
-      )
-      await refreshAllData()
+      await syncProductInStore(product.id)
       toast({
         title: "Success",
         description: `Product ${product.is_active ? "disabled" : "enabled"} successfully`,
@@ -1377,8 +1390,7 @@ export default function Inventory() {
       // while the first request was still in flight, which both raced the
       // refresh and made it look like the first delete hadn't applied.
       await apiService.deleteProduct(product.id)
-      setProducts((prev) => prev.filter((p) => p.id !== product.id))
-      await refreshAllData()
+      removeProductFromStore(product.id)
       toast({
         title: "Deleted",
         description: `"${product.name}" has been removed.`,
@@ -1681,7 +1693,7 @@ export default function Inventory() {
               <Package className="h-4 w-4 text-green-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-green-600">{products.filter((p) => p.is_active).length}</div>
+              <div className="text-2xl font-bold text-green-600">{activeProductCount}</div>
             </CardContent>
           </Card>
           <Card>
@@ -1690,7 +1702,7 @@ export default function Inventory() {
               <AlertTriangle className="h-4 w-4 text-blue-600" />
             </CardHeader>
             <CardContent>
-              <div className="text-2xl font-bold text-blue-600">{products.filter((p) => p.is_featured).length}</div>
+              <div className="text-2xl font-bold text-blue-600">{featuredProductCount}</div>
             </CardContent>
           </Card>
         </div>
@@ -1761,7 +1773,7 @@ export default function Inventory() {
             </div>
           </CardHeader>
           <CardContent>
-            {loading ? (
+            {globalLoading && isInitialLoading ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
                 {Array.from({ length: 8 }).map((_, index) => (
                   <div
@@ -1798,7 +1810,7 @@ export default function Inventory() {
 
                     return (
                       <div
-                        key={product.id}
+                        key={`${product.id}-${product.updated_at}`}
                         className="group flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md"
                       >
                         <div className="relative aspect-[4/3] overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100">
@@ -1959,7 +1971,7 @@ export default function Inventory() {
                           size="sm"
                           className="text-sm text-black"
                           onClick={() => setCurrentPage(1)}
-                          disabled={currentPage === 1 || loading}
+                          disabled={currentPage === 1 || globalLoading}
                         >
                           First
                         </Button>
@@ -1968,7 +1980,7 @@ export default function Inventory() {
                           size="sm"
                           className="text-sm text-black"
                           onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                          disabled={currentPage === 1 || loading}
+                          disabled={currentPage === 1 || globalLoading}
                         >
                           Previous
                         </Button>
@@ -1980,7 +1992,7 @@ export default function Inventory() {
                           size="sm"
                           className="text-sm text-black"
                           onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                          disabled={currentPage >= totalPages || loading}
+                          disabled={currentPage >= totalPages || globalLoading}
                         >
                           Next
                         </Button>
@@ -1989,7 +2001,7 @@ export default function Inventory() {
                           size="sm"
                           className="text-sm text-black"
                           onClick={() => setCurrentPage(totalPages)}
-                          disabled={currentPage >= totalPages || loading}
+                          disabled={currentPage >= totalPages || globalLoading}
                         >
                           Last
                         </Button>
