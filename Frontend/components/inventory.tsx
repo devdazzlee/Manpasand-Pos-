@@ -861,6 +861,7 @@ export default function Inventory() {
   // confirm button can show a spinner while the API call is in flight.
   const [productToDelete, setProductToDelete] = useState<Product | null>(null)
   const [isDeletingProduct, setIsDeletingProduct] = useState(false)
+  const [toggleStatusProductId, setToggleStatusProductId] = useState<string | null>(null)
 
   // "Add Stock" companion fields — sit alongside the product form. Stock is
   // a separate table row keyed by (product, branch), so we keep it outside
@@ -1336,20 +1337,30 @@ export default function Inventory() {
     }
   }
 
-  const handleToggleStatus = async (id: string) => {
+  const handleToggleStatus = async (product: Product) => {
+    if (toggleStatusProductId) return
+
+    setToggleStatusProductId(product.id)
     try {
-      await apiService.toggleProductStatus(id)
+      await apiService.toggleProductStatus(product.id)
+      setProducts((prev) =>
+        prev.map((item) =>
+          item.id === product.id ? { ...item, is_active: !item.is_active } : item
+        )
+      )
+      await refreshAllData()
       toast({
         title: "Success",
-        description: "Product status updated successfully",
+        description: `Product ${product.is_active ? "disabled" : "enabled"} successfully`,
       })
-      loadProducts()
     } catch (error) {
       toast({
         title: "Error",
         description: "Failed to update product status",
         variant: "destructive",
       })
+    } finally {
+      setToggleStatusProductId(null)
     }
   }
 
@@ -1893,6 +1904,25 @@ export default function Inventory() {
                             >
                               <Edit className="mr-2 h-3.5 w-3.5" />
                               Edit
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className={
+                                product.is_active
+                                  ? "text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+                                  : "text-green-700 hover:bg-green-50 hover:text-green-800"
+                              }
+                              onClick={() => handleToggleStatus(product)}
+                              disabled={toggleStatusProductId === product.id}
+                            >
+                              {toggleStatusProductId === product.id ? (
+                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                              ) : product.is_active ? (
+                                "Disable"
+                              ) : (
+                                "Enable"
+                              )}
                             </Button>
                             <Button
                               size="sm"
