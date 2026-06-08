@@ -48,6 +48,8 @@ import { usePosData } from "@/hooks/use-pos-data";
 import {
   StockStatusBadge,
 } from "@/components/inventory/stock-ops/stock-status-badge";
+import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
+import { StockRecordCard } from "@/components/inventory/stock-ops/stock-record-card";
 import {
   ALL_BRANCHES,
   ALL_BRANDS,
@@ -596,128 +598,35 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
           </p>
         </div>
         <CardContent className="p-0">
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="border-gray-200">
-                  <TableHead className="text-sm text-gray-600">
-                    <button
-                      type="button"
-                      className="inline-flex items-center text-sm text-gray-600 hover:text-black"
-                      onClick={() => toggleSort("product")}
-                    >
-                      Product
-                      <ArrowUpDown className="ml-1 h-3 w-3" />
-                    </button>
-                  </TableHead>
-                  <TableHead className="text-sm text-gray-600">SKU</TableHead>
-                  <TableHead className="text-sm text-gray-600">Barcode</TableHead>
-                  <TableHead className="text-sm text-gray-600">
-                    <button
-                      type="button"
-                      className="inline-flex items-center text-sm text-gray-600 hover:text-black"
-                      onClick={() => toggleSort("branch")}
-                    >
-                      Branch
-                      <ArrowUpDown className="ml-1 h-3 w-3" />
-                    </button>
-                  </TableHead>
-                  <TableHead className="text-sm text-gray-600 text-right">
-                    Available
-                  </TableHead>
-                  <TableHead className="text-sm text-gray-600 text-right">
-                    Reserved
-                  </TableHead>
-                  <TableHead className="text-sm text-gray-600 text-right">
-                    Value
-                  </TableHead>
-                  <TableHead className="text-sm text-gray-600">
-                    Updated
-                  </TableHead>
-                  <TableHead className="text-sm text-gray-600 text-center min-w-[108px]">
-                    Status
-                  </TableHead>
-                  <TableHead className="text-sm text-gray-600 text-right w-[72px]">
-                    Details
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {loading ? (
-                  <TableRow>
-                    <TableCell colSpan={10} className="h-48">
-                      <PageLoader message="Loading stock..." />
-                    </TableCell>
-                  </TableRow>
-                ) : stocks.length === 0 ? (
-                  <TableRow>
-                    <TableCell
-                      colSpan={10}
-                      className="h-32 text-center text-sm text-gray-500"
-                    >
-                      No stock found for these filters.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  sortedStocks.map((s) => {
-                    const qty = Number(s.current_quantity || 0);
-                    const reserved = Number(s.reserved_quantity || 0);
-                    const cost = Number(s.product?.purchase_rate || 0);
-                    const minQty = Number(
-                      s.minimum_quantity ?? s.product?.min_qty ?? 0,
-                    );
-                    return (
-                      <TableRow key={s.id} className="border-gray-100">
-                        <TableCell className="py-3">
-                          <span className="text-sm text-black block">
-                            {s.product?.name || "-"}
-                          </span>
-                        </TableCell>
-                        <TableCell className="text-sm text-gray-600">
-                          {s.product?.sku || "-"}
-                        </TableCell>
-                        <TableCell className="text-sm text-gray-600">
-                          {getProductBarcode(s.product)}
-                        </TableCell>
-                        <TableCell className="text-sm text-black">
-                          {s.branch?.name || "-"}
-                        </TableCell>
-                        <TableCell className="text-sm text-black text-right">
-                          {(qty - reserved).toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-sm text-gray-600 text-right">
-                          {reserved.toLocaleString()}
-                        </TableCell>
-                        <TableCell className="text-sm text-black text-right">
-                          {formatMoney(qty * cost)}
-                        </TableCell>
-                        <TableCell className="text-sm text-gray-600">
-                          {s.last_updated
-                            ? new Date(s.last_updated).toLocaleDateString()
-                            : "-"}
-                        </TableCell>
-                        <TableCell className="text-center whitespace-nowrap">
-                          <StockStatusBadge qty={qty} minQty={minQty} showIcon />
-                        </TableCell>
-                        <TableCell className="text-right pr-4">
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            className="h-8 w-8 p-0 text-gray-600 hover:text-black"
-                            aria-label={`View details for ${s.product?.name || "product"}`}
-                            onClick={() => openDetail(s)}
-                          >
-                            <ChevronRight className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })
-                )}
-              </TableBody>
-            </Table>
-          </div>
+          <InventoryCardGrid
+            empty={!loading && stocks.length === 0}
+            emptyTitle="No stock found"
+            emptyDescription="No stock found for these filters."
+            loading={loading}
+          >
+            {sortedStocks.map((s) => {
+              const qty = Number(s.current_quantity || 0);
+              const reserved = Number(s.reserved_quantity || 0);
+              const cost = Number(s.product?.purchase_rate || 0);
+              const minQty = Number(s.minimum_quantity ?? s.product?.min_qty ?? 0);
+              return (
+                <StockRecordCard
+                  key={s.id}
+                  productName={s.product?.name || "-"}
+                  sku={s.product?.sku}
+                  barcode={getProductBarcode(s.product)}
+                  branch={s.branch?.name}
+                  cost={cost}
+                  quantity={qty}
+                  reserved={reserved}
+                  available={qty - reserved}
+                  value={qty * cost}
+                  minQty={minQty}
+                  onView={() => openDetail(s)}
+                />
+              );
+            })}
+          </InventoryCardGrid>
 
           {totalPages > 1 && (
             <div className="flex items-center justify-between px-6 py-4 border-t border-gray-100 bg-white rounded-b-xl">

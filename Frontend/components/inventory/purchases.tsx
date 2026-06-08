@@ -65,6 +65,13 @@ import { useInventoryDashboard } from "@/components/inventory/stock-ops/use-inve
 import { formatMoney } from "@/components/inventory/stock-ops/export-utils";
 import * as XLSX from "xlsx";
 import { z } from "zod";
+import { usePosData } from "@/hooks/use-pos-data";
+import {
+  StockProductPicker,
+  type StockLineItem,
+} from "@/components/inventory/stock-ops/stock-product-picker";
+import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
+import { TransactionRecordCard } from "@/components/inventory/stock-ops/transaction-record-card";
 
 // Zod schema for the supplier-delivery form. Limited to the inputs the user
 // commonly misses — supplier, warehouse, and at least one line. Inline errors
@@ -121,6 +128,7 @@ interface PurchaseRow {
 
 export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const { stats: dashboardStats, loading: dashboardLoading } = useInventoryDashboard();
+  const { categories, productsLoading } = usePosData();
   // ------- shared metadata -------
   const [products, setProducts] = useState<Product[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
@@ -309,104 +317,59 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     }
   }, [branches, warehouseBranchId]);
 
-  // Add-a-line row
-  const [searchTerm, setSearchTerm] = useState("");
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickedProductId, setPickedProductId] = useState<string>("");
-  const [pickedQty, setPickedQty] = useState<string>("");
-  const [pickedCost, setPickedCost] = useState<string>("");
-  const [pickedAvailable, setPickedAvailable] = useState<number | null>(null);
-  const [availableLoading, setAvailableLoading] = useState(false);
+  const [stockMap, setStockMap] = useState<Record<string, number>>({});
 
-  // Fetch current on-hand quantity for the selected product at the selected
-  // branch so the user can see the current stock before adding more.
   useEffect(() => {
-    if (!pickedProductId || !warehouseBranchId) {
-      setPickedAvailable(null);
+    if (!warehouseBranchId) {
+      setStockMap({});
       return;
     }
     let cancelled = false;
-    setAvailableLoading(true);
-    apiClient
-      .get(`${API_BASE}/stock/product/${pickedProductId}/branch/${warehouseBranchId}`)
-      .then((res) => {
+    (async () => {
+      try {
+        const res = await apiClient.get(`${API_BASE}/stock`, {
+          params: { branchId: warehouseBranchId, limit: 5000 },
+        });
         if (cancelled) return;
-        const qty = Number(res.data?.data?.current_quantity ?? 0);
-        setPickedAvailable(Number.isFinite(qty) ? qty : 0);
-      })
-      .catch(() => {
-        if (!cancelled) setPickedAvailable(0);
-      })
-      .finally(() => {
-        if (!cancelled) setAvailableLoading(false);
-      });
+        const map: Record<string, number> = {};
+        (res.data?.data || []).forEach((s: any) => {
+          const pid = s.product_id || s.product?.id;
+          if (pid) map[pid] = Number(s.current_quantity || 0);
+        });
+        setStockMap(map);
+      } catch {
+        if (!cancelled) setStockMap({});
+      }
+    })();
     return () => {
       cancelled = true;
     };
-  }, [pickedProductId, warehouseBranchId]);
+  }, [warehouseBranchId]);
 
-  const filteredProducts = useMemo(() => {
-    const t = searchTerm.toLowerCase().trim();
-    if (!t) return products.slice(0, 50);
-    return products
-      .filter(
-        (p) =>
-          p.name.toLowerCase().includes(t) ||
-          (p.sku && p.sku.toLowerCase().includes(t)),
-      )
-      .slice(0, 50);
-  }, [products, searchTerm]);
-
-  const pickedProduct = useMemo(
-    () => products.find((p) => p.id === pickedProductId),
-    [products, pickedProductId],
+  const pickerLines: StockLineItem[] = useMemo(
+    () =>
+      lines.map((l) => ({
+        productId: l.productId,
+        productName: l.productName,
+        sku: l.sku,
+        quantity: l.quantity,
+        unitCost: l.costPrice,
+        currentQty: stockMap[l.productId] ?? 0,
+      })),
+    [lines, stockMap],
   );
 
-  const resetAddLine = () => {
-    setPickedProductId("");
-    setPickedQty("");
-    setPickedCost("");
-    setSearchTerm("");
-    setPickedAvailable(null);
-  };
-
-  const addLine = () => {
-    if (!pickedProductId) {
-      toast.error("Pick a product");
-      return;
-    }
-    const q = Number(pickedQty);
-    const c = Number(pickedCost);
-    if (!Number.isFinite(q) || q <= 0) {
-      toast.error("Quantity must be greater than 0");
-      return;
-    }
-    if (!Number.isFinite(c) || c < 0) {
-      toast.error("Cost must be 0 or more");
-      return;
-    }
-    setLines((prev) => {
-      const ex = prev.find((l) => l.productId === pickedProductId);
-      if (ex) {
-        return prev.map((l) =>
-          l.productId === pickedProductId
-            ? { ...l, quantity: l.quantity + q, costPrice: c || l.costPrice }
-            : l,
-        );
-      }
-      return [
-        ...prev,
-        {
-          productId: pickedProductId,
-          productName: pickedProduct?.name || "Product",
-          sku: pickedProduct?.sku || undefined,
-          quantity: q,
-          costPrice: c,
-        },
-      ];
-    });
+  const onPickerLinesChange = (next: StockLineItem[]) => {
+    setLines(
+      next.map((l) => ({
+        productId: l.productId,
+        productName: l.productName,
+        sku: l.sku,
+        quantity: Number(l.quantity) || 0,
+        costPrice: Number(l.unitCost) || 0,
+      })),
+    );
     clearError("lines");
-    resetAddLine();
   };
 
   const removeLine = (productId: string) => {
@@ -481,7 +444,6 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
       setStockInSource("SUPPLIER_DELIVERY");
       setBatchNo("");
       setExpiryDate(undefined);
-      resetAddLine();
       setTab("history");
       setPage(1);
       fetchHistory(1);
@@ -595,23 +557,12 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
           setBatchNo={setBatchNo}
           expiryDate={expiryDate}
           setExpiryDate={setExpiryDate}
-          // add a line
-          searchTerm={searchTerm}
-          setSearchTerm={setSearchTerm}
-          pickerOpen={pickerOpen}
-          setPickerOpen={setPickerOpen}
-          pickedProductId={pickedProductId}
-          setPickedProductId={setPickedProductId}
-          pickedProduct={pickedProduct}
-          filteredProducts={filteredProducts}
-          pickedQty={pickedQty}
-          setPickedQty={setPickedQty}
-          pickedCost={pickedCost}
-          setPickedCost={setPickedCost}
-          pickedAvailable={pickedAvailable}
-          availableLoading={availableLoading}
-          onAddLine={addLine}
-          // lines
+          products={products}
+          categories={categories}
+          productsLoading={productsLoading || metaLoading}
+          pickerLines={pickerLines}
+          onPickerLinesChange={onPickerLinesChange}
+          stockMap={stockMap}
           lines={lines}
           removeLine={removeLine}
           // sidebar
@@ -1028,116 +979,49 @@ function HistoryView({
         </div>
       </Card>
 
-      {/* Table */}
       <Card className="border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader className="bg-gray-50">
-              <TableRow className="border-gray-200">
-                <TableHead className="px-6 py-4 text-sm font-medium text-black">
-                  Timestamp
-                </TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Doc Ref</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Supplier</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Branch</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black text-right">
-                  Valuation
-                </TableHead>
-                <TableHead className="px-6 py-4 text-sm font-medium text-black">
-                  Status
-                </TableHead>
-                <TableHead className="px-6 py-4 text-sm font-medium text-black text-right">
-                  Actions
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell
-                    colSpan={7}
-                    className="py-12 text-center text-sm text-gray-500"
+        <InventoryCardGrid
+          empty={!loading && rows.length === 0}
+          emptyTitle="No supplier purchases in this list"
+          emptyDescription="GRN receipts saved from Step 2 will show up here."
+          loading={loading}
+        >
+          {rows.map((r) => {
+            const ts = new Date(r.purchase_date);
+            const value = Number(r.quantity) * Number(r.cost_price);
+            return (
+              <TransactionRecordCard
+                key={r.id}
+                date={`${ts.toLocaleDateString()} · ${ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                title={r.product?.name || "Purchase line"}
+                subtitle={r.invoice_ref || undefined}
+                meta={`${r.supplier?.name || "—"} · ${r.warehouse_branch?.name || "—"}`}
+                badge={
+                  <Badge variant="outline" className="text-xs">
+                    {r.delivery_status || "COMPLETE"}
+                  </Badge>
+                }
+                highlights={[
+                  { label: "Qty", value: r.quantity },
+                  {
+                    label: "Value",
+                    value: `Rs ${value.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+                  },
+                ]}
+                actions={
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-8 text-xs"
+                    onClick={() => onViewDetail(r.id)}
                   >
-                    Loading...
-                  </TableCell>
-                </TableRow>
-              ) : rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="py-16 text-center">
-                    <div className="flex flex-col items-center gap-3 max-w-xl mx-auto">
-                      <FileText className="h-10 w-10 text-gray-300" />
-                      <p className="text-base font-medium text-black">
-                        No supplier purchases in this list
-                      </p>
-                      <p className="text-sm text-gray-600">
-                        That is expected if all your stock came from{" "}
-                        <span className="font-medium">catalog / Excel bulk import</span>{" "}
-                        (opening stock) rather than from{" "}
-                        <span className="font-medium">Save purchase</span> on this screen.
-                        Those imports still increased on-hand qty — they are stored as
-                        stock movements, not as rows in this purchase history.
-                      </p>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rows.map((r) => {
-                  const ts = new Date(r.purchase_date);
-                  const value = Number(r.quantity) * Number(r.cost_price);
-                  return (
-                    <TableRow key={r.id} className="border-gray-100 hover:bg-gray-50">
-                      <TableCell className="px-6 py-4 align-top">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-sm text-black">
-                            {ts.toLocaleDateString()}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            {ts.toLocaleTimeString([], {
-                              hour: "2-digit",
-                              minute: "2-digit",
-                            })}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-4 align-top text-sm text-black font-mono">
-                        {r.invoice_ref || "—"}
-                      </TableCell>
-                      <TableCell className="py-4 align-top text-sm text-black">
-                        {r.supplier?.name || "—"}
-                      </TableCell>
-                      <TableCell className="py-4 align-top text-sm text-black">
-                        {r.warehouse_branch?.name || "—"}
-                      </TableCell>
-                      <TableCell className="py-4 align-top text-right text-sm text-black">
-                        Rs{" "}
-                        {value.toLocaleString("en-US", {
-                          minimumFractionDigits: 2,
-                          maximumFractionDigits: 2,
-                        })}
-                      </TableCell>
-                      <TableCell className="px-6 py-4 align-top">
-                        <Badge variant="outline" className="text-xs text-black">
-                          {r.delivery_status || "COMPLETE"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="px-6 py-4 align-top text-right">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-8 text-xs text-black border border-slate-200 hover:bg-slate-50 transition-all font-medium rounded-md px-3"
-                          onClick={() => onViewDetail(r.id)}
-                        >
-                          View
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
+                    View
+                  </Button>
+                }
+              />
+            );
+          })}
+        </InventoryCardGrid>
         {/* Pagination */}
         {total > 0 && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-gray-200">
@@ -1237,21 +1121,12 @@ interface NewEntryViewProps {
   expiryDate?: Date;
   setExpiryDate: (d?: Date) => void;
 
-  searchTerm: string;
-  setSearchTerm: (v: string) => void;
-  pickerOpen: boolean;
-  setPickerOpen: (v: boolean) => void;
-  pickedProductId: string;
-  setPickedProductId: (v: string) => void;
-  pickedProduct?: Product;
-  filteredProducts: Product[];
-  pickedQty: string;
-  setPickedQty: (v: string) => void;
-  pickedCost: string;
-  setPickedCost: (v: string) => void;
-  pickedAvailable: number | null;
-  availableLoading: boolean;
-  onAddLine: () => void;
+  products: Product[];
+  categories: Array<{ id: string; name: string }>;
+  productsLoading: boolean;
+  pickerLines: StockLineItem[];
+  onPickerLinesChange: (lines: StockLineItem[]) => void;
+  stockMap: Record<string, number>;
 
   lines: DraftLine[];
   removeLine: (productId: string) => void;
@@ -1285,21 +1160,12 @@ function NewEntryView(props: NewEntryViewProps) {
     setBatchNo,
     expiryDate,
     setExpiryDate,
-    searchTerm,
-    setSearchTerm,
-    pickerOpen,
-    setPickerOpen,
-    pickedProductId,
-    setPickedProductId,
-    pickedProduct,
-    filteredProducts,
-    pickedQty,
-    setPickedQty,
-    pickedCost,
-    setPickedCost,
-    pickedAvailable,
-    availableLoading,
-    onAddLine,
+    products,
+    categories,
+    productsLoading,
+    pickerLines,
+    onPickerLinesChange,
+    stockMap,
     lines,
     removeLine,
     notes,
@@ -1466,273 +1332,57 @@ function NewEntryView(props: NewEntryViewProps) {
               )}
             </div>
 
-            {/* Add a line */}
-            <div className="border border-gray-200 rounded-md p-4 bg-gray-50/40 space-y-3">
-              <h3 className="text-sm font-medium text-black">Add one line at a time</h3>
-              <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_140px_auto] gap-3 items-end">
-                <div className="space-y-1.5">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <Label className="text-sm text-black">Product</Label>
-                    {pickedProductId && (
-                      <span className="text-xs text-gray-500">
-                        Available:{" "}
-                        <span className="text-black font-medium">
-                          {availableLoading
-                            ? "…"
-                            : pickedAvailable !== null
-                              ? pickedAvailable
-                              : "—"}
-                        </span>
-                      </span>
-                    )}
-                  </div>
-                  <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-                    <PopoverAnchor asChild>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                        <Input
-                          placeholder="Search product..."
-                          value={
-                            pickedProductId && !pickerOpen
-                              ? pickedProduct?.name || ""
-                              : searchTerm
-                          }
-                          onChange={(e) => {
-                            setSearchTerm(e.target.value);
-                            setPickerOpen(true);
-                            if (pickedProductId) setPickedProductId("");
-                          }}
-                          onFocus={() => setPickerOpen(true)}
-                          className="h-9 pl-9 text-sm text-black"
-                        />
-                      </div>
-                    </PopoverAnchor>
-                    <PopoverContent
-                      align="start"
-                      sideOffset={4}
-                      className="p-0 z-[100] w-[var(--radix-popover-trigger-width)] max-h-72 overflow-y-auto"
-                      onOpenAutoFocus={(e) => e.preventDefault()}
-                      onCloseAutoFocus={(e) => e.preventDefault()}
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-sm text-black">Batch / lot (optional)</Label>
+                <Input
+                  placeholder="Lot number"
+                  value={batchNo}
+                  onChange={(e) => setBatchNo(e.target.value)}
+                  className="h-9 text-sm text-black"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-sm text-black">Expiry (optional)</Label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <Button
+                      variant="outline"
+                      className="h-9 w-full justify-start text-left text-sm font-normal text-black"
                     >
-                      {filteredProducts.length > 0 ? (
-                        filteredProducts.map((p) => (
-                          <button
-                            key={p.id}
-                            type="button"
-                            className="w-full px-3 py-2 text-left hover:bg-gray-50 border-b last:border-none border-gray-100"
-                            onMouseDown={(e) => e.preventDefault()}
-                            onClick={() => {
-                              setPickedProductId(p.id);
-                              setSearchTerm(p.name);
-                              setPickerOpen(false);
-                            }}
-                          >
-                            <span className="block text-sm text-black truncate">
-                              {p.name}
-                            </span>
-                            <span className="block text-xs text-gray-500">
-                              SKU: {p.sku || "N/A"}
-                            </span>
-                          </button>
-                        ))
-                      ) : (
-                        <div className="p-3 text-center text-sm text-gray-500">
-                          No products found
-                        </div>
+                      <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                      {expiryDate ? format(expiryDate, "PPP") : (
+                        <span className="text-gray-500">None</span>
                       )}
-                    </PopoverContent>
-                  </Popover>
-                </div>
-                <div className="space-y-1.5">
-                  <div className="flex items-baseline justify-between gap-2">
-                    <Label className="text-sm text-black">Qty</Label>
-                    {pickedProductId &&
-                      pickedAvailable !== null &&
-                      Number(pickedQty) > 0 && (
-                        <span className="text-xs text-gray-500">
-                          After:{" "}
-                          <span className="text-black font-medium">
-                            {pickedAvailable + Number(pickedQty)}
-                          </span>
-                        </span>
-                      )}
-                  </div>
-                  <Input
-                    type="number"
-                    min={0}
-                    placeholder="0"
-                    value={pickedQty}
-                    onChange={(e) => setPickedQty(e.target.value)}
-                    className="h-9 text-sm text-black"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Cost / unit (Rs)</Label>
-                  <Input
-                    type="number"
-                    min={0}
-                    placeholder="0"
-                    value={pickedCost}
-                    onChange={(e) => setPickedCost(e.target.value)}
-                    className="h-9 text-sm text-black"
-                  />
-                </div>
-                <Button onClick={onAddLine} size="sm" className="h-9 text-sm">
-                  Add to this bill
-                </Button>
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-1">
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Batch / lot (optional)</Label>
-                  <Input
-                    placeholder="Lot number"
-                    value={batchNo}
-                    onChange={(e) => setBatchNo(e.target.value)}
-                    className="h-9 text-sm text-black"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Expiry (optional)</Label>
-                  <Popover>
-                    <PopoverTrigger asChild>
-                      <Button
-                        variant="outline"
-                        className="h-9 w-full justify-start text-left text-sm font-normal text-black"
-                      >
-                        <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
-                        {expiryDate ? format(expiryDate, "PPP") : (
-                          <span className="text-gray-500">None</span>
-                        )}
-                      </Button>
-                    </PopoverTrigger>
-                    <PopoverContent className="w-auto p-0" align="start">
-                      <CalendarComponent
-                        mode="single"
-                        selected={expiryDate}
-                        onSelect={setExpiryDate}
-                      />
-                    </PopoverContent>
-                  </Popover>
-                </div>
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="single"
+                      selected={expiryDate}
+                      onSelect={setExpiryDate}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
             </div>
 
-            {/* Lines on this bill */}
-            <div>
-              <h3 className="text-sm font-medium text-black mb-1">Lines on this bill</h3>
-              <p className="text-xs text-gray-500 mb-2">
-                These lines are what will be saved with the supplier invoice — not the
-                Excel import above.
-              </p>
-              {formErrors.lines && (
-                <p className="text-xs text-red-600 mb-2">{formErrors.lines}</p>
-              )}
-              <div
-                className={`border rounded-md overflow-hidden ${formErrors.lines ? "border-red-500" : "border-gray-200"}`}
-              >
-                <Table>
-                  <TableHeader className="bg-gray-50">
-                    <TableRow className="border-gray-200">
-                      <TableHead className="px-4 py-3 text-sm font-medium text-black">
-                        Product
-                      </TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black">
-                        SKU
-                      </TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black text-right">
-                        Qty
-                      </TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black text-right">
-                        Cost
-                      </TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black">
-                        Batch
-                      </TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black">
-                        Expiry
-                      </TableHead>
-                      <TableHead className="py-3 text-sm font-medium text-black text-right">
-                        Total cost
-                      </TableHead>
-                      <TableHead className="px-4 py-3 w-[60px]" />
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {lines.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={8} className="py-10 text-center">
-                          <div className="flex flex-col items-center gap-2">
-                            <Box className="h-8 w-8 text-gray-300" />
-                            <p className="text-sm text-black">No lines yet</p>
-                            <p className="text-xs text-gray-500">
-                              Pick a product, enter quantity and cost, then click "Add
-                              to this bill".
-                            </p>
-                          </div>
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      lines.map((l) => (
-                        <TableRow
-                          key={l.productId}
-                          className="border-gray-100 hover:bg-gray-50"
-                        >
-                          <TableCell className="px-4 py-3">
-                            <div className="flex flex-col">
-                              <span className="text-sm text-black truncate max-w-[260px]">
-                                {l.productName}
-                              </span>
-                              {l.sku && (
-                                <span className="text-xs text-gray-500">
-                                  SKU: {l.sku}
-                                </span>
-                              )}
-                            </div>
-                          </TableCell>
-                          <TableCell className="py-3 text-sm text-gray-600">
-                            {l.sku || "—"}
-                          </TableCell>
-                          <TableCell className="py-3 text-right text-sm text-black">
-                            {l.quantity}
-                          </TableCell>
-                          <TableCell className="py-3 text-right text-sm text-black">
-                            Rs{" "}
-                            {l.costPrice.toLocaleString("en-US", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </TableCell>
-                          <TableCell className="py-3 text-sm text-gray-600">
-                            {batchNo || "—"}
-                          </TableCell>
-                          <TableCell className="py-3 text-sm text-gray-600">
-                            {expiryDate ? format(expiryDate, "PP") : "—"}
-                          </TableCell>
-                          <TableCell className="py-3 text-right text-sm text-black">
-                            Rs{" "}
-                            {(l.quantity * l.costPrice).toLocaleString("en-US", {
-                              minimumFractionDigits: 2,
-                              maximumFractionDigits: 2,
-                            })}
-                          </TableCell>
-                          <TableCell className="px-4 py-3 text-right">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="h-7 w-7 p-0 text-red-600"
-                              onClick={() => removeLine(l.productId)}
-                            >
-                              <Trash2 className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
-            </div>
+            <StockProductPicker
+              products={products}
+              categories={categories}
+              loading={productsLoading}
+              lines={pickerLines}
+              onLinesChange={onPickerLinesChange}
+              quantityLabel="Qty"
+              showUnitCost
+              unitCostLabel="Cost / unit (Rs)"
+              showCurrentQty
+              disabled={!warehouseBranchId}
+              getCurrentQty={(id) =>
+                warehouseBranchId ? (stockMap[id] ?? 0) : null
+              }
+              error={formErrors.lines}
+            />
           </div>
         </Card>
       </div>

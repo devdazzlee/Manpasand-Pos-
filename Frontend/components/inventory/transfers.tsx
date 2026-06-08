@@ -1,35 +1,22 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { 
-  Dialog, 
-  DialogContent, 
-  DialogHeader, 
-  DialogTitle, 
-  DialogTrigger,
-  DialogFooter,
-  DialogDescription
-} from "@/components/ui/dialog";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { cn } from "@/lib/utils";
 import {
-  Search,
   Plus,
-  Loader2,
   Truck,
   Printer,
   ArrowRight,
-  Package,
   CalendarIcon,
   History,
   CheckCircle2,
@@ -37,7 +24,6 @@ import {
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format } from "date-fns";
@@ -46,40 +32,57 @@ import { API_BASE } from "@/config/constants";
 import { toast } from "sonner";
 import { usePosData } from "@/hooks/use-pos-data";
 import { PageLoader } from "@/components/ui/page-loader";
+import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
+import { TransactionRecordCard } from "@/components/inventory/stock-ops/transaction-record-card";
+import {
+  StockProductPicker,
+  type StockLineItem,
+} from "@/components/inventory/stock-ops/stock-product-picker";
+import {
+  StockOperationDialog,
+  STOCK_DLG,
+} from "@/components/inventory/stock-ops/stock-operation-dialog";
+
+const DEFAULT_TRANSFER_FORM = {
+  fromBranchId: "",
+  toBranchId: "",
+  notes: "",
+  reason: "Stock Replenishment",
+  carrierName: "",
+  vehicleNo: "",
+  estimatedArrival: "",
+};
+
+function validateTransferLines(lines: StockLineItem[]): string | null {
+  if (lines.length === 0) return "Add at least one product";
+  for (const line of lines) {
+    const q = Number(line.quantity);
+    if (!Number.isFinite(q) || q <= 0) {
+      return `Quantity must be greater than 0 for ${line.productName}`;
+    }
+  }
+  return null;
+}
 
 export function Transfers() {
-  const { 
-    products, 
-    branches, 
-    productsLoading, 
-    branchesLoading,
+  const {
+    products,
+    branches,
+    categories,
+    productsLoading,
     fetchProducts,
-    fetchBranches
+    fetchBranches,
   } = usePosData();
 
   const [transfers, setTransfers] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [prodDropdownOpen, setProdDropdownOpen] = useState(false);
-  const productRef = useRef<HTMLDivElement>(null);
+  const [transferLines, setTransferLines] = useState<StockLineItem[]>([]);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [stocks, setStocks] = useState<Record<string, number>>({});
 
-  const [form, setForm] = useState({
-    productId: "",
-    fromBranchId: "",
-    toBranchId: "",
-    quantity: "",
-    notes: "",
-    // Advanced fields
-    reason: "Stock Replenishment",
-    carrierName: "",
-    vehicleNo: "",
-    estimatedArrival: "",
-  });
-
-  const [sourceStock, setSourceStock] = useState<number | null>(null);
-  const [stockLoading, setStockLoading] = useState(false);
+  const [form, setForm] = useState(DEFAULT_TRANSFER_FORM);
 
   // Fetch Transfers
   const fetchTransfers = useCallback(async () => {
@@ -96,103 +99,108 @@ export function Transfers() {
     }
   }, []);
 
+  const fetchStockLevels = useCallback(async () => {
+    try {
+      const res = await apiClient.get(`${API_BASE}/stock`, { params: { limit: 1000 } });
+      const stockList = res.data?.data || [];
+      const map: Record<string, number> = {};
+      stockList.forEach((s: { product_id: string; branch_id: string; current_quantity?: string | number }) => {
+        map[`${s.product_id}-${s.branch_id}`] = Number(s.current_quantity || 0);
+      });
+      setStocks(map);
+    } catch (e) {
+      console.error("Failed to fetch stock levels", e);
+    }
+  }, []);
+
+  const getStockQty = useCallback(
+    (productId: string) => {
+      if (!form.fromBranchId) return null;
+      return stocks[`${productId}-${form.fromBranchId}`] ?? 0;
+    },
+    [form.fromBranchId, stocks],
+  );
+
+  const resetTransferForm = useCallback(() => {
+    setForm(DEFAULT_TRANSFER_FORM);
+    setTransferLines([]);
+    setFormErrors({});
+  }, []);
+
   // Initial Sync
   useEffect(() => {
     fetchTransfers();
     fetchProducts();
     fetchBranches();
-  }, [fetchTransfers, fetchProducts, fetchBranches]);
-
-  // Fetch Stock in Source Branch
-  useEffect(() => {
-    if (form.productId && form.fromBranchId) {
-      const fetchCurrentStock = async () => {
-        setStockLoading(true);
-        try {
-          const res = await apiClient.get(`${API_BASE}/stock/product/${form.productId}/branch/${form.fromBranchId}`);
-          setSourceStock(res.data?.data?.current_quantity || 0);
-        } catch (e) {
-          setSourceStock(0);
-        } finally {
-          setStockLoading(false);
-        }
-      };
-      fetchCurrentStock();
-    } else {
-      setSourceStock(null);
-    }
-  }, [form.productId, form.fromBranchId]);
-
-  useEffect(() => {
-    if (!dialogOpen) {
-      setProdDropdownOpen(false);
-    }
-  }, [dialogOpen]);
-
-  const filteredProducts = useMemo(() => {
-    const term = searchTerm.toLowerCase();
-    if (!term) return products.slice(0, 50);
-    return products.filter(p => 
-      p.name.toLowerCase().includes(term) || 
-      (p.sku && p.sku.toLowerCase().includes(term))
-    ).slice(0, 50);
-  }, [products, searchTerm]);
-
-  const selectedProduct = useMemo(() => 
-    products.find(p => p.id === form.productId),
-    [products, form.productId]
-  );
+    fetchStockLevels();
+  }, [fetchTransfers, fetchProducts, fetchBranches, fetchStockLevels]);
 
   const handleSubmit = async () => {
-    const qty = Number(form.quantity);
-    if (!form.productId || !form.fromBranchId || !form.toBranchId || !qty || qty <= 0) {
-      toast.warning("Incomplete Data Transmission", {
-        description: "Please verify all required ledger fields are populated."
-      });
-      return;
+    const errors: Record<string, string> = {};
+    if (!form.fromBranchId) errors.fromBranchId = "Source branch is required";
+    if (!form.toBranchId) errors.toBranchId = "Destination branch is required";
+    if (form.fromBranchId && form.toBranchId && form.fromBranchId === form.toBranchId) {
+      errors.toBranchId = "Source and destination must be different";
     }
 
-    if (form.fromBranchId === form.toBranchId) {
-      toast.error("Invalid Destination", {
-        description: "Source and destination nodes cannot be identical."
-      });
-      return;
+    const lineErr = validateTransferLines(transferLines);
+    if (lineErr) errors.lines = lineErr;
+
+    if (!errors.lines && form.fromBranchId) {
+      for (const line of transferLines) {
+        const qty = Number(line.quantity);
+        const available = getStockQty(line.productId) ?? 0;
+        if (qty > available) {
+          errors.lines = `Insufficient stock for ${line.productName}. Available: ${available}`;
+          break;
+        }
+      }
     }
 
-    if (sourceStock !== null && qty > sourceStock) {
-      toast.error("Insufficient Telemetry", {
-        description: `Cannot transfer ${qty} units. Only ${sourceStock} available at source.`
-      });
+    if (Object.keys(errors).length > 0) {
+      setFormErrors(errors);
       return;
     }
+    setFormErrors({});
 
     setSubmitting(true);
+    let ok = 0;
+    let fail = 0;
+    let lastError: string | null = null;
+
     try {
-      await apiClient.post(`${API_BASE}/transfers`, {
-        productId: form.productId,
-        fromBranchId: form.fromBranchId,
-        toBranchId: form.toBranchId,
-        quantity: qty,
-        notes: form.notes || undefined,
-        reason: form.reason || undefined,
-        carrierName: form.carrierName || undefined,
-        vehicleNo: form.vehicleNo || undefined,
-        estimatedArrival: form.estimatedArrival || undefined,
-      });
-      
-      toast.success("Transfer Chain Initialized", {
-        description: "Inventory movement has been successfully recorded."
-      });
-      
-      setDialogOpen(false);
-      setForm({ 
-        productId: "", fromBranchId: "", toBranchId: "", quantity: "", notes: "", 
-        reason: "Stock Replenishment", carrierName: "", vehicleNo: "", estimatedArrival: "" 
-      });
-      setSearchTerm("");
-      fetchTransfers();
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message || "Execution Error: Synchronizer Failed");
+      for (const line of transferLines) {
+        try {
+          await apiClient.post(`${API_BASE}/transfers`, {
+            productId: line.productId,
+            fromBranchId: form.fromBranchId,
+            toBranchId: form.toBranchId,
+            quantity: Number(line.quantity),
+            notes: form.notes || undefined,
+            reason: form.reason || undefined,
+            carrierName: form.carrierName || undefined,
+            vehicleNo: form.vehicleNo || undefined,
+            estimatedArrival: form.estimatedArrival || undefined,
+          });
+          ok++;
+        } catch (e: any) {
+          fail++;
+          lastError = e?.response?.data?.message || "Failed to create transfer";
+        }
+      }
+
+      if (ok > 0) {
+        toast.success(`Created ${ok} transfer${ok === 1 ? "" : "s"}`, {
+          description: "Inventory movement has been recorded.",
+        });
+        setDialogOpen(false);
+        resetTransferForm();
+        fetchTransfers();
+        fetchStockLevels();
+      }
+      if (fail > 0) {
+        toast.error(lastError || `Failed to create ${fail} transfer${fail === 1 ? "" : "s"}`);
+      }
     } finally {
       setSubmitting(false);
     }
@@ -311,224 +319,210 @@ export function Transfers() {
           </p>
         </div>
 
-        <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm" className="text-sm">
-              <Plus className="h-4 w-4 mr-2" /> New Transfer
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl overflow-visible">
-            <DialogHeader>
-              <DialogTitle className="text-lg font-semibold text-black">New Transfer</DialogTitle>
-              <DialogDescription className="text-sm text-gray-600">
-                Move stock between locations.
-              </DialogDescription>
-            </DialogHeader>
+        <Button size="sm" className="text-sm" onClick={() => setDialogOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" /> New Transfer
+        </Button>
 
-            <div
-              className="space-y-1.5 pb-1"
-              ref={productRef}
-              onBlur={(e) => {
-                if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-                  setProdDropdownOpen(false);
-                }
-              }}
-            >
-              <Label className="text-sm text-black">Product</Label>
-              <div className="relative z-[60]">
-                <Search className="absolute left-3 top-1/2 z-10 -translate-y-1/2 h-4 w-4 text-gray-400 pointer-events-none" />
-                <Input
-                  placeholder="Search product by name or SKU..."
-                  value={searchTerm}
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setProdDropdownOpen(true);
-                  }}
-                  onFocus={() => setProdDropdownOpen(true)}
-                  className={cn(
-                    "h-9 pl-9 text-sm text-black bg-background",
-                    "focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-0",
-                    prodDropdownOpen && "rounded-b-none border-b-0",
-                  )}
-                />
-                {prodDropdownOpen && (
-                  <div
-                    role="listbox"
-                    className="absolute left-0 right-0 top-full z-10 max-h-60 overflow-y-auto overscroll-contain rounded-b-md border border-t-0 border-input bg-white shadow-lg"
-                    onWheel={(e) => e.stopPropagation()}
-                    onTouchMove={(e) => e.stopPropagation()}
-                  >
-                    {filteredProducts.length > 0 ? (
-                      filteredProducts.map((p) => (
-                        <button
-                          key={p.id}
-                          type="button"
-                          role="option"
-                          className="w-full px-3 py-2 text-left hover:bg-gray-50 border-b last:border-none border-gray-100"
-                          onMouseDown={(e) => e.preventDefault()}
-                          onClick={() => {
-                            setForm({ ...form, productId: p.id });
-                            setSearchTerm(p.name);
-                            setProdDropdownOpen(false);
-                          }}
-                        >
-                          <span className="block text-sm text-black truncate">{p.name}</span>
-                          <span className="block text-xs text-gray-500">SKU: {p.sku || "N/A"}</span>
-                        </button>
-                      ))
-                    ) : (
-                      <div className="p-3 text-center text-sm text-gray-500">
-                        No products found
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-4 max-h-[min(52vh,420px)] overflow-y-auto overflow-x-hidden pr-1 pt-2">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">From Branch</Label>
-                  <Select value={form.fromBranchId} onValueChange={(v) => setForm({ ...form, fromBranchId: v })}>
-                    <SelectTrigger className="h-9 text-sm text-black">
-                      <SelectValue placeholder="Source" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {branches.map((b) => (
-                        <SelectItem key={b.id} value={b.id} className="text-sm">
-                          {b.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">To Branch</Label>
-                  <Select value={form.toBranchId} onValueChange={(v) => setForm({ ...form, toBranchId: v })}>
-                    <SelectTrigger className="h-9 text-sm text-black">
-                      <SelectValue placeholder="Target" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {branches.map((b) => (
-                        <SelectItem
-                          key={b.id}
-                          value={b.id}
-                          disabled={b.id === form.fromBranchId}
-                          className="text-sm"
-                        >
-                          {b.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Quantity</Label>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={form.quantity}
-                    onChange={(e) => setForm({ ...form, quantity: e.target.value })}
-                    className="h-9 text-sm text-black"
-                  />
-                  {sourceStock !== null && (
-                    <p className="text-xs text-gray-500">Available: {sourceStock}</p>
-                  )}
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Reason</Label>
-                  <Select value={form.reason} onValueChange={(v) => setForm({ ...form, reason: v })}>
-                    <SelectTrigger className="h-9 text-sm text-black">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="Stock Replenishment" className="text-sm">Stock Replenishment</SelectItem>
-                      <SelectItem value="Branch Support" className="text-sm">Branch Support</SelectItem>
-                      <SelectItem value="Damage Return" className="text-sm">Damage Return</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Carrier</Label>
-                  <Input
-                    placeholder="Courier name"
-                    value={form.carrierName}
-                    onChange={(e) => setForm({ ...form, carrierName: e.target.value })}
-                    className="h-9 text-sm text-black"
-                  />
-                </div>
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Vehicle</Label>
-                  <Input
-                    placeholder="Plate #"
-                    value={form.vehicleNo}
-                    onChange={(e) => setForm({ ...form, vehicleNo: e.target.value })}
-                    className="h-9 text-sm text-black"
-                  />
-                </div>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-sm text-black">Estimated Arrival</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      variant="outline"
-                      className="h-9 w-full justify-start text-left text-sm font-normal text-black"
+        <StockOperationDialog
+          open={dialogOpen}
+          onOpenChange={(open) => {
+            setDialogOpen(open);
+            if (!open) resetTransferForm();
+          }}
+          title="New transfer"
+          description="Select multiple products and move stock between branches in one go."
+          onSubmit={handleSubmit}
+          submitting={submitting}
+          submitLabel={
+            transferLines.length > 0
+              ? `Create ${transferLines.length} transfer${transferLines.length === 1 ? "" : "s"}`
+              : "Create transfer"
+          }
+          footerHint={
+            transferLines.length > 0
+              ? `${transferLines.length} product${transferLines.length === 1 ? "" : "s"} selected`
+              : null
+          }
+        >
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className={STOCK_DLG.label}>From branch</Label>
+              <Select
+                value={form.fromBranchId}
+                onValueChange={(v) => {
+                  setForm((f) => ({ ...f, fromBranchId: v }));
+                  setFormErrors((e) => ({ ...e, fromBranchId: "" }));
+                  setTransferLines((prev) =>
+                    prev.map((l) => ({
+                      ...l,
+                      currentQty: stocks[`${l.productId}-${v}`] ?? 0,
+                    })),
+                  );
+                }}
+              >
+                <SelectTrigger
+                  className={`h-9 text-sm text-black ${formErrors.fromBranchId ? "border-red-400" : "border-gray-200"}`}
+                >
+                  <SelectValue placeholder="Source branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem
+                      key={b.id}
+                      value={b.id}
+                      disabled={b.id === form.toBranchId}
+                      className="text-sm"
                     >
-                      <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
-                      {arrivalDate ? (
-                        format(arrivalDate, "PPP")
-                      ) : (
-                        <span className="text-gray-500">Pick a date</span>
-                      )}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <CalendarComponent
-                      mode="single"
-                      selected={arrivalDate}
-                      onSelect={(d) =>
-                        setForm({
-                          ...form,
-                          estimatedArrival: d ? d.toISOString() : "",
-                        })
-                      }
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label className="text-sm text-black">Notes</Label>
-                <Textarea
-                  placeholder="Optional remarks..."
-                  value={form.notes}
-                  onChange={(e) => setForm({ ...form, notes: e.target.value })}
-                  className="text-sm text-black min-h-[60px] resize-none"
-                />
-              </div>
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {formErrors.fromBranchId && (
+                <p className="text-xs text-red-500">{formErrors.fromBranchId}</p>
+              )}
             </div>
+            <div className="space-y-2">
+              <Label className={STOCK_DLG.label}>To branch</Label>
+              <Select
+                value={form.toBranchId}
+                onValueChange={(v) => {
+                  setForm((f) => ({ ...f, toBranchId: v }));
+                  setFormErrors((e) => ({ ...e, toBranchId: "" }));
+                }}
+              >
+                <SelectTrigger
+                  className={`h-9 text-sm text-black ${formErrors.toBranchId ? "border-red-400" : "border-gray-200"}`}
+                >
+                  <SelectValue placeholder="Destination branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem
+                      key={b.id}
+                      value={b.id}
+                      disabled={b.id === form.fromBranchId}
+                      className="text-sm"
+                    >
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {formErrors.toBranchId && (
+                <p className="text-xs text-red-500">{formErrors.toBranchId}</p>
+              )}
+            </div>
+          </div>
 
-            <DialogFooter className="pt-2">
-              <Button variant="outline" size="sm" onClick={() => setDialogOpen(false)} className="text-sm text-black">
-                Cancel
-              </Button>
-              <Button onClick={handleSubmit} disabled={submitting} size="sm" className="text-sm">
-                {submitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Package className="h-4 w-4 mr-2" />}
-                Create Transfer
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className={STOCK_DLG.label}>Reason</Label>
+              <Select
+                value={form.reason}
+                onValueChange={(v) => setForm((f) => ({ ...f, reason: v }))}
+              >
+                <SelectTrigger className="h-9 text-sm text-black">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Stock Replenishment" className="text-sm">
+                    Stock Replenishment
+                  </SelectItem>
+                  <SelectItem value="Branch Support" className="text-sm">
+                    Branch Support
+                  </SelectItem>
+                  <SelectItem value="Damage Return" className="text-sm">
+                    Damage Return
+                  </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className={STOCK_DLG.label}>Estimated arrival</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-9 w-full justify-start text-left text-sm font-normal text-black"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                    {arrivalDate ? (
+                      format(arrivalDate, "PPP")
+                    ) : (
+                      <span className="text-gray-500">Pick a date</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={arrivalDate}
+                    onSelect={(d) =>
+                      setForm((f) => ({
+                        ...f,
+                        estimatedArrival: d ? d.toISOString() : "",
+                      }))
+                    }
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className={STOCK_DLG.label}>Carrier</Label>
+              <Input
+                placeholder="Courier name"
+                value={form.carrierName}
+                onChange={(e) => setForm((f) => ({ ...f, carrierName: e.target.value }))}
+                className="h-9 text-sm text-black"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className={STOCK_DLG.label}>Vehicle</Label>
+              <Input
+                placeholder="Plate number"
+                value={form.vehicleNo}
+                onChange={(e) => setForm((f) => ({ ...f, vehicleNo: e.target.value }))}
+                className="h-9 text-sm text-black"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>Notes</Label>
+            <Textarea
+              placeholder="Optional remarks..."
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              className="text-sm text-black min-h-[60px] resize-none"
+            />
+          </div>
+
+          <StockProductPicker
+            products={products}
+            categories={categories}
+            loading={productsLoading}
+            lines={transferLines}
+            onLinesChange={(next) => {
+              setTransferLines(
+                next.map((l) => ({
+                  ...l,
+                  currentQty: getStockQty(l.productId),
+                })),
+              );
+              setFormErrors((e) => ({ ...e, lines: "" }));
+            }}
+            quantityLabel="Qty to transfer"
+            showCurrentQty
+            getCurrentQty={getStockQty}
+            disabled={!form.fromBranchId}
+            error={formErrors.lines}
+          />
+        </StockOperationDialog>
       </div>
 
       {/* KPI cards */}
@@ -579,130 +573,74 @@ export function Transfers() {
         </Card>
       </div>
 
-      {/* Transfers table */}
       <Card className="border border-gray-200 overflow-hidden">
         <CardHeader className="px-6 py-4 border-b border-gray-200">
           <CardTitle className="text-base font-semibold text-black">Transfer History</CardTitle>
         </CardHeader>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader className="bg-gray-50">
-              <TableRow className="border-gray-200 hover:bg-transparent">
-                <TableHead className="px-6 py-4 text-sm font-medium text-black">Date</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Reference</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Product</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">From → To</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Details</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black text-center">Status</TableHead>
-                <TableHead className="px-6 py-4 text-sm font-medium text-black text-right">Actions</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {transfers.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="h-48 text-center">
-                    <div className="flex flex-col items-center gap-2">
-                      <History className="h-10 w-10 text-gray-300" />
-                      <p className="text-sm text-black">No transfers yet</p>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                transfers.map((t) => (
-                  <TableRow key={t.id} className="border-gray-100 hover:bg-gray-50">
-                    <TableCell className="px-6 py-5 align-top">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-sm text-black">
-                          {new Date(t.transfer_date).toLocaleDateString()}
-                        </span>
-                        <span className="text-xs text-gray-500">
-                          {new Date(t.transfer_date).toLocaleTimeString([], {
-                            hour: "2-digit",
-                            minute: "2-digit",
-                          })}
-                        </span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-5 align-top">
-                      <span className="text-sm text-black font-mono">
-                        {t.reference_no || t.id.slice(0, 8)}
-                      </span>
-                    </TableCell>
-                    <TableCell className="py-5 align-top">
-                      <div className="flex flex-col gap-1">
-                        <span className="text-sm text-black truncate max-w-[200px]">
-                          {t.product?.name}
-                        </span>
-                        <span className="text-xs text-gray-500">Qty: {t.quantity}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-5 align-top">
-                      <div className="flex items-center gap-2 text-sm text-black">
-                        <span>{t.from_branch?.name}</span>
-                        <ArrowRight className="h-3.5 w-3.5 text-gray-400" />
-                        <span>{t.to_branch?.name}</span>
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-5 align-top">
-                      <div className="flex flex-col gap-1 text-sm">
-                        {t.carrier_name && (
-                          <span className="text-black">{t.carrier_name}</span>
-                        )}
-                        {t.vehicle_no && (
-                          <span className="text-gray-500 text-xs">{t.vehicle_no}</span>
-                        )}
-                        {t.reason && (
-                          <span className="text-gray-500 text-xs">{t.reason}</span>
-                        )}
-                      </div>
-                    </TableCell>
-                    <TableCell className="py-5 text-center align-top">
-                      <Badge
-                        variant="outline"
-                        className={`text-xs ${getStatusStyle(t.status)}`}
-                      >
-                        {t.status}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="px-6 py-5 text-right align-top">
-                      <div className="flex justify-end gap-2">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 w-8 p-0 text-black"
-                          onClick={() => printSlip(t)}
-                          title="Print slip"
-                        >
-                          <Printer className="h-3.5 w-3.5" />
-                        </Button>
-                        {t.status === "PENDING" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 text-xs text-black"
-                            onClick={() => updateStatus(t.id, "DISPATCHED")}
-                          >
-                            Dispatch
-                          </Button>
-                        )}
-                        {t.status === "DISPATCHED" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 text-xs text-black"
-                            onClick={() => updateStatus(t.id, "RECEIVED")}
-                          >
-                            Receive
-                          </Button>
-                        )}
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </div>
+        <InventoryCardGrid
+          empty={transfers.length === 0}
+          emptyTitle="No transfers yet"
+          emptyDescription="Create a transfer to move stock between branches."
+        >
+          {transfers.map((t) => (
+            <TransactionRecordCard
+              key={t.id}
+              date={`${new Date(t.transfer_date).toLocaleDateString()} · ${new Date(t.transfer_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+              title={t.product?.name || "Product"}
+              subtitle={`Ref: ${t.reference_no || t.id.slice(0, 8)} · Qty ${t.quantity}`}
+              meta={
+                <span className="inline-flex items-center gap-1.5">
+                  {t.from_branch?.name}
+                  <ArrowRight className="h-3 w-3" />
+                  {t.to_branch?.name}
+                </span>
+              }
+              badge={
+                <Badge variant="outline" className={`text-xs ${getStatusStyle(t.status)}`}>
+                  {t.status}
+                </Badge>
+              }
+              highlights={[
+                { label: "Carrier", value: t.carrier_name || "—" },
+                { label: "Vehicle", value: t.vehicle_no || "—" },
+              ]}
+              footer={t.reason}
+              actions={
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 w-8 p-0"
+                    onClick={() => printSlip(t)}
+                    title="Print slip"
+                  >
+                    <Printer className="h-3.5 w-3.5" />
+                  </Button>
+                  {t.status === "PENDING" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => updateStatus(t.id, "DISPATCHED")}
+                    >
+                      Dispatch
+                    </Button>
+                  )}
+                  {t.status === "DISPATCHED" && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="h-8 text-xs"
+                      onClick={() => updateStatus(t.id, "RECEIVED")}
+                    >
+                      Receive
+                    </Button>
+                  )}
+                </div>
+              }
+            />
+          ))}
+        </InventoryCardGrid>
       </Card>
     </div>
   );

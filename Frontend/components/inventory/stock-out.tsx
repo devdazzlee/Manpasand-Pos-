@@ -50,6 +50,12 @@ import { StockModuleToolbar } from "@/components/inventory/stock-ops/stock-modul
 import { useInventoryDashboard } from "@/components/inventory/stock-ops/use-inventory-dashboard";
 import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
 import { formatMoney } from "@/components/inventory/stock-ops/export-utils";
+import {
+  StockProductPicker,
+  type StockLineItem,
+} from "@/components/inventory/stock-ops/stock-product-picker";
+import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
+import { TransactionRecordCard } from "@/components/inventory/stock-ops/transaction-record-card";
 
 type Reason = "SALE" | "DAMAGE" | "LOSS" | "EXPIRED" | "RETURN";
 
@@ -95,7 +101,14 @@ interface MovementRow {
 
 export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const { stats: dashboardStats, loading: dashboardLoading } = useInventoryDashboard();
-  const { products, branches, fetchProducts, fetchBranches } = usePosData();
+  const {
+    products,
+    branches,
+    categories,
+    productsLoading,
+    fetchProducts,
+    fetchBranches,
+  } = usePosData();
 
   const [tab, setTab] = useState<"history" | "new">("history");
 
@@ -167,109 +180,60 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
       return next;
     });
 
-  // Add-a-line input row
-  const [searchTerm, setSearchTerm] = useState("");
-  const [pickerOpen, setPickerOpen] = useState(false);
-  const [pickedProductId, setPickedProductId] = useState<string>("");
-  const [pickedQty, setPickedQty] = useState<string>("");
-  const [pickedRate, setPickedRate] = useState<string>("");
-  const [pickedAvailable, setPickedAvailable] = useState<number | null>(null);
-  const pickerRef = useRef<HTMLDivElement>(null);
+  const [stockMap, setStockMap] = useState<Record<string, number>>({});
 
-  const filteredProducts = useMemo(() => {
-    const term = searchTerm.toLowerCase().trim();
-    if (!term) return products.slice(0, 50);
-    return products
-      .filter(
-        (p: any) =>
-          p.name.toLowerCase().includes(term) ||
-          (p.sku && p.sku.toLowerCase().includes(term)),
-      )
-      .slice(0, 50);
-  }, [products, searchTerm]);
-
-  const pickedProduct = useMemo(
-    () => products.find((p: any) => p.id === pickedProductId),
-    [products, pickedProductId],
-  );
-
-  // Look up available stock for picked product + selected branch.
   useEffect(() => {
-    if (!pickedProductId || !branchId) {
-      setPickedAvailable(null);
+    if (!branchId) {
+      setStockMap({});
       return;
     }
     let cancelled = false;
     (async () => {
       try {
-        const res = await apiClient.get(
-          `${API_BASE}/stock/product/${pickedProductId}/branch/${branchId}`,
-        );
-        if (!cancelled) {
-          setPickedAvailable(Number(res.data?.data?.current_quantity ?? 0));
-        }
+        const res = await apiClient.get(`${API_BASE}/stock`, {
+          params: { branchId, limit: 5000 },
+        });
+        if (cancelled) return;
+        const map: Record<string, number> = {};
+        (res.data?.data || []).forEach((s: any) => {
+          const pid = s.product_id || s.product?.id;
+          if (pid) map[pid] = Number(s.current_quantity || 0);
+        });
+        setStockMap(map);
       } catch {
-        if (!cancelled) setPickedAvailable(0);
+        if (!cancelled) setStockMap({});
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [pickedProductId, branchId]);
+  }, [branchId]);
 
-  const resetAddLine = () => {
-    setPickedProductId("");
-    setPickedQty("");
-    setPickedRate("");
-    setPickedAvailable(null);
-    setSearchTerm("");
-  };
+  const pickerLines: StockLineItem[] = useMemo(
+    () =>
+      lines.map((l) => ({
+        productId: l.productId,
+        productName: l.productName,
+        sku: l.sku,
+        quantity: l.quantity,
+        unitCost: l.rate,
+        currentQty: l.available,
+      })),
+    [lines],
+  );
 
-  const addLine = () => {
-    if (!branchId) {
-      toast.error("Pick a branch first");
-      return;
-    }
-    if (!pickedProductId) {
-      toast.error("Select a product");
-      return;
-    }
-    const q = Number(pickedQty);
-    const r = Number(pickedRate || 0);
-    if (!Number.isFinite(q) || q <= 0) {
-      toast.error("Quantity must be greater than 0");
-      return;
-    }
-    if (reason === "SALE" && pickedAvailable != null && q > pickedAvailable) {
-      toast.error(
-        `Only ${pickedAvailable} available for ${pickedProduct?.name || "product"}`,
-      );
-      return;
-    }
-    // Merge with an existing line for the same product instead of duplicating.
-    setLines((prev) => {
-      const existing = prev.find((l) => l.productId === pickedProductId);
-      if (existing) {
-        return prev.map((l) =>
-          l.productId === pickedProductId
-            ? { ...l, quantity: l.quantity + q, rate: r || l.rate }
-            : l,
-        );
-      }
-      return [
-        ...prev,
-        {
-          productId: pickedProductId,
-          productName: pickedProduct?.name || "Product",
-          sku: (pickedProduct as any)?.sku,
-          quantity: q,
-          rate: r,
-          available: pickedAvailable ?? 0,
-        },
-      ];
-    });
+  const onPickerLinesChange = (next: StockLineItem[]) => {
+    setLines(
+      next.map((l) => ({
+        productId: l.productId,
+        productName: l.productName,
+        sku: l.sku,
+        quantity: Number(l.quantity) || 0,
+        rate: Number(l.unitCost) || 0,
+        available: l.currentQty ?? stockMap[l.productId] ?? 0,
+      })),
+    );
     clearError("lines");
-    resetAddLine();
   };
 
   const removeLine = (productId: string) => {
@@ -452,7 +416,6 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
       setNotes("");
       setDocumentRef("");
       setCustomerId("");
-      resetAddLine();
       setTab("history");
       setHistoryPage(1);
       fetchHistory(1);
@@ -704,177 +667,29 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                   </div>
                 </div>
 
-                {/* Add a line */}
-                <div className="border border-gray-200 rounded-md p-4 space-y-3">
-                  <h3 className="text-sm font-medium text-black">Add a line</h3>
-                  <div className="grid grid-cols-1 md:grid-cols-[1fr_120px_120px_auto] gap-3 items-end">
-                    <div className="space-y-1.5" ref={pickerRef}>
-                      {/* Label row carries the "Available: N" hint inline
-                          so it doesn't push the input down and break grid
-                          alignment with the Quantity / Rate columns. */}
-                      <div className="flex items-baseline justify-between gap-2">
-                        <Label className="text-sm text-black">Product</Label>
-                        {pickedProductId && pickedAvailable !== null && (
-                          <span className="text-xs text-gray-500">
-                            Available:{" "}
-                            <span className="text-black font-medium">
-                              {pickedAvailable}
-                            </span>
-                          </span>
-                        )}
-                      </div>
-                      <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-                        <PopoverAnchor asChild>
-                          <div className="relative">
-                            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                            <Input
-                              placeholder="Search product..."
-                              value={
-                                pickedProductId && !pickerOpen
-                                  ? pickedProduct?.name || ""
-                                  : searchTerm
-                              }
-                              onChange={(e) => {
-                                setSearchTerm(e.target.value);
-                                setPickerOpen(true);
-                                if (pickedProductId) {
-                                  setPickedProductId("");
-                                  setPickedAvailable(null);
-                                }
-                              }}
-                              onFocus={() => setPickerOpen(true)}
-                              className="h-9 pl-9 text-sm text-black"
-                            />
-                          </div>
-                        </PopoverAnchor>
-                        <PopoverContent
-                          align="start"
-                          sideOffset={4}
-                          className="p-0 z-[100] w-[var(--radix-popover-trigger-width)] max-h-72 overflow-y-auto"
-                          onOpenAutoFocus={(e) => e.preventDefault()}
-                          onCloseAutoFocus={(e) => e.preventDefault()}
-                        >
-                          {filteredProducts.length > 0 ? (
-                            filteredProducts.map((p: any) => (
-                              <button
-                                key={p.id}
-                                type="button"
-                                className="w-full px-3 py-2 text-left hover:bg-gray-50 border-b last:border-none border-gray-100"
-                                onMouseDown={(e) => e.preventDefault()}
-                                onClick={() => {
-                                  setPickedProductId(p.id);
-                                  setSearchTerm(p.name);
-                                  setPickerOpen(false);
-                                }}
-                              >
-                                <span className="block text-sm text-black truncate">{p.name}</span>
-                                <span className="block text-xs text-gray-500">SKU: {p.sku || "N/A"}</span>
-                              </button>
-                            ))
-                          ) : (
-                            <div className="p-3 text-center text-sm text-gray-500">
-                              No products found
-                            </div>
-                          )}
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-sm text-black">Quantity</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        placeholder="0"
-                        value={pickedQty}
-                        onChange={(e) => setPickedQty(e.target.value)}
-                        className="h-9 text-sm text-black"
-                      />
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-sm text-black">Rate (Rs)</Label>
-                      <Input
-                        type="number"
-                        min={0}
-                        placeholder="0"
-                        value={pickedRate}
-                        onChange={(e) => setPickedRate(e.target.value)}
-                        className="h-9 text-sm text-black"
-                      />
-                    </div>
-                    <Button onClick={addLine} size="sm" className="h-9 text-sm">
-                      <Plus className="h-4 w-4 mr-1" /> Add to draft
-                    </Button>
+                {!branchId && (
+                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-center gap-1.5">
+                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                    Select a branch above before adding products.
                   </div>
-                </div>
+                )}
 
-                {/* Draft lines table */}
-                <div>
-                  <h3 className="text-sm font-medium text-black mb-2">
-                    Draft lines ({lines.length})
-                  </h3>
-                  {formErrors.lines && (
-                    <p className="text-xs text-red-600 mb-2">{formErrors.lines}</p>
-                  )}
-                  <div
-                    className={`border rounded-md overflow-hidden ${formErrors.lines ? "border-red-500" : "border-gray-200"}`}
-                  >
-                    <Table>
-                      <TableHeader className="bg-gray-50">
-                        <TableRow className="border-gray-200">
-                          <TableHead className="px-4 py-3 text-sm font-medium text-black">Item</TableHead>
-                          <TableHead className="py-3 text-sm font-medium text-black text-right">Available</TableHead>
-                          <TableHead className="py-3 text-sm font-medium text-black text-right">Qty</TableHead>
-                          <TableHead className="py-3 text-sm font-medium text-black text-right">Cost impact</TableHead>
-                          <TableHead className="px-4 py-3 text-sm font-medium text-black text-right w-[60px]" />
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {lines.length === 0 ? (
-                          <TableRow>
-                            <TableCell colSpan={5} className="py-10 text-center text-sm text-gray-500">
-                              Add lines manually or load an Excel file in step 1.
-                            </TableCell>
-                          </TableRow>
-                        ) : (
-                          lines.map((l) => (
-                            <TableRow key={l.productId} className="border-gray-100 hover:bg-gray-50">
-                              <TableCell className="px-4 py-3">
-                                <div className="flex flex-col">
-                                  <span className="text-sm text-black truncate max-w-[260px]">{l.productName}</span>
-                                  {l.sku && (
-                                    <span className="text-xs text-gray-500">SKU: {l.sku}</span>
-                                  )}
-                                </div>
-                              </TableCell>
-                              <TableCell className="py-3 text-right text-sm text-gray-700">
-                                {l.available}
-                              </TableCell>
-                              <TableCell className="py-3 text-right text-sm text-black">
-                                {l.quantity}
-                              </TableCell>
-                              <TableCell className="py-3 text-right text-sm text-black">
-                                Rs {(l.quantity * (l.rate || 0)).toLocaleString("en-US", {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
-                              </TableCell>
-                              <TableCell className="px-4 py-3 text-right">
-                                <Button
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 w-7 p-0 text-red-600"
-                                  onClick={() => removeLine(l.productId)}
-                                >
-                                  <Trash2 className="h-4 w-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))
-                        )}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </div>
+                <StockProductPicker
+                  products={products}
+                  categories={categories}
+                  loading={productsLoading}
+                  lines={pickerLines}
+                  onLinesChange={onPickerLinesChange}
+                  quantityLabel="Dispatch qty"
+                  showUnitCost
+                  unitCostLabel="Rate (Rs)"
+                  showCurrentQty
+                  disabled={!branchId}
+                  getCurrentQty={(id) =>
+                    branchId ? (stockMap[id] ?? 0) : null
+                  }
+                  error={formErrors.lines}
+                />
               </div>
             </Card>
           </div>
@@ -1106,88 +921,36 @@ function HistoryView({
         </div>
       </Card>
 
-      {/* Table */}
       <Card className="border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader className="bg-gray-50">
-              <TableRow className="border-gray-200">
-                <TableHead className="px-6 py-4 text-sm font-medium text-black">Date</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Product</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Branch</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black text-right">Qty</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Type</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Notes</TableHead>
-                <TableHead className="px-6 py-4 text-sm font-medium text-black">Operator</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {loading ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center text-sm text-gray-500">
-                    Loading...
-                  </TableCell>
-                </TableRow>
-              ) : rows.length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="py-12 text-center">
-                    <div className="flex flex-col items-center gap-2">
-                      <History className="h-10 w-10 text-gray-300" />
-                      <p className="text-sm text-black">No stock-out records yet</p>
-                    </div>
-                  </TableCell>
-                </TableRow>
-              ) : (
-                rows.map((r) => {
-                  const ts = new Date(r.created_at);
-                  const qty = Number(r.quantity_change);
-                  return (
-                    <TableRow key={r.id} className="border-gray-100 hover:bg-gray-50">
-                      <TableCell className="px-6 py-4 align-top">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-sm text-black">
-                            {ts.toLocaleDateString()}
-                          </span>
-                          <span className="text-xs text-gray-500">
-                            {ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
-                          </span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-4 align-top">
-                        <div className="flex flex-col gap-0.5">
-                          <span className="text-sm text-black truncate max-w-[260px]">
-                            {r.product?.name || "—"}
-                          </span>
-                          {r.product?.sku && (
-                            <span className="text-xs text-gray-500">SKU: {r.product.sku}</span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="py-4 align-top text-sm text-black">
-                        {r.branch?.name || "—"}
-                      </TableCell>
-                      <TableCell className="py-4 align-top text-right text-sm text-red-600">
-                        {qty}
-                      </TableCell>
-                      <TableCell className="py-4 align-top">
-                        <Badge variant="outline" className="text-xs text-black">
-                          {r.movement_type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="py-4 align-top text-sm text-gray-600 max-w-[260px] truncate">
-                        {r.notes || "—"}
-                      </TableCell>
-                      <TableCell className="px-6 py-4 align-top text-sm text-black">
-                        {r.user?.email || "—"}
-                      </TableCell>
-                    </TableRow>
-                  );
-                })
-              )}
-            </TableBody>
-          </Table>
-        </div>
-
+        <InventoryCardGrid
+          empty={!loading && rows.length === 0}
+          emptyTitle="No stock-out records yet"
+          emptyDescription="Dispatches will appear here after you save them."
+          loading={loading}
+        >
+          {rows.map((r) => {
+            const ts = new Date(r.created_at);
+            const qty = Number(r.quantity_change);
+            return (
+              <TransactionRecordCard
+                key={r.id}
+                date={`${ts.toLocaleDateString()} · ${ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                title={r.product?.name || "Product"}
+                subtitle={r.product?.sku ? `SKU: ${r.product.sku}` : undefined}
+                meta={r.branch?.name}
+                badge={
+                  <Badge variant="outline" className="text-xs">
+                    {r.movement_type}
+                  </Badge>
+                }
+                highlights={[
+                  { label: "Qty removed", value: qty, tone: "danger" },
+                ]}
+                footer={r.user?.email || r.notes || undefined}
+              />
+            );
+          })}
+        </InventoryCardGrid>
         {/* Pagination */}
         {total > 0 && (
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-gray-200">

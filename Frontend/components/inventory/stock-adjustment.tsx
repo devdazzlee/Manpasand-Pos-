@@ -1,10 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -13,7 +12,6 @@ import {
   Edit, 
   Loader2, 
   Plus, 
-  Search, 
   MapPin, 
   Package, 
   ClipboardCheck, 
@@ -26,8 +24,7 @@ import {
   CheckCircle2,
   AlertTriangle,
   Zap,
-  Info,
-  X
+  Info
 } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
@@ -35,16 +32,27 @@ import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { usePosData } from "@/hooks/use-pos-data";
 import { PageLoader } from "@/components/ui/page-loader";
+import {
+  StockProductPicker,
+  type StockLineItem,
+} from "@/components/inventory/stock-ops/stock-product-picker";
+import {
+  StockOperationDialog,
+  STOCK_DLG,
+} from "@/components/inventory/stock-ops/stock-operation-dialog";
+import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
+import { TransactionRecordCard } from "@/components/inventory/stock-ops/transaction-record-card";
 
 
 
 export function StockAdjustment() {
-  const { 
-    products, 
-    branches, 
-    productsLoading, 
+  const {
+    products,
+    categories,
+    branches,
+    productsLoading,
     fetchProducts,
-    fetchBranches
+    fetchBranches,
   } = usePosData();
 
   const [adjustments, setAdjustments] = useState<any[]>([]);
@@ -57,18 +65,12 @@ export function StockAdjustment() {
   const [totalAdjustments, setTotalAdjustments] = useState(0);
   const PAGE_SIZE = 20;
   
-  // Custom Search Dropdown States
-  const [searchTerm, setSearchTerm] = useState("");
-  const [productDropdownOpen, setProductDropdownOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+  const [adjustLines, setAdjustLines] = useState<StockLineItem[]>([]);
 
   const [form, setForm] = useState({
-    productId: "",
     branchId: "",
     adjustmentType: "RECONCILIATION" as any,
     adjustmentCategory: "CORRECTION" as any,
-    physicalCount: "",
-    changeQuantity: "",
     referenceNo: "",
     reason: "",
   });
@@ -121,95 +123,85 @@ export function StockAdjustment() {
     fetchAdjustments();
   }, [fetchAdjustments]);
 
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
-        setProductDropdownOpen(false);
-      }
-    };
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
-  const filteredProducts = useMemo(() => {
-    const term = searchTerm.toLowerCase();
-    if (!term) return products.slice(0, 50);
-    return products.filter(p => 
-      p.name.toLowerCase().includes(term) || 
-      (p.sku && p.sku.toLowerCase().includes(term))
-    ).slice(0, 50);
-  }, [products, searchTerm]);
-
-  const selectedProduct = useMemo(() => 
-    products.find(p => p.id === form.productId),
-    [products, form.productId]
+  const getStockQty = useCallback(
+    (productId: string) => {
+      if (!form.branchId) return null;
+      return stocks[`${productId}-${form.branchId}`] ?? 0;
+    },
+    [form.branchId, stocks],
   );
 
-  const systemQty = useMemo(() => {
-    if (form.productId && form.branchId) {
-      return stocks[`${form.productId}-${form.branchId}`] ?? 0;
-    }
-    return 0;
-  }, [form.productId, form.branchId, stocks]);
-
-  const difference = useMemo(() => {
-    if (form.adjustmentType === 'RECONCILIATION') {
-       if (form.physicalCount === "") return null;
-       return Number(form.physicalCount) - systemQty;
-    } else if (form.adjustmentType === 'ADDITION') {
-       return Number(form.changeQuantity || 0);
-    } else {
-       return -Math.abs(Number(form.changeQuantity || 0));
-    }
-  }, [form.adjustmentType, form.physicalCount, form.changeQuantity, systemQty]);
-
   const handleSubmit = async () => {
-    if (!form.productId || !form.branchId) {
-      toast({ title: "Validation Error", description: "Product and Branch are required", variant: "destructive" });
+    if (!form.branchId) {
+      toast.error("Branch is required");
+      return;
+    }
+    if (adjustLines.length === 0) {
+      toast.error("Add at least one product");
       return;
     }
 
-    const payload: any = {
-      productId: form.productId,
-      branchId: form.branchId,
-      systemQuantity: systemQty,
-      adjustmentType: form.adjustmentType,
-      adjustmentCategory: form.adjustmentCategory,
-      reason: form.reason || `${form.adjustmentType} via POS Portal`,
-      referenceNo: form.referenceNo,
-    };
-
-    if (form.adjustmentType === 'RECONCILIATION') {
-       if (form.physicalCount === "") {
-          toast({ title: "Missing Count", description: "Physical count is required for reconciliation", variant: "destructive" });
-          return;
-       }
-       payload.physicalCount = Number(form.physicalCount);
-    } else {
-       if (form.changeQuantity === "") {
-          toast({ title: "Missing Quantity", description: "Change quantity is required", variant: "destructive" });
-          return;
-       }
-       payload.changeQuantity = Number(form.changeQuantity);
+    for (const line of adjustLines) {
+      const qty = Number(line.quantity);
+      if (!Number.isFinite(qty)) {
+        toast.error(`Invalid quantity for ${line.productName}`);
+        return;
+      }
+      if (form.adjustmentType === "RECONCILIATION" && line.quantity === "") {
+        toast.error(`Physical count required for ${line.productName}`);
+        return;
+      }
+      if (form.adjustmentType !== "RECONCILIATION" && qty === 0) {
+        toast.error(`Change cannot be zero for ${line.productName}`);
+        return;
+      }
     }
 
     try {
       setSubmitting(true);
-      await apiClient.post(`${API_BASE}/stock-adjustments`, payload);
-      toast.success("Inventory record successfully synchronized.");
+      let ok = 0;
+      for (const line of adjustLines) {
+        const systemQty = getStockQty(line.productId) ?? 0;
+        const payload: any = {
+          productId: line.productId,
+          branchId: form.branchId,
+          systemQuantity: systemQty,
+          adjustmentType: form.adjustmentType,
+          adjustmentCategory: form.adjustmentCategory,
+          reason: form.reason || `${form.adjustmentType} via POS Portal`,
+          referenceNo: form.referenceNo,
+        };
+
+        if (form.adjustmentType === "RECONCILIATION") {
+          payload.physicalCount = Number(line.quantity);
+        } else if (form.adjustmentType === "ADDITION") {
+          payload.changeQuantity = Number(line.quantity);
+        } else {
+          payload.changeQuantity = -Math.abs(Number(line.quantity));
+        }
+
+        await apiClient.post(`${API_BASE}/stock-adjustments`, payload);
+        ok++;
+      }
+
+      toast.success(`Adjusted ${ok} product${ok === 1 ? "" : "s"} successfully.`);
       setDialogOpen(false);
       setForm({
-         productId: "", branchId: "", adjustmentType: "RECONCILIATION", 
-         adjustmentCategory: "CORRECTION", physicalCount: "", changeQuantity: "", 
-         referenceNo: "", reason: "" 
+        branchId: "",
+        adjustmentType: "RECONCILIATION",
+        adjustmentCategory: "CORRECTION",
+        referenceNo: "",
+        reason: "",
       });
-      setSearchTerm("");
-      // Jump back to page 1 so the newly-created adjustment is visible.
+      setAdjustLines([]);
       if (page !== 1) setPage(1);
       else fetchAdjustments(1);
       fetchStockLevels();
     } catch (e: any) {
-      const backendMessage = e?.response?.data?.message || e?.message || "Failed to execute stock adjustment";
+      const backendMessage =
+        e?.response?.data?.message ||
+        e?.message ||
+        "Failed to execute stock adjustment";
       toast.error(backendMessage);
     } finally {
       setSubmitting(false);
@@ -275,203 +267,151 @@ export function StockAdjustment() {
             <Download className="h-4 w-4 mr-2" /> Export CSV
           </Button>
 
-          <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm" className="text-sm">
-                <Plus className="h-4 w-4 mr-2" /> New Adjustment
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl">
-              <DialogHeader>
-                <DialogTitle className="text-lg font-semibold text-black">
-                  Inventory Correction Form
-                </DialogTitle>
-                <DialogDescription className="text-sm text-gray-600">
-                  Submit stock level adjustments and audit notes
-                </DialogDescription>
-              </DialogHeader>
+          <Button size="sm" className="text-sm" onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-2" /> New Adjustment
+          </Button>
 
-              <div className="space-y-4 max-h-[80vh] overflow-y-auto pr-1">
-                <div className="grid grid-cols-2 gap-4">
-                  {/* Product search */}
-                  <div className="space-y-1.5 relative" ref={dropdownRef}>
-                    <Label className="text-sm text-black">Product</Label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                      <Input
-                        placeholder="Search SKU or name..."
-                        className="h-9 pl-9 text-sm text-black"
-                        value={form.productId ? selectedProduct?.name : searchTerm}
-                        onFocus={() => {
-                          setProductDropdownOpen(true);
-                          if (form.productId) {
-                            setSearchTerm("");
-                            setForm((f) => ({ ...f, productId: "" }));
-                          }
-                        }}
-                        onChange={(e) => {
-                          setSearchTerm(e.target.value);
-                          setProductDropdownOpen(true);
-                        }}
-                      />
-                      {form.productId && (
-                        <button
-                          onClick={() => {
-                            setForm((f) => ({ ...f, productId: "" }));
-                            setSearchTerm("");
-                          }}
-                          className="absolute right-3 top-1/2 -translate-y-1/2"
-                        >
-                          <X className="h-4 w-4 text-gray-400" />
-                        </button>
-                      )}
-                    </div>
-
-                    {productDropdownOpen && (
-                      <div className="mt-1 max-h-56 overflow-y-auto rounded-md border border-gray-200 bg-white">
-                        {filteredProducts.length === 0 ? (
-                          <div className="p-3 text-center text-sm text-gray-500">
-                            No products found
-                          </div>
-                        ) : (
-                          filteredProducts.map((p) => (
-                            <button
-                              key={p.id}
-                              onClick={() => {
-                                setForm((f) => ({ ...f, productId: p.id }));
-                                setProductDropdownOpen(false);
-                                setSearchTerm(p.name);
-                              }}
-                              className="w-full px-3 py-2 text-left hover:bg-gray-50 border-b last:border-none border-gray-100"
-                            >
-                              <span className="block text-sm text-black truncate">{p.name}</span>
-                              <span className="block text-xs text-gray-500">SKU: {p.sku || "N/A"}</span>
-                            </button>
-                          ))
-                        )}
-                      </div>
-                    )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">Branch</Label>
-                    <Select value={form.branchId} onValueChange={(v) => setForm((f) => ({ ...f, branchId: v }))}>
-                      <SelectTrigger className="h-9 text-sm text-black">
-                        <SelectValue placeholder="Select branch" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {branches.map((b) => (
-                          <SelectItem key={b.id} value={b.id} className="text-sm">
-                            {b.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">Adjustment Type</Label>
-                    <Select value={form.adjustmentType} onValueChange={(v) => setForm((f) => ({ ...f, adjustmentType: v }))}>
-                      <SelectTrigger className="h-9 text-sm text-black">
-                        <SelectValue placeholder="Select type" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="RECONCILIATION">Reconciliation (Reset)</SelectItem>
-                        <SelectItem value="ADDITION">Addition (+)</SelectItem>
-                        <SelectItem value="SUBTRACTION">Subtraction (-)</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">Category</Label>
-                    <Select value={form.adjustmentCategory} onValueChange={(v) => setForm((f) => ({ ...f, adjustmentCategory: v }))}>
-                      <SelectTrigger className="h-9 text-sm text-black">
-                        <SelectValue placeholder="Select category" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="CORRECTION">Standard correction</SelectItem>
-                        <SelectItem value="DAMAGE">Damaged / broken</SelectItem>
-                        <SelectItem value="EXPIRED">Expired stock</SelectItem>
-                        <SelectItem value="THEFT">Missing / theft</SelectItem>
-                        <SelectItem value="RETURN_TO_SUPPLIER">Return to supplier</SelectItem>
-                        <SelectItem value="ADMINISTRATIVE">Administrative</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-
-                <div className="p-4 border border-gray-200 rounded-md grid grid-cols-2 gap-4 items-center">
-                  <div>
-                    <p className="text-sm text-black">Current System Qty</p>
-                    <p className="text-lg text-black">
-                      {form.productId && form.branchId ? systemQty : "—"}{" "}
-                      <span className="text-sm text-gray-500">Units</span>
-                    </p>
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">
-                      {form.adjustmentType === "RECONCILIATION" ? "New Physical Count" : "Quantity Change"}
-                    </Label>
-                    <Input
-                      type="number"
-                      className="h-9 text-sm text-black text-center"
-                      placeholder="0"
-                      value={form.adjustmentType === "RECONCILIATION" ? form.physicalCount : form.changeQuantity}
-                      onChange={(e) => {
-                        if (form.adjustmentType === "RECONCILIATION")
-                          setForm((f) => ({ ...f, physicalCount: e.target.value }));
-                        else setForm((f) => ({ ...f, changeQuantity: e.target.value }));
-                      }}
-                    />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-2 gap-4">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">Reference / Batch ID</Label>
-                    <Input
-                      className="h-9 text-sm text-black"
-                      placeholder="REF-XXXXX"
-                      value={form.referenceNo}
-                      onChange={(e) => setForm((f) => ({ ...f, referenceNo: e.target.value }))}
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">Stock Variance</Label>
-                    <div className="h-9 rounded-md flex items-center px-3 text-sm text-black bg-gray-50 border border-gray-200">
-                      {difference !== null ? (
-                        <>
-                          {difference > 0 ? "+" : ""}
-                          {difference} Units
-                        </>
-                      ) : (
-                        "Pending input"
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Label className="text-sm text-black">Remarks / Reason</Label>
-                  <Textarea
-                    className="text-sm text-black min-h-[60px] resize-none"
-                    placeholder="Detailed explanation for audit log..."
-                    value={form.reason}
-                    onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
-                  />
-                </div>
-
-                <Button onClick={handleSubmit} disabled={submitting} size="sm" className="w-full text-sm">
-                  {submitting ? <Loader2 className="h-4 w-4 animate-spin" /> : "Submit Adjustment"}
-                </Button>
+          <StockOperationDialog
+            open={dialogOpen}
+            onOpenChange={(open) => {
+              setDialogOpen(open);
+              if (!open) {
+                setAdjustLines([]);
+                setForm({
+                  branchId: "",
+                  adjustmentType: "RECONCILIATION",
+                  adjustmentCategory: "CORRECTION",
+                  referenceNo: "",
+                  reason: "",
+                });
+              }
+            }}
+            title="Bulk stock adjustment"
+            description="Select multiple products, set quantities, and submit in one go."
+            onSubmit={handleSubmit}
+            submitting={submitting}
+            submitLabel={
+              adjustLines.length > 0
+                ? `Submit ${adjustLines.length} item${adjustLines.length === 1 ? "" : "s"}`
+                : "Submit"
+            }
+            footerHint={
+              adjustLines.length > 0
+                ? `${adjustLines.length} product${adjustLines.length === 1 ? "" : "s"} selected`
+                : null
+            }
+          >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className={STOCK_DLG.label}>Branch</Label>
+                <Select
+                  value={form.branchId}
+                  onValueChange={(v) => {
+                    setForm((f) => ({ ...f, branchId: v }));
+                    setAdjustLines((prev) =>
+                      prev.map((l) => ({
+                        ...l,
+                        currentQty: stocks[`${l.productId}-${v}`] ?? 0,
+                      })),
+                    );
+                  }}
+                >
+                  <SelectTrigger className="h-9 text-sm text-black">
+                    <SelectValue placeholder="Select branch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branches.map((b) => (
+                      <SelectItem key={b.id} value={b.id} className="text-sm">
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
-            </DialogContent>
-          </Dialog>
+              <div className="space-y-2">
+                <Label className={STOCK_DLG.label}>Adjustment type</Label>
+                <Select
+                  value={form.adjustmentType}
+                  onValueChange={(v) => setForm((f) => ({ ...f, adjustmentType: v }))}
+                >
+                  <SelectTrigger className="h-9 text-sm text-black">
+                    <SelectValue placeholder="Select type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="RECONCILIATION">Reconciliation (physical count)</SelectItem>
+                    <SelectItem value="ADDITION">Addition (+)</SelectItem>
+                    <SelectItem value="SUBTRACTION">Subtraction (-)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className={STOCK_DLG.label}>Category</Label>
+                <Select
+                  value={form.adjustmentCategory}
+                  onValueChange={(v) => setForm((f) => ({ ...f, adjustmentCategory: v }))}
+                >
+                  <SelectTrigger className="h-9 text-sm text-black">
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="CORRECTION">Standard correction</SelectItem>
+                    <SelectItem value="DAMAGE">Damaged / broken</SelectItem>
+                    <SelectItem value="EXPIRED">Expired stock</SelectItem>
+                    <SelectItem value="THEFT">Missing / theft</SelectItem>
+                    <SelectItem value="RETURN_TO_SUPPLIER">Return to supplier</SelectItem>
+                    <SelectItem value="ADMINISTRATIVE">Administrative</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className={STOCK_DLG.label}>Reference / Batch ID</Label>
+                <Input
+                  className="h-9 text-sm text-black"
+                  placeholder="REF-XXXXX"
+                  value={form.referenceNo}
+                  onChange={(e) => setForm((f) => ({ ...f, referenceNo: e.target.value }))}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label className={STOCK_DLG.label}>Remarks / Reason</Label>
+              <Textarea
+                className="text-sm text-black min-h-[60px] resize-none"
+                placeholder="Detailed explanation for audit log..."
+                value={form.reason}
+                onChange={(e) => setForm((f) => ({ ...f, reason: e.target.value }))}
+              />
+            </div>
+
+            <StockProductPicker
+              products={products}
+              categories={categories}
+              loading={productsLoading}
+              lines={adjustLines}
+              onLinesChange={(next) => {
+                setAdjustLines(
+                  next.map((l) => ({
+                    ...l,
+                    currentQty: getStockQty(l.productId),
+                  })),
+                );
+              }}
+              quantityLabel={
+                form.adjustmentType === "RECONCILIATION"
+                  ? "Physical count"
+                  : form.adjustmentType === "ADDITION"
+                    ? "Qty to add"
+                    : "Qty to remove"
+              }
+              showCurrentQty
+              getCurrentQty={getStockQty}
+              disabled={!form.branchId}
+            />
+          </StockOperationDialog>
         </div>
       </div>
 
@@ -512,89 +452,44 @@ export function StockAdjustment() {
         </Card>
       </div>
 
-      {/* History table */}
+      {/* Adjustment history */}
       <Card className="border border-gray-200 overflow-hidden">
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader className="bg-gray-50">
-              <TableRow className="border-gray-200 hover:bg-transparent">
-                <TableHead className="px-6 py-4 text-sm font-medium text-black">Date</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Product</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Location</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black">Type / Category</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black text-right">Variance</TableHead>
-                <TableHead className="py-4 text-sm font-medium text-black text-right">Remarks</TableHead>
-                <TableHead className="px-6 py-4 text-sm font-medium text-black text-right">Staff</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {adjustments.map((a) => (
-                <TableRow key={a.id} className="border-gray-100 hover:bg-gray-50">
-                  <TableCell className="px-6 py-5 align-top">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-sm text-black">
-                        {new Date(a.adjustment_date).toLocaleDateString()}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        {new Date(a.adjustment_date).toLocaleTimeString()}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="py-5 align-top">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-sm text-black truncate max-w-[200px]">{a.product?.name}</span>
-                      <span className="text-xs text-gray-500">{a.product?.sku}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="py-5 align-top">
-                    <span className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-gray-100 text-sm text-black">
-                      <MapPin className="h-3.5 w-3.5 text-gray-500" /> {a.branch?.name}
-                    </span>
-                  </TableCell>
-                  <TableCell className="py-5 align-top">
-                    <div className="flex flex-col gap-1">
-                      <span className="text-sm text-black">{a.adjustment_type}</span>
-                      <span className="text-xs text-gray-500">{a.adjustment_category}</span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="py-5 text-right align-top">
-                    <div className="flex flex-col gap-1 items-end">
-                      <span className="text-sm font-medium text-black">
-                        {Number(a.difference) > 0 ? "+" : ""}
-                        {a.difference}
-                      </span>
-                      <span className="text-xs text-gray-500">
-                        Total: {a.physical_count ?? a.change_quantity}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell className="py-5 text-right max-w-[200px] align-top">
-                    <div className="flex flex-col gap-1 items-end">
-                      <span className="text-sm text-black truncate max-w-full">
-                        {a.reason || "—"}
-                      </span>
-                      {a.reference_no && (
-                        <span className="text-xs text-gray-500"># {a.reference_no}</span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="px-6 py-5 text-right align-top">
-                    <span className="text-sm text-black">
-                      {a.user?.email?.split("@")[0] || "Operator"}
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
-
-          {adjustments.length === 0 && !loading && (
-            <div className="p-16 flex flex-col items-center justify-center text-center">
-              <History className="h-10 w-10 text-gray-300 mb-3" />
-              <p className="text-sm text-black">No adjustments found</p>
-            </div>
-          )}
-        </div>
+        <InventoryCardGrid
+          empty={adjustments.length === 0 && !loading}
+          emptyTitle="No adjustments found"
+          emptyDescription="Create a bulk adjustment to see history here."
+          loading={loading && adjustments.length === 0}
+        >
+          {adjustments.map((a) => (
+            <TransactionRecordCard
+              key={a.id}
+              date={`${new Date(a.adjustment_date).toLocaleDateString()} · ${new Date(a.adjustment_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+              title={a.product?.name || "Product"}
+              subtitle={a.product?.sku}
+              meta={
+                <span className="inline-flex items-center gap-1">
+                  <MapPin className="h-3 w-3" />
+                  {a.branch?.name}
+                </span>
+              }
+              badge={
+                <Badge variant="outline" className="text-xs">
+                  {a.adjustment_type}
+                </Badge>
+              }
+              highlights={[
+                {
+                  label: "Variance",
+                  value: `${Number(a.difference) > 0 ? "+" : ""}${a.difference}`,
+                  tone: Number(a.difference) > 0 ? "success" : Number(a.difference) < 0 ? "danger" : "default",
+                },
+                { label: "Category", value: a.adjustment_category },
+                { label: "Count", value: a.physical_count ?? a.change_quantity ?? "—" },
+              ]}
+              footer={a.reason || a.reference_no ? `${a.reason || ""}${a.reference_no ? ` · #${a.reference_no}` : ""}` : undefined}
+            />
+          ))}
+        </InventoryCardGrid>
 
         {/* Pagination */}
         {totalAdjustments > 0 && (

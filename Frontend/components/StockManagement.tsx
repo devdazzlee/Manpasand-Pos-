@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
@@ -39,7 +39,6 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
-import { z } from "zod";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { usePosData } from "@/hooks/use-pos-data";
@@ -67,6 +66,17 @@ import {
   getStockStatusDisplay,
   StockStatusBadge,
 } from "@/components/inventory/stock-ops/stock-status-badge";
+import {
+  StockProductPicker,
+  type StockLineItem,
+} from "@/components/inventory/stock-ops/stock-product-picker";
+import {
+  StockOperationDialog,
+  STOCK_DLG,
+} from "@/components/inventory/stock-ops/stock-operation-dialog";
+import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
+import { StockRecordCard } from "@/components/inventory/stock-ops/stock-record-card";
+import { MovementRecordCard } from "@/components/inventory/stock-ops/movement-record-card";
 
 const DLG = {
   content: "max-w-2xl border border-gray-200 p-0 gap-0 max-h-[90vh] overflow-y-auto",
@@ -83,46 +93,25 @@ const DLG = {
   pickSku: "text-xs text-gray-500",
 };
 
-// ─── Zod Schemas ────────────────────────────────────────────────────────────
-const addStockSchema = z.object({
-  productId: z.string().min(1, "Product is required"),
-  branchId:  z.string().min(1, "Branch is required"),
-  quantity:  z.preprocess(
-    (v) => (v === "" ? undefined : Number(v)),
-    z.number({ required_error: "Quantity is required", invalid_type_error: "Must be a number" }).positive("Must be greater than 0")
-  ),
-});
-
-const adjustStockSchema = z.object({
-  productId:      z.string().min(1, "Product is required"),
-  branchId:       z.string().min(1, "Branch is required"),
-  quantityChange: z.preprocess(
-    (v) => (v === "" || v === "-" ? undefined : Number(v)),
-    z.number({ required_error: "Change amount is required", invalid_type_error: "Must be a number" }).refine((n) => n !== 0, { message: "Change cannot be zero" })
-  ),
-});
-
-const removeStockSchema = z.object({
-  productId: z.string().min(1, "Product is required"),
-  branchId:  z.string().min(1, "Branch is required"),
-  quantity:  z.preprocess(
-    (v) => (v === "" ? undefined : Number(v)),
-    z.number({ required_error: "Quantity is required", invalid_type_error: "Must be a number" }).positive("Must be greater than 0")
-  ),
-});
-
-const transferStockSchema = z.object({
-  productId:    z.string().min(1, "Product is required"),
-  fromBranchId: z.string().min(1, "From branch is required"),
-  toBranchId:   z.string().min(1, "To branch is required"),
-  quantity:     z.preprocess(
-    (v) => (v === "" ? undefined : Number(v)),
-    z.number({ required_error: "Quantity is required", invalid_type_error: "Must be a number" }).positive("Must be greater than 0")
-  ),
-}).refine((d) => d.fromBranchId !== d.toBranchId, {
-  message: "From and To branch must be different",
-  path: ["toBranchId"],
-});
+function validateStockLines(
+  lines: StockLineItem[],
+  mode: "positive" | "signed",
+): string | null {
+  if (lines.length === 0) return "Add at least one product";
+  for (const line of lines) {
+    const q = Number(line.quantity);
+    if (!Number.isFinite(q)) {
+      return `Invalid quantity for ${line.productName}`;
+    }
+    if (mode === "signed" && q === 0) {
+      return `Change cannot be zero for ${line.productName}`;
+    }
+    if (mode === "positive" && q <= 0) {
+      return `Quantity must be greater than 0 for ${line.productName}`;
+    }
+  }
+  return null;
+}
 
 function DetailRow({
   label,
@@ -134,7 +123,7 @@ function DetailRow({
   return (
     <div className="flex justify-between gap-4 py-2 border-b border-gray-100 last:border-0">
       <dt className="text-sm text-gray-600">{label}</dt>
-      <dd className="text-sm text-black text-right">{value ?? "—"}</dd>
+      <dd className="text-sm text-black text-right">{value ?? "-"}</dd>
     </div>
   );
 }
@@ -253,7 +242,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
   const [barcodeSearch, setBarcodeSearch] = useState("");
   const [isLoading, setIsLoading] = useState(false);
 
-  // Apply the filter bar to Movement Log + Today too — currently only the
+  // Apply the filter bar to Movement Log + Today too - currently only the
   // Stock List respects it. Filter is client-side over the already-fetched
   // arrays. SKU + name search, branch by id, category via product.category_id.
   const filterMovement = useMemo(() => {
@@ -290,8 +279,11 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
   const [viewProduct, setViewProduct] = useState<Record<string, unknown> | null>(null);
   const [viewError, setViewError] = useState<string | null>(null);
 
-  // Product search state
-  const [productSearch, setProductSearch] = useState("");
+  // Multi-product line items per operation modal
+  const [addLines, setAddLines] = useState<StockLineItem[]>([]);
+  const [adjustLines, setAdjustLines] = useState<StockLineItem[]>([]);
+  const [removeLines, setRemoveLines] = useState<StockLineItem[]>([]);
+  const [transferLines, setTransferLines] = useState<StockLineItem[]>([]);
 
   // Pagination for stock table
   const [stockPage, setStockPage] = useState(1);
@@ -303,70 +295,65 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
   const [isAdjustOpen, setIsAdjustOpen] = useState(false);
   const [isRemoveOpen, setIsRemoveOpen] = useState(false);
 
-  // ─── Per-field validation errors ─────────────────────────────────────────
+  // --- Per-field validation errors ---------------------------------------â”€â”€
   type FieldErrors = Record<string, string>;
   const [addErrors,      setAddErrors]      = useState<FieldErrors>({});
   const [adjustErrors,   setAdjustErrors]   = useState<FieldErrors>({});
   const [removeErrors,   setRemoveErrors]   = useState<FieldErrors>({});
   const [transferErrors, setTransferErrors] = useState<FieldErrors>({});
 
-  // Dropdown state for product selection
-  const [addProductDropdownOpen, setAddProductDropdownOpen] = useState(false);
-  const [adjustProductDropdownOpen, setAdjustProductDropdownOpen] = useState(false);
-  const [transferProductDropdownOpen, setTransferProductDropdownOpen] = useState(false);
-  const [removeProductDropdownOpen, setRemoveProductDropdownOpen] = useState(false);
-  
-  // Refs for dropdown containers
-  const addProductDropdownRef = React.useRef<HTMLDivElement>(null);
-  const adjustProductDropdownRef = React.useRef<HTMLDivElement>(null);
-  const transferProductDropdownRef = React.useRef<HTMLDivElement>(null);
-  const removeProductDropdownRef = React.useRef<HTMLDivElement>(null);
-
-  // Form state
+  // Form metadata (branch, reason, notes - quantities live on line items)
   const [transferForm, setTransferForm] = useState({
-    productId: "",
     fromBranchId: "",
     toBranchId: "",
-    quantity: "" as string | number,
     notes: "",
   });
 
   const [addForm, setAddForm] = useState({
-    productId: "",
     branchId: "",
-    quantity: "" as string | number,
     supplierId: "",
-    unitCost: "" as string | number,
     invoiceRef: "",
     notes: "",
   });
 
   const [adjustForm, setAdjustForm] = useState({
-    productId: "",
     branchId: "",
-    quantityChange: "" as string | number,
-    reason: "",
+    reason: "CORRECTION",
     notes: "",
   });
 
   const [removeForm, setRemoveForm] = useState({
-    productId: "",
     branchId: "",
-    quantity: "" as string | number,
     reason: "WASTE",
     notes: "",
   });
 
-  // Instant filtered products from global store
-  const filteredProducts = useMemo(() => {
-    if (!productSearch.trim()) return globalProducts.slice(0, 50);
-    const search = productSearch.toLowerCase().trim();
-    return globalProducts.filter(p => 
-      p.name.toLowerCase().includes(search) || 
-      p.sku?.toLowerCase().includes(search) || 
-      p.barcode?.includes(search)
-    ).slice(0, 50);
-  }, [globalProducts, productSearch]);
+  const getStockQty = useCallback(
+    (productId: string, branchId: string) => {
+      const row = allStocks.find(
+        (s) => s.product?.id === productId && s.branch?.id === branchId,
+      );
+      return row ? Number(row.current_quantity) : 0;
+    },
+    [allStocks],
+  );
+
+  const refreshLineStock = useCallback(
+    (
+      lines: StockLineItem[],
+      branchId: string,
+      setter: React.Dispatch<React.SetStateAction<StockLineItem[]>>,
+    ) => {
+      if (!branchId) return;
+      setter(
+        lines.map((l) => ({
+          ...l,
+          currentQty: getStockQty(l.productId, branchId),
+        })),
+      );
+    },
+    [getStockQty],
+  );
 
   // 1) Fetch branches on mount
   useEffect(() => {
@@ -528,152 +515,174 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     printHtmlDocument(
       "Inventory Report",
       `<h1>Inventory Report</h1>
-      <p class="meta">Generated ${new Date().toLocaleString()} · ${totalStocks} records</p>
+      <p class="meta">Generated ${new Date().toLocaleString()}  |  ${totalStocks} records</p>
       <table><thead><tr>${exportHeaders.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`,
     );
   };
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (addProductDropdownRef.current && !addProductDropdownRef.current.contains(event.target as Node)) setAddProductDropdownOpen(false);
-      if (adjustProductDropdownRef.current && !adjustProductDropdownRef.current.contains(event.target as Node)) setAdjustProductDropdownOpen(false);
-      if (transferProductDropdownRef.current && !transferProductDropdownRef.current.contains(event.target as Node)) setTransferProductDropdownOpen(false);
-      if (removeProductDropdownRef.current && !removeProductDropdownRef.current.contains(event.target as Node)) setRemoveProductDropdownOpen(false);
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
-
   // Derived analytics
   const paginationOptions = [20, 50, 100, 500];
   const totalUnits = stockMeta.totalQuantity || 0;
   const alerts = stockMeta.lowStockCount || 0;
   const totalStockPages = stockMeta.totalPages || 1;
 
-  // Handlers
-  // ─── helper to flatten Zod errors into a flat record ───────────────────
-  const flattenZodErrors = (err: z.ZodError): FieldErrors => {
-    const out: FieldErrors = {};
-    for (const issue of err.issues) {
-      const key = issue.path.join(".") || "_root";
-      if (!out[key]) out[key] = issue.message;
+  const runBatchStockOps = async (
+    lines: StockLineItem[],
+    worker: (line: StockLineItem) => Promise<void>,
+  ) => {
+    let ok = 0;
+    let fail = 0;
+    let lastError: unknown = null;
+    for (const line of lines) {
+      try {
+        await worker(line);
+        ok++;
+      } catch (e) {
+        fail++;
+        lastError = e;
+      }
     }
-    return out;
+    return { ok, fail, lastError };
   };
 
   const handleAddStock = async () => {
-    const parsed = addStockSchema.safeParse(addForm);
-    if (!parsed.success) {
-      setAddErrors(flattenZodErrors(parsed.error));
+    const errors: FieldErrors = {};
+    if (!addForm.branchId) errors.branchId = "Branch is required";
+    const lineErr = validateStockLines(addLines, "positive");
+    if (lineErr) errors.lines = lineErr;
+    if (Object.keys(errors).length > 0) {
+      setAddErrors(errors);
       return;
     }
     setAddErrors({});
     setIsTransferring(true);
     try {
-      await apiClient.post(`${API_BASE}/stock`, {
-        productId:  parsed.data.productId,
-        branchId:   parsed.data.branchId,
-        quantity:   parsed.data.quantity,
-        supplierId: addForm.supplierId  || undefined,
-        unitCost:   addForm.unitCost    ? Number(addForm.unitCost) : undefined,
-        invoiceRef: addForm.invoiceRef  || undefined,
-        notes:      addForm.notes       || undefined,
-      });
-      setIsAddOpen(false);
-      clearProductUI();
-      refreshAllData();
-      toast.success("Stock added successfully");
-    } catch (e: any) {
-      showErrorToast(e);
+      const { ok, fail, lastError } = await runBatchStockOps(addLines, (line) =>
+        apiClient.post(`${API_BASE}/stock`, {
+          productId: line.productId,
+          branchId: addForm.branchId,
+          quantity: Number(line.quantity),
+          supplierId: addForm.supplierId || undefined,
+          unitCost: line.unitCost ? Number(line.unitCost) : undefined,
+          invoiceRef: addForm.invoiceRef || undefined,
+          notes: addForm.notes || undefined,
+        }),
+      );
+      if (ok > 0) {
+        setIsAddOpen(false);
+        clearProductUI();
+        refreshAllData();
+        toast.success(`Stock added for ${ok} product${ok === 1 ? "" : "s"}`);
+      }
+      if (fail > 0) showErrorToast(lastError);
     } finally {
       setIsTransferring(false);
     }
   };
 
   const handleAdjustStock = async () => {
-    const parsed = adjustStockSchema.safeParse(adjustForm);
-    if (!parsed.success) {
-      setAdjustErrors(flattenZodErrors(parsed.error));
+    const errors: FieldErrors = {};
+    if (!adjustForm.branchId) errors.branchId = "Branch is required";
+    const lineErr = validateStockLines(adjustLines, "signed");
+    if (lineErr) errors.lines = lineErr;
+    if (Object.keys(errors).length > 0) {
+      setAdjustErrors(errors);
       return;
     }
     setAdjustErrors({});
     setIsTransferring(true);
     try {
-      await apiClient.patch(`${API_BASE}/stock/adjust`, {
-        productId:      parsed.data.productId,
-        branchId:       parsed.data.branchId,
-        quantityChange: parsed.data.quantityChange,
-        reason: adjustForm.reason || undefined,
-        notes:  adjustForm.notes  || undefined,
-      });
-      setIsAdjustOpen(false);
-      setAdjustForm({ productId: "", branchId: "", quantityChange: "", reason: "", notes: "" });
-      setProductSearch("");
-      setAdjustProductDropdownOpen(false);
-      refreshAllData();
-      toast.success("Stock adjusted successfully");
-    } catch (e: any) {
-      showErrorToast(e);
+      const { ok, fail, lastError } = await runBatchStockOps(adjustLines, (line) =>
+        apiClient.patch(`${API_BASE}/stock/adjust`, {
+          productId: line.productId,
+          branchId: adjustForm.branchId,
+          quantityChange: Number(line.quantity),
+          reason: adjustForm.reason || undefined,
+          notes: adjustForm.notes || undefined,
+        }),
+      );
+      if (ok > 0) {
+        setIsAdjustOpen(false);
+        clearProductUI();
+        refreshAllData();
+        toast.success(`Stock adjusted for ${ok} product${ok === 1 ? "" : "s"}`);
+      }
+      if (fail > 0) showErrorToast(lastError);
     } finally {
       setIsTransferring(false);
     }
   };
 
   const handleRemoveStock = async () => {
-    const parsed = removeStockSchema.safeParse(removeForm);
-    if (!parsed.success) {
-      setRemoveErrors(flattenZodErrors(parsed.error));
+    const errors: FieldErrors = {};
+    if (!removeForm.branchId) errors.branchId = "Branch is required";
+    const lineErr = validateStockLines(removeLines, "positive");
+    if (lineErr) errors.lines = lineErr;
+    if (Object.keys(errors).length > 0) {
+      setRemoveErrors(errors);
       return;
     }
     setRemoveErrors({});
     setIsTransferring(true);
     try {
-      await apiClient.delete(`${API_BASE}/stock/remove`, {
-        data: {
-          productId: parsed.data.productId,
-          branchId:  parsed.data.branchId,
-          quantity:  parsed.data.quantity,
-          reason:    removeForm.reason,
-          notes:     removeForm.notes || undefined,
-        },
-      });
-      setIsRemoveOpen(false);
-      setRemoveForm({ productId: "", branchId: "", quantity: "", reason: "WASTE", notes: "" });
-      setProductSearch("");
-      setRemoveProductDropdownOpen(false);
-      refreshAllData();
-      toast.success("Stock removed successfully");
-    } catch (e: any) {
-      showErrorToast(e);
+      const { ok, fail, lastError } = await runBatchStockOps(removeLines, (line) =>
+        apiClient.delete(`${API_BASE}/stock/remove`, {
+          data: {
+            productId: line.productId,
+            branchId: removeForm.branchId,
+            quantity: Number(line.quantity),
+            reason: removeForm.reason,
+            notes: removeForm.notes || undefined,
+          },
+        }),
+      );
+      if (ok > 0) {
+        setIsRemoveOpen(false);
+        clearProductUI();
+        refreshAllData();
+        toast.success(`Stock removed for ${ok} product${ok === 1 ? "" : "s"}`);
+      }
+      if (fail > 0) showErrorToast(lastError);
     } finally {
       setIsTransferring(false);
     }
   };
 
   const handleTransfer = async () => {
-    const parsed = transferStockSchema.safeParse(transferForm);
-    if (!parsed.success) {
-      setTransferErrors(flattenZodErrors(parsed.error));
+    const errors: FieldErrors = {};
+    if (!transferForm.fromBranchId) errors.fromBranchId = "From branch is required";
+    if (!transferForm.toBranchId) errors.toBranchId = "To branch is required";
+    if (
+      transferForm.fromBranchId &&
+      transferForm.toBranchId &&
+      transferForm.fromBranchId === transferForm.toBranchId
+    ) {
+      errors.toBranchId = "From and To branch must be different";
+    }
+    const lineErr = validateStockLines(transferLines, "positive");
+    if (lineErr) errors.lines = lineErr;
+    if (Object.keys(errors).length > 0) {
+      setTransferErrors(errors);
       return;
     }
     setTransferErrors({});
     setIsTransferring(true);
     try {
-      await apiClient.post(`${API_BASE}/stock/transfer`, {
-        productId:    parsed.data.productId,
-        fromBranchId: parsed.data.fromBranchId,
-        toBranchId:   parsed.data.toBranchId,
-        quantity:     parsed.data.quantity,
-        notes:        transferForm.notes,
-      });
-      setIsTransferOpen(false);
-      setTransferForm({ productId: "", fromBranchId: "", toBranchId: "", quantity: "", notes: "" });
-      setProductSearch("");
-      setTransferProductDropdownOpen(false);
-      refreshAllData();
-      toast.success("Stock transferred successfully");
-    } catch (e: any) {
-      showErrorToast(e);
+      const { ok, fail, lastError } = await runBatchStockOps(transferLines, (line) =>
+        apiClient.post(`${API_BASE}/stock/transfer`, {
+          productId: line.productId,
+          fromBranchId: transferForm.fromBranchId,
+          toBranchId: transferForm.toBranchId,
+          quantity: Number(line.quantity),
+          notes: transferForm.notes,
+        }),
+      );
+      if (ok > 0) {
+        setIsTransferOpen(false);
+        clearProductUI();
+        refreshAllData();
+        toast.success(`Stock transferred for ${ok} product${ok === 1 ? "" : "s"}`);
+      }
+      if (fail > 0) showErrorToast(lastError);
     } finally {
       setIsTransferring(false);
     }
@@ -734,25 +743,19 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
 
   const formatMoney = (v: unknown) => {
     const n = Number(v);
-    if (!Number.isFinite(n)) return "—";
+    if (!Number.isFinite(n)) return "-";
     return n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   };
 
-  const handleProductSearch = (search: string) => {
-    setProductSearch(search);
-  };
-
   const clearProductUI = () => {
-    setProductSearch("");
-    setAddProductDropdownOpen(false);
-    setAdjustProductDropdownOpen(false);
-    setTransferProductDropdownOpen(false);
-    setRemoveProductDropdownOpen(false);
-    // Reset forms to default
-    setAddForm({ productId: "", branchId: "", quantity: "", supplierId: "", unitCost: "" });
-    setAdjustForm({ productId: "", branchId: "", quantityChange: "", reason: "CORRECTION" });
-    setRemoveForm({ productId: "", branch_id: "", quantity: "", reason: "WASTE", notes: "" });
-    setTransferForm({ productId: "", fromBranchId: "", toBranchId: "", quantity: "", notes: "" });
+    setAddLines([]);
+    setAdjustLines([]);
+    setRemoveLines([]);
+    setTransferLines([]);
+    setAddForm({ branchId: "", supplierId: "", invoiceRef: "", notes: "" });
+    setAdjustForm({ branchId: "", reason: "CORRECTION", notes: "" });
+    setRemoveForm({ branchId: "", reason: "WASTE", notes: "" });
+    setTransferForm({ fromBranchId: "", toBranchId: "", notes: "" });
   };
 
   if (isInitialLoading) {
@@ -770,7 +773,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         <div>
           <h1 className="text-2xl font-bold text-black tracking-tight">Stock Management</h1>
           <p className="text-sm text-gray-600 mt-1 max-w-2xl">
-            Central inventory dashboard — stock levels, valuation, adjustments, and movement history.
+            Central inventory dashboard - stock levels, valuation, adjustments, and movement history.
           </p>
         </div>
       </div>
@@ -788,757 +791,371 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         exportDisabled={allStocks.length === 0}
       />
 
-      <Dialog
+      <StockOperationDialog
         open={isAddOpen}
         onOpenChange={(open) => {
           setIsAddOpen(open);
-          if (!open) { clearProductUI(); setAddErrors({}); }
+          if (!open) {
+            clearProductUI();
+            setAddErrors({});
+          }
         }}
+        title="Add stock"
+        description="Add quantity for one or more products at a branch."
+        onSubmit={handleAddStock}
+        submitting={isTransferring}
+        submitLabel={addLines.length > 0 ? `Save ${addLines.length} item${addLines.length === 1 ? "" : "s"}` : "Save"}
+        footerHint={addLines.length > 0 ? `${addLines.length} product${addLines.length === 1 ? "" : "s"} selected` : null}
       >
-        <DialogContent className={DLG.content}>
-                  <DialogHeader className={DLG.header}>
-                    <DialogTitle className={DLG.title}>Add stock</DialogTitle>
-                    <p className={DLG.desc}>Add quantity to a product at a branch.</p>
-                  </DialogHeader>
-                  <div className={DLG.body}>
-                    {/* PRODUCT SELECTOR */}
-                    <div className="space-y-1.5 relative" ref={addProductDropdownRef}>
-                      <Label className={DLG.label}>Product</Label>
-                      <div className="relative group">
-                        <Input
-                          placeholder="Search product..."
-                          value={productSearch}
-                          onFocus={() => setAddProductDropdownOpen(true)}
-                          autoComplete="off"
-                          onChange={(e) => {
-                            setProductSearch(e.target.value);
-                            setAddProductDropdownOpen(true);
-                          }}
-                          className={`px-4 h-9 border text-sm text-black focus:ring-1 focus:ring-slate-300 transition-all ${addErrors.productId ? "border-red-400" : "border-gray-200"}`}
-                        />
-                        {addProductDropdownOpen && (
-                          <Card className={DLG.dropdown}>
-                            {filteredProducts.length === 0 ? (
-                               <div className="p-6 text-center">
-                                 <Package className="h-6 w-6 text-slate-200 mx-auto mb-1" />
-                                 <p className="text-sm text-gray-500">No products found</p>
-                               </div>
-                            ) : (
-                              <div className="p-1">
-                                {filteredProducts.map((p) => (
-                                  <button
-                                    key={p.id}
-                                    className={DLG.pickRow}
-                                    onClick={() => {
-                                      setAddForm({ ...addForm, productId: p.id });
-                                      setAddErrors(e => ({ ...e, productId: "" }));
-                                      setProductSearch(p.name);
-                                      setAddProductDropdownOpen(false);
-                                    }}
-                                  >
-                                    <div className="flex flex-col">
-                                      <span className="text-sm text-black">{p.name}</span>
-                                      <span className="text-xs text-gray-500">{p.sku || p.id.slice(0, 8)}</span>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </Card>
-                        )}
-                      </div>
-                    </div>
-                    {addErrors.productId && <p className="text-xs text-red-500 -mt-2">{addErrors.productId}</p>}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>Branch</Label>
+            <Select
+              value={addForm.branchId}
+              onValueChange={(v) => {
+                setAddForm({ ...addForm, branchId: v });
+                setAddErrors((e) => ({ ...e, branchId: "" }));
+                refreshLineStock(addLines, v, setAddLines);
+              }}
+            >
+              <SelectTrigger className={`h-9 border text-sm text-black ${addErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
+                <SelectValue placeholder="Select branch" />
+              </SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id} className="text-sm">
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {addErrors.branchId && <p className="text-xs text-red-500">{addErrors.branchId}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>Supplier (optional)</Label>
+            <Select value={addForm.supplierId} onValueChange={(v) => setAddForm({ ...addForm, supplierId: v })}>
+              <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                <SelectValue placeholder="Select supplier" />
+              </SelectTrigger>
+              <SelectContent>
+                {supplierOptions.map((s) => (
+                  <SelectItem key={s.id} value={s.id} className="text-sm">
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
-                    <div className="space-y-2">
-                      <Label className={DLG.label}>Branch</Label>
-                      <Select value={addForm.branchId} onValueChange={(v) => { setAddForm({ ...addForm, branchId: v }); setAddErrors(e => ({...e, branchId: ""})); }}>
-                        <SelectTrigger className={`h-9 border text-sm text-black ${addErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
-                          <SelectValue placeholder="Select branch" />
-                        </SelectTrigger>
-                        <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
-                          {branches.map(b => <SelectItem key={b.id} value={b.id} className="font-normal text-sm py-2">{b.name}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                      {addErrors.branchId && <p className="text-xs text-red-500 mt-0.5">{addErrors.branchId}</p>}
-                    </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>Invoice / GRN reference (optional)</Label>
+            <Input
+              placeholder="e.g. INV-1024"
+              value={addForm.invoiceRef}
+              onChange={(e) => setAddForm({ ...addForm, invoiceRef: e.target.value })}
+              className="h-9 text-sm text-black"
+            />
+          </div>
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>Notes (optional)</Label>
+            <Input
+              placeholder="Delivery note, vehicle, etc."
+              value={addForm.notes}
+              onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
+              className="h-9 text-sm text-black"
+            />
+          </div>
+        </div>
 
-                    {(() => {
-                      // Pre/post balance preview — same pattern as Adjust /
-                      // Remove / Transfer. Helps the user see how many they
-                      // already have before piling on more.
-                      const addStock = addForm.productId && addForm.branchId
-                        ? allStocks.find(
-                            (s) =>
-                              s.product?.id === addForm.productId &&
-                              s.branch?.id === addForm.branchId,
-                          )
-                        : undefined;
-                      const currentQty = addStock ? Number(addStock.current_quantity) : null;
-                      const addQty = Number(addForm.quantity) || 0;
-                      const newTotal =
-                        currentQty !== null
-                          ? currentQty + addQty
-                          : addQty > 0 && addForm.branchId
-                            ? addQty
-                            : null;
-                      return (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="space-y-1">
-                            <Label className="text-sm text-gray-600">Current quantity</Label>
-                            <div className="h-9 flex items-center px-3 rounded-md bg-gray-50 border border-gray-200 text-sm text-black">
-                              {currentQty !== null
-                                ? formatQty(currentQty)
-                                : addForm.branchId
-                                  ? "0"
-                                  : "—"}
-                            </div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className={DLG.label}>Quantity to add</Label>
-                            <Input
-                              type="number"
-                              placeholder="0"
-                              value={addForm.quantity}
-                              onChange={(e) => { setAddForm({ ...addForm, quantity: e.target.value }); setAddErrors(er => ({...er, quantity: ""})); }}
-                              className={`h-9 border text-sm text-black text-center ${addErrors.quantity ? "border-red-400" : "border-gray-200"}`}
-                            />
-                            {addErrors.quantity && <p className="text-xs text-red-500 mt-0.5">{addErrors.quantity}</p>}
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-sm text-gray-600">After adding</Label>
-                            <div className="h-9 flex items-center px-3 rounded-md bg-gray-50 border border-gray-200 text-sm text-black">
-                              {newTotal !== null ? formatQty(newTotal) : "—"}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
+        <StockProductPicker
+          products={globalProducts}
+          categories={categories}
+          loading={globalLoading}
+          lines={addLines}
+          onLinesChange={(next) => {
+            setAddLines(next);
+            setAddErrors((e) => ({ ...e, lines: "" }));
+            if (addForm.branchId) {
+              refreshLineStock(next, addForm.branchId, setAddLines);
+            }
+          }}
+          quantityLabel="Qty to add"
+          showUnitCost
+          showCurrentQty
+          getCurrentQty={(id) => (addForm.branchId ? getStockQty(id, addForm.branchId) : null)}
+          error={addErrors.lines}
+        />
+      </StockOperationDialog>
 
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Supplier</Label>
-                        <Select value={addForm.supplierId} onValueChange={(v) => setAddForm({ ...addForm, supplierId: v })}>
-                          <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
-                            <SelectValue placeholder="Select Supplier" />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
-                            {supplierOptions.map((s) => <SelectItem key={s.id} value={s.id} className="font-normal text-sm py-2">{s.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Unit cost</Label>
-                        <Input
-                          placeholder="0.00"
-                          type="number"
-                          value={addForm.unitCost}
-                          onChange={(e) => setAddForm({ ...addForm, unitCost: e.target.value })}
-                          className="h-9 border border-gray-200 text-sm text-black text-sm"
-                        />
-                      </div>
-                    </div>
+      <StockOperationDialog
+        open={isAdjustOpen}
+        onOpenChange={(open) => {
+          setIsAdjustOpen(open);
+          if (!open) {
+            clearProductUI();
+            setAdjustErrors({});
+          }
+        }}
+        title="Adjust stock"
+        description="Apply quantity corrections for multiple products at once."
+        onSubmit={handleAdjustStock}
+        submitting={isTransferring}
+        submitLabel={adjustLines.length > 0 ? `Save ${adjustLines.length} item${adjustLines.length === 1 ? "" : "s"}` : "Save"}
+        footerHint={adjustLines.length > 0 ? `${adjustLines.length} product${adjustLines.length === 1 ? "" : "s"} selected` : null}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>Branch</Label>
+            <Select
+              value={adjustForm.branchId}
+              onValueChange={(v) => {
+                setAdjustForm({ ...adjustForm, branchId: v });
+                setAdjustErrors((e) => ({ ...e, branchId: "" }));
+                refreshLineStock(adjustLines, v, setAdjustLines);
+              }}
+            >
+              <SelectTrigger className={`h-9 border text-sm text-black ${adjustErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
+                <SelectValue placeholder="Select branch" />
+              </SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id} className="text-sm">
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {adjustErrors.branchId && <p className="text-xs text-red-500">{adjustErrors.branchId}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>Reason</Label>
+            <Select value={adjustForm.reason} onValueChange={(v) => setAdjustForm({ ...adjustForm, reason: v })}>
+              <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                <SelectValue placeholder="Select reason" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="CORRECTION" className="text-sm">Correction</SelectItem>
+                <SelectItem value="LOST" className="text-sm">Lost / Unaccounted</SelectItem>
+                <SelectItem value="FOUND" className="text-sm">Found / Surprise Entry</SelectItem>
+                <SelectItem value="PROMOTIONAL" className="text-sm">Promotional Redistribution</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
-                    <div className="space-y-2">
-                      <Label className={DLG.label}>Invoice / GRN reference (optional)</Label>
-                      <Input
-                        placeholder="e.g. INV-1024"
-                        value={addForm.invoiceRef}
-                        onChange={(e) => setAddForm({ ...addForm, invoiceRef: e.target.value })}
-                        className="h-9 border border-gray-200 text-sm text-black"
-                      />
-                    </div>
+        <div className="space-y-2">
+          <Label className={STOCK_DLG.label}>Notes (optional)</Label>
+          <Textarea
+            placeholder="Add any additional details..."
+            value={adjustForm.notes}
+            onChange={(e) => setAdjustForm({ ...adjustForm, notes: e.target.value })}
+            className="text-sm text-black min-h-[64px] resize-none border-gray-200"
+          />
+        </div>
 
-                    <div className="space-y-2">
-                      <Label className={DLG.label}>Notes (optional)</Label>
-                      <Textarea
-                        placeholder="Delivery note, vehicle, approval, etc."
-                        value={addForm.notes}
-                        onChange={(e) => setAddForm({ ...addForm, notes: e.target.value })}
-                        className="text-sm text-black min-h-[64px] resize-none border-gray-200"
-                      />
-                    </div>
+        <StockProductPicker
+          products={globalProducts}
+          categories={categories}
+          loading={globalLoading}
+          lines={adjustLines}
+          onLinesChange={(next) => {
+            setAdjustLines(next);
+            setAdjustErrors((e) => ({ ...e, lines: "" }));
+            if (adjustForm.branchId) {
+              refreshLineStock(next, adjustForm.branchId, setAdjustLines);
+            }
+          }}
+          quantityLabel="Change (+ / âˆ’)"
+          quantityPlaceholder="e.g. -5 or 10"
+          allowSignedQuantity
+          showCurrentQty
+          getCurrentQty={(id) => (adjustForm.branchId ? getStockQty(id, adjustForm.branchId) : null)}
+          error={adjustErrors.lines}
+        />
+      </StockOperationDialog>
 
-                    <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
-                      <Button
-                        variant="outline"
-                        type="button"
-                        size="sm"
-                        onClick={() => setIsAddOpen(false)}
-                        className="text-sm text-black"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={handleAddStock}
-                        disabled={isTransferring}
-                        size="sm" className="text-sm"
-                      >
-                        {isTransferring && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                        Save
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
+      <StockOperationDialog
+        open={isRemoveOpen}
+        onOpenChange={(open) => {
+          setIsRemoveOpen(open);
+          if (!open) {
+            clearProductUI();
+            setRemoveErrors({});
+          }
+        }}
+        title="Remove stock"
+        description="Reduce quantity for multiple products (damage, waste, loss, or expiry)."
+        onSubmit={handleRemoveStock}
+        submitting={isTransferring}
+        submitLabel={removeLines.length > 0 ? `Save ${removeLines.length} item${removeLines.length === 1 ? "" : "s"}` : "Save"}
+        footerHint={removeLines.length > 0 ? `${removeLines.length} product${removeLines.length === 1 ? "" : "s"} selected` : null}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>Branch</Label>
+            <Select
+              value={removeForm.branchId}
+              onValueChange={(v) => {
+                setRemoveForm({ ...removeForm, branchId: v });
+                setRemoveErrors((e) => ({ ...e, branchId: "" }));
+                refreshLineStock(removeLines, v, setRemoveLines);
+              }}
+            >
+              <SelectTrigger className={`h-9 border text-sm text-black ${removeErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
+                <SelectValue placeholder="Select branch" />
+              </SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id} className="text-sm">
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {removeErrors.branchId && <p className="text-xs text-red-500">{removeErrors.branchId}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>Reason</Label>
+            <Select value={removeForm.reason} onValueChange={(v) => setRemoveForm({ ...removeForm, reason: v })}>
+              <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                <SelectValue placeholder="Select reason" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="DAMAGE" className="text-sm">Damaged / Defected</SelectItem>
+                <SelectItem value="WASTE" className="text-sm">Wastage / Garbage</SelectItem>
+                <SelectItem value="THEFT" className="text-sm">Theft / Loss</SelectItem>
+                <SelectItem value="EXPIRED" className="text-sm">Expired Goods</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
 
-              <Dialog
-                open={isAdjustOpen}
-                onOpenChange={(open) => {
-                  setIsAdjustOpen(open);
-                  if (!open) { clearProductUI(); setAdjustErrors({}); }
-                }}
-              >
-                <DialogContent className={DLG.content}>
-                  <DialogHeader className={DLG.header}>
-                    <DialogTitle className={DLG.title}>Adjust stock</DialogTitle>
-                    <p className={DLG.desc}>Set the correct quantity for a product.</p>
-                  </DialogHeader>
-                  <div className={DLG.body}>
-                    <div className="space-y-2 relative" ref={adjustProductDropdownRef}>
-                      <Label className={DLG.label}>Product</Label>
-                      <div className="relative group">
-                        <Input
-                          placeholder="Search product..."
-                          value={productSearch}
-                          onFocus={() => setAdjustProductDropdownOpen(true)}
-                          autoComplete="off"
-                          onChange={(e) => {
-                            setProductSearch(e.target.value);
-                            setAdjustProductDropdownOpen(true);
-                          }}
-                          className="px-4 h-9 border border-gray-200 text-sm text-black focus:ring-1 focus:ring-slate-300"
-                        />
-                        {adjustProductDropdownOpen && (
-                          <Card className={DLG.dropdown}>
-                            {filteredProducts.length === 0 ? (
-                               <div className="p-4 text-center text-sm text-gray-500">No products found</div>
-                            ) : (
-                              <div className="p-1">
-                                {filteredProducts.map((p) => (
-                                  <button
-                                    key={p.id}
-                                    className={DLG.pickRow}
-                                    onClick={() => {
-                                      setAdjustForm({ ...adjustForm, productId: p.id });
-                                      setAdjustErrors(e => ({ ...e, productId: "" }));
-                                      setProductSearch(p.name);
-                                      setAdjustProductDropdownOpen(false);
-                                    }}
-                                  >
-                                    <div className="flex flex-col">
-                                      <span className="text-sm text-black">{p.name}</span>
-                                      <span className="text-xs text-gray-500">{p.sku || p.id.slice(0, 8)}</span>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </Card>
-                        )}
-                      </div>
-                    </div>
-                    {adjustErrors.productId && <p className="text-xs text-red-500 -mt-2">{adjustErrors.productId}</p>}
-                    
-                    <div className="grid grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Branch</Label>
-                        <Select value={adjustForm.branchId} onValueChange={(v) => { setAdjustForm({ ...adjustForm, branchId: v }); setAdjustErrors(e => ({...e, branchId: ""})); }}>
-                          <SelectTrigger className={`h-9 border text-sm text-black ${adjustErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
-                             <SelectValue placeholder="Branch" />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
-                             {branches.map(b => <SelectItem key={b.id} value={b.id} className="font-normal text-sm py-2">{b.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                        {adjustErrors.branchId && <p className="text-xs text-red-500 mt-0.5">{adjustErrors.branchId}</p>}
-                      </div>
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Reason</Label>
-                        <Select value={adjustForm.reason} onValueChange={(v) => setAdjustForm({ ...adjustForm, reason: v })}>
-                          <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
-                            <SelectValue placeholder="Select Reason" />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
-                            <SelectItem value="CORRECTION" className="font-normal text-sm py-2">Correction</SelectItem>
-                            <SelectItem value="LOST" className="font-normal text-sm py-2">Lost / Unaccounted</SelectItem>
-                            <SelectItem value="FOUND" className="font-normal text-sm py-2">Found / Surprise Entry</SelectItem>
-                            <SelectItem value="PROMOTIONAL" className="font-normal text-sm py-2">Promotional Redistribution</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
+        <div className="space-y-2">
+          <Label className={STOCK_DLG.label}>Notes (optional)</Label>
+          <Textarea
+            placeholder="Add reference, batch, vehicle, etc."
+            value={removeForm.notes}
+            onChange={(e) => setRemoveForm({ ...removeForm, notes: e.target.value })}
+            className="text-sm text-black min-h-[64px] resize-none border-gray-200"
+          />
+        </div>
 
-                    {(() => {
-                      // Look up the current on-hand stock for the picked
-                      // product + branch combination. allStocks is the full
-                      // list loaded for the current page; if the user hasn't
-                      // picked both yet, we just show a dash.
-                      const adjStock = adjustForm.productId && adjustForm.branchId
-                        ? allStocks.find(
-                            (s) =>
-                              s.product?.id === adjustForm.productId &&
-                              s.branch?.id === adjustForm.branchId,
-                          )
-                        : undefined;
-                      const currentQty = adjStock ? Number(adjStock.current_quantity) : null;
-                      const delta = Number(adjustForm.quantityChange) || 0;
-                      const newTotal = currentQty !== null ? currentQty + delta : null;
-                      return (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
-                          <div className="space-y-1">
-                            <Label className="text-sm text-gray-600">Current quantity</Label>
-                            <div className="h-9 flex items-center px-3 rounded-md bg-gray-50 border border-gray-200 text-sm text-black">
-                              {currentQty !== null ? formatQty(currentQty) : "—"}
-                            </div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className={DLG.label}>Change (+ / −)</Label>
-                            <Input
-                              type="number"
-                              placeholder="e.g. -5 or 10"
-                              value={adjustForm.quantityChange}
-                              onChange={(e) => { setAdjustForm({ ...adjustForm, quantityChange: e.target.value }); setAdjustErrors(er => ({...er, quantityChange: ""})); }}
-                              className={`h-9 border text-sm text-black text-center ${adjustErrors.quantityChange ? "border-red-400" : "border-gray-200"}`}
-                            />
-                            {adjustErrors.quantityChange && <p className="text-xs text-red-500 mt-0.5">{adjustErrors.quantityChange}</p>}
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-sm text-gray-600">New total</Label>
-                            <div
-                              className={`h-9 flex items-center px-3 rounded-md border text-sm ${
-                                newTotal !== null && newTotal < 0
-                                  ? "bg-red-50 border-red-200 text-red-700"
-                                  : "bg-gray-50 border-gray-200 text-black"
-                              }`}
-                            >
-                              {newTotal !== null ? formatQty(newTotal) : "—"}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
+        <StockProductPicker
+          products={globalProducts}
+          categories={categories}
+          loading={globalLoading}
+          lines={removeLines}
+          onLinesChange={(next) => {
+            setRemoveLines(next);
+            setRemoveErrors((e) => ({ ...e, lines: "" }));
+            if (removeForm.branchId) {
+              refreshLineStock(next, removeForm.branchId, setRemoveLines);
+            }
+          }}
+          quantityLabel="Qty to remove"
+          showCurrentQty
+          getCurrentQty={(id) => (removeForm.branchId ? getStockQty(id, removeForm.branchId) : null)}
+          error={removeErrors.lines}
+        />
+      </StockOperationDialog>
 
-                    <div className="space-y-2">
-                      <Label className={DLG.label}>Notes (optional)</Label>
-                      <Textarea
-                        placeholder="Add any additional details..."
-                        value={adjustForm.notes}
-                        onChange={(e) => setAdjustForm({ ...adjustForm, notes: e.target.value })}
-                        className="text-sm text-black min-h-[64px] resize-none border-gray-200"
-                      />
-                    </div>
+      <StockOperationDialog
+        open={isTransferOpen}
+        onOpenChange={(open) => {
+          setIsTransferOpen(open);
+          if (!open) {
+            clearProductUI();
+            setTransferErrors({});
+          }
+        }}
+        title="Transfer stock"
+        description="Move quantity for multiple products between branches."
+        onSubmit={handleTransfer}
+        submitting={isTransferring}
+        submitLabel={transferLines.length > 0 ? `Save ${transferLines.length} item${transferLines.length === 1 ? "" : "s"}` : "Save"}
+        footerHint={transferLines.length > 0 ? `${transferLines.length} product${transferLines.length === 1 ? "" : "s"} selected` : null}
+      >
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>From branch</Label>
+            <Select
+              value={transferForm.fromBranchId}
+              onValueChange={(v) => {
+                setTransferForm({ ...transferForm, fromBranchId: v });
+                setTransferErrors((e) => ({ ...e, fromBranchId: "" }));
+                if (v) refreshLineStock(transferLines, v, setTransferLines);
+              }}
+            >
+              <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.fromBranchId ? "border-red-400" : "border-gray-200"}`}>
+                <SelectValue placeholder="Select branch" />
+              </SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id} disabled={b.id === transferForm.toBranchId} className="text-sm">
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {transferErrors.fromBranchId && <p className="text-xs text-red-500">{transferErrors.fromBranchId}</p>}
+          </div>
+          <div className="space-y-2">
+            <Label className={STOCK_DLG.label}>To branch</Label>
+            <Select
+              value={transferForm.toBranchId}
+              onValueChange={(v) => {
+                setTransferForm({ ...transferForm, toBranchId: v });
+                setTransferErrors((e) => ({ ...e, toBranchId: "" }));
+              }}
+            >
+              <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.toBranchId ? "border-red-400" : "border-gray-200"}`}>
+                <SelectValue placeholder="Select branch" />
+              </SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id} disabled={b.id === transferForm.fromBranchId} className="text-sm">
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {transferErrors.toBranchId && <p className="text-xs text-red-500">{transferErrors.toBranchId}</p>}
+          </div>
+        </div>
 
-                    <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
-                      <Button
-                        variant="outline"
-                        type="button"
-                        size="sm"
-                        onClick={() => setIsAdjustOpen(false)}
-                        className="text-sm text-black"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={handleAdjustStock}
-                        disabled={isTransferring}
-                        size="sm" className="text-sm"
-                      >
-                        {isTransferring && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                        Save
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-              <Dialog
-                open={isRemoveOpen}
-                onOpenChange={(open) => {
-                  setIsRemoveOpen(open);
-                  if (!open) { clearProductUI(); setRemoveErrors({}); }
-                }}
-              >
-                <DialogContent className={DLG.content}>
-                  <DialogHeader className={DLG.header}>
-                    <DialogTitle className={DLG.title}>Remove stock</DialogTitle>
-                    <p className={DLG.desc}>Reduce quantity (damage, waste, loss, or expiry).</p>
-                  </DialogHeader>
-                  <div className={DLG.body}>
-                    <div className="space-y-2 relative" ref={removeProductDropdownRef}>
-                      <Label className={DLG.label}>Product</Label>
-                      <div className="relative group">
-                        <Input
-                          placeholder="Search product..."
-                          value={productSearch}
-                          onFocus={() => setRemoveProductDropdownOpen(true)}
-                          autoComplete="off"
-                          onChange={(e) => {
-                            setProductSearch(e.target.value);
-                            setRemoveProductDropdownOpen(true);
-                          }}
-                          className="px-4 h-9 border border-gray-200 text-sm text-black focus:ring-1 focus:ring-slate-300"
-                        />
-                        {removeProductDropdownOpen && (
-                          <Card className={DLG.dropdown}>
-                             {filteredProducts.length === 0 ? (
-                               <div className="p-4 text-center text-sm text-gray-500">No products found</div>
-                            ) : (
-                              <div className="p-1">
-                                {filteredProducts.map((p) => (
-                                  <button
-                                    key={p.id}
-                                    className={DLG.pickRow}
-                                    onClick={() => {
-                                      setRemoveForm({ ...removeForm, productId: p.id });
-                                      setRemoveErrors(e => ({ ...e, productId: "" }));
-                                      setProductSearch(p.name);
-                                      setRemoveProductDropdownOpen(false);
-                                    }}
-                                  >
-                                    <div className="flex flex-col">
-                                      <span className="text-sm text-black">{p.name}</span>
-                                      <span className="text-xs text-gray-500">{p.sku || p.id.slice(0, 8)}</span>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </Card>
-                        )}
-                      </div>
-                    </div>
-                    {removeErrors.productId && <p className="text-xs text-red-500 -mt-2">{removeErrors.productId}</p>}
-                    
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Branch</Label>
-                        <Select value={removeForm.branchId} onValueChange={(v) => { setRemoveForm({ ...removeForm, branchId: v }); setRemoveErrors(e => ({...e, branchId: ""})); }}>
-                          <SelectTrigger className={`h-9 border text-sm text-black ${removeErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
-                            <SelectValue placeholder="Select branch" />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
-                            {branches.map((b) => (
-                              <SelectItem key={b.id} value={b.id} className="font-normal text-sm py-2">
-                                {b.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        {removeErrors.branchId && <p className="text-xs text-red-500 mt-0.5">{removeErrors.branchId}</p>}
-                      </div>
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Reason</Label>
-                        <Select value={removeForm.reason} onValueChange={(v) => setRemoveForm({ ...removeForm, reason: v })}>
-                          <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
-                            <SelectValue placeholder="Method" />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-xl border border-slate-100 shadow-xl">
-                            <SelectItem value="DAMAGE" className="font-normal text-sm py-2">Damaged / Defected</SelectItem>
-                            <SelectItem value="WASTE" className="font-normal text-sm py-2">Wastage / Garbage</SelectItem>
-                            <SelectItem value="THEFT" className="font-normal text-sm py-2">Theft / Loss</SelectItem>
-                            <SelectItem value="EXPIRED" className="font-normal text-sm py-2">Expired Goods</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
+        <div className="space-y-2">
+          <Label className={STOCK_DLG.label}>Notes (optional)</Label>
+          <Input
+            placeholder="Carrier name or reference..."
+            value={transferForm.notes}
+            onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
+            className="h-9 text-sm text-black"
+          />
+        </div>
 
-                    {(() => {
-                      // Same live preview as Adjust — show current on-hand,
-                      // the quantity being removed, and the resulting total.
-                      const rmStock = removeForm.productId && removeForm.branchId
-                        ? allStocks.find(
-                            (s) =>
-                              s.product?.id === removeForm.productId &&
-                              s.branch?.id === removeForm.branchId,
-                          )
-                        : undefined;
-                      const currentQty = rmStock ? Number(rmStock.current_quantity) : null;
-                      const removeAmt = Number(removeForm.quantity) || 0;
-                      const newTotal = currentQty !== null ? currentQty - removeAmt : null;
-                      const wouldOverdraw = newTotal !== null && newTotal < 0;
-                      return (
-                        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                          <div className="space-y-1">
-                            <Label className="text-sm text-gray-600">Current quantity</Label>
-                            <div className="h-9 flex items-center px-3 rounded-md bg-gray-50 border border-gray-200 text-sm text-black">
-                              {currentQty !== null ? formatQty(currentQty) : "—"}
-                            </div>
-                          </div>
-                          <div className="space-y-2">
-                            <Label className={DLG.label}>Quantity to remove</Label>
-                            <Input
-                              type="number"
-                              placeholder="0"
-                              value={removeForm.quantity}
-                              onChange={(e) => { setRemoveForm({ ...removeForm, quantity: e.target.value }); setRemoveErrors(er => ({...er, quantity: ""})); }}
-                              className={`h-9 border text-sm text-black text-center ${removeErrors.quantity ? "border-red-400" : "border-gray-200"}`}
-                            />
-                            {removeErrors.quantity && <p className="text-xs text-red-500 mt-0.5">{removeErrors.quantity}</p>}
-                          </div>
-                          <div className="space-y-1">
-                            <Label className="text-sm text-gray-600">After removal</Label>
-                            <div
-                              className={`h-9 flex items-center px-3 rounded-md border text-sm ${
-                                wouldOverdraw
-                                  ? "bg-red-50 border-red-200 text-red-700"
-                                  : "bg-gray-50 border-gray-200 text-black"
-                              }`}
-                            >
-                              {newTotal !== null ? formatQty(newTotal) : "—"}
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
+        <StockProductPicker
+          products={globalProducts}
+          categories={categories}
+          loading={globalLoading}
+          lines={transferLines}
+          onLinesChange={(next) => {
+            setTransferLines(next);
+            setTransferErrors((e) => ({ ...e, lines: "" }));
+            if (transferForm.fromBranchId) {
+              refreshLineStock(next, transferForm.fromBranchId, setTransferLines);
+            }
+          }}
+          quantityLabel="Qty to transfer"
+          showCurrentQty
+          getCurrentQty={(id) =>
+            transferForm.fromBranchId ? getStockQty(id, transferForm.fromBranchId) : null
+          }
+          error={transferErrors.lines}
+        />
+      </StockOperationDialog>
 
-                    <div className="space-y-2">
-                      <Label className={DLG.label}>Notes (optional)</Label>
-                      <Textarea
-                        placeholder="Add reference, batch, vehicle, etc."
-                        value={removeForm.notes}
-                        onChange={(e) => setRemoveForm({ ...removeForm, notes: e.target.value })}
-                        className="text-sm text-black min-h-[64px] resize-none border-gray-200"
-                      />
-                    </div>
-
-                    <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
-                      <Button
-                        variant="outline"
-                        type="button"
-                        size="sm"
-                        onClick={() => setIsRemoveOpen(false)}
-                        className="text-sm text-black"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={handleRemoveStock}
-                        disabled={isTransferring}
-                        size="sm" className="text-sm"
-                      >
-                        {isTransferring && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                        Save
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-              <Dialog
-                open={isTransferOpen}
-                onOpenChange={(open) => {
-                  setIsTransferOpen(open);
-                  if (!open) { clearProductUI(); setTransferErrors({}); }
-                }}
-              >
-                <DialogContent className={DLG.content}>
-                  <DialogHeader className={DLG.header}>
-                    <DialogTitle className={DLG.title}>Transfer stock</DialogTitle>
-                    <p className={DLG.desc}>Move quantity from one branch to another.</p>
-                  </DialogHeader>
-                  <div className={DLG.body}>
-                     <div className="space-y-2 relative" ref={transferProductDropdownRef}>
-                      <Label className={DLG.label}>Select Product</Label>
-                      <div className="relative group">
-                        <Input
-                          placeholder="Search product..."
-                          value={productSearch}
-                          onFocus={() => setTransferProductDropdownOpen(true)}
-                          autoComplete="off"
-                          onChange={(e) => {
-                            setProductSearch(e.target.value);
-                            setTransferProductDropdownOpen(true);
-                          }}
-                          className="px-4 h-9 border border-gray-200 text-sm text-black focus:ring-1 focus:ring-slate-300"
-                        />
-                        {transferProductDropdownOpen && (
-                          <Card className={DLG.dropdown}>
-                            {filteredProducts.length === 0 ? (
-                               <div className="p-8 text-center">
-                                 <p className="text-xs text-gray-500">No products found</p>
-                               </div>
-                            ) : (
-                              <div className="p-2">
-                                {filteredProducts.map((p) => (
-                                  <button
-                                    key={p.id}
-                                    className={DLG.pickRow}
-                                    onClick={() => {
-                                      setTransferForm({ ...transferForm, productId: p.id });
-                                      setTransferErrors(e => ({ ...e, productId: "" }));
-                                      setProductSearch(p.name);
-                                      setTransferProductDropdownOpen(false);
-                                    }}
-                                  >
-                                    <div className="flex flex-col">
-                                      <span className="text-sm text-black">{p.name}</span>
-                                      <span className="text-xs text-gray-500">{p.sku || p.id.slice(0, 8)}</span>
-                                    </div>
-                                  </button>
-                                ))}
-                              </div>
-                            )}
-                          </Card>
-                        )}
-                      </div>
-                    </div>
-                    {transferErrors.productId && <p className="text-xs text-red-500 -mt-2">{transferErrors.productId}</p>}
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="flex-1 w-full space-y-2">
-                        <Label className={DLG.label}>From branch</Label>
-                        <Select value={transferForm.fromBranchId} onValueChange={(v) => { setTransferForm({ ...transferForm, fromBranchId: v }); setTransferErrors(e => ({...e, fromBranchId: ""})); }}>
-                          <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.fromBranchId ? "border-red-400" : "border-gray-200"}`}>
-                             <SelectValue placeholder="Select branch" />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-2xl border border-slate-100 shadow-xl">
-                             {branches.map(b => (
-                               <SelectItem 
-                                 key={b.id} 
-                                 value={b.id} 
-                                 disabled={b.id === transferForm.toBranchId}
-                                 className="font-normal text-sm py-3"
-                                >
-                                 {b.name}
-                               </SelectItem>
-                             ))}
-                          </SelectContent>
-                        </Select>
-                        {transferErrors.fromBranchId && <p className="text-xs text-red-500 mt-0.5">{transferErrors.fromBranchId}</p>}
-                      </div>
-                      
-
-                      <div className="flex-1 w-full space-y-2">
-                         <Label className={DLG.label}>To branch</Label>
-                        <Select value={transferForm.toBranchId} onValueChange={(v) => { setTransferForm({ ...transferForm, toBranchId: v }); setTransferErrors(e => ({...e, toBranchId: ""})); }}>
-                          <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.toBranchId ? "border-red-400" : "border-gray-200"}`}>
-                             <SelectValue placeholder="Select branch" />
-                          </SelectTrigger>
-                          <SelectContent className="rounded-2xl border border-slate-100 shadow-xl">
-                             {branches.map(b => (
-                               <SelectItem 
-                                 key={b.id} 
-                                 value={b.id} 
-                                 disabled={b.id === transferForm.fromBranchId}
-                                 className="font-normal text-sm py-3"
-                               >
-                                 {b.name}
-                               </SelectItem>
-                             ))}
-                          </SelectContent>
-                        </Select>
-                        {transferErrors.toBranchId && <p className="text-xs text-red-500 mt-0.5">{transferErrors.toBranchId}</p>}
-                      </div>
-                    </div>
-
-                    {(() => {
-                      // Pre/post-transfer balance preview. allStocks is the
-                      // full stocks list for the current page — sufficient
-                      // for the typical case where the user picks something
-                      // they can see; for products in stocks outside the
-                      // current page, the balances simply show "—".
-                      const fromStock = transferForm.productId && transferForm.fromBranchId
-                        ? allStocks.find(
-                            (s) =>
-                              s.product?.id === transferForm.productId &&
-                              s.branch?.id === transferForm.fromBranchId,
-                          )
-                        : undefined;
-                      const toStock = transferForm.productId && transferForm.toBranchId
-                        ? allStocks.find(
-                            (s) =>
-                              s.product?.id === transferForm.productId &&
-                              s.branch?.id === transferForm.toBranchId,
-                          )
-                        : undefined;
-                      const fromQty = fromStock ? Number(fromStock.current_quantity) : null;
-                      const toQty = toStock ? Number(toStock.current_quantity) : null;
-                      const moveQty = Number(transferForm.quantity) || 0;
-                      const fromAfter = fromQty !== null ? fromQty - moveQty : null;
-                      const toAfter = toQty !== null ? toQty + moveQty : moveQty > 0 ? moveQty : null;
-                      const wouldOverdraw = fromAfter !== null && fromAfter < 0;
-
-                      if (!transferForm.productId) return null;
-                      return (
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-md border border-gray-200 bg-gray-50/60 p-3">
-                          <div className="space-y-1">
-                            <p className="text-xs text-gray-600 uppercase tracking-wide">From branch</p>
-                            <div className="flex items-baseline gap-2 text-sm">
-                              <span className="text-gray-600">Current:</span>
-                              <span className="text-black">
-                                {fromQty !== null ? formatQty(fromQty) : "—"}
-                              </span>
-                            </div>
-                            <div className="flex items-baseline gap-2 text-sm">
-                              <span className="text-gray-600">After:</span>
-                              <span className={wouldOverdraw ? "text-red-700 font-medium" : "text-black"}>
-                                {fromAfter !== null ? formatQty(fromAfter) : "—"}
-                              </span>
-                            </div>
-                          </div>
-                          <div className="space-y-1">
-                            <p className="text-xs text-gray-600 uppercase tracking-wide">To branch</p>
-                            <div className="flex items-baseline gap-2 text-sm">
-                              <span className="text-gray-600">Current:</span>
-                              <span className="text-black">
-                                {toQty !== null ? formatQty(toQty) : transferForm.toBranchId ? "0" : "—"}
-                              </span>
-                            </div>
-                            <div className="flex items-baseline gap-2 text-sm">
-                              <span className="text-gray-600">After:</span>
-                              <span className="text-black">
-                                {toAfter !== null ? formatQty(toAfter) : "—"}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })()}
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-1">
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Quantity</Label>
-                        <Input
-                          type="number"
-                          placeholder="Quantity"
-                          value={transferForm.quantity}
-                          onChange={(e) => { setTransferForm({ ...transferForm, quantity: e.target.value }); setTransferErrors(er => ({...er, quantity: ""})); }}
-                          className={`h-9 border text-sm text-black ${transferErrors.quantity ? "border-red-400" : "border-gray-200"}`}
-                        />
-                        {transferErrors.quantity && <p className="text-xs text-red-500 mt-0.5">{transferErrors.quantity}</p>}
-                      </div>
-                      <div className="space-y-2">
-                        <Label className={DLG.label}>Notes</Label>
-                        <Input
-                          placeholder="Carrier name or ref..."
-                          value={transferForm.notes}
-                          onChange={(e) => setTransferForm({ ...transferForm, notes: e.target.value })}
-                          className="h-9 border border-gray-200 text-sm text-black text-sm"
-                        />
-                      </div>
-                    </div>
-
-                    <div className="flex justify-end gap-2 px-5 py-4 border-t border-gray-200">
-                      <Button
-                        variant="outline"
-                        type="button"
-                        size="sm"
-                        onClick={() => setIsTransferOpen(false)}
-                        className="text-sm text-black"
-                      >
-                        Cancel
-                      </Button>
-                      <Button
-                        onClick={handleTransfer}
-                        disabled={isTransferring}
-                        size="sm" className="text-sm"
-                      >
-                        {isTransferring && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
-                        Save
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
 
       <InventoryKpiGrid
         columns={6}
@@ -1690,8 +1307,8 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
       </Card>
 
       <p className="text-xs text-gray-500 px-1">
-        Filtered view: {totalStocks.toLocaleString()} rows ·{" "}
-        {formatQty(stockMeta.totalQuantity || 0)} units · value{" "}
+        Filtered view: {totalStocks.toLocaleString()} rows |{" "}
+        {formatQty(stockMeta.totalQuantity || 0)} units | value{" "}
         {formatMoney(stockMeta.totalInventoryValue || 0)}
       </p>
 
@@ -1723,112 +1340,56 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                 </div>
               )}
               
-              <div className="overflow-x-auto">
-              <Table>
-                <TableHeader className="bg-slate-50/30">
-                  <TableRow className="hover:bg-transparent border-slate-100">
-                    <TableHead className="text-sm text-gray-600 py-3 w-12"></TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 min-w-[160px]">Product</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">SKU</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">Barcode</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">Category</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">Brand</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">Branch</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-right">Cost</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-right">Sell</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-right">Current</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-right">Reserved</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-right">Available</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-right">Value</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 min-w-[108px]">Status</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-right w-[72px]">View</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {allStocks.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={15} className="text-center p-24">
-                        <div className="flex flex-col items-center opacity-20">
-                          <Package className="h-12 w-12 mb-3 text-slate-300" />
-                          <p className="text-sm text-gray-500">No stock found</p>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  ) : (
-                    allStocks.map((s) => {
-                      const qty = Number(s.current_quantity || 0);
-                      const reserved = Number(s.reserved_quantity || 0);
-                      const available = qty - reserved;
-                      const cost = Number(s.product?.purchase_rate || 0);
-                      const sell = Number(s.product?.sales_rate_inc_dis_and_tax || 0);
-                      const minQty = Number(
-                        (s.product as { min_qty?: number }).min_qty ?? 10,
-                      );
-                      const imageUrl = getStockRowImage(s.product);
-                      return (
-                        <TableRow key={s.id} className="border-gray-100 hover:bg-gray-50">
-                          <TableCell className="py-2">
-                            {imageUrl ? (
-                              <img
-                                src={imageUrl}
-                                alt=""
-                                className="h-9 w-9 rounded object-cover border border-gray-200"
-                              />
-                            ) : (
-                              <div className="h-9 w-9 rounded bg-gray-100 flex items-center justify-center">
-                                <Package className="h-4 w-4 text-gray-400" />
-                              </div>
-                            )}
-                          </TableCell>
-                          <TableCell className="py-3">
-                            <span className="text-sm text-black">{s.product.name}</span>
-                          </TableCell>
-                          <TableCell className="text-sm text-gray-600 py-3">{s.product.sku || "—"}</TableCell>
-                          <TableCell className="text-sm text-gray-600 py-3">{getProductBarcode(s.product)}</TableCell>
-                          <TableCell className="text-sm text-gray-600 py-3">
-                            {s.product.category?.name ||
-                              categories.find((c) => c.id === s.product.category_id)?.name ||
-                              "—"}
-                          </TableCell>
-                          <TableCell className="text-sm text-gray-600 py-3">{s.product.brand?.name || "—"}</TableCell>
-                          <TableCell className="text-sm text-gray-600 py-3">{s.branch?.name || "—"}</TableCell>
-                          <TableCell className="text-sm text-black py-3 text-right">{formatMoney(cost)}</TableCell>
-                          <TableCell className="text-sm text-black py-3 text-right">{formatMoney(sell)}</TableCell>
-                          <TableCell className="text-sm text-black py-3 text-right">{formatQty(qty)}</TableCell>
-                          <TableCell className="text-sm text-gray-600 py-3 text-right">{formatQty(reserved)}</TableCell>
-                          <TableCell className="text-sm text-black py-3 text-right">{formatQty(available)}</TableCell>
-                          <TableCell className="text-sm text-black py-3 text-right">{formatMoney(qty * cost)}</TableCell>
-                          <TableCell className="py-3 whitespace-nowrap">
-                            <StockStatusBadge qty={qty} minQty={minQty} />
-                          </TableCell>
-                          <TableCell className="text-right py-3 pr-4">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 w-8 p-0 text-gray-600 hover:text-black"
-                              aria-label={`View details for ${s.product.name}`}
-                              onClick={() => openStockView(s)}
-                            >
-                              <Eye className="h-4 w-4" />
-                            </Button>
-                          </TableCell>
-                        </TableRow>
-                      );
-                    })
-                  )}
-                </TableBody>
-              </Table>
-              </div>
+              <InventoryCardGrid
+                empty={allStocks.length === 0}
+                emptyTitle="No stock found"
+                emptyDescription="Adjust filters or add stock to see records here."
+                loading={isLoading && allStocks.length === 0}
+              >
+                {allStocks.map((s) => {
+                  const qty = Number(s.current_quantity || 0);
+                  const reserved = Number(s.reserved_quantity || 0);
+                  const available = qty - reserved;
+                  const cost = Number(s.product?.purchase_rate || 0);
+                  const sell = Number(s.product?.sales_rate_inc_dis_and_tax || 0);
+                  const minQty = Number(
+                    (s.product as { min_qty?: number }).min_qty ?? 10,
+                  );
+                  const imageUrl = getStockRowImage(s.product);
+                  return (
+                    <StockRecordCard
+                      key={s.id}
+                      productName={s.product.name}
+                      sku={s.product.sku}
+                      barcode={getProductBarcode(s.product)}
+                      category={
+                        s.product.category?.name ||
+                        categories.find((c) => c.id === s.product.category_id)?.name
+                      }
+                      brand={s.product.brand?.name}
+                      branch={s.branch?.name}
+                      imageUrl={imageUrl}
+                      cost={cost}
+                      sell={sell}
+                      quantity={qty}
+                      reserved={reserved}
+                      available={available}
+                      value={qty * cost}
+                      minQty={minQty}
+                      onView={() => openStockView(s)}
+                    />
+                  );
+                })}
+              </InventoryCardGrid>
               
-              {/* Pagination — First / Prev / Page X of Y / Next / Last with
-                  an inline rows-per-page selector and a "Showing 1–20 of N"
+              {/* Pagination - First / Prev / Page X of Y / Next / Last with
+                  an inline rows-per-page selector and a "Showing 1-20 of N"
                   caption. Same pattern as the other inventory tables. */}
               {totalStocks > 0 && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-gray-200">
                   <div className="flex items-center gap-3">
                     <p className="text-sm text-black">
-                      Showing {(stockPage - 1) * stockPageSize + 1}–
+                      Showing {(stockPage - 1) * stockPageSize + 1} to{" "}
                       {Math.min(stockPage * stockPageSize, totalStocks)} of {totalStocks}
                     </p>
                     <span className="text-gray-300">|</span>
@@ -1906,97 +1467,56 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
 
         {/* Movement History Tab Content */}
         <TabsContent value="history" className="mt-0 outline-none animate-in fade-in duration-500">
-           <Card className="border-none shadow-sm rounded-3xl overflow-hidden bg-white">
-              <Table>
-                <TableHeader className="bg-slate-50/30">
-                  <TableRow className="border-slate-100">
-                    <TableHead className="text-sm text-gray-600 py-3">Date</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">Product</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">Type</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-center">Change</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3">Before → after</TableHead>
-                    <TableHead className="text-sm text-gray-600 py-3 text-right">User</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {filteredHistory.length === 0 ? (
-                    <TableRow>
-                      <TableCell colSpan={6} className="text-center p-20 text-slate-400 text-xs uppercase font-semibold">No movement history discovered</TableCell>
-                    </TableRow>
-                  ) : (
-                    filteredHistory.map((m) => (
-                      <TableRow key={m.id} className="hover:bg-slate-50/50 border-slate-50 transition-colors">
-                        <TableCell className="p-8 py-4 text-xs font-bold text-slate-500 whitespace-nowrap">
-                          {new Date(m.created_at).toLocaleString([], { dateStyle: 'short', timeStyle: 'short' })}
-                        </TableCell>                         <TableCell>
-                           <div className="flex flex-col min-w-[200px]">
-                              <span className="font-normal text-slate-700 text-xs">{m.product.name}</span>
-                              <span className="text-xs font-medium text-indigo-400 uppercase tracking-wider">{m.branch?.name}</span>
-                           </div>
-                        </TableCell>
-                        <TableCell>{getMovementBadge(m.movement_type)}</TableCell>
-                        <TableCell className="text-center">
-                          <span className={`text-sm font-normal ${m.quantity_change > 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                            {m.quantity_change > 0 ? "+" : ""}{formatQty(Number(m.quantity_change))}
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                           <div className="flex items-center gap-2 font-mono text-xs text-slate-400">
-                             <span className="bg-slate-50 px-2 py-0.5 rounded">{formatQty(Number(m.previous_qty))}</span>
-                             <ArrowRightLeft className="h-2.5 w-2.5 opacity-30" />
-                             <span className="bg-slate-900 text-white px-2 py-0.5 rounded font-normal">{formatQty(Number(m.new_qty))}</span>
-                           </div>
-                        </TableCell>
-                        <TableCell className="p-8 py-4 text-right text-xs font-semibold text-slate-400 uppercase max-w-[120px] truncate">
-                          {m.user?.email.split('@')[0] || "SYSTEM"}
-                        </TableCell>
-                      </TableRow>
-                    ))
-                  )}
-                </TableBody>
-              </Table>
+           <Card className="border border-slate-200 shadow-sm rounded-xl overflow-hidden bg-white">
+              <InventoryCardGrid
+                empty={filteredHistory.length === 0}
+                emptyTitle="No movement history"
+                emptyDescription="Stock changes will appear here once recorded."
+              >
+                {filteredHistory.map((m) => (
+                  <MovementRecordCard
+                    key={m.id}
+                    date={new Date(m.created_at).toLocaleString([], {
+                      dateStyle: "short",
+                      timeStyle: "short",
+                    })}
+                    productName={m.product.name}
+                    branch={m.branch?.name}
+                    movementType={getMovementBadge(m.movement_type)}
+                    quantityChange={Number(m.quantity_change)}
+                    previousQty={Number(m.previous_qty)}
+                    newQty={Number(m.new_qty)}
+                    user={m.user?.email?.split("@")[0] || "System"}
+                  />
+                ))}
+              </InventoryCardGrid>
            </Card>
         </TabsContent>
 
         {/* Today's Movement Tab */}
         <TabsContent value="today" className="mt-0 outline-none animate-in fade-in duration-500">
-           <Card className="border-none shadow-sm rounded-3xl overflow-hidden bg-white">
-              <Table>
-                <TableHeader className="bg-slate-50/30">
-                   <TableRow className="border-slate-100">
-                    <TableHead className="font-semibold text-xs uppercase p-8 py-4 text-slate-400 ">Timestamp</TableHead>
-                    <TableHead className="font-semibold text-xs uppercase text-slate-400 ">Target Entity</TableHead>
-                    <TableHead className="font-semibold text-xs uppercase text-slate-400 ">Protocol</TableHead>
-                    <TableHead className="font-semibold text-xs uppercase text-center text-slate-400 ">Variance</TableHead>
-                    <TableHead className="font-semibold text-xs uppercase text-slate-400 ">Final State</TableHead>
-                    <TableHead className="font-semibold text-xs uppercase p-8 py-4 text-right text-slate-400 ">Audit Notes</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                   {filteredTodayMovements.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={6} className="text-center p-20 text-slate-400 text-xs uppercase font-semibold">No events recorded today</TableCell>
-                      </TableRow>
-                   ) : (
-                     filteredTodayMovements.map((m) => (
-                        <TableRow key={m.id} className="hover:bg-slate-50/50 border-slate-50 transition-colors">
-                          <TableCell className="p-8 py-4 text-xs font-semibold text-indigo-600 uppercase">
-                            {new Date(m.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-                          </TableCell>
-                          <TableCell className="font-normal text-slate-700 text-xs">{m.product.name}</TableCell>
-                          <TableCell>{getMovementBadge(m.movement_type)}</TableCell>
-                          <TableCell className="text-center font-normal text-sm text-slate-700">{m.quantity_change > 0 ? "+" : ""}{formatQty(Number(m.quantity_change))}</TableCell>
-                          <TableCell>
-                             <div className="bg-slate-900 text-white px-2 py-0.5 rounded font-normal text-xs inline-block">{formatQty(Number(m.new_qty))}</div>
-                          </TableCell>
-                          <TableCell className="p-8 py-4 text-right text-xs text-slate-400 max-w-[150px] truncate uppercase">
-                            {m.notes || "-"}
-                          </TableCell>
-                        </TableRow>
-                     ))
-                   )}
-                </TableBody>
-              </Table>
+           <Card className="border border-slate-200 shadow-sm rounded-xl overflow-hidden bg-white">
+              <InventoryCardGrid
+                empty={filteredTodayMovements.length === 0}
+                emptyTitle="No events today"
+                emptyDescription="Today's stock movements will show up here."
+              >
+                {filteredTodayMovements.map((m) => (
+                  <MovementRecordCard
+                    key={m.id}
+                    date={new Date(m.created_at).toLocaleTimeString([], {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    })}
+                    productName={m.product.name}
+                    branch={m.branch?.name}
+                    movementType={getMovementBadge(m.movement_type)}
+                    quantityChange={Number(m.quantity_change)}
+                    newQty={Number(m.new_qty)}
+                    notes={m.notes || undefined}
+                  />
+                ))}
+              </InventoryCardGrid>
            </Card>
         </TabsContent>
       </Tabs>
@@ -2012,7 +1532,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
             <DialogTitle className={DLG.title}>Stock details</DialogTitle>
             <DialogDescription className={DLG.desc}>
               {viewRow
-                ? `${viewRow.product?.name ?? "Product"} · ${viewRow.branch?.name ?? "Branch"}`
+                ? `${viewRow.product?.name ?? "Product"} | ${viewRow.branch?.name ?? "Branch"}`
                 : "Product and branch stock information"}
             </DialogDescription>
           </DialogHeader>
@@ -2020,7 +1540,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
           {viewLoading ? (
             <div className="flex flex-col items-center justify-center py-16 px-5 gap-3">
               <Loader2 className="h-7 w-7 animate-spin text-gray-400" />
-              <p className="text-sm text-gray-600">Loading details…</p>
+              <p className="text-sm text-gray-600">Loading details...</p>
             </div>
           ) : viewError ? (
             <div className="px-5 py-10 text-center">
@@ -2043,12 +1563,12 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                   value={
                     (viewProduct?.sku as string) ||
                     viewRow.product?.sku ||
-                    "—"
+                    "-"
                   }
                 />
                 <DetailRow
                   label="Barcode"
-                  value={(viewProduct?.code as string) || viewRow.product?.barcode || "—"}
+                  value={(viewProduct?.code as string) || viewRow.product?.barcode || "-"}
                 />
                 <DetailRow label="Branch" value={viewRow.branch?.name} />
                 <DetailRow
@@ -2056,16 +1576,16 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                   value={
                     (viewProduct?.category as { name?: string })?.name ||
                     categories.find((c) => c.id === viewRow.product?.category_id)?.name ||
-                    "—"
+                    "-"
                   }
                 />
                 <DetailRow
                   label="Subcategory"
-                  value={(viewProduct?.subcategory as { name?: string })?.name || "—"}
+                  value={(viewProduct?.subcategory as { name?: string })?.name || "-"}
                 />
                 <DetailRow
                   label="Unit"
-                  value={(viewProduct?.unit as { name?: string })?.name || "—"}
+                  value={(viewProduct?.unit as { name?: string })?.name || "-"}
                 />
                 <DetailRow
                   label="Quantity on hand"
