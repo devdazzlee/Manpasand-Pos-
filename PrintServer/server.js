@@ -543,8 +543,8 @@ app.post('/print-receipt', async (req, res) => {
       // Logo is a square (1024x1024) image. `fit` keeps aspect ratio, so the
       // SMALLER box side controls the rendered size -- a square box lets it scale
       // up to fill the receipt width instead of being capped by a short height.
-      const maxW = mm(38);
-      const maxH = mm(38);
+      const maxW = mm(28);
+      const maxH = mm(28);
       const x = (pageWidth - maxW) / 2;
       doc.save();
       doc.image(logoToUse, x, y, { fit: [maxW, maxH], align: 'center', valign: 'center' });
