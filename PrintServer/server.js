@@ -11,10 +11,10 @@ const app = express();
 const PORT = 3001; // Local print server port
 
 // Resolve logo path - handle both src and dist directories (same as backend)
-const logoPath = fs.existsSync(path.join(__dirname, '../Frontend/public/Printserver-logo.jpeg'))
-  ? path.resolve(__dirname, '../Frontend/public/Printserver-logo.jpeg')
-  : fs.existsSync(path.join(__dirname, 'Printserver-logo.jpeg'))
-    ? path.resolve(__dirname, 'Printserver-logo.jpeg')
+const logoPath = fs.existsSync(path.join(__dirname, '../Frontend/public/Printserver-logo.png'))
+  ? path.resolve(__dirname, '../Frontend/public/Printserver-logo.png')
+  : fs.existsSync(path.join(__dirname, 'Printserver-logo.png'))
+    ? path.resolve(__dirname, 'Printserver-logo.png')
     : null;
 
 if (logoPath) {
