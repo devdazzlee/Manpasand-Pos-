@@ -333,7 +333,7 @@ app.post('/print-receipt', async (req, res) => {
     // every glyph as fill + a stroked outline, which physically thickens each
     // stroke by ~BOLD_STROKE so the center stays solid black after AA.
     // (A sub-pixel positional offset is useless here: <1 printer dot rounds away.)
-    const BOLD_STROKE = 0.15; // pt of outline added around each glyph (~0.4 dot @203dpi)
+    const BOLD_STROKE = 0.25; // pt of outline added around each glyph (~0.7 dot @203dpi)
     const _origText = doc.text.bind(doc);
     doc.text = function (text, x, y, options) {
       // Match stroke colour to fill so the outline is also pure black.
@@ -611,10 +611,14 @@ app.post('/print-receipt', async (req, res) => {
     y += lh2;
 
     // Cashier | Customer
-    const cashierName = receiptData.cashier || 'Walk-in';
+    const rawCashier =
+      typeof receiptData.cashier === 'string' ? receiptData.cashier.trim() : '';
     const customerType = receiptData.customerType || 'Walk-in';
-    const lh3 = rowLR('Cashier', cashierName, y);
-    y += lh3;
+    // Only show Cashier when a real employee name is provided. "Walk-in" is a
+    // customer type, not a cashier, so showing it here is meaningless.
+    if (rawCashier && rawCashier.toLowerCase() !== 'walk-in') {
+      y += rowLR('Cashier', rawCashier, y);
+    }
     const lh4 = rowLR('Customer', customerType, y);
     y += lh4 + 2;
 
