@@ -11,10 +11,10 @@ const app = express();
 const PORT = 3001; // Local print server port
 
 // Resolve logo path - handle both src and dist directories (same as backend)
-const logoPath = fs.existsSync(path.join(__dirname, '../Frontend/public/Printserver-logo.jpeg'))
-  ? path.resolve(__dirname, '../Frontend/public/Printserver-logo.jpeg')
-  : fs.existsSync(path.join(__dirname, 'Printserver-logo.jpeg'))
-    ? path.resolve(__dirname, 'Printserver-logo.jpeg')
+const logoPath = fs.existsSync(path.join(__dirname, '../Frontend/public/logo.png'))
+  ? path.resolve(__dirname, '../Frontend/public/logo.png')
+  : fs.existsSync(path.join(__dirname, 'logo.png'))
+    ? path.resolve(__dirname, 'logo.png')
     : null;
 
 if (logoPath) {
@@ -789,7 +789,7 @@ app.post('/print-receipt', async (req, res) => {
     y += lineH(poweredBy) + 1;
 
     const aceLines = [
-      'Website: acestudiosus.com | Contact: +92 336 2500357'
+      '+92 336 2500357'
     ];
     for (const line of aceLines) {
       const usedAce = drawFit(line, margins.left, y, W, {
@@ -819,7 +819,7 @@ app.post('/print-receipt', async (req, res) => {
 
     // Print using pdf-to-printer (same as backend)
     for (let i = 0; i < copies; i++) {
-      await print(tmp, { printer: printer.name, scale: 'noscale', monochrome: true });
+      await print(tmp, { printer: printer.name, scale: 'noscale' });
     }
 
     // Cleanup
