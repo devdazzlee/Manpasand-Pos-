@@ -327,11 +327,27 @@ app.post('/print-receipt', async (req, res) => {
     const boldFont = 'Helvetica-Bold';
     doc.fillColor('#000').strokeColor('#000').opacity(1);
 
+    // Faux-bold via glyph stroking (ROOT-CAUSE fix for light thermal text):
+    // SumatraPDF anti-aliases text, so thin strokes become gray pixels that the
+    // thermal driver dithers into sparse dots -> faded/broken look. We render
+    // every glyph as fill + a stroked outline, which physically thickens each
+    // stroke by ~BOLD_STROKE so the center stays solid black after AA.
+    // (A sub-pixel positional offset is useless here: <1 printer dot rounds away.)
+    const BOLD_STROKE = 0.15; // pt of outline added around each glyph (~0.4 dot @203dpi)
+    const _origText = doc.text.bind(doc);
+    doc.text = function (text, x, y, options) {
+      // Match stroke colour to fill so the outline is also pure black.
+      doc.lineWidth(BOLD_STROKE);
+      const opts = Object.assign({ fill: true, stroke: true }, options);
+      return _origText(text, x, y, opts);
+    };
+
     // Global sizes (same as backend)
+    // Minimums raised: below ~8pt at 203 DPI strokes are too thin and fade first.
     const BODY_MAX = 9.4;
-    const BODY_MIN = 7.0;
+    const BODY_MIN = 8.0;
     const TOTAL_MAX = 11.2;
-    const TOTAL_MIN = 7.8;
+    const TOTAL_MIN = 8.6;
     const HEAD_MAX = 16;
 
     doc.font(baseFont).fontSize(BODY_MAX);
@@ -398,7 +414,7 @@ app.post('/print-receipt', async (req, res) => {
       doc.fontSize(sizeR);
       let checkWidth = doc.widthOfString(value);
       if (checkWidth > W * 0.7) {
-        while (sizeR > 7 && checkWidth > W * 0.7) {
+        while (sizeR > 8 && checkWidth > W * 0.7) {
           sizeR -= 0.2;
           doc.fontSize(sizeR);
           checkWidth = doc.widthOfString(value);
