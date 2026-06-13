@@ -386,7 +386,7 @@ export const generateReceiptHtml = (data: ReceiptData, logoDataUri = ""): string
   const aceHtml = `
 <div class="divider-thin"></div>
 <div class="powered-by">Powered by Ace Studios</div>
-<div class="ace-line">+92 336 2500357</div>`;
+<div class="ace-line">Website: acestudiosus.com | Contact: +92 336 2500357</div>`;
   const logoSrc = logoDataUri || (typeof window !== "undefined" ? `${window.location.origin}/logo.png` : "/logo.png");
 
   return `

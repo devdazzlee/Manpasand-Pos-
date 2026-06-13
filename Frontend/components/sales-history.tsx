@@ -462,7 +462,7 @@ export function SalesHistory() {
     const aceHtml = `
 <div class="divider-thin"></div>
 <div class="powered-by">Powered by Ace Studios</div>
-<div class="ace-line">+92 336 2500357</div>`;
+<div class="ace-line">Website: acestudiosus.com | Contact: +92 336 2500357</div>`;
     
     const logoSrc = logoDataUri || `${window.location.origin}/logo.png`;
     return `

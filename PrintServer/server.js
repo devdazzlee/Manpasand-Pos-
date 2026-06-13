@@ -6,9 +6,39 @@ const path = require('path');
 const PDFDocument = require('pdfkit');
 const { print } = require('pdf-to-printer');
 const bwipjs = require('bwip-js');
+const sharp = require('sharp');
 
 const app = express();
 const PORT = 3001; // Local print server port
+
+// Cache processed logos so repeated prints stay fast
+const thermalLogoCache = new Map();
+
+// Boost logo contrast for thermal printers (thin JPEG strokes print too light otherwise)
+async function prepareLogoForThermal(sourcePath) {
+  if (!sourcePath || !fs.existsSync(sourcePath)) return null;
+
+  const cached = thermalLogoCache.get(sourcePath);
+  if (cached && fs.existsSync(cached)) return cached;
+
+  const tmpLogo = path.join(
+    os.tmpdir(),
+    `logo_thermal_${path.basename(sourcePath, path.extname(sourcePath))}.png`
+  );
+
+  await sharp(sourcePath)
+    .flatten({ background: '#ffffff' })
+    .grayscale()
+    .normalize()
+    .linear(2.2, -70)
+    .sharpen()
+    .threshold(150)
+    .png()
+    .toFile(tmpLogo);
+
+  thermalLogoCache.set(sourcePath, tmpLogo);
+  return tmpLogo;
+}
 
 // Resolve logo path - handle both src and dist directories (same as backend)
 const logoPath = fs.existsSync(path.join(__dirname, '../Frontend/public/Printserver-logo.jpeg'))
@@ -300,6 +330,7 @@ app.post('/print-receipt', async (req, res) => {
     const copies = job?.copies ?? 1;
     // Use logoPath from receiptData if provided, otherwise use default
     const logoToUse = receiptData.logoPath || logoPath;
+    const thermalLogo = await prepareLogoForThermal(logoToUse);
 
     // Paper geometry (80mm roll) - same as backend
     const pageWidth = mm(72);
@@ -322,10 +353,26 @@ app.post('/print-receipt', async (req, res) => {
     const stream = fs.createWriteStream(tmp);
     doc.pipe(stream);
 
-    // Fonts: use Helvetica-Bold (same as backend)
-    const baseFont = 'Helvetica-Bold';
-    const boldFont = 'Helvetica-Bold';
-    doc.fillColor('#000').strokeColor('#000').opacity(1);
+    // Fonts: Courier-Bold prints darker on thermal printers than Helvetica
+    const baseFont = 'Courier-Bold';
+    const boldFont = 'Courier-Bold';
+    doc.fillColor('black').strokeColor('black').opacity(1);
+
+    const ensureDarkInk = () => {
+      doc.fillColor('black').strokeColor('black').opacity(1);
+    };
+
+    // Double-strike text so thermal printers burn darker (single-line only)
+    const printDarkText = (text, x, y, options = {}) => {
+      ensureDarkInk();
+      doc.text(text, x, y, options);
+      const isSingleLine =
+        options.lineBreak === false ||
+        (options.width == null && !String(text).includes('\n'));
+      if (isSingleLine) {
+        doc.text(text, x + 0.4, y, options);
+      }
+    };
 
     // Global sizes (same as backend)
     const BODY_MAX = 9.4;
@@ -369,7 +416,8 @@ app.post('/print-receipt', async (req, res) => {
         drawX = x + (width - textWidth) / 2;
       }
 
-      doc.text(text, drawX, y, { lineBreak: false });
+      ensureDarkInk();
+      printDarkText(text, drawX, y, { lineBreak: false });
       return size;
     }
 
@@ -389,7 +437,8 @@ app.post('/print-receipt', async (req, res) => {
         doc.fontSize(sizeL);
       }
       doc.fontSize(sizeL);
-      doc.text(label, margins.left, y, { lineBreak: false });
+      ensureDarkInk();
+      printDarkText(label, margins.left, y, { lineBreak: false });
 
       // Right value - NO WIDTH CONSTRAINT
       doc.font(font);
@@ -406,7 +455,8 @@ app.post('/print-receipt', async (req, res) => {
       }
       doc.fontSize(sizeR);
       const finalValueWidth = doc.widthOfString(value);
-      doc.text(value, margins.left + W - finalValueWidth, y, { lineBreak: false });
+      ensureDarkInk();
+      printDarkText(value, margins.left + W - finalValueWidth, y, { lineBreak: false });
 
       const used = Math.min(sizeL, sizeR);
       return lineH(used);
@@ -456,8 +506,9 @@ app.post('/print-receipt', async (req, res) => {
       return lineH(used);
     }
 
-    function hr(y, style = 'dotted', thick = 1) {
+    function hr(y, style = 'dotted', thick = 1.8) {
       const yy = y + 1;
+      ensureDarkInk();
       if (style === 'dotted') doc.dash(1, { space: 2 });
       else doc.undash();
       doc.moveTo(margins.left, yy)
@@ -514,13 +565,14 @@ app.post('/print-receipt', async (req, res) => {
     // ===== HEADER =====
     let y = margins.top;
 
-    // Logo (if provided)
-    if (logoToUse && fs.existsSync(logoToUse)) {
+    // Logo (if provided) — use high-contrast thermal version
+    if (thermalLogo && fs.existsSync(thermalLogo)) {
       const maxW = mm(48);
       const maxH = mm(24);
       const x = (pageWidth - maxW) / 2;
       doc.save();
-      doc.image(logoToUse, x, y, { fit: [maxW, maxH], align: 'center', valign: 'center' });
+      ensureDarkInk();
+      doc.image(thermalLogo, x, y, { fit: [maxW, maxH], align: 'center', valign: 'center' });
       doc.restore();
       y += maxH + mm(3);
     }
@@ -606,9 +658,10 @@ app.post('/print-receipt', async (req, res) => {
 
     // ===== ITEMS HEADER =====
     doc.font(boldFont).fontSize(TOTAL_MAX);
-    doc.text('ITEM', X_ITEM_C, y, { width: itemColW, align: 'left', lineBreak: false });
-    doc.text('QTY', X_QTY_C, y, { width: qtyColW, align: 'right', lineBreak: false });
-    doc.text('RATE', X_RATE_C, y, { width: rateColW, align: 'right', lineBreak: false });
+    ensureDarkInk();
+    printDarkText('ITEM', X_ITEM_C, y, { width: itemColW, align: 'left', lineBreak: false });
+    printDarkText('QTY', X_QTY_C, y, { width: qtyColW, align: 'right', lineBreak: false });
+    printDarkText('RATE', X_RATE_C, y, { width: rateColW, align: 'right', lineBreak: false });
     y += lineH(TOTAL_MAX);
     y += hr(y, 'solid', 1);
     y += 4;
@@ -634,16 +687,17 @@ app.post('/print-receipt', async (req, res) => {
       doc.font(baseFont).fontSize(BODY_MAX);
       const itemH = doc.heightOfString(name, { width: itemColW });
 
-      doc.text(name, X_ITEM_C, y, {
+      ensureDarkInk();
+      printDarkText(name, X_ITEM_C, y, {
         width: itemColW,
         align: 'left',
       });
-      doc.text(qty, X_QTY_C, y, {
+      printDarkText(qty, X_QTY_C, y, {
         width: qtyColW,
         align: 'right',
         lineBreak: false,
       });
-      doc.text(rate, X_RATE_C, y, {
+      printDarkText(rate, X_RATE_C, y, {
         width: rateColW,
         align: 'right',
         lineBreak: false,
@@ -660,7 +714,8 @@ app.post('/print-receipt', async (req, res) => {
     for (const section of sections) {
       if (section.title) {
         doc.font(boldFont).fontSize(BODY_MAX);
-        doc.text(String(section.title), X_ITEM_C, y, {
+        ensureDarkInk();
+        printDarkText(String(section.title), X_ITEM_C, y, {
           width: W,
           align: 'left',
         });
@@ -731,8 +786,8 @@ app.post('/print-receipt', async (req, res) => {
           {
             bcid: 'code128',
             text: String(receiptData.transactionId),
-            scale: 2,
-            height: 10,
+            scale: 3,
+            height: 12,
             includetext: false,
             backgroundcolor: 'FFFFFF',
             paddingwidth: 0,
@@ -789,7 +844,7 @@ app.post('/print-receipt', async (req, res) => {
     y += lineH(poweredBy) + 1;
 
     const aceLines = [
-      '+92 336 2500357'
+      'Website: acestudiosus.com | Contact: +92 336 2500357'
     ];
     for (const line of aceLines) {
       const usedAce = drawFit(line, margins.left, y, W, {
