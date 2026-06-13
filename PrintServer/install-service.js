@@ -13,6 +13,47 @@
 const path = require('path');
 const os = require('os');
 const fs = require('fs');
+const { execSync } = require('child_process');
+
+const SERVICE_NAMES = ['Manpasand Print Server', 'manpasandprintserver.exe'];
+
+function runSc(args) {
+  for (const name of SERVICE_NAMES) {
+    try {
+      execSync(`sc ${args} "${name}"`, { stdio: 'pipe', windowsHide: true });
+      return name;
+    } catch (_) {}
+  }
+  throw new Error(`sc ${args} failed for all service names`);
+}
+
+function preflight() {
+  const scriptPath = path.resolve(__dirname, 'server.js');
+  const errors = [];
+
+  if (!fs.existsSync(scriptPath)) {
+    errors.push('server.js not found');
+  }
+
+  const requiredModules = ['express', 'pdfkit', 'pdf-to-printer', 'bwip-js', 'cors'];
+  for (const mod of requiredModules) {
+    try {
+      require.resolve(mod, { paths: [__dirname] });
+    } catch (_) {
+      errors.push(`Missing module: ${mod} (run: npm install)`);
+    }
+  }
+
+  if (errors.length) {
+    console.error('');
+    console.error('Preflight failed:');
+    errors.forEach((e) => console.error(`  - ${e}`));
+    console.error('');
+    process.exit(1);
+  }
+
+  return scriptPath;
+}
 
 // Check if node-windows is installed
 let Service;
@@ -32,13 +73,26 @@ try {
 }
 
 // Get the directory where this script is located
-const scriptPath = path.resolve(__dirname, 'server.js');
+const scriptPath = preflight();
+const nodeExe = process.execPath;
+
+if (!fs.existsSync(nodeExe)) {
+  console.error(`❌ Node executable not found: ${nodeExe}`);
+  process.exit(1);
+}
+
+console.log('📁 PrintServer folder: ' + __dirname);
+console.log('📁 server.js: ' + scriptPath);
+console.log('📁 node.exe: ' + nodeExe);
+console.log('');
 
 // Create a new service object
 const svc = new Service({
   name: 'Manpasand Print Server',
   description: 'Local print server for Manpasand POS receipt printing',
   script: scriptPath,
+  execPath: nodeExe,
+  workingDirectory: __dirname,
   nodeOptions: [
     '--max_old_space_size=4096'
   ],
@@ -54,66 +108,84 @@ const svc = new Service({
   maxRestarts: 5
 });
 
+function verifyDaemonXml() {
+  const xmlPath = path.join(__dirname, 'daemon', 'manpasandprintserver.xml');
+  if (!fs.existsSync(xmlPath)) return;
+
+  const xml = fs.readFileSync(xmlPath, 'utf8');
+  const paths = [
+    ...xml.matchAll(/<executable>([^<]+)<\/executable>/g),
+    ...xml.matchAll(/<argument>([^<]+)<\/argument>/g),
+    ...xml.matchAll(/<workingdirectory>([^<]+)<\/workingdirectory>/g)
+  ].map((m) => m[1].trim());
+
+  const missing = paths.filter((p) => {
+    if (!p || p === 'undefined' || p.startsWith('--')) return false;
+    return !fs.existsSync(p);
+  });
+
+  if (missing.length) {
+    console.log('⚠️  Service XML references missing files:');
+    missing.forEach((p) => console.log('   - ' + p));
+    console.log('   Run fix-service.bat as Administrator to reinstall.');
+  } else {
+    console.log('✅ All service paths verified');
+  }
+}
+
 // Listen for the "install" event, which indicates the process is available as a service
 svc.on('install', function() {
   console.log('✅ Print Server service installed successfully!');
-  
-  // Set startup type to Automatic - CRITICAL for auto-start
-  const { execSync } = require('child_process');
-  
-  // Wait a moment for service to be fully registered
+  console.log('📁 Registered path: ' + scriptPath);
+  verifyDaemonXml();
+
   setTimeout(() => {
     try {
       console.log('🔧 Setting startup type to AUTOMATIC...');
-      
-      // Use sc config to set startup type - this is the most reliable method
-      execSync('sc config "Manpasand Print Server" start= auto', { 
-        stdio: 'inherit',
-        windowsHide: true 
-      });
-      
-      // Verify it was set correctly
-      const verifyOutput = execSync('sc qc "Manpasand Print Server"', { 
-        encoding: 'utf8',
-        windowsHide: true 
-      });
-      
-      if (verifyOutput.includes('AUTO_START') || verifyOutput.includes('2')) {
-        console.log('✅ Startup type confirmed: AUTOMATIC - will start on boot!');
-      } else {
-        console.log('⚠️  Startup type may not be set correctly');
-      }
-      
-      // Configure recovery options (auto-restart on failure)
+      runSc('config start= auto');
+      console.log('✅ Startup type confirmed: AUTOMATIC');
+
       try {
-        execSync('sc failure "Manpasand Print Server" reset= 86400 actions= restart/60000/restart/60000/restart/60000', {
-          stdio: 'inherit',
-          windowsHide: true
-        });
+        const serviceName = SERVICE_NAMES.find((name) => {
+          try {
+            execSync(`sc qc "${name}"`, { stdio: 'pipe', windowsHide: true });
+            return true;
+          } catch (_) {
+            return false;
+          }
+        }) || SERVICE_NAMES[0];
+        execSync(
+          `sc failure "${serviceName}" reset= 86400 actions= restart/60000/restart/60000/restart/60000`,
+          { stdio: 'inherit', windowsHide: true }
+        );
         console.log('✅ Recovery options configured (auto-restart on failure)');
       } catch (recoveryError) {
         console.log('⚠️  Could not configure recovery options (non-critical)');
       }
-      
-      // Start the service automatically
+
       console.log('🚀 Starting service...');
-      execSync('sc start "Manpasand Print Server"', { 
-        stdio: 'inherit',
-        windowsHide: true 
-      });
+      runSc('start');
       
-      // Wait and verify service started
       setTimeout(() => {
         try {
-          const statusOutput = execSync('sc query "Manpasand Print Server"', {
-            encoding: 'utf8',
-            windowsHide: true
-          });
-          
-          if (statusOutput.includes('RUNNING')) {
+          let running = false;
+          for (const name of SERVICE_NAMES) {
+            try {
+              const statusOutput = execSync(`sc query "${name}"`, {
+                encoding: 'utf8',
+                windowsHide: true
+              });
+              if (statusOutput.includes('RUNNING')) {
+                running = true;
+                break;
+              }
+            } catch (_) {}
+          }
+          if (running) {
             console.log('✅ Service started successfully and is RUNNING!');
           } else {
             console.log('⚠️  Service may still be starting...');
+            console.log('   If it stops, run fix-service.bat as Administrator');
           }
         } catch (statusError) {
           console.log('⚠️  Could not verify service status');
@@ -139,8 +211,15 @@ svc.on('install', function() {
 
 // Listen for the "alreadyinstalled" event
 svc.on('alreadyinstalled', function() {
-  console.log('⚠️  Service is already installed!');
-  console.log('To reinstall, first run: node uninstall-service.js');
+  console.log('⚠️  Service already installed with OLD paths (this causes the error in Event Viewer).');
+  console.log('');
+  console.log('Run as Administrator:');
+  console.log('  fix-service.bat');
+  console.log('');
+  console.log('Or manually:');
+  console.log('  node uninstall-service.js');
+  console.log('  node install-service.js');
+  process.exit(1);
 });
 
 // Listen for errors during installation

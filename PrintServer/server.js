@@ -1565,11 +1565,26 @@ app.post('/print-barcode-labels', async (req, res) => {
 app.listen(PORT, () => {
   console.log(`🖨️  Print Server running on http://localhost:${PORT}`);
   console.log(`📡 Waiting for print requests...`);
+}).on('error', (error) => {
+  const logDir = path.join(__dirname, 'daemon');
+  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+  const logPath = path.join(logDir, 'server-startup-error.log');
+  const msg = `${new Date().toISOString()} ${error.stack || error.message}\n`;
+  fs.appendFileSync(logPath, msg);
+  console.error('Failed to start server:', error.message);
+  process.exit(1);
 });
 
 // Handle errors
 process.on('uncaughtException', (error) => {
+  const logDir = path.join(__dirname, 'daemon');
+  if (!fs.existsSync(logDir)) fs.mkdirSync(logDir, { recursive: true });
+  fs.appendFileSync(
+    path.join(logDir, 'server-crash.log'),
+    `${new Date().toISOString()} ${error.stack || error.message}\n`
+  );
   console.error('Uncaught Exception:', error);
+  process.exit(1);
 });
 
 process.on('unhandledRejection', (error) => {
