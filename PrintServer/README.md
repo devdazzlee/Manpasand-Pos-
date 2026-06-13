@@ -206,9 +206,9 @@ pm2 startup
 
 ## Logo Support
 
-The server automatically looks for logo.png in:
-1. `../Frontend/public/logo.png`
-2. `./logo.png` (PrintServer directory)
+The server automatically looks for Printserver-logo.jpeg in:
+1. `../Frontend/public/Printserver-logo.jpeg`
+2. `./Printserver-logo.jpeg` (PrintServer directory)
 
 Or you can provide logoPath in receiptData.
 
