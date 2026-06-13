@@ -503,8 +503,16 @@ app.post('/print-receipt', async (req, res) => {
     };
 
     const buildReceiptBranchLine = (storeName, address) => {
-      const normalizedStoreName =
+      const rawStoreName =
         typeof storeName === 'string' ? storeName.trim() : '';
+      // Drop the literal word "Branch" — customers already know it's a branch,
+      // and keeping it both reads awkwardly and duplicates the area name that
+      // is already present in the address (e.g. "Bahadurabad Branch, Bahadurabad").
+      const normalizedStoreName = rawStoreName
+        .replace(/\bbranch\b/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/[\s,]+$/g, '')
+        .trim();
       const normalizedAddress = normalizeReceiptAddress(address);
 
       if (
@@ -532,8 +540,8 @@ app.post('/print-receipt', async (req, res) => {
 
     // Logo (if provided)
     if (logoToUse && fs.existsSync(logoToUse)) {
-      const maxW = mm(48);
-      const maxH = mm(24);
+      const maxW = mm(60);
+      const maxH = mm(30);
       const x = (pageWidth - maxW) / 2;
       doc.save();
       doc.image(logoToUse, x, y, { fit: [maxW, maxH], align: 'center', valign: 'center' });
