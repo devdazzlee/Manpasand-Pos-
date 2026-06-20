@@ -1669,8 +1669,8 @@ export function NewSale() {
         setCompletedSaleNumber(transactionId);
         setCompletedTotalReceived(amountPaid);
         setCompletedCustomerPhone(
-          customerAtSale?.phone_number ||
-            (customerAtSale as any)?.mobile_number ||
+          customerAtSale?.phone ||
+            (customerAtSale as PosCustomer)?.phone_number ||
             ""
         );
         setCompletedCustomerEmail(customerAtSale?.email || "");
