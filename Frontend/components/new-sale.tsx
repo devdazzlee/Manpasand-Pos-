@@ -402,7 +402,7 @@ export function NewSale() {
   const lastAddedProductId = useRef<string | null>(null);
   const [activeCartLineId, setActiveCartLineId] = useState<string | null>(null);
   // Refs for cart items and scrollable container
-  const cartItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
+  const cartItemRefs = useRef<Record<string, HTMLElement | null>>({});
   const cartScrollContainerRef = useRef<HTMLDivElement | null>(null);
   // Ref to track scan timeout for rapid scanning
   const scanTimeoutRef = useRef<NodeJS.Timeout | null>(null);
@@ -440,6 +440,8 @@ export function NewSale() {
 
   const [globalDiscountType, setGlobalDiscountType] = useState<"percentage" | "fixed">("fixed");
   const [globalDiscountValue, setGlobalDiscountValue] = useState<string>("");
+  const [showDiscountRow, setShowDiscountRow] = useState(false);
+  const [priceEditLineId, setPriceEditLineId] = useState<string | null>(null);
 
   // Global store with custom hook
   const {
@@ -1282,6 +1284,10 @@ export function NewSale() {
     setQuantityInputs({});
     setQuantityModes({});
     setGlobalDiscountValue("");
+    setShowDiscountRow(false);
+    setActiveCartLineId(null);
+    setPriceEditLineId(null);
+    activeCartLineIdRef.current = null;
   };
 
   const subtotal = sumMoney(
@@ -2654,408 +2660,389 @@ export function NewSale() {
       </div>
 
       {/* Cart Section */}
-      <div className="w-full lg:w-[320px] bg-white lg:border-l border-gray-200 flex flex-col">
-        <div className="border-b border-gray-200 bg-slate-50/60 p-2.5">
-          <div className="flex items-start justify-between gap-2">
+      <div className="flex w-full flex-col bg-white lg:w-[300px] lg:border-l lg:border-slate-200">
+        <div className="border-b border-slate-200 px-3 py-2.5">
+          <div className="flex items-center justify-between gap-2">
             <div>
-              <h2 className="text-sm font-semibold text-gray-900">Sale Summary</h2>
-              {cart.length === 0 && (
-                <p className="mt-0.5 text-[10px] text-gray-500">
-                  Scan a product or search to start a new sale.
-                </p>
-              )}
+              <h2 className="text-sm font-semibold text-slate-900">Cart</h2>
+              <p className="text-[10px] text-slate-500">
+                {cart.length === 0
+                  ? "Search or scan to add items"
+                  : `${cart.length} line${cart.length === 1 ? "" : "s"} · use quick qty to adjust`}
+              </p>
             </div>
-            <div className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-gray-600 shadow-sm">
-              {cart.length} item{cart.length === 1 ? "" : "s"}
-            </div>
+            {cart.length > 0 && (
+              <div className="flex shrink-0 gap-1">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearCart}
+                  className="h-7 px-2 text-[11px] text-slate-600"
+                >
+                  Clear
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={holdCurrentSale}
+                  className="h-7 px-2 text-[11px]"
+                  disabled={isHoldingSale || branchLoading || !hasBranch}
+                >
+                  {isHoldingSale ? "…" : "Hold"}
+                </Button>
+              </div>
+            )}
           </div>
-
-          {cart.length > 0 && (
-            <div className="mt-1.5 flex flex-wrap gap-1.5">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={clearCart}
-                className="h-7 flex-1 min-w-[100px] border-dashed text-[11px]"
-              >
-                Clear Cart
-              </Button>
-              <Button
-                variant="default"
-                size="sm"
-                onClick={holdCurrentSale}
-                className="h-7 flex-1 min-w-[100px] text-[11px]"
-                disabled={isHoldingSale || branchLoading || !hasBranch}
-              >
-                {isHoldingSale ? "Saving..." : "Hold Sale"}
-              </Button>
-            </div>
-          )}
 
           {holdSales.length > 0 && (
             <Button
               variant="ghost"
               size="sm"
               onClick={handleViewHeldSales}
-              className="mt-3 w-full justify-between border border-gray-200 bg-white hover:bg-white"
+              className="mt-2 h-7 w-full justify-between px-2 text-[11px] text-slate-600"
               disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !hasBranch}
             >
-              <span className="text-sm font-medium text-gray-700">
+              <span>
                 {isViewingHeldSales || holdSalesLoading
-                  ? "Loading held sales..."
-                  : `Held Sales (${holdSales.length})`}
+                  ? "Loading…"
+                  : `Held sales (${holdSales.length})`}
               </span>
-              {showHeldSales ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+              {showHeldSales ? (
+                <ChevronUp className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronDown className="h-3.5 w-3.5" />
+              )}
             </Button>
           )}
 
           {showHeldSales && holdSalesLoading && (
-            <div className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3 text-xs text-gray-500">
-              Loading held sales...
-            </div>
+            <p className="mt-2 text-[11px] text-slate-400">Loading held sales…</p>
           )}
 
           {holdSales.length > 0 && showHeldSales && !holdSalesLoading && (
-            <div id="held-sales-list" className="mt-2 rounded-lg border border-dashed border-blue-200 bg-white p-3">
-              <div className="max-h-60 pr-2 space-y-3 overflow-y-auto scrollbar-thin scrollbar-thumb-gray-200">
-                  {holdSales.map((sale, index) => {
-                    const saleTotal = sumMoney(
-                      ...sale.items.map((item) =>
-                        lineTotal(getSellingPrice(item as CartItem), item.quantity),
-                      ),
-                    );
-                    return (
-                      <div key={sale.id} className="flex flex-col gap-2 rounded-md border border-gray-200 p-2.5 bg-gray-50/50 hover:border-blue-300 transition-colors">
-                        <div className="flex items-start justify-between">
-                          <div className="flex flex-col leading-tight">
-                            <span className="font-semibold text-sm text-gray-800">Sale #{index + 1} - {sale.branchName}</span>
-                            <span className="text-xs text-gray-500 mt-1">
-                              {sale.items.length} items • Rs {saleTotal.toFixed(2)}
-                            </span>
-                          </div>
-                          <Button
-                            variant="ghost"
-                            size="icon"
-                            className="h-7 w-7 text-red-500 hover:text-red-700 hover:bg-red-50 -mt-1 -mr-1 shrink-0"
-                            disabled={isDeletingHoldSale}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              setDeleteTargetHoldSale(index);
-                            }}
-                          >
-                            {isDeletingHoldSale && deleteTargetHoldSale === index ? (
-                              <Loader2 className="h-4 w-4 animate-spin" />
-                            ) : (
-                              <Trash2 className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </div>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleRetrieveHoldSale(index)}
-                          className="w-full text-xs font-semibold text-blue-600 bg-white hover:bg-blue-50 hover:text-blue-700 border-blue-200 h-8 mt-1"
-                          disabled={resumingHoldIndex === index}
-                        >
-                          {resumingHoldIndex === index ? "Resuming..." : "Resume Sale"}
-                        </Button>
-                      </div>
-                    );
-                  })}
-              </div>
+            <div id="held-sales-list" className="mt-2 max-h-40 space-y-1.5 overflow-y-auto">
+              {holdSales.map((sale, index) => {
+                const saleTotal = sumMoney(
+                  ...sale.items.map((item) =>
+                    lineTotal(getSellingPrice(item as CartItem), item.quantity),
+                  ),
+                );
+                return (
+                  <div
+                    key={sale.id}
+                    className="flex items-center gap-2 rounded-lg border border-slate-200 bg-slate-50/80 px-2 py-1.5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-[11px] font-medium text-slate-800">
+                        #{index + 1} · {sale.items.length} items
+                      </p>
+                      <p className="text-[10px] tabular-nums text-slate-500">
+                        Rs {formatMoney(saleTotal)}
+                      </p>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-6 px-2 text-[10px]"
+                      onClick={() => handleRetrieveHoldSale(index)}
+                      disabled={resumingHoldIndex === index}
+                    >
+                      {resumingHoldIndex === index ? "…" : "Resume"}
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 shrink-0 text-red-500 hover:bg-red-50"
+                      disabled={isDeletingHoldSale}
+                      onClick={() => setDeleteTargetHoldSale(index)}
+                    >
+                      {isDeletingHoldSale && deleteTargetHoldSale === index ? (
+                        <Loader2 className="h-3 w-3 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-3 w-3" />
+                      )}
+                    </Button>
+                  </div>
+                );
+              })}
             </div>
           )}
-
         </div>
 
-        <div className="flex-1 overflow-hidden">
-          <div ref={cartScrollContainerRef} className="h-full overflow-auto px-4 py-3">
+        <div className="min-h-0 flex-1 overflow-hidden">
+          <div ref={cartScrollContainerRef} className="h-full overflow-y-auto px-2 py-2">
             {cart.length === 0 ? (
-              <div className="mt-8 text-center text-gray-500">
-                <p className="font-medium text-gray-600">Your cart is empty</p>
-                <p className="text-sm text-gray-500">Add products to see them here.</p>
+              <div className="flex flex-col items-center justify-center py-12 text-center">
+                <Scan className="mb-2 h-8 w-8 text-slate-200" />
+                <p className="text-xs font-medium text-slate-500">No items yet</p>
               </div>
             ) : (
-              <div className="space-y-2">
+              <ul className="divide-y divide-slate-100">
                 {cart.map((item) => {
                   const unitName = item.unitName || item.unit;
-                  const minQuantity = isPieceUnit(unitName) ? 1 : 0.01;
                   const effectiveUnitPrice = getSellingPrice(item);
+                  const lineAmount = lineTotal(effectiveUnitPrice, item.quantity);
+                  const isActive = activeCartLineId === item.id;
+                  const qtyDisplay =
+                    quantityInputs[item.id] ?? formatQuantityValue(item.quantity);
 
                   return (
-                  <div
-                    key={item.id}
-                    ref={(el) => {
-                      cartItemRefs.current[item.id] = el;
-                    }}
-                    className="rounded-md border border-gray-200 bg-white p-2 shadow-sm"
-                  >
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="space-y-0.5 min-w-0">
-                        <h4 className="text-[11px] font-semibold text-gray-900 leading-snug flex items-center gap-1 flex-wrap">
-                          <span className="truncate">{item.name}</span>
-                          {isPriceOverridden(item) && (
-                            <Badge variant="outline" className="text-[9px] border-amber-300 text-amber-700 bg-amber-50">
-                              <Pencil className="h-2.5 w-2.5 mr-0.5" />
-                              Custom
-                            </Badge>
-                          )}
-                        </h4>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        onClick={() => removeFromCart(item.id)}
-                        className="h-5 w-5 p-0 text-red-500 hover:text-red-600 shrink-0"
-                      >
-                        <Trash2 className="h-3 w-3" />
-                      </Button>
-                    </div>
-
-                    <div className="mt-1.5 rounded-md border border-gray-100 bg-slate-50 p-2 space-y-2">
-                      {/* Price editor */}
-                      <div>
-                        <div className="flex items-center justify-between">
-                          <label className="text-[10px] font-semibold tracking-wide text-gray-600">
-                            Selling Price (Rs)
-                          </label>
-                          {isPriceOverridden(item) && (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="ghost"
-                              className="h-6 px-1.5 text-[10px] text-amber-700 hover:text-amber-800"
-                              onClick={() => {
-                                setCart(
-                                  cart.map((cartItem) =>
-                                    cartItem.id === item.id
-                                      ? {
-                                          ...cartItem,
-                                          actualUnitPrice: cartItem.originalPrice,
-                                          price: cartItem.originalPrice,
-                                        }
-                                      : cartItem,
-                                  ),
-                                );
-                              }}
-                            >
-                              Reset Default
-                            </Button>
-                          )}
-                        </div>
-                          <Input
-                            ref={(el) => {
-                              priceInputRefs.current[item.id] = el;
-                              if (el) {
-                              el.setAttribute("data-price-input", "true");
-                              }
-                            }}
-                            type="text"
-                            inputMode="decimal"
-                          value={
-                            priceInputs[item.id] !== undefined
-                              ? priceInputs[item.id]
-                              : item.actualUnitPrice === 0
-                                ? ""
-                                : String(item.actualUnitPrice || item.price)
+                    <li
+                      key={item.id}
+                      ref={(el) => {
+                        cartItemRefs.current[item.id] = el;
+                      }}
+                    >
+                      <div
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => switchActiveCartLine(item.id)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            switchActiveCartLine(item.id);
                           }
-                            onFocus={() => {
-                              isUserInteractingRef.current = true;
+                        }}
+                        className={cn(
+                          "group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 transition-colors",
+                          isActive
+                            ? "bg-blue-50 ring-1 ring-inset ring-blue-200"
+                            : "hover:bg-slate-50",
+                        )}
+                      >
+                        <div className="flex shrink-0 items-center rounded-md border border-slate-200 bg-white">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 rounded-none rounded-l-md text-slate-600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              bumpQuantity(item.id, -1);
                             }}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === "Tab") {
-                              e.preventDefault();
-                              const quantityInput = quantityInputRefs.current[item.id];
-                              if (quantityInput) {
-                                quantityInput.focus();
-                                if (quantityInput instanceof HTMLInputElement) {
-                                quantityInput.select();
+                          >
+                            <Minus className="h-3 w-3" />
+                          </Button>
+                          <span className="min-w-[1.75rem] px-1 text-center text-xs font-bold tabular-nums text-slate-900">
+                            {qtyDisplay}
+                          </span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 rounded-none rounded-r-md text-slate-600"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              bumpQuantity(item.id, 1);
+                            }}
+                          >
+                            <Plus className="h-3 w-3" />
+                          </Button>
+                        </div>
+
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-xs font-medium leading-tight text-slate-900">
+                            {item.name}
+                          </p>
+                          <p className="mt-0.5 text-[10px] tabular-nums text-slate-500">
+                            Rs {formatMoney(effectiveUnitPrice)} each
+                            {isPriceOverridden(item) && (
+                              <span className="ml-1 font-medium text-amber-600">· custom</span>
+                            )}
+                          </p>
+                        </div>
+
+                        <span className="shrink-0 text-xs font-bold tabular-nums text-slate-900">
+                          {formatMoney(lineAmount)}
+                        </span>
+
+                        <div className="flex shrink-0 items-center">
+                          <Popover
+                            open={priceEditLineId === item.id}
+                            onOpenChange={(open) =>
+                              setPriceEditLineId(open ? item.id : null)
+                            }
+                          >
+                            <PopoverTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="ghost"
+                                size="icon"
+                                className="h-7 w-7 text-slate-400 opacity-0 group-hover:opacity-100 data-[state=open]:opacity-100"
+                                onClick={(e) => e.stopPropagation()}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              className="w-52 p-3"
+                              align="end"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <p className="mb-2 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                Unit price
+                              </p>
+                              <Input
+                                ref={(el) => {
+                                  priceInputRefs.current[item.id] = el;
+                                  if (el) el.setAttribute("data-price-input", "true");
+                                }}
+                                type="text"
+                                inputMode="decimal"
+                                autoFocus
+                                value={
+                                  priceInputs[item.id] !== undefined
+                                    ? priceInputs[item.id]
+                                    : item.actualUnitPrice === 0
+                                      ? ""
+                                      : String(item.actualUnitPrice || item.price)
                                 }
-                              }
-                            }
-                          }}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            setPriceInputs((prev) => ({ ...prev, [item.id]: value }));
-                            
-                            if (value === "") {
-                              setCart(
-                                cart.map((cartItem) =>
-                                  cartItem.id === item.id
-                                    ? { ...cartItem, actualUnitPrice: 0, price: 0 }
-                                    : cartItem,
-                                ),
-                              );
-                              return;
-                            }
-                            
-                            if (/^(\d*\.?\d*)$/.test(value)) {
-                              if (value === ".") return;
-                              const numValue = parseFloat(value);
-                              if (!isNaN(numValue) && numValue >= 0) {
-                                setCart(
-                                  cart.map((cartItem) =>
-                                    cartItem.id === item.id
-                                      ? { ...cartItem, actualUnitPrice: numValue, price: numValue }
-                                      : cartItem,
-                                  ),
-                                );
-                              }
-                            }
-                          }}
-                          onBlur={(e) => {
-                            const value = e.target.value.trim();
-                            setPriceInputs((prev) => {
-                              const newState = { ...prev };
-                              delete newState[item.id];
-                              return newState;
-                            });
-                            
-                            if (value === "" || value === "." || value === "0") {
-                              setCart(
-                                cart.map((cartItem) =>
-                                  cartItem.id === item.id
-                                    ? {
-                                        ...cartItem,
-                                        actualUnitPrice: cartItem.originalPrice,
-                                        price: cartItem.originalPrice,
-                                      }
-                                    : cartItem,
-                                ),
-                              );
-                            } else {
-                              const numValue = parseFloat(value);
-                              if (!isNaN(numValue) && numValue >= 0) {
-                                setCart(
-                                  cart.map((cartItem) =>
-                                    cartItem.id === item.id
-                                      ? { ...cartItem, actualUnitPrice: numValue, price: numValue }
-                                      : cartItem,
-                                  ),
-                                );
-                              } else {
-                                setCart(
-                                  cart.map((cartItem) =>
-                                    cartItem.id === item.id
-                                      ? {
-                                          ...cartItem,
-                                          actualUnitPrice: cartItem.originalPrice,
-                                          price: cartItem.originalPrice,
-                                        }
-                                      : cartItem,
-                                  ),
-                                );
-                              }
-                            }
-                            setTimeout(() => {
-                              isUserInteractingRef.current = false;
-                            }, 300);
-                          }}
-                          className={`mt-1 h-7 text-xs font-semibold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none ${
-                            isPriceOverridden(item) ? "border-amber-400 bg-amber-50" : ""
-                          }`}
-                        />
-                      </div>
-
-                      {/* Quantity + amount based auto-calc */}
-                      <div className="grid grid-cols-2 gap-2">
-                      <div>
-                          <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">
-                            Quantity {unitName ? `(${unitName})` : ""}
-                        </label>
-                          <Input
-                            ref={(el) => {
-                              quantityInputRefs.current[item.id] = el;
-                              if (el) {
-                                el.setAttribute("data-quantity-input", "true");
-                              }
+                                onFocus={() => {
+                                  isUserInteractingRef.current = true;
+                                  switchActiveCartLine(item.id);
+                                }}
+                                onChange={(e) => {
+                                  const value = e.target.value;
+                                  setPriceInputs((prev) => ({ ...prev, [item.id]: value }));
+                                  if (value === "") {
+                                    setCartSync((prev) =>
+                                      prev.map((cartItem) =>
+                                        cartItem.id === item.id
+                                          ? { ...cartItem, actualUnitPrice: 0, price: 0 }
+                                          : cartItem,
+                                      ),
+                                    );
+                                    return;
+                                  }
+                                  if (/^(\d*\.?\d*)$/.test(value) && value !== ".") {
+                                    const numValue = parseFloat(value);
+                                    if (!isNaN(numValue) && numValue >= 0) {
+                                      setCartSync((prev) =>
+                                        prev.map((cartItem) =>
+                                          cartItem.id === item.id
+                                            ? {
+                                                ...cartItem,
+                                                actualUnitPrice: numValue,
+                                                price: numValue,
+                                              }
+                                            : cartItem,
+                                        ),
+                                      );
+                                    }
+                                  }
+                                }}
+                                onBlur={(e) => {
+                                  const value = e.target.value.trim();
+                                  setPriceInputs((prev) => {
+                                    const next = { ...prev };
+                                    delete next[item.id];
+                                    return next;
+                                  });
+                                  if (value === "" || value === "." || value === "0") {
+                                    setCartSync((prev) =>
+                                      prev.map((cartItem) =>
+                                        cartItem.id === item.id
+                                          ? {
+                                              ...cartItem,
+                                              actualUnitPrice: cartItem.originalPrice,
+                                              price: cartItem.originalPrice,
+                                            }
+                                          : cartItem,
+                                      ),
+                                    );
+                                  } else {
+                                    const numValue = parseFloat(value);
+                                    if (!isNaN(numValue) && numValue >= 0) {
+                                      setCartSync((prev) =>
+                                        prev.map((cartItem) =>
+                                          cartItem.id === item.id
+                                            ? {
+                                                ...cartItem,
+                                                actualUnitPrice: numValue,
+                                                price: numValue,
+                                              }
+                                            : cartItem,
+                                        ),
+                                      );
+                                    }
+                                  }
+                                  setTimeout(() => {
+                                    isUserInteractingRef.current = false;
+                                  }, 300);
+                                }}
+                                className="h-8 text-sm font-semibold tabular-nums"
+                              />
+                              {isPriceOverridden(item) && (
+                                <Button
+                                  type="button"
+                                  variant="ghost"
+                                  size="sm"
+                                  className="mt-2 h-7 w-full text-[11px] text-amber-700"
+                                  onClick={() => {
+                                    setCartSync((prev) =>
+                                      prev.map((cartItem) =>
+                                        cartItem.id === item.id
+                                          ? {
+                                              ...cartItem,
+                                              actualUnitPrice: cartItem.originalPrice,
+                                              price: cartItem.originalPrice,
+                                            }
+                                          : cartItem,
+                                      ),
+                                    );
+                                    setPriceEditLineId(null);
+                                  }}
+                                >
+                                  Reset to default
+                                </Button>
+                              )}
+                            </PopoverContent>
+                          </Popover>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            className="h-7 w-7 text-red-400 opacity-0 hover:text-red-600 group-hover:opacity-100"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              removeFromCart(item.id);
                             }}
-                            type="text"
-                            inputMode={isWeightUnit(unitName) ? "text" : "decimal"}
-                            placeholder={
-                              isPieceUnit(unitName)
-                                ? "Enter pieces"
-                                : isWeightUnit(unitName)
-                                  ? "e.g. 0.25 or 250g"
-                                  : "Enter quantity"
-                            }
-                            value={
-                              quantityInputs[item.id] !== undefined
-                                ? quantityInputs[item.id]
-                                : isPieceUnit(unitName)
-                                  ? String(Math.max(1, Math.round(item.quantity)))
-                                  : String(item.quantity)
-                            }
-                            onFocus={() => {
-                              isUserInteractingRef.current = true;
-                            }}
-                            onChange={(e) => {
-                              const raw = e.target.value;
-                              setQuantityInputs((prev) => ({ ...prev, [item.id]: raw }));
-                              const trimmed = raw.trim();
-                              if (trimmed === "") return;
-                              const parsed = parseCustomQuantityInput(trimmed, unitName);
-                              if (parsed === null || parsed <= 0) return;
-                              updateQuantityManual(item.id, parsed, unitName);
-                            }}
-                            onBlur={() => {
-                              const currentValue = quantityInputs[item.id];
-                              const parsed = currentValue
-                                ? parseCustomQuantityInput(currentValue, unitName)
-                                : null;
-                              if (!currentValue || parsed === null || parsed <= 0) {
-                                setQuantityInputs((prev) => ({
-                                  ...prev,
-                                  [item.id]: isPieceUnit(unitName) ? "1" : "0.01",
-                                }));
-                                updateQuantityManual(item.id, minQuantity, unitName);
-                              } else {
-                                updateQuantityManual(item.id, parsed, unitName);
-                              }
-                              setTimeout(() => {
-                                isUserInteractingRef.current = false;
-                              }, 300);
-                            }}
-                            className="mt-1 h-7 text-xs font-semibold [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
-                      </div>
-
-                        <div>
-                          <label className="text-[10px] font-semibold uppercase tracking-wide text-gray-600">
-                            Total
-                          </label>
-                          <div className="mt-1 rounded-md border border-blue-100 bg-blue-50 px-2 h-7 flex items-center">
-                            <span className="text-xs font-semibold text-blue-900 whitespace-nowrap">
-                              Rs {formatMoney(lineTotal(effectiveUnitPrice, item.quantity))}
-                            </span>
-                          </div>
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
                         </div>
                       </div>
-                    </div>
-                  </div>
+                    </li>
                   );
                 })}
-              </div>
+              </ul>
             )}
           </div>
         </div>
 
         {cart.length > 0 && (
-          <div className="border-t border-gray-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_-20px_rgba(15,23,42,0.4)] backdrop-blur">
-            <div className="space-y-3">
-              <div className="grid grid-cols-1 gap-2.5">
-              <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/60 shadow-sm">
-                <div className="space-y-2.5 p-3">
-                  <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-500">Subtotal</span>
-                    <span className="text-sm font-semibold tabular-nums text-slate-800">
-                      {formatMoney(subtotal)}
-                    </span>
-                  </div>
+          <div className="border-t border-slate-200 bg-white px-3 py-3 shadow-[0_-4px_20px_-12px_rgba(15,23,42,0.15)]">
+            <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/60 shadow-sm">
+              <div className="space-y-2 p-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-slate-500">Subtotal</span>
+                  <span className="text-sm font-semibold tabular-nums text-slate-800">
+                    {formatMoney(subtotal)}
+                  </span>
+                </div>
 
+                {!showDiscountRow && globalDiscountAmount === 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowDiscountRow(true)}
+                    className="text-[11px] font-medium text-blue-600 hover:text-blue-700"
+                  >
+                    + Add discount
+                  </button>
+                ) : (
                   <div className="flex items-center justify-between gap-3">
-                    <span className="shrink-0 text-xs font-medium text-slate-500">Discount</span>
-                    <div className="flex h-8 w-[9.5rem] shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/15">
+                    <span className="shrink-0 text-xs text-slate-500">Discount</span>
+                    <div className="flex h-8 w-[9.5rem] shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/15">
                       <Select
                         value={globalDiscountType}
                         onValueChange={(value) =>
@@ -3088,45 +3075,44 @@ export function NewSale() {
                       />
                     </div>
                   </div>
+                )}
 
-                  {globalDiscountAmount > 0 && (
-                    <div className="flex items-center justify-between rounded-md bg-emerald-50 px-2 py-1.5 text-xs font-medium text-emerald-700">
-                      <span>Saved</span>
-                      <span className="tabular-nums">−{formatMoney(globalDiscountAmount)}</span>
-                    </div>
-                  )}
-                </div>
-
-                <div className="flex items-center justify-between border-t border-slate-200/80 bg-blue-600 px-3 py-2.5 text-white">
-                  <span className="text-xs font-semibold uppercase tracking-wide text-blue-100">
-                    Payable
-                  </span>
-                  <span className="text-lg font-bold tabular-nums">{formatMoney(total)}</span>
-                </div>
-              </div>
+                {globalDiscountAmount > 0 && (
+                  <div className="flex items-center justify-between text-xs font-medium text-emerald-700">
+                    <span>Saved</span>
+                    <span className="tabular-nums">−{formatMoney(globalDiscountAmount)}</span>
+                  </div>
+                )}
               </div>
 
-              <div className="grid grid-cols-2 gap-1.5">
-                <Button
-                  size="sm"
-                  onClick={() => startPayment("Cash")}
-                  disabled={paymentLoading || branchLoading || !hasBranch}
-                  className="h-9 text-xs"
-                >
-                  <DollarSign className="mr-1.5 h-3.5 w-3.5" />
-                  Cash
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => startPayment("Card")}
-                  disabled={paymentLoading || branchLoading || !hasBranch}
-                  className="h-9 text-xs"
-                >
-                  <CreditCard className="mr-1.5 h-3.5 w-3.5" />
-                  Card
-                </Button>
+              <div className="flex items-center justify-between border-t border-slate-200/80 bg-blue-600 px-3 py-2.5 text-white">
+                <span className="text-xs font-semibold uppercase tracking-wide text-blue-100">
+                  Payable
+                </span>
+                <span className="text-xl font-bold tabular-nums">{formatMoney(total)}</span>
               </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <Button
+                size="lg"
+                onClick={() => startPayment("Cash")}
+                disabled={paymentLoading || branchLoading || !hasBranch}
+                className="h-11 text-sm font-semibold"
+              >
+                <DollarSign className="mr-2 h-4 w-4" />
+                Cash
+              </Button>
+              <Button
+                size="lg"
+                variant="outline"
+                onClick={() => startPayment("Card")}
+                disabled={paymentLoading || branchLoading || !hasBranch}
+                className="h-11 text-sm font-semibold"
+              >
+                <CreditCard className="mr-2 h-4 w-4" />
+                Card
+              </Button>
             </div>
           </div>
         )}
