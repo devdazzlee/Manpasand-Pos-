@@ -1,6 +1,14 @@
 "use client";
 
-import { useState, useEffect, useRef, useMemo, startTransition } from "react";
+import {
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useRef,
+  useMemo,
+  useCallback,
+  startTransition,
+} from "react";
 import { Button } from "@/components/ui/button";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { Input } from "@/components/ui/input";
@@ -44,6 +52,10 @@ import {
   Check,
   ChevronsUpDown,
   User,
+  LayoutGrid,
+  X,
+  Plus,
+  Minus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
@@ -253,6 +265,89 @@ function CustomerSearchCombobox({
   );
 }
 
+type PosCategoryOption = {
+  id: string;
+  name: string;
+  count: number;
+};
+
+interface CategoryFilterComboboxProps {
+  categories: PosCategoryOption[];
+  loading?: boolean;
+  value: string;
+  onChange: (categoryId: string) => void;
+  disabled?: boolean;
+}
+
+function CategoryFilterCombobox({
+  categories,
+  loading = false,
+  value,
+  onChange,
+  disabled = false,
+}: CategoryFilterComboboxProps) {
+  const [open, setOpen] = useState(false);
+  const selectedCategory =
+    categories.find((category) => category.id === value) || categories[0];
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button
+          variant="outline"
+          role="combobox"
+          aria-expanded={open}
+          disabled={disabled || loading || categories.length === 0}
+          className="h-10 w-full justify-between bg-white font-normal"
+        >
+          <span className="flex min-w-0 items-center gap-2 truncate">
+            <LayoutGrid className="h-4 w-4 shrink-0 text-gray-500" />
+            <span className="truncate">
+              {loading
+                ? "Loading categories..."
+                : selectedCategory?.name || "All categories"}
+            </span>
+          </span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent className="w-[320px] p-0" align="start">
+        <Command>
+          <CommandInput placeholder="Search categories..." />
+          <CommandList className="max-h-72">
+            <CommandEmpty>No category found.</CommandEmpty>
+            <CommandGroup>
+              {categories.map((category) => (
+                <CommandItem
+                  key={category.id}
+                  value={`${category.id} ${category.name}`}
+                  onSelect={() => {
+                    onChange(category.id);
+                    setOpen(false);
+                  }}
+                >
+                  <Check
+                    className={cn(
+                      "mr-2 h-4 w-4 shrink-0",
+                      value === category.id ? "opacity-100" : "opacity-0"
+                    )}
+                  />
+                  <div className="flex min-w-0 flex-1 items-center justify-between gap-3">
+                    <span className="truncate">{category.name}</span>
+                    <span className="shrink-0 rounded-full bg-gray-100 px-2 py-0.5 text-[11px] font-medium text-gray-600">
+                      {category.count}
+                    </span>
+                  </div>
+                </CommandItem>
+              ))}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
 
 export function NewSale() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -285,7 +380,20 @@ export function NewSale() {
   // Refs for price and quantity inputs for keyboard navigation
   const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const quantityInputRefs = useRef<Record<string, HTMLElement | null>>({});
+  const quickQtyPlusRef = useRef<HTMLButtonElement | null>(null);
+  const quickQtyInputRef = useRef<HTMLInputElement | null>(null);
+  const quantityEnterConfirmedRef = useRef<string | null>(null);
+  const quantityFocusLineIdRef = useRef<string | null>(null);
+  const activeCartLineIdRef = useRef<string | null>(null);
+  const cartRef = useRef(cart);
+  const quantityInputsRef = useRef(quantityInputs);
+  const searchDropdownRef = useRef<HTMLDivElement | null>(null);
+  const searchDropdownItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [quickQtyFocusTick, setQuickQtyFocusTick] = useState(0);
+  const [productSearchOpen, setProductSearchOpen] = useState(false);
+  const [highlightedProductIndex, setHighlightedProductIndex] = useState(0);
   const lastAddedProductId = useRef<string | null>(null);
+  const [activeCartLineId, setActiveCartLineId] = useState<string | null>(null);
   // Refs for cart items and scrollable container
   const cartItemRefs = useRef<Record<string, HTMLDivElement | null>>({});
   const cartScrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -359,11 +467,6 @@ export function NewSale() {
 
     fetchData();
 
-    // Focus the search input
-    if (searchInputRef.current) {
-      searchInputRef.current.focus();
-    }
-
     // Cleanup function to prevent memory leaks and state updates after unmount
     return () => {
       mounted = false;
@@ -374,6 +477,26 @@ export function NewSale() {
       }
     };
   }, []); // Empty dependency array since we only want to fetch once on mount
+
+  useEffect(() => {
+    cartRef.current = cart;
+  }, [cart]);
+
+  useEffect(() => {
+    quantityInputsRef.current = quantityInputs;
+  }, [quantityInputs]);
+
+  useEffect(() => {
+    activeCartLineIdRef.current = activeCartLineId;
+  }, [activeCartLineId]);
+
+  const setCartSync = (updater: (prev: CartItem[]) => CartItem[]) => {
+    setCart((prev) => {
+      const next = updater(prev);
+      cartRef.current = next;
+      return next;
+    });
+  };
 
   // Keep search input always focused (professional POS behavior)
   // Uses intelligent focus management: only refocuses when user is idle
@@ -401,7 +524,10 @@ export function NewSale() {
       if (element.getAttribute('data-price-input') === 'true' ||
           element.getAttribute('data-quantity-input') === 'true' ||
           element.getAttribute('data-quantity-select') === 'true' ||
-          element.getAttribute('data-amount-input') === 'true') {
+          element.getAttribute('data-amount-input') === 'true' ||
+          element.getAttribute('data-quick-qty') === 'true' ||
+          element.closest('[data-quick-qty="true"]') ||
+          element.closest('[data-product-search-dropdown]')) {
         return true;
       }
       
@@ -551,16 +677,92 @@ export function NewSale() {
       const searchLower = searchTerm.toLowerCase().trim();
       if (searchLower.length === 0) return true;
 
-      // Search in name, barcode, SKU
+      // Search in name, code, barcode, SKU (same fields used for POS scanning)
       const nameMatch = product.name?.toLowerCase().includes(searchLower);
+      const codeMatch = product.code?.toLowerCase().includes(searchLower);
       const barcodeMatch = product.barcode?.toLowerCase().includes(searchLower);
       const skuMatch = product.sku?.toLowerCase().includes(searchLower);
 
-      return nameMatch || barcodeMatch || skuMatch;
+      return nameMatch || codeMatch || barcodeMatch || skuMatch;
     })();
 
     return matchesCategory && matchesSearch;
   });
+
+  const SEARCH_DROPDOWN_LIMIT = 25;
+
+  const searchDropdownProducts = useMemo(() => {
+    if (!searchTerm.trim()) return [];
+    return filteredProducts.slice(0, SEARCH_DROPDOWN_LIMIT);
+  }, [filteredProducts, searchTerm]);
+
+  const searchDropdownOverflowCount = useMemo(() => {
+    if (!searchTerm.trim()) return 0;
+    return Math.max(0, filteredProducts.length - SEARCH_DROPDOWN_LIMIT);
+  }, [filteredProducts.length, searchTerm]);
+
+  useEffect(() => {
+    if (!productSearchOpen) return;
+    const highlightedEl = searchDropdownItemRefs.current[highlightedProductIndex];
+    if (!highlightedEl) return;
+    highlightedEl.scrollIntoView({ block: "nearest" });
+  }, [highlightedProductIndex, productSearchOpen, searchDropdownProducts.length]);
+
+  const focusSearchInput = useCallback((options?: { clear?: boolean }) => {
+    setProductSearchOpen(false);
+    setHighlightedProductIndex(0);
+    if (options?.clear) setSearchTerm("");
+    requestAnimationFrame(() => {
+      const el = searchInputRef.current;
+      if (!el || paymentDialogOpen) return;
+      el.focus({ preventScroll: true });
+      el.select();
+    });
+  }, [paymentDialogOpen]);
+
+  const focusQuantityInput = useCallback(() => {
+    const el = quickQtyInputRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.select();
+  }, []);
+
+  useEffect(() => {
+    focusSearchInput();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const posCategories = useMemo(() => {
+    const activeProducts = products.filter((product) => product.is_active !== false);
+    const counts = new Map<string, number>();
+
+    activeProducts.forEach((product) => {
+      const categoryId = product.categoryId || "unknown";
+      counts.set(categoryId, (counts.get(categoryId) || 0) + 1);
+    });
+
+    return categories
+      .filter((category) => category.id === "all" || category.is_active !== false)
+      .map((category) => ({
+        ...category,
+        count:
+          category.id === "all"
+            ? activeProducts.length
+            : counts.get(category.id) || 0,
+      }))
+      .filter((category) => category.id === "all" || category.count > 0)
+      .sort((a, b) => {
+        if (a.id === "all") return -1;
+        if (b.id === "all") return 1;
+        if (a.name.toLowerCase() === "unknown") return 1;
+        if (b.name.toLowerCase() === "unknown") return -1;
+        return a.name.localeCompare(b.name);
+      });
+  }, [categories, products]);
+
+  const selectedCategoryLabel =
+    posCategories.find((category) => category.id === selectedCategory)?.name ||
+    "All categories";
 
   const addToCart = (product: Product, quantity: number = 1, customPrice?: number) => {
     // For testing: Allow negative sales (stock can go below 0)
@@ -592,9 +794,10 @@ export function NewSale() {
     if (customPrice !== undefined && originalProductPrice > 0) {
       // Calculate quantity: barcodePrice / originalPrice
       finalQuantity = customPrice / originalProductPrice;
-      finalQuantity = Math.max(0.01, finalQuantity); // Ensure minimum quantity
+      const minFromUnit = isWeightUnit(product.unitName) ? 0.01 : 1;
+      finalQuantity = Math.max(minFromUnit, finalQuantity);
       
-      // Show the scanned price (barcode value) in the price field for display
+      // Show the scanned price (barcode price) in the price field for display
       displayPrice = customPrice; // Display barcode price in price field
       // But keep actualUnitPrice as original for calculations
       actualUnitPrice = originalProductPrice; // Always use original price for line total
@@ -603,60 +806,55 @@ export function NewSale() {
       finalQuantity = Math.max(1, quantity);
     }
     
-    console.log('addToCart - Barcode price:', customPrice, 'Original price:', originalProductPrice, 'Calculated quantity:', finalQuantity, 'Display price:', displayPrice, 'Actual unit price:', actualUnitPrice);
+    const isBarcodeLine = customPrice !== undefined && originalProductPrice > 0;
 
-    // Always create a NEW separate line item for each scan (don't increment existing)
-    // Generate unique ID for each scan to allow multiple separate entries
-    const uniqueCartItemId = `${product.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const prevCart = cartRef.current;
+    let affectedLineId: string;
+    let nextCart: CartItem[];
 
-    // Use functional state update to avoid stale closure issues
-    setCart((prevCart) => [
-      ...prevCart,
-      {
-        id: uniqueCartItemId, // Unique ID for this cart entry (each scan = new entry)
-        productId: product.id, // Store original product ID for reference
-        name: product.name,
-        price: displayPrice, // Display price (barcode price if scanned, otherwise original)
-        originalPrice: originalProductPrice, // Store original product price
-        actualUnitPrice: actualUnitPrice, // Actual unit price for line total calculations
-        quantity: finalQuantity, // Calculated quantity (barcodePrice / originalPrice)
-        category: product.category,
-        unitId: product.unitId,
-        unitName: product.unitName,
-        unit: product.unitName,
-      },
-    ]);
+    const lastLineIndex = isBarcodeLine
+      ? -1
+      : prevCart.findLastIndex(
+          (line) => line.productId === product.id || line.id === product.id,
+        );
 
-    lastAddedProductId.current = uniqueCartItemId;
-    
-    // Use startTransition for non-urgent UI updates (scroll, focus) - doesn't block main thread
-    startTransition(() => {
-      // Instant scroll to newly added item (use unique cart item ID)
-      setTimeout(() => {
-        const cartItem = cartItemRefs.current[uniqueCartItemId];
-        if (cartItem && cartScrollContainerRef.current) {
-          cartItem.scrollIntoView({ 
-            behavior: 'auto', // Instant scroll
-            block: 'nearest',
-            inline: 'nearest'
-          });
-        }
-      }, 0);
+    if (lastLineIndex >= 0) {
+      const existing = prevCart[lastLineIndex];
+      const unitName = existing.unitName || existing.unit;
+      const bumpBy = isPieceUnit(unitName) ? 1 : getQuantityIncrement(unitName);
+      const nextQty = isPieceUnit(unitName)
+        ? Math.round(existing.quantity + bumpBy)
+        : Number((existing.quantity + bumpBy).toFixed(3));
+      const minQ = isPieceUnit(unitName) ? 1 : 0.01;
+      nextCart = [...prevCart];
+      nextCart[lastLineIndex] = { ...existing, quantity: Math.max(minQ, nextQty) };
+      affectedLineId = existing.id;
+    } else {
+      affectedLineId = `${product.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+      nextCart = [
+        ...prevCart,
+        {
+          id: affectedLineId,
+          productId: product.id,
+          name: product.name,
+          price: displayPrice,
+          originalPrice: originalProductPrice,
+          actualUnitPrice: actualUnitPrice,
+          quantity: finalQuantity,
+          category: product.category,
+          unitId: product.unitId,
+          unitName: product.unitName,
+          unit: product.unitName,
+        },
+      ];
+    }
 
-      // DISABLED: Auto-focus on price input - removed to prevent interference with scanning
-      // Keep focus on search input for rapid scanning
-      /*
-      if (customPrice === undefined) {
-        setTimeout(() => {
-          const priceInput = priceInputRefs.current[uniqueCartItemId];
-          if (priceInput) {
-            priceInput.focus();
-            priceInput.select();
-          }
-        }, 0);
-      }
-      */
-    });
+    setCartSync(() => nextCart);
+
+    lastAddedProductId.current = affectedLineId;
+    activeCartLineIdRef.current = affectedLineId;
+    setActiveCartLineId(affectedLineId);
+    setQuickQtyFocusTick((n) => n + 1);
 
     // Toast removed as per user request - no toast when selecting products
   };
@@ -780,6 +978,37 @@ export function NewSale() {
     return 1;
   };
 
+  const computeQuantityAfterChange = (
+    currentQuantity: number,
+    direction: 1 | -1,
+    unitName?: string,
+    mode: "preset" | "custom" = "custom",
+  ): number => {
+    const minQuantity = isPieceUnit(unitName) ? 1 : 0.01;
+    let targetQuantity = currentQuantity;
+
+    if (mode === "preset" && isWeightUnit(unitName)) {
+      const presets = getQuantityPresetOptions(unitName).map((preset) => preset.quantity);
+      const presetMin = Math.min(...presets);
+      const presetMax = Math.max(...presets);
+      targetQuantity =
+        direction > 0
+          ? Math.min(presetMax, Math.max(presetMin, currentQuantity * 2))
+          : Math.max(presetMin, currentQuantity / 2);
+      targetQuantity = presets.reduce((best, candidate) =>
+        Math.abs(candidate - targetQuantity) < Math.abs(best - targetQuantity) ? candidate : best,
+      presets[0]);
+    } else {
+      const increment = getQuantityIncrement(unitName);
+      targetQuantity = currentQuantity + (direction > 0 ? increment : -increment);
+    }
+
+    const normalizedQuantity = isPieceUnit(unitName)
+      ? Math.round(targetQuantity)
+      : Number(targetQuantity.toFixed(3));
+    return Math.max(minQuantity, normalizedQuantity);
+  };
+
   const updateQuantity = (id: string, change: number) => {
     const item = cart.find((item) => item.id === id);
     // Find product by productId if item has it, otherwise fallback to id (for backward compatibility)
@@ -853,13 +1082,8 @@ export function NewSale() {
       ? Math.round(Number(newQuantity))
       : Number(newQuantity);
     const validQuantity = Math.max(minQuantity, normalizedQuantity);
-    setCart(
-      cart.map((item) => {
-        if (item.id === id) {
-          return { ...item, quantity: validQuantity };
-        }
-        return item;
-      })
+    setCartSync((prev) =>
+      prev.map((line) => (line.id === id ? { ...line, quantity: validQuantity } : line)),
     );
   };
 
@@ -896,6 +1120,54 @@ export function NewSale() {
     const parsed = parseFloat(numericOnly[1]);
     if (Number.isNaN(parsed) || parsed < 0) return null;
     return parsed;
+  };
+
+  const clearQuantityOverlay = (lineId: string) => {
+    setQuantityInputs((prev) => {
+      if (!(lineId in prev)) return prev;
+      const next = { ...prev };
+      delete next[lineId];
+      quantityInputsRef.current = next;
+      return next;
+    });
+  };
+
+  const applyTypedOverlayToCart = (lineId: string) => {
+    const pending = quantityInputsRef.current[lineId];
+    if (pending === undefined || pending.trim() === "") return;
+    const line = cartRef.current.find((l) => l.id === lineId);
+    if (!line) return;
+    const unitName = line.unitName || line.unit;
+    const parsed = parseCustomQuantityInput(pending.trim(), unitName);
+    if (parsed === null || parsed <= 0) return;
+    updateQuantityManual(lineId, parsed, unitName);
+  };
+
+  const switchActiveCartLine = (newId: string | null) => {
+    const prevId = activeCartLineIdRef.current;
+    if (prevId && prevId !== newId) {
+      applyTypedOverlayToCart(prevId);
+      clearQuantityOverlay(prevId);
+    }
+    activeCartLineIdRef.current = newId;
+    setActiveCartLineId(newId);
+  };
+
+  const bumpQuantity = (id: string, direction: 1 | -1) => {
+    activeCartLineIdRef.current = id;
+    setActiveCartLineId(id);
+    clearQuantityOverlay(id);
+    setCartSync((prev) =>
+      prev.map((line) => {
+        if (line.id !== id) return line;
+        const unitName = line.unitName || line.unit;
+        const mode = quantityModes[id] ?? "preset";
+        return {
+          ...line,
+          quantity: computeQuantityAfterChange(line.quantity, direction, unitName, mode),
+        };
+      }),
+    );
   };
 
   const updateItemPrice = (id: string, newPrice: number) => {
@@ -1746,9 +2018,40 @@ export function NewSale() {
     }, 50);
   };
 
-  const handleProductClick = (product: Product) => {
+  const selectProductForSale = (product: Product) => {
     addToCart(product, 1);
+    setProductSearchOpen(false);
+    setSearchTerm("");
+    setHighlightedProductIndex(0);
   };
+
+  const handleProductClick = (product: Product) => {
+    selectProductForSale(product);
+  };
+
+  const quickAdjustLine = useMemo(() => {
+    if (cart.length === 0) return null;
+    if (activeCartLineId) {
+      return cart.find((line) => line.id === activeCartLineId) ?? cart[cart.length - 1];
+    }
+    return cart[cart.length - 1];
+  }, [cart, activeCartLineId]);
+
+  const confirmQuantityAndReturnToSearch = useCallback((lineId?: string) => {
+    const id = lineId ?? quantityFocusLineIdRef.current ?? activeCartLineIdRef.current;
+    if (id) {
+      quantityEnterConfirmedRef.current = id;
+      applyTypedOverlayToCart(id);
+      clearQuantityOverlay(id);
+    }
+    quantityFocusLineIdRef.current = null;
+    focusSearchInput({ clear: true });
+  }, [focusSearchInput]);
+
+  useLayoutEffect(() => {
+    if (quickQtyFocusTick === 0) return;
+    focusQuantityInput();
+  }, [quickQtyFocusTick, focusQuantityInput]);
 
   const handleCategoryChange = async (categoryId: string) => {
     setSelectedCategory(categoryId);
@@ -1890,125 +2193,365 @@ export function NewSale() {
               )}
             </div>
           </div>
-          <div className="mb-4 max-w-sm">
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
-              Customer
-            </label>
-            <CustomerSearchCombobox
-              customers={customers}
-              loading={customersLoading}
-              value={selectedCustomer}
-              onChange={setSelectedCustomer}
-              disabled={paymentLoading}
-            />
+          <div className="mb-4 grid gap-4 md:grid-cols-2">
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Customer
+              </label>
+              <CustomerSearchCombobox
+                customers={customers}
+                loading={customersLoading}
+                value={selectedCustomer}
+                onChange={setSelectedCustomer}
+                disabled={paymentLoading}
+              />
+            </div>
+            <div>
+              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Category
+              </label>
+              <CategoryFilterCombobox
+                categories={posCategories}
+                loading={categoriesLoading || productsLoading}
+                value={selectedCategory}
+                onChange={handleCategoryChange}
+                disabled={paymentLoading}
+              />
+            </div>
           </div>
           {!hasBranch && !branchLoading && (
             <p className="mb-4 max-w-sm text-sm text-amber-700">
               Branch is not configured. Hold Sale and checkout may fail until a branch is assigned.
             </p>
           )}
-          <div className="flex items-center space-x-4">
-            <div className="relative flex-1 max-w-md">
-              <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
-              {isScanning && (
-                <LoadingSpinner size="sm" className="absolute right-3 top-1/2 transform -translate-y-1/2" />
-              )}
-              <Input
-                ref={searchInputRef}
-                placeholder={isScanning ? "Processing scan..." : "Scan barcode or search products..."}
-                value={searchTerm}
-                onBlur={(e) => {
-                  // Don't blur if clicking on interactive elements
-                  const relatedTarget = e.relatedTarget as HTMLElement;
-                  if (relatedTarget && (
-                    relatedTarget.getAttribute('data-price-input') === 'true' ||
-                    relatedTarget.getAttribute('data-quantity-input') === 'true' ||
-                    relatedTarget.getAttribute('data-quantity-select') === 'true' ||
-                    relatedTarget.getAttribute('data-amount-input') === 'true' ||
-                    relatedTarget.tagName === 'SELECT' ||
-                    relatedTarget.closest('select')
-                  )) {
-                    return;
-                  }
-                  // Schedule refocus after idle period (not immediate)
-                  // This allows user to interact with other elements
-                }}
-                onChange={(e) => {
-                  const value = e.target.value;
-                  setSearchTerm(value);
-                  
-                  // Clear any pending scan timeout
-                  if (scanTimeoutRef.current) {
-                    clearTimeout(scanTimeoutRef.current);
-                    scanTimeoutRef.current = null;
-                  }
-                  
-                  // Auto-detect barcode scan format (CODE-PRICE) even without Enter
-                  // This handles scanners that send data quickly
-                  // Only process if the price part looks complete (at least 3 digits to avoid premature processing)
-                  if (value.includes('-') && value.length > 6) {
-                    // Check if it looks like CODE-PRICE format
-                    const parts = value.split('-');
-                    if (parts.length >= 2) {
-                      const codePart = parts[0].trim();
-                      const pricePart = parts.slice(1).join('-').trim();
-                      // If code part exists and price part is numeric with at least 3 digits, treat as barcode scan
-                      // This prevents processing when user is still typing (e.g., "CODE-8" vs "CODE-8000")
-                      if (codePart.length > 0 && /^\d{3,}(\.\d+)?$/.test(pricePart)) {
-                        // Skip if Enter key was just pressed (onKeyDown will handle it)
-                        if (enterKeyPressedRef.current) {
-                          enterKeyPressedRef.current = false;
-                          return;
-                        }
-                        // Small delay to ensure scanner finished sending all data
-                        if (scanTimeoutRef.current) {
-                          clearTimeout(scanTimeoutRef.current);
-                        }
-                        scanTimeoutRef.current = setTimeout(() => {
-                          const currentValue = searchInputRef.current?.value || '';
-                          if (currentValue === value && value.includes('-')) {
-                            // Double-check we have a complete price value
-                            const finalParts = currentValue.split('-');
-                            if (finalParts.length >= 2 && finalParts[1].trim().length > 0) {
-                              handleScannerInput(currentValue);
-                            }
+          <div className="mb-3">
+            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+              Product search
+            </label>
+            <div className="flex w-full max-w-2xl flex-wrap items-stretch gap-2">
+              <div className="relative min-w-[12rem] w-full max-w-md flex-1">
+                <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
+                {isScanning && (
+                  <LoadingSpinner size="sm" className="absolute right-3 top-1/2 transform -translate-y-1/2" />
+                )}
+                <Input
+                  ref={searchInputRef}
+                  placeholder={isScanning ? "Processing scan..." : "Scan barcode or search products..."}
+                  value={searchTerm}
+                  onFocus={() => {
+                    if (searchTerm.trim()) setProductSearchOpen(true);
+                  }}
+                  onBlur={(e) => {
+                    const relatedTarget = e.relatedTarget as HTMLElement;
+                    if (relatedTarget && (
+                      relatedTarget.closest('[data-product-search-dropdown]') ||
+                      relatedTarget.getAttribute('data-price-input') === 'true' ||
+                      relatedTarget.getAttribute('data-quantity-input') === 'true' ||
+                      relatedTarget.getAttribute('data-quick-qty') === 'true' ||
+                      relatedTarget.closest('[data-quick-qty="true"]') ||
+                      relatedTarget.getAttribute('data-quantity-select') === 'true' ||
+                      relatedTarget.getAttribute('data-amount-input') === 'true' ||
+                      relatedTarget.tagName === 'SELECT' ||
+                      relatedTarget.closest('select')
+                    )) {
+                      return;
+                    }
+                    setProductSearchOpen(false);
+                  }}
+                  onChange={(e) => {
+                    const value = e.target.value;
+                    setSearchTerm(value);
+                    setHighlightedProductIndex(0);
+                    setProductSearchOpen(value.trim().length > 0);
+
+                    if (scanTimeoutRef.current) {
+                      clearTimeout(scanTimeoutRef.current);
+                      scanTimeoutRef.current = null;
+                    }
+
+                    if (value.includes('-') && value.length > 6) {
+                      const parts = value.split('-');
+                      if (parts.length >= 2) {
+                        const codePart = parts[0].trim();
+                        const pricePart = parts.slice(1).join('-').trim();
+                        if (codePart.length > 0 && /^\d{3,}(\.\d+)?$/.test(pricePart)) {
+                          if (enterKeyPressedRef.current) {
+                            enterKeyPressedRef.current = false;
+                            return;
                           }
-                          scanTimeoutRef.current = null;
-                        }, 300); // Wait 300ms to ensure scanner finished sending all digits (8000, not just 8)
+                          if (scanTimeoutRef.current) {
+                            clearTimeout(scanTimeoutRef.current);
+                          }
+                          scanTimeoutRef.current = setTimeout(() => {
+                            const currentValue = searchInputRef.current?.value || '';
+                            if (currentValue === value && value.includes('-')) {
+                              const finalParts = currentValue.split('-');
+                              if (finalParts.length >= 2 && finalParts[1].trim().length > 0) {
+                                handleScannerInput(currentValue);
+                              }
+                            }
+                            scanTimeoutRef.current = null;
+                          }, 300);
+                        }
                       }
                     }
-                  }
-                }}
-                onKeyDown={(e) => {
-                  // Detect Enter key (barcode scanner typically sends Enter after data)
-                  if (e.key === 'Enter' && searchTerm.trim()) {
-                    e.preventDefault();
-                    const trimmedValue = searchTerm.trim();
-                    
-                    // Mark that Enter was pressed to prevent onChange from processing
-                    enterKeyPressedRef.current = true;
-                    
-                    // Check if it's a barcode format (numeric barcode or CODE-PRICE format)
-                    const isNumericBarcode = /^\d{8,}$/.test(trimmedValue) ||
-                      /^\d{12,13}$/.test(trimmedValue) || // EAN-13, UPC-A
-                      /^\d{8}$/.test(trimmedValue); // EAN-8
-                    
-                    // Check if it's CODE-PRICE format (contains dash)
-                    const isCodePriceFormat = trimmedValue.includes('-') && trimmedValue.length > 3;
-                    
-                    if (isNumericBarcode || isCodePriceFormat) {
-                      handleScannerInput(trimmedValue);
+                  }}
+                  onKeyDown={(e) => {
+                    const trimmed = searchTerm.trim();
+
+                    if (e.key === "Escape") {
+                      e.preventDefault();
+                      setProductSearchOpen(false);
+                      setHighlightedProductIndex(0);
+                      return;
                     }
-                    
-                    // Reset flag after processing
-                    setTimeout(() => {
-                      enterKeyPressedRef.current = false;
-                    }, 100);
-                  }
-                }}
-                className={`pl-10 ${isScanning ? 'border-blue-500 bg-blue-50/50' : ''}`}
-                autoFocus
-              />
+
+                    if (e.key === "ArrowDown" && searchDropdownProducts.length > 0) {
+                      e.preventDefault();
+                      setProductSearchOpen(true);
+                      setHighlightedProductIndex((i) =>
+                        Math.min(i + 1, searchDropdownProducts.length - 1),
+                      );
+                      return;
+                    }
+
+                    if (e.key === "ArrowUp" && searchDropdownProducts.length > 0) {
+                      e.preventDefault();
+                      setProductSearchOpen(true);
+                      setHighlightedProductIndex((i) => Math.max(i - 1, 0));
+                      return;
+                    }
+
+                    if (e.key === "Enter" && trimmed) {
+                      enterKeyPressedRef.current = true;
+
+                      const isNumericBarcode =
+                        /^\d{8,}$/.test(trimmed) ||
+                        /^\d{12,13}$/.test(trimmed) ||
+                        /^\d{8}$/.test(trimmed);
+                      const isCodePriceFormat = trimmed.includes("-") && trimmed.length > 3;
+
+                      if (isNumericBarcode || isCodePriceFormat) {
+                        e.preventDefault();
+                        handleScannerInput(trimmed);
+                        setTimeout(() => {
+                          enterKeyPressedRef.current = false;
+                        }, 100);
+                        return;
+                      }
+
+                      if (searchDropdownProducts.length > 0) {
+                        e.preventDefault();
+                        const product =
+                          searchDropdownProducts[highlightedProductIndex] ??
+                          searchDropdownProducts[0];
+                        selectProductForSale(product);
+                        setTimeout(() => {
+                          enterKeyPressedRef.current = false;
+                        }, 100);
+                        return;
+                      }
+
+                      setTimeout(() => {
+                        enterKeyPressedRef.current = false;
+                      }, 100);
+                    }
+                  }}
+                  className={cn(
+                    "h-10 pl-10 border-gray-200 shadow-sm focus-visible:ring-1 focus-visible:ring-blue-400 focus-visible:ring-offset-0",
+                    isScanning && "border-blue-500 bg-blue-50/50 pr-10",
+                  )}
+                  autoFocus
+                />
+
+                {productSearchOpen && searchDropdownProducts.length > 0 && (
+                  <div
+                    ref={searchDropdownRef}
+                    data-product-search-dropdown
+                    role="listbox"
+                    className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg"
+                  >
+                    {searchDropdownProducts.map((product, index) => (
+                      <button
+                        key={product.id}
+                        ref={(el) => {
+                          searchDropdownItemRefs.current[index] = el;
+                        }}
+                        type="button"
+                        role="option"
+                        aria-selected={index === highlightedProductIndex}
+                        className={cn(
+                          "flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm transition-colors",
+                          index === highlightedProductIndex
+                            ? "bg-blue-50 text-blue-900"
+                            : "hover:bg-slate-50",
+                        )}
+                        onMouseDown={(e) => e.preventDefault()}
+                        onMouseEnter={() => setHighlightedProductIndex(index)}
+                        onClick={() => selectProductForSale(product)}
+                      >
+                        <span className="truncate font-medium">{product.name}</span>
+                        <span className="shrink-0 text-xs font-semibold text-blue-600 tabular-nums">
+                          Rs {product.price.toLocaleString()}
+                        </span>
+                      </button>
+                    ))}
+                    {searchDropdownOverflowCount > 0 && (
+                      <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500">
+                        +{searchDropdownOverflowCount} more — type a more specific name or code
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div
+                className={cn(
+                  "flex h-10 w-full min-w-[13rem] max-w-[15rem] shrink-0 items-stretch overflow-hidden rounded-md border bg-white shadow-sm transition-opacity sm:w-[15rem]",
+                  quickAdjustLine ? "border-gray-200" : "border-dashed border-gray-200 opacity-40",
+                )}
+                title={
+                  quickAdjustLine
+                    ? `Adjust quantity for ${quickAdjustLine.name}`
+                    : "Add a product to adjust quantity"
+                }
+              >
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={!quickAdjustLine}
+                  className="h-10 w-11 shrink-0 rounded-none border-r border-gray-200 px-0 hover:bg-slate-100 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                  aria-label="Decrease quantity"
+                  data-quick-qty="true"
+                  onClick={() => quickAdjustLine && bumpQuantity(quickAdjustLine.id, -1)}
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <div className="flex min-w-0 flex-1 flex-col items-center justify-center border-r border-gray-200 bg-slate-50/90 px-2 py-0.5">
+                  <Input
+                    ref={quickQtyInputRef}
+                    disabled={!quickAdjustLine}
+                    type="text"
+                    inputMode={
+                      quickAdjustLine && isWeightUnit(quickAdjustLine.unitName || quickAdjustLine.unit)
+                        ? "text"
+                        : "decimal"
+                    }
+                    placeholder="Qty"
+                    data-quantity-input="true"
+                    data-quick-qty="true"
+                    value={
+                      quickAdjustLine
+                        ? quantityInputs[quickAdjustLine.id] ??
+                          formatQuantityValue(quickAdjustLine.quantity)
+                        : ""
+                    }
+                    onFocus={() => {
+                      if (!quickAdjustLine) return;
+                      quantityFocusLineIdRef.current = quickAdjustLine.id;
+                      isUserInteractingRef.current = true;
+                      switchActiveCartLine(quickAdjustLine.id);
+                    }}
+                    onChange={(e) => {
+                      const lineId = quickAdjustLine?.id;
+                      if (!lineId) return;
+                      const line =
+                        cartRef.current.find((l) => l.id === lineId) ?? quickAdjustLine;
+                      if (!line) return;
+                      const unitName = line.unitName || line.unit;
+                      const value = e.target.value.trim();
+                      setQuantityModes((prev) => ({ ...prev, [lineId]: "custom" }));
+                      if (value === "") {
+                        setQuantityInputs((prev) => {
+                          const next = { ...prev, [lineId]: "" };
+                          quantityInputsRef.current = next;
+                          return next;
+                        });
+                        return;
+                      }
+                      setQuantityInputs((prev) => {
+                        const next = { ...prev, [lineId]: value };
+                        quantityInputsRef.current = next;
+                        return next;
+                      });
+                      const parsed = parseCustomQuantityInput(value, unitName);
+                      if (parsed === null) return;
+                      updateQuantityManual(lineId, parsed, unitName);
+                    }}
+                    onBlur={() => {
+                      const lineId = quantityFocusLineIdRef.current;
+                      if (!lineId) return;
+                      if (quantityEnterConfirmedRef.current === lineId) {
+                        quantityEnterConfirmedRef.current = null;
+                        quantityFocusLineIdRef.current = null;
+                        setTimeout(() => {
+                          isUserInteractingRef.current = false;
+                        }, 300);
+                        return;
+                      }
+                      applyTypedOverlayToCart(lineId);
+                      clearQuantityOverlay(lineId);
+                      quantityFocusLineIdRef.current = null;
+                      setTimeout(() => {
+                        isUserInteractingRef.current = false;
+                      }, 300);
+                    }}
+                    onKeyDown={(e) => {
+                      if (!quickAdjustLine) return;
+                      if (e.key === "Enter") {
+                        e.preventDefault();
+                        quantityFocusLineIdRef.current = quickAdjustLine.id;
+                        confirmQuantityAndReturnToSearch(quickAdjustLine.id);
+                        return;
+                      }
+                      if (e.key === "ArrowUp") {
+                        e.preventDefault();
+                        bumpQuantity(quickAdjustLine.id, 1);
+                      }
+                      if (e.key === "ArrowDown") {
+                        e.preventDefault();
+                        bumpQuantity(quickAdjustLine.id, -1);
+                      }
+                    }}
+                    className="h-7 w-full max-w-[5.5rem] border-0 bg-transparent p-0 text-center text-base font-bold tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none disabled:opacity-50"
+                  />
+                  <span className="max-w-full truncate text-[10px] leading-none text-gray-500">
+                    {quickAdjustLine
+                      ? `Rs ${formatMoney(getSellingPrice(quickAdjustLine))} each`
+                      : "each"}
+                  </span>
+                </div>
+                <Button
+                  ref={quickQtyPlusRef}
+                  type="button"
+                  variant="ghost"
+                  disabled={!quickAdjustLine}
+                  className="h-10 w-11 shrink-0 rounded-none px-0 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                  aria-label="Increase quantity"
+                  data-quick-qty="true"
+                  onClick={() => quickAdjustLine && bumpQuantity(quickAdjustLine.id, 1)}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+              <span>
+                {filteredProducts.length} product{filteredProducts.length === 1 ? "" : "s"}
+                {selectedCategory !== "all" ? ` in ${selectedCategoryLabel}` : ""}
+              </span>
+              {selectedCategory !== "all" && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-gray-600 hover:text-gray-900"
+                  onClick={() => handleCategoryChange("all")}
+                >
+                  <X className="mr-1 h-3.5 w-3.5" />
+                  Clear category
+                </Button>
+              )}
             </div>
           </div>
         </div>
@@ -2020,24 +2563,6 @@ export function NewSale() {
               <span className="text-blue-600 text-xs">(change in Printer Settings)</span>
             </div>
           )}
-
-        {/* Categories */}
-        <div className="flex space-x-2 mb-6 overflow-x-auto">
-          {categories.map((category) => (
-            <Button
-              key={category.id}
-              variant={selectedCategory === category.id ? "default" : "outline"}
-              onClick={() => handleCategoryChange(category.id)}
-              className="whitespace-nowrap"
-              disabled={productsLoading}
-            >
-              {productsLoading && selectedCategory === category.id && (
-                <LoadingSpinner size="sm" className="mr-2" />
-              )}
-              {category.name}
-            </Button>
-          ))}
-        </div>
 
         {/* Products Grid */}
         {productsLoading ? (
