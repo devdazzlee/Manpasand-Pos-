@@ -91,6 +91,13 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useHoldSales } from "@/hooks/use-hold-sales";
 import { usePosBranch } from "@/hooks/use-pos-branch";
 
@@ -525,9 +532,11 @@ export function NewSale() {
           element.getAttribute('data-quantity-input') === 'true' ||
           element.getAttribute('data-quantity-select') === 'true' ||
           element.getAttribute('data-amount-input') === 'true' ||
+          element.getAttribute('data-discount-select') === 'true' ||
           element.getAttribute('data-quick-qty') === 'true' ||
           element.closest('[data-quick-qty="true"]') ||
-          element.closest('[data-product-search-dropdown]')) {
+          element.closest('[data-product-search-dropdown]') ||
+          element.closest('[data-radix-select-content]')) {
         return true;
       }
       
@@ -2566,55 +2575,78 @@ export function NewSale() {
 
         {/* Products Grid */}
         {productsLoading ? (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {Array.from({ length: 10 }).map((_, i) => (
-              <Card key={i} className="animate-pulse">
-                <CardContent className="p-4">
-                  <div className="aspect-square bg-gray-200 rounded-lg mb-3" />
-                  <div className="h-4 bg-gray-200 rounded mb-2" />
-                  <div className="h-4 bg-gray-200 rounded w-2/3 mb-2" />
-                  <div className="h-3 bg-gray-200 rounded w-1/2" />
-                </CardContent>
-              </Card>
+              <div
+                key={i}
+                className="animate-pulse rounded-xl border border-slate-200 bg-white p-3"
+              >
+                <div className="mb-2 h-8 rounded-md bg-slate-100" />
+                <div className="h-3 w-3/4 rounded bg-slate-100" />
+                <div className="mt-3 flex justify-between border-t border-slate-100 pt-2">
+                  <div className="h-2 w-10 rounded bg-slate-100" />
+                  <div className="h-4 w-14 rounded bg-slate-100" />
+                </div>
+              </div>
             ))}
           </div>
         ) : filteredProducts.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-64 col-span-full">
-            <span className="text-2xl mb-2">🛒</span>
-            <p className="text-gray-500 text-lg">
-              No products found in this category.
+          <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 py-16">
+            <LayoutGrid className="mb-3 h-10 w-10 text-slate-300" />
+            <p className="text-sm font-medium text-slate-600">No products found</p>
+            <p className="mt-1 text-xs text-slate-400">
+              {selectedCategory !== "all"
+                ? `Try another category or clear "${selectedCategoryLabel}"`
+                : "Try a different search term"}
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-4">
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {filteredProducts.map((product) => {
-              // Find cart items by productId (for separate entries) or id (backward compatibility)
-              const cartItems = cart.filter((item) => 
-                (item as any).productId === product.id || item.id === product.id
+              const cartItems = cart.filter(
+                (item) =>
+                  (item as CartItem).productId === product.id || item.id === product.id,
               );
               const totalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+              const inCart = totalQuantity > 0;
+
               return (
-                <Card
+                <button
                   key={product.id}
-                  className="cursor-pointer hover:shadow-sm transition-shadow"
+                  type="button"
                   onClick={() => handleProductClick(product)}
+                  className={cn(
+                    "group relative flex min-h-[5.5rem] flex-col rounded-xl border bg-white p-3 text-left shadow-sm transition-all duration-150",
+                    "hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
+                    inCart
+                      ? "border-blue-400 bg-blue-50/30 ring-1 ring-blue-200"
+                      : "border-slate-200",
+                  )}
                 >
-                  <CardContent className="p-2 space-y-1">
-                    <h3 className="text-xs font-semibold text-gray-900 leading-tight line-clamp-2">
-                      {product.name}
-                    </h3>
-                    <div className="flex items-center justify-between gap-1">
-                      <span className="text-sm font-bold text-blue-600">
-                        Rs {product.price.toLocaleString()}
+                  {inCart && (
+                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold tabular-nums text-white shadow-sm">
+                      {formatQuantityValue(totalQuantity)}
+                    </span>
+                  )}
+
+                  <span className="line-clamp-2 min-h-[2.25rem] flex-1 text-xs font-medium leading-snug text-slate-800 group-hover:text-slate-900">
+                    {product.name}
+                  </span>
+
+                  <div className="mt-2 flex items-end justify-between gap-2 border-t border-slate-100 pt-2">
+                    {product.category ? (
+                      <span className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                        {product.category}
                       </span>
-                      {totalQuantity > 0 && (
-                        <Badge className="bg-blue-600 text-[10px] px-1.5 py-0.5">
-                          {formatQuantityValue(totalQuantity)}
-                        </Badge>
-                      )}
-                    </div>
-                  </CardContent>
-                </Card>
+                    ) : (
+                      <span className="text-[10px] text-slate-300">—</span>
+                    )}
+                    <span className="shrink-0 text-sm font-bold tabular-nums text-blue-600">
+                      Rs {formatMoney(product.price)}
+                    </span>
+                  </div>
+                </button>
               );
             })}
           </div>
@@ -3012,46 +3044,66 @@ export function NewSale() {
           <div className="border-t border-gray-200 bg-white/95 px-3 py-3 shadow-[0_-8px_24px_-20px_rgba(15,23,42,0.4)] backdrop-blur">
             <div className="space-y-3">
               <div className="grid grid-cols-1 gap-2.5">
-                <div className="rounded-lg border border-gray-200 bg-slate-50 p-2.5 text-xs">
-                  <div className="flex items-center justify-between text-gray-600 text-xs font-medium">
-                    <span>Subtotal</span>
-                    <span className="text-sm font-semibold text-blue-700">{formatMoney(subtotal)}</span>
+              <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/60 shadow-sm">
+                <div className="space-y-2.5 p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-500">Subtotal</span>
+                    <span className="text-sm font-semibold tabular-nums text-slate-800">
+                      {formatMoney(subtotal)}
+                    </span>
                   </div>
 
-                  <div className="mt-2 flex items-center justify-between">
-                    <span className="text-gray-600 text-xs font-medium">Discount</span>
-                    <div className="flex items-center space-x-1.5 w-32">
-                      <select 
-                        value={globalDiscountType} 
-                        onChange={(e) => setGlobalDiscountType(e.target.value as "percentage" | "fixed")} 
-                        className="h-7 w-12 rounded border border-gray-300 bg-white px-1 text-xs outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="shrink-0 text-xs font-medium text-slate-500">Discount</span>
+                    <div className="flex h-8 w-[9.5rem] shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm transition-colors focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/15">
+                      <Select
+                        value={globalDiscountType}
+                        onValueChange={(value) =>
+                          setGlobalDiscountType(value as "percentage" | "fixed")
+                        }
                       >
-                        <option value="fixed">Rs</option>
-                        <option value="percentage">%</option>
-                      </select>
-                      <Input 
+                        <SelectTrigger
+                          data-discount-select="true"
+                          className="h-8 w-[3.25rem] shrink-0 rounded-none border-0 border-r border-slate-200 bg-slate-50 px-2 text-xs font-semibold text-slate-700 shadow-none focus:ring-0 focus:ring-offset-0 [&>svg]:h-3.5 [&>svg]:w-3.5"
+                        >
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent align="end" className="min-w-[4.5rem]">
+                          <SelectItem value="fixed" className="text-xs">
+                            Rs
+                          </SelectItem>
+                          <SelectItem value="percentage" className="text-xs">
+                            %
+                          </SelectItem>
+                        </SelectContent>
+                      </Select>
+                      <Input
                         type="number"
                         min="0"
                         placeholder="0"
-                        value={globalDiscountValue} 
-                        onChange={(e) => setGlobalDiscountValue(e.target.value)} 
-                        className="h-7 w-full px-2 text-xs text-right [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        value={globalDiscountValue}
+                        onChange={(e) => setGlobalDiscountValue(e.target.value)}
+                        data-amount-input="true"
+                        className="h-8 flex-1 rounded-none border-0 bg-transparent px-2.5 text-right text-xs font-medium tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />
                     </div>
                   </div>
-                  
+
                   {globalDiscountAmount > 0 && (
-                    <div className="mt-1 flex items-center justify-between text-green-600 text-xs font-medium">
-                      <span>Discount Given</span>
-                      <span>-{formatMoney(globalDiscountAmount)}</span>
+                    <div className="flex items-center justify-between rounded-md bg-emerald-50 px-2 py-1.5 text-xs font-medium text-emerald-700">
+                      <span>Saved</span>
+                      <span className="tabular-nums">−{formatMoney(globalDiscountAmount)}</span>
                     </div>
                   )}
-
-                  <div className="mt-2 pt-2 border-t border-gray-200 flex items-center justify-between text-blue-700 text-sm font-bold">
-                    <span>Payable</span>
-                    <span>{formatMoney(total)}</span>
-                  </div>
                 </div>
+
+                <div className="flex items-center justify-between border-t border-slate-200/80 bg-blue-600 px-3 py-2.5 text-white">
+                  <span className="text-xs font-semibold uppercase tracking-wide text-blue-100">
+                    Payable
+                  </span>
+                  <span className="text-lg font-bold tabular-nums">{formatMoney(total)}</span>
+                </div>
+              </div>
               </div>
 
               <div className="grid grid-cols-2 gap-1.5">
