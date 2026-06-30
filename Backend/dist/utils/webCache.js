@@ -1,10 +1,7 @@
 "use strict";
-// No-op cache layer.
-//
-// Redis was removed from the project per product requirements. This module is
-// intentionally kept (with its original signatures) so existing call sites in
-// the website service compile without edits. Every "cache" call now just
-// invokes the loader directly — the data is always live from Postgres.
+// In-memory TTL cache for public website API responses.
+// Redis was removed from the project; this lightweight layer prevents every
+// page view from hammering Postgres with identical heavy queries.
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.WEB_CACHE_TTL = void 0;
 exports.getCache = getCache;
@@ -12,28 +9,69 @@ exports.setCache = setCache;
 exports.withCache = withCache;
 exports.invalidateCache = invalidateCache;
 exports.invalidatePattern = invalidatePattern;
-async function getCache(_key) {
-    return null;
+const store = new Map();
+const MAX_ENTRIES = 500;
+function pruneIfNeeded() {
+    if (store.size <= MAX_ENTRIES)
+        return;
+    const now = Date.now();
+    for (const [key, entry] of store) {
+        if (entry.expiresAt <= now)
+            store.delete(key);
+        if (store.size <= MAX_ENTRIES * 0.8)
+            break;
+    }
+    if (store.size > MAX_ENTRIES) {
+        const oldest = [...store.entries()].sort((a, b) => a[1].expiresAt - b[1].expiresAt);
+        for (let i = 0; i < oldest.length - MAX_ENTRIES * 0.8; i++) {
+            store.delete(oldest[i][0]);
+        }
+    }
 }
-async function setCache(_key, _value, _ttlSeconds) {
-    return;
+async function getCache(key) {
+    const hit = store.get(key);
+    if (!hit)
+        return null;
+    if (Date.now() >= hit.expiresAt) {
+        store.delete(key);
+        return null;
+    }
+    return hit.value;
 }
-async function withCache(_key, _ttlSeconds, loader) {
-    return loader();
+async function setCache(key, value, ttlSeconds) {
+    if (ttlSeconds <= 0)
+        return;
+    pruneIfNeeded();
+    store.set(key, { value, expiresAt: Date.now() + ttlSeconds * 1000 });
 }
-async function invalidateCache(_keys) {
-    return;
+async function withCache(key, ttlSeconds, loader) {
+    if (ttlSeconds > 0) {
+        const cached = await getCache(key);
+        if (cached !== null)
+            return cached;
+    }
+    const value = await loader();
+    await setCache(key, value, ttlSeconds);
+    return value;
 }
-async function invalidatePattern(_pattern) {
-    return;
+async function invalidateCache(keys) {
+    for (const key of keys)
+        store.delete(key);
+}
+async function invalidatePattern(pattern) {
+    const prefix = pattern.replace(/\*$/, '');
+    for (const key of store.keys()) {
+        if (key.startsWith(prefix))
+            store.delete(key);
+    }
 }
 exports.WEB_CACHE_TTL = {
-    HOME: 0,
-    CATEGORIES_LIST: 0,
-    CATEGORY_DETAIL: 0,
-    PRODUCT_LIST: 0,
-    PRODUCT_DETAIL: 0,
-    SEARCH_SUGGEST: 0,
-    PRODUCT_COUNT: 0,
+    HOME: 5 * 60,
+    CATEGORIES_LIST: 10 * 60,
+    CATEGORY_DETAIL: 5 * 60,
+    PRODUCT_LIST: 3 * 60,
+    PRODUCT_DETAIL: 5 * 60,
+    SEARCH_SUGGEST: 2 * 60,
+    PRODUCT_COUNT: 10 * 60,
 };
 //# sourceMappingURL=webCache.js.map

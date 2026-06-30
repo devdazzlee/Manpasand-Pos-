@@ -104,15 +104,17 @@ function clampPage(value: unknown): number {
 export class WebService {
   async getHome(opts: { featuredLimit?: number; bestLimit?: number; categoriesLimit?: number } = {}) {
     const featuredLimit = clampLimit(opts.featuredLimit, 8, 24);
-    const bestLimit = clampLimit(opts.bestLimit, 8, 24);
-    const categoriesLimit = clampLimit(opts.categoriesLimit, 6, 24);
-    const cacheKey = `home:v2:f${featuredLimit}:b${bestLimit}:c${categoriesLimit}`;
+    // bestLimit defaults to 0 — homepage does not render best sellers; skip the heavy join.
+    const bestLimit =
+      opts.bestLimit === 0 ? 0 : clampLimit(opts.bestLimit ?? 0, 0, 24);
+    const categoriesLimit = clampLimit(opts.categoriesLimit, 24, 50);
+    const cacheKey = `home:v3:f${featuredLimit}:b${bestLimit}:c${categoriesLimit}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.HOME, async () => {
       const [featured, bestSellers, categories, productCount, featuredTotal, categoriesTotal] =
         await Promise.all([
           this.loadFeatured(featuredLimit),
-          this.loadBestSellers(bestLimit),
+          bestLimit > 0 ? this.loadBestSellers(bestLimit) : Promise.resolve([]),
           this.loadHomeCategories(categoriesLimit),
           prisma.product.count({ where: { is_active: true } }),
           prisma.product.count({ where: { is_active: true, is_featured: true } }),

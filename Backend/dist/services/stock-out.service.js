@@ -136,7 +136,7 @@ class StockOutService {
             quantity_change: { lt: 0 },
             movement_type: params.reason
                 ? params.reason
-                : { in: ['SALE', 'DAMAGE', 'LOSS', 'EXPIRED'] },
+                : { in: ['SALE', 'DAMAGE', 'LOSS', 'EXPIRED', 'RETURN'] },
         };
         if (params.branchId)
             where.branch_id = params.branchId;

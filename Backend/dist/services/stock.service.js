@@ -260,60 +260,122 @@ class StockService {
         }
         return stock;
     }
-    async getStockByBranch(branchId, page = 1, limit = 20, search, userRole, categoryId) {
+    async getStockByBranch(branchId, page = 1, limit = 20, search, userRole, categoryId, brandId, supplierId, stockStatus) {
         const skip = (page - 1) * limit;
         const where = {};
-        // Only filter by branch if branchId is provided AND user is not admin
         if (branchId && branchId.trim() !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
             where.branch_id = branchId;
         }
         else if (branchId && branchId.trim() !== "") {
-            // Admin can still filter by specific branch if they choose
             where.branch_id = branchId;
         }
-        if (search && search.trim() !== "" || categoryId) {
-            where.product = {};
-            if (search && search.trim() !== "") {
-                where.product.OR = [
-                    { name: { contains: search, mode: 'insensitive' } },
-                    { sku: { contains: search, mode: 'insensitive' } }
-                ];
-            }
-            if (categoryId && categoryId !== 'all') {
-                where.product.category_id = categoryId;
-            }
+        const productWhere = {};
+        if (search && search.trim() !== "") {
+            productWhere.OR = [
+                { name: { contains: search, mode: 'insensitive' } },
+                { sku: { contains: search, mode: 'insensitive' } },
+                { code: { contains: search, mode: 'insensitive' } },
+            ];
         }
-        const [stocks, total, stats, lowStockCount] = await Promise.all([
+        if (categoryId && categoryId !== 'all') {
+            productWhere.category_id = categoryId;
+        }
+        if (brandId && brandId !== 'all') {
+            productWhere.brand_id = brandId;
+        }
+        if (supplierId && supplierId !== 'all') {
+            productWhere.supplier_id = supplierId;
+        }
+        if (Object.keys(productWhere).length > 0) {
+            where.product = productWhere;
+        }
+        const productInclude = {
+            category: { select: { id: true, name: true } },
+            brand: { select: { id: true, name: true } },
+            supplier: { select: { id: true, name: true } },
+            ProductImage: { take: 1, orderBy: { created_at: 'asc' } },
+        };
+        const [allForStats, total] = await Promise.all([
             client_1.prisma.stock.findMany({
                 where,
-                include: { product: true, branch: true },
-                orderBy: { last_updated: "desc" },
-                skip,
-                take: limit,
+                select: {
+                    id: true,
+                    current_quantity: true,
+                    reserved_quantity: true,
+                    minimum_quantity: true,
+                    product: { select: { purchase_rate: true, min_qty: true, id: true } },
+                },
             }),
             client_1.prisma.stock.count({ where }),
-            client_1.prisma.stock.aggregate({
-                where,
-                _sum: {
-                    current_quantity: true
-                }
-            }),
-            client_1.prisma.stock.count({
-                where: {
-                    ...where,
-                    current_quantity: { lte: 10 }
-                }
-            })
         ]);
+        const matchesStockStatus = (row) => {
+            const qty = Number(row.current_quantity || 0);
+            const minQty = Number(row.product?.min_qty ?? row.minimum_quantity ?? 0);
+            switch (stockStatus) {
+                case 'negative':
+                    return qty < 0;
+                case 'out':
+                    return qty <= 0;
+                case 'low':
+                    return qty > 0 && minQty > 0 && qty <= minQty;
+                case 'in':
+                    return qty > 0 && (minQty <= 0 || qty > minQty);
+                default:
+                    return true;
+            }
+        };
+        let filteredIds = null;
+        if (stockStatus && stockStatus !== 'all') {
+            filteredIds = allForStats.filter(matchesStockStatus).map((row) => row.id);
+        }
+        const listWhere = filteredIds !== null
+            ? { ...where, id: { in: filteredIds.length > 0 ? filteredIds : ['__none__'] } }
+            : where;
+        const filteredTotal = filteredIds !== null ? filteredIds.length : total;
+        const stocks = await client_1.prisma.stock.findMany({
+            where: listWhere,
+            include: {
+                product: { include: productInclude },
+                branch: true,
+            },
+            orderBy: { last_updated: 'desc' },
+            skip,
+            take: limit,
+        });
+        let totalInventoryValue = 0;
+        let totalQuantity = 0;
+        let lowStockCount = 0;
+        let outOfStockCount = 0;
+        let negativeStockCount = 0;
+        const productIds = new Set();
+        for (const row of allForStats) {
+            const qty = Number(row.current_quantity || 0);
+            const reserved = Number(row.reserved_quantity || 0);
+            const minQty = Number(row.product?.min_qty ?? row.minimum_quantity ?? 0);
+            const cost = Number(row.product?.purchase_rate || 0);
+            totalQuantity += qty;
+            totalInventoryValue += qty * cost;
+            productIds.add(row.product?.id);
+            if (qty < 0)
+                negativeStockCount += 1;
+            if (qty <= 0)
+                outOfStockCount += 1;
+            else if (minQty > 0 && qty <= minQty)
+                lowStockCount += 1;
+        }
         return {
             data: stocks,
             meta: {
-                total,
+                total: filteredTotal,
                 page,
                 limit,
-                totalPages: Math.ceil(total / limit),
-                totalQuantity: Number(stats._sum.current_quantity || 0),
-                lowStockCount
+                totalPages: Math.max(1, Math.ceil(filteredTotal / limit)),
+                totalQuantity,
+                totalInventoryValue,
+                totalProducts: productIds.size,
+                lowStockCount,
+                outOfStockCount,
+                negativeStockCount,
             },
         };
     }

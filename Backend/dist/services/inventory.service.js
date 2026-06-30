@@ -26,9 +26,14 @@ class InventoryService {
             },
         });
         let totalInventoryValue = 0;
+        let totalStockQuantity = 0;
+        let negativeStockCount = 0;
         const branchSummary = {};
         for (const s of stocks) {
             const qty = (0, helpers_1.asNumber)(s.current_quantity);
+            totalStockQuantity += qty;
+            if (qty < 0)
+                negativeStockCount += 1;
             const cost = (0, helpers_1.asNumber)(s.product.purchase_rate || 0);
             const value = qty * cost;
             const bid = s.branch_id;
@@ -137,10 +142,16 @@ class InventoryService {
             select: { quantity: true, cost_price: true }
         });
         const poTotalValue = purchasesThisMonth.reduce((acc, p) => acc + (0, helpers_1.asNumber)(p.quantity) * (0, helpers_1.asNumber)(p.cost_price), 0);
+        const activeBranches = await client_1.prisma.branch.count({ where: { is_active: true } });
         return {
             totalInventoryValue,
+            totalStockQuantity,
+            negativeStockCount,
+            lowStockCount: lowStockItems.length,
             totalSkus: await client_1.prisma.product.count({ where: { is_active: true } }),
             outOfStockCount: outOfStockItems.length,
+            totalLocations: activeBranches,
+            pendingTransferCount: pendingTransfers.length,
             branchSummary: sortedTopValued,
             categorySummary: Object.entries(categorySummary).map(([name, v]) => ({ name, ...v })),
             velocity: topMovingWithNames,

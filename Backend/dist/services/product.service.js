@@ -978,7 +978,7 @@ class ProductService {
                 },
             },
         };
-        const select = fetchAll ? minimalSelect : detailedSelect;
+        const select = detailedSelect;
         const fetchPage = async (pageNumber) => client_2.prisma.product.findMany({
             where,
             orderBy: { created_at: 'desc' },
