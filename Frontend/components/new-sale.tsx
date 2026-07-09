@@ -1117,12 +1117,8 @@ export function NewSale() {
         return numericValue;
       }
 
-      // No suffix provided:
-      // - Large integer-like values are usually grams in POS usage (e.g. 250 => 250g)
-      // - Smaller values are treated as kg (e.g. 1 => 1kg, 0.5 => 0.5kg)
-      if (numericValue >= 10) {
-        return numericValue / 1000;
-      }
+      // Plain number without suffix = quantity in the product's unit (kg).
+      // Use an explicit suffix for grams, e.g. "250g" or "0.25".
       return numericValue;
     }
 
@@ -2470,28 +2466,15 @@ export function NewSale() {
                     onChange={(e) => {
                       const lineId = quickAdjustLine?.id;
                       if (!lineId) return;
-                      const line =
-                        cartRef.current.find((l) => l.id === lineId) ?? quickAdjustLine;
-                      if (!line) return;
-                      const unitName = line.unitName || line.unit;
-                      const value = e.target.value.trim();
+                      const value = e.target.value;
                       setQuantityModes((prev) => ({ ...prev, [lineId]: "custom" }));
-                      if (value === "") {
-                        setQuantityInputs((prev) => {
-                          const next = { ...prev, [lineId]: "" };
-                          quantityInputsRef.current = next;
-                          return next;
-                        });
-                        return;
-                      }
                       setQuantityInputs((prev) => {
                         const next = { ...prev, [lineId]: value };
                         quantityInputsRef.current = next;
                         return next;
                       });
-                      const parsed = parseCustomQuantityInput(value, unitName);
-                      if (parsed === null) return;
-                      updateQuantityManual(lineId, parsed, unitName);
+                      // Commit quantity on Enter/blur only — avoids rewriting
+                      // "50" into "0.05" while the user is still typing.
                     }}
                     onBlur={() => {
                       const lineId = quantityFocusLineIdRef.current;
