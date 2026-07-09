@@ -11,12 +11,17 @@ export class CloudinaryService {
   /**
    * Upload a multer file buffer to Cloudinary
    */
-  async uploadImage(file: Express.Multer.File, retries = 3): Promise<string> {
+  async uploadImage(
+    file: Express.Multer.File,
+    options?: { folder?: string },
+    retries = 3,
+  ): Promise<string> {
+    const folder = options?.folder ?? 'products';
     try {
       const result = await new Promise<string>((resolve, reject) => {
         const uploadStream = cloudinary.uploader.upload_stream(
           {
-            folder: 'products',
+            folder,
             resource_type: 'image',
             transformation: [
               { width: 1200, height: 1200, crop: 'limit', quality: 'auto', fetch_format: 'auto' }
@@ -36,7 +41,7 @@ export class CloudinaryService {
       console.log('Cloudinary upload failed:', error);
       if (retries > 0) {
         await new Promise(resolve => setTimeout(resolve, 1000 * (4 - retries)));
-        return this.uploadImage(file, retries - 1);
+        return this.uploadImage(file, options, retries - 1);
       }
       throw error;
     }
@@ -71,12 +76,16 @@ export class CloudinaryService {
   /**
    * Upload multiple multer files to Cloudinary
    */
-  async uploadMultipleImages(files: Express.Multer.File[], concurrency = 3): Promise<string[]> {
+  async uploadMultipleImages(
+    files: Express.Multer.File[],
+    options?: { folder?: string },
+    concurrency = 3,
+  ): Promise<string[]> {
     const results: string[] = [];
     for (let i = 0; i < files.length; i += concurrency) {
       const batch = files.slice(i, i + concurrency);
       const batchResults = await Promise.all(
-        batch.map(file => this.uploadImage(file))
+        batch.map(file => this.uploadImage(file, options))
       );
       results.push(...batchResults);
     }

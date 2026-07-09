@@ -7,6 +7,7 @@ import {
   listCategories,
   deleteCategory,
   deleteAllCategories,
+  uploadCategoryImage,
 } from '../controllers/category.controller';
 import {
   createCategorySchema,
@@ -17,13 +18,13 @@ import {
 import { validate } from '../middleware/validation.middleware';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import upload from '../utils/multer';
-import { parseFormData } from '../middleware/parse-formdata.middleware';
 
 const router = express.Router();
 
 router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
 
-router.post('/', upload.array('images', 10), parseFormData, validate(createCategorySchema), createCategory);
+router.post('/upload-image', upload.single('image'), uploadCategoryImage);
+router.post('/', validate(createCategorySchema), createCategory);
 router.delete('/all', deleteAllCategories);
 router.get('/', validate(listCategoriesSchema), listCategories);
 router.get('/:id', validate(getCategorySchema), getCategory);

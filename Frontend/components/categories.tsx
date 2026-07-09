@@ -3,6 +3,7 @@
 import type React from "react"
 import { z } from "zod"
 import { useState, useEffect, useRef } from "react"
+import { useStore } from "@/lib/store"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -63,6 +64,16 @@ const extractApiError = (err: any, fallback = "Something went wrong"): string =>
   }
   if (typeof data.message === "string") return data.message
   return fallback
+}
+
+async function uploadCategoryImageToCloudinary(file: File): Promise<string> {
+  const formData = new FormData()
+  formData.append("image", file)
+  const response = await apiClient.post("/categories/upload-image", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+    timeout: 60000,
+  })
+  return response.data.data.url as string
 }
 
 // Image compression utility
@@ -185,6 +196,9 @@ export function Categories() {
   const [editImagePreview, setEditImagePreview] = useState<string | null>(null)
   const fileInputRef = useRef<HTMLInputElement>(null)
   const editFileInputRef = useRef<HTMLInputElement>(null)
+  const pendingAddImageFileRef = useRef<File | null>(null)
+  const pendingEditImageFileRef = useRef<File | null>(null)
+  const [editImageRemoved, setEditImageRemoved] = useState(false)
   const { toast } = useToast()
   const [selectedCategoryForProducts, setSelectedCategoryForProducts] = useState<Category | null>(null)
   const [categoryProducts, setCategoryProducts] = useState<any[]>([])
@@ -247,17 +261,10 @@ export function Categories() {
     }
 
     try {
-      // Compress the image
       const compressedFile = await compressImage(file, 0.7, 800, 600)
-
-      // Convert to base64
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const base64String = e.target?.result as string
-        setImagePreview(base64String)
-        setNewCategory({ ...newCategory, image: base64String })
-      }
-      reader.readAsDataURL(compressedFile)
+      pendingAddImageFileRef.current = compressedFile
+      setImagePreview(URL.createObjectURL(compressedFile))
+      setNewCategory({ ...newCategory, image: "" })
     } catch (error) {
       toast({
         title: "Error",
@@ -293,17 +300,10 @@ export function Categories() {
     }
 
     try {
-      // Compress the image
       const compressedFile = await compressImage(file, 0.7, 800, 600)
-
-      // Convert to base64
-      const reader = new FileReader()
-      reader.onload = (e) => {
-        const base64String = e.target?.result as string
-        setEditImagePreview(base64String)
-        setEditingCategory({ ...editingCategory, image: base64String })
-      }
-      reader.readAsDataURL(compressedFile)
+      pendingEditImageFileRef.current = compressedFile
+      setEditImageRemoved(false)
+      setEditImagePreview(URL.createObjectURL(compressedFile))
     } catch (error) {
       toast({
         title: "Error",
@@ -315,7 +315,11 @@ export function Categories() {
 
   // Remove image for new category
   const handleRemoveImage = () => {
+    if (imagePreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(imagePreview)
+    }
     setImagePreview(null)
+    pendingAddImageFileRef.current = null
     setNewCategory({ ...newCategory, image: "" })
     if (fileInputRef.current) {
       fileInputRef.current.value = ""
@@ -325,8 +329,12 @@ export function Categories() {
   // Remove image for edit category
   const handleRemoveEditImage = () => {
     if (!editingCategory) return
+    if (editImagePreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(editImagePreview)
+    }
     setEditImagePreview(null)
-    setEditingCategory({ ...editingCategory, image: "" })
+    pendingEditImageFileRef.current = null
+    setEditImageRemoved(true)
     if (editFileInputRef.current) {
       editFileInputRef.current.value = ""
     }
@@ -494,25 +502,39 @@ export function Categories() {
     try {
       setLoading(true)
       const allBranchIds = branches.map((b) => b.id)
-      const { branch_id: _unusedBranchId, ...rest } = newCategory
+      const { branch_id: _unusedBranchId, image: _image, ...rest } = newCategory
       const categoryData = {
         ...rest,
-        ...validationResult.data, // Uses validated name & slug
+        ...validationResult.data,
         display_on_branches: allBranchIds,
         display_on_pos: true,
         get_tax_from_item: false,
         editable_sale_rate: false,
-        is_active: addIsActive, // Support for is_active
+        is_active: addIsActive,
       }
 
-      const response = await apiClient.post("/categories", categoryData)
+      let image_url: string | undefined
+      if (pendingAddImageFileRef.current) {
+        image_url = await uploadCategoryImageToCloudinary(pendingAddImageFileRef.current)
+      }
+
+      const response = await apiClient.post("/categories", {
+        ...categoryData,
+        ...(image_url ? { image_url } : {}),
+      })
 
       toast({
         title: "Success",
         description: "Category created successfully",
       })
 
-      setCategories([...categories, normalizeCategory(response.data.data)])
+      const created = normalizeCategory(response.data.data as Record<string, unknown>)
+      setCategories([...categories, created])
+      useStore.getState().upsertCategoryInStore({
+        id: created.id,
+        name: created.name,
+        is_active: getCategoryIsActive(created),
+      })
       setNewCategory({
         name: "",
         slug: "",
@@ -524,6 +546,7 @@ export function Categories() {
         branch_id: "",
       })
       setImagePreview(null)
+      pendingAddImageFileRef.current = null
       if (fileInputRef.current) {
         fileInputRef.current.value = ""
       }
@@ -569,13 +592,23 @@ export function Categories() {
     try {
       setLoading(true)
       const allBranchIds = branches.map((b) => b.id)
-      const response = await apiClient.patch(`/categories/${editingCategory.id}`, {
+
+      const payload: Record<string, unknown> = {
         ...validationResult.data,
         display_on_branches: allBranchIds,
-        image: editingCategory.image,
         display_on_pos: true,
         is_active: editIsActive,
-      })
+      }
+
+      if (editImageRemoved) {
+        payload.remove_image = true
+      } else if (pendingEditImageFileRef.current) {
+        payload.image_url = await uploadCategoryImageToCloudinary(
+          pendingEditImageFileRef.current,
+        )
+      }
+
+      const response = await apiClient.patch(`/categories/${editingCategory.id}`, payload)
 
       toast({
         title: "Success",
@@ -584,11 +617,21 @@ export function Categories() {
 
       setCategories(
         categories.map((c) =>
-          c.id === editingCategory.id ? normalizeCategory(response.data.data) : c,
+          c.id === editingCategory.id
+            ? normalizeCategory(response.data.data as Record<string, unknown>)
+            : c,
         ),
       )
+      const updated = normalizeCategory(response.data.data as Record<string, unknown>)
+      useStore.getState().upsertCategoryInStore({
+        id: updated.id,
+        name: updated.name,
+        is_active: getCategoryIsActive(updated),
+      })
       setEditingCategory(null)
       setEditImagePreview(null)
+      pendingEditImageFileRef.current = null
+      setEditImageRemoved(false)
     } catch (error: any) {
       console.log("Error updating category:", error)
       const errMsg = extractApiError(error, "Failed to update category")
@@ -617,18 +660,26 @@ export function Categories() {
       const updated = response.data?.data
         ? normalizeCategory(response.data.data)
         : null
+      const previous = categories.find((c) => c.id === id)
+      const nextCategory =
+        updated ??
+        (previous
+          ? normalizeCategory({
+              ...previous,
+              is_active: !getCategoryIsActive(previous),
+            } as Record<string, unknown>)
+          : null)
 
-      setCategories(
-        categories.map((c) => {
-          if (c.id !== id) return c
-          if (updated) return { ...c, ...updated }
-          const nextActive = !getCategoryIsActive(c)
-          return normalizeCategory({
-            ...c,
-            is_active: nextActive,
-          } as Record<string, unknown>)
-        }),
-      )
+      if (nextCategory) {
+        setCategories(
+          categories.map((c) => (c.id === id ? { ...c, ...nextCategory } : c)),
+        )
+        useStore.getState().upsertCategoryInStore({
+          id: nextCategory.id,
+          name: nextCategory.name,
+          is_active: getCategoryIsActive(nextCategory),
+        })
+      }
     } catch (error: any) {
       console.log("Error toggling category status:", error)
       toast({
@@ -661,6 +712,7 @@ export function Categories() {
       })
 
       setCategories(categories.filter((c) => c.id !== categoryToDelete))
+      useStore.getState().removeCategoryFromStore(categoryToDelete)
       setCategoryToDelete(null)
     } catch (error: any) {
       console.log("Error deleting category:", error)
@@ -682,14 +734,21 @@ export function Categories() {
     setEditingCategory(category)
     setEditIsActive(getCategoryIsActive(category))
     setEditImagePreview(category.image || null)
+    pendingEditImageFileRef.current = null
+    setEditImageRemoved(false)
     setEditErrors({})
     setEditApiError("")
   }
 
   // Handle edit dialog close
   const handleEditDialogClose = () => {
+    if (editImagePreview?.startsWith("blob:")) {
+      URL.revokeObjectURL(editImagePreview)
+    }
     setEditingCategory(null)
     setEditImagePreview(null)
+    pendingEditImageFileRef.current = null
+    setEditImageRemoved(false)
     if (editFileInputRef.current) {
       editFileInputRef.current.value = ""
     }

@@ -106,11 +106,15 @@ interface StoreState {
   fetchSuppliers: (force?: boolean) => Promise<void>
   upsertProductFromApi: (rawProduct: any) => void
   removeProductFromStore: (productId: string) => void
+  upsertCategoryInStore: (category: Category) => void
+  removeCategoryFromStore: (categoryId: string) => void
   clearStore: () => void
 }
 
 // Cache duration in milliseconds (5 minutes)
 const CACHE_DURATION = 5 * 60 * 1000
+
+let categoriesFetchInFlight: Promise<void> | null = null
 
 const aggregateStockFields = (item: any) => {
   if (item.available_stock != null || item.current_stock != null) {
@@ -351,28 +355,37 @@ export const useStore = create<StoreState>()(
             state.categories.length > 0 && 
             state.lastCategoriesFetch && 
             (now - state.lastCategoriesFetch) < CACHE_DURATION) {
-          // Audit: Cache hit within duration
           return
         }
 
-        set({ categoriesLoading: true })
-        
-        try {
-          const res = await apiClient.get("/categories")
-          const categories = [{ id: "all", name: "All" }, ...res.data.data]
-          
-          set({ 
-            categories, 
-            categoriesLoading: false,
-            lastCategoriesFetch: now
-          })
-          
-          console.log(`Loaded ${categories.length} categories`)
-        } catch (error) {
-          console.log('Failed to fetch categories:', error)
-          set({ categoriesLoading: false })
-          throw error
+        if (categoriesFetchInFlight) {
+          return categoriesFetchInFlight
         }
+
+        categoriesFetchInFlight = (async () => {
+          set({ categoriesLoading: true })
+          
+          try {
+            const res = await apiClient.get("/categories", { params: { limit: 1000 } })
+            const categories = [{ id: "all", name: "All" }, ...res.data.data]
+            
+            set({ 
+              categories, 
+              categoriesLoading: false,
+              lastCategoriesFetch: Date.now()
+            })
+            
+            console.log(`Loaded ${categories.length} categories`)
+          } catch (error) {
+            console.log('Failed to fetch categories:', error)
+            set({ categoriesLoading: false })
+            throw error
+          } finally {
+            categoriesFetchInFlight = null
+          }
+        })()
+
+        return categoriesFetchInFlight
       },
 
       // Fetch customers with caching
@@ -507,6 +520,39 @@ export const useStore = create<StoreState>()(
         }))
       },
 
+      upsertCategoryInStore: (category: Category) => {
+        if (!category?.id || category.id === "all") return
+
+        set((state) => {
+          const realCategories = state.categories.filter((c) => c.id !== "all")
+          const index = realCategories.findIndex((c) => c.id === category.id)
+          const nextCategory = {
+            id: category.id,
+            name: category.name,
+            is_active: category.is_active,
+          }
+
+          const nextReal =
+            index === -1
+              ? [...realCategories, nextCategory]
+              : realCategories.map((c, i) => (i === index ? { ...c, ...nextCategory } : c))
+
+          return {
+            categories: [{ id: "all", name: "All" }, ...nextReal],
+            lastCategoriesFetch: Date.now(),
+          }
+        })
+      },
+
+      removeCategoryFromStore: (categoryId: string) => {
+        if (!categoryId || categoryId === "all") return
+
+        set((state) => ({
+          categories: state.categories.filter((c) => c.id !== categoryId),
+          lastCategoriesFetch: Date.now(),
+        }))
+      },
+
       // Clear all cached data
       clearStore: () => {
         set({
@@ -525,23 +571,23 @@ export const useStore = create<StoreState>()(
     }),
     {
       name: 'pos-store',
-      version: 2,
+      version: 3,
       migrate: (persistedState) => {
         const state = (persistedState || {}) as Partial<StoreState>
         return {
           ...state,
           products: [],
+          categories: [],
+          lastCategoriesFetch: null,
         } as StoreState
       },
       partialize: (state) => ({
-        // Products are fetched fresh on load — persisting 800+ records caused
-        // stale cards after edits and on browser refresh (304 + localStorage).
-        categories: state.categories,
+        // Products and categories are fetched fresh on load — persisting them
+        // caused stale dropdowns/cards after edits and on browser refresh.
         customers: state.customers,
         branches: state.branches,
         suppliers: state.suppliers,
         lastProductsFetch: state.lastProductsFetch,
-        lastCategoriesFetch: state.lastCategoriesFetch,
         lastCustomersFetch: state.lastCustomersFetch,
         lastBranchesFetch: state.lastBranchesFetch,
         lastSuppliersFetch: state.lastSuppliersFetch,

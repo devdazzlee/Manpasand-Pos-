@@ -2,14 +2,43 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateCategoryInput, UpdateCategoryInput } from '../validations/category.validation';
-import { s3Service } from './common/s3BucketService';
+import { imageService } from './common/cloudinaryService';
 import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
+import { invalidatePattern } from '../utils/webCache';
+
+const CATEGORY_CLOUDINARY_FOLDER = 'manpasand/categories';
+
+const CATEGORY_IMAGE_INCLUDE = {
+  CategoryImages: {
+    where: { status: 'COMPLETE' as const },
+    select: { image: true },
+    take: 1,
+    orderBy: { created_at: 'desc' as const },
+  },
+} satisfies Prisma.CategoryInclude;
+
+/** Single source of truth: CategoryImages table (Cloudinary URLs). */
+function resolveCategoryImage(
+  category: { CategoryImages?: { image: string }[] },
+): string | null {
+  return category.CategoryImages?.[0]?.image ?? null;
+}
+
+export async function invalidateWebCategoryCache(): Promise<void> {
+  await Promise.all([
+    invalidatePattern('home:'),
+    invalidatePattern('categories:'),
+    invalidatePattern('category:'),
+  ]);
+}
 
 export class CategoryService {
   async createCategory(data: CreateCategoryInput) {
+    const { image_url: _imageUrl, remove_image: _removeImage, ...fields } = data;
+
     const [existingSlug, allCategories] = await Promise.all([
       prisma.category.findUnique({
-        where: { slug: data.slug },
+        where: { slug: fields.slug },
       }),
       prisma.category.findMany({
         select: { code: true },
@@ -20,7 +49,6 @@ export class CategoryService {
       throw new AppError(400, 'Category with this slug already exists');
     }
 
-    // Generate new code by finding the highest numeric code
     let maxCode = 999;
     allCategories.forEach(cat => {
       const codeNum = parseInt(cat.code, 10);
@@ -28,19 +56,16 @@ export class CategoryService {
         if (codeNum > maxCode) maxCode = codeNum;
       }
     });
-    
+
     const newCode = (maxCode + 1).toString();
 
-    // First create without code
-    const category = await prisma.category.create({
+    return prisma.category.create({
       data: {
-        ...data,
-        code: newCode, // Temporary empty value
-        display_on_branches: data.display_on_branches || [],
+        ...fields,
+        code: newCode,
+        display_on_branches: fields.display_on_branches || [],
       },
     });
-
-    return category;
   }
 
   async getCategoryById(id: string) {
@@ -52,6 +77,7 @@ export class CategoryService {
           where: { is_active: true },
           select: { id: true, name: true },
         },
+        ...CATEGORY_IMAGE_INCLUDE,
       },
     });
 
@@ -59,29 +85,40 @@ export class CategoryService {
       throw new AppError(404, 'Category not found');
     }
 
-    return category;
+    const { CategoryImages, ...rest } = category;
+    return {
+      ...rest,
+      image: resolveCategoryImage(category),
+    };
   }
 
   async updateCategory(id: string, data: UpdateCategoryInput) {
+    const { image_url: _imageUrl, remove_image: _removeImage, ...fields } = data;
     const category = await this.getCategoryById(id);
 
-    // Check if new slug conflicts with existing
-    if (data.slug && data.slug !== category.slug) {
+    if (fields.slug && fields.slug !== category.slug) {
       const existingSlug = await prisma.category.findUnique({
-        where: { slug: data.slug },
+        where: { slug: fields.slug },
       });
       if (existingSlug) {
         throw new AppError(400, 'Category with this slug already exists');
       }
     }
 
-    return prisma.category.update({
+    const updated = await prisma.category.update({
       where: { id },
       data: {
-        ...data,
-        display_on_branches: data.display_on_branches || category.display_on_branches,
+        ...fields,
+        display_on_branches: fields.display_on_branches || category.display_on_branches,
       },
+      include: CATEGORY_IMAGE_INCLUDE,
     });
+
+    const { CategoryImages, ...rest } = updated;
+    return {
+      ...rest,
+      image: resolveCategoryImage(updated),
+    };
   }
 
   async toggleCategoryStatus(id: string) {
@@ -136,6 +173,7 @@ export class CategoryService {
           branch: {
             select: { id: true, name: true, code: true },
           },
+          ...CATEGORY_IMAGE_INCLUDE,
           _count: {
             select: { products: true },
           },
@@ -145,11 +183,14 @@ export class CategoryService {
     ]);
 
     return {
-      data: categories.map(c => ({
-        ...c,
-        product_count: c._count.products,
-        _count: undefined,
-      })),
+      data: categories.map(c => {
+        const { CategoryImages, _count, ...rest } = c;
+        return {
+          ...rest,
+          image: resolveCategoryImage(c),
+          product_count: _count.products,
+        };
+      }),
       meta: {
         total,
         page,
@@ -160,66 +201,67 @@ export class CategoryService {
   }
 
   async getCategories() {
-    // Fetch categories from the database
-    return await prisma.category.findMany({
-      where: {
-        is_active: true,
-      },
-      orderBy: {
-        created_at: "desc",
-      },
-      include: {
-        CategoryImages: {
-          where: {
-            status: 'COMPLETE',
-          },
-          select: {
-            image: true,
-          }
-        },
-      },
+    return prisma.category.findMany({
+      where: { is_active: true },
+      orderBy: { created_at: 'desc' },
+      include: CATEGORY_IMAGE_INCLUDE,
     });
   }
 
-  async processCategoryImages(categoryId: string, files: Express.Multer.File[]) {
-    try {
-      console.log('Processing category images service');
-      
-      // 1. Upload images to S3
-      const imageUrls = await s3Service.uploadMultipleImages(files);
-      console.log('Uploaded images to S3:', imageUrls);
-      
-      // 2. Create image records with status COMPLETE
-      await prisma.categoryImages.createMany({
-        data: imageUrls.map(url => ({
+  /**
+   * Link a Cloudinary URL to a category (same pattern as product image_urls).
+   * Replaces any existing category images.
+   */
+  async setCategoryImageUrl(categoryId: string, imageUrl: string) {
+    const existing = await prisma.categoryImages.findMany({
+      where: { category_id: categoryId, status: 'COMPLETE' },
+      select: { image: true },
+    });
+
+    const oldCloudinaryUrls = existing
+      .map(row => row.image)
+      .filter(url => url.includes('cloudinary.com'));
+
+    await prisma.$transaction([
+      prisma.categoryImages.deleteMany({ where: { category_id: categoryId } }),
+      prisma.categoryImages.create({
+        data: {
           category_id: categoryId,
-          image: url,
+          image: imageUrl,
           status: 'COMPLETE',
-        }))
-      });
+        },
+      }),
+    ]);
 
-      console.log('Category images processed successfully:', imageUrls);
-
-    } catch (error) {
-      console.log('Error processing category images:', error);
-      const err = error as Error;
-
-      // 3. On failure, create FAILED image records with error messages
-      await prisma.categoryImages.createMany({
-        data: files.map(file => ({
-          category_id: categoryId,
-          image: `failed-${file.originalname}`, // Placeholder image value
-          status: 'FAILED',
-          error: err.message.substring(0, 255), // Truncated error message
-        }))
-      });
-
-      throw error;
+    if (oldCloudinaryUrls.length > 0) {
+      await imageService.deleteMultipleImages(oldCloudinaryUrls);
     }
+  }
+
+  async clearCategoryImages(categoryId: string) {
+    const existing = await prisma.categoryImages.findMany({
+      where: { category_id: categoryId, status: 'COMPLETE' },
+      select: { image: true },
+    });
+
+    await prisma.categoryImages.deleteMany({ where: { category_id: categoryId } });
+
+    const cloudinaryUrls = existing
+      .map(row => row.image)
+      .filter(url => url.includes('cloudinary.com'));
+
+    if (cloudinaryUrls.length > 0) {
+      await imageService.deleteMultipleImages(cloudinaryUrls);
+    }
+  }
+
+  async uploadCategoryImageFile(file: Express.Multer.File): Promise<string> {
+    return imageService.uploadImage(file, { folder: CATEGORY_CLOUDINARY_FOLDER });
   }
 
   async deleteCategory(id: string) {
     const category = await this.getCategoryById(id);
+    await this.clearCategoryImages(id);
 
     await prisma.$transaction(async (tx) => {
       const defaultCategoryId = await catalogDefaults.ensureDefaultCategory(tx, id);
@@ -235,23 +277,18 @@ export class CategoryService {
     return category;
   }
 
-  async deleteAllCategories(): Promise<{ 
-    deletedCount: number; 
+  async deleteAllCategories(): Promise<{
+    deletedCount: number;
     deletedImages: number;
   }> {
-    // Delete all categories and their related records in a transaction
-    return await prisma.$transaction(async (tx) => {
-      // 1. Delete CategoryImages records first (ON DELETE RESTRICT constraint)
+    return prisma.$transaction(async (tx) => {
       const deletedImages = await tx.categoryImages.deleteMany({});
-      
-      // 2. Delete all Categories
       const deletedCategories = await tx.category.deleteMany({});
-      
+
       return {
         deletedCount: deletedCategories.count,
         deletedImages: deletedImages.count,
       };
     });
   }
-
 }

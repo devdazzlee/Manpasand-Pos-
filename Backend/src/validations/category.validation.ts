@@ -10,16 +10,22 @@ const categoryBaseSchema = {
   branch_id: z.string().optional(),
 };
 
+const categoryImageFields = {
+  image_url: z.string().url().optional(),
+  remove_image: z.boolean().optional(),
+};
+
 export const createCategorySchema = z.object({
   body: z.object({
     ...categoryBaseSchema,
-    // code is auto-generated so not in create schema
+    ...categoryImageFields,
   }),
 });
 
 export const updateCategorySchema = z.object({
   body: z.object({
     ...categoryBaseSchema,
+    ...categoryImageFields,
     name: categoryBaseSchema.name.optional(),
     slug: categoryBaseSchema.slug.optional(),
   }),

@@ -25,7 +25,7 @@ export function DataProvider({ children }: DataProviderProps) {
         // Initialize all data in parallel
         await Promise.all([
           fetchProducts(),
-          fetchCategories(),
+          fetchCategories(true),
           fetchCustomers()
         ])
         console.log('✅ All data initialized successfully')

@@ -11,15 +11,20 @@ const categoryBaseSchema = {
     display_on_pos: zod_1.z.boolean().optional().default(true),
     branch_id: zod_1.z.string().optional(),
 };
+const categoryImageFields = {
+    image_url: zod_1.z.string().url().optional(),
+    remove_image: zod_1.z.boolean().optional(),
+};
 exports.createCategorySchema = zod_1.z.object({
     body: zod_1.z.object({
         ...categoryBaseSchema,
-        // code is auto-generated so not in create schema
+        ...categoryImageFields,
     }),
 });
 exports.updateCategorySchema = zod_1.z.object({
     body: zod_1.z.object({
         ...categoryBaseSchema,
+        ...categoryImageFields,
         name: categoryBaseSchema.name.optional(),
         slug: categoryBaseSchema.slug.optional(),
     }),

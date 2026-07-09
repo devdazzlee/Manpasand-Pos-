@@ -1,10 +1,9 @@
 "use client"
 
-import { useState, useEffect, useRef, useMemo } from "react"
+import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { PageLoader } from "@/components/ui/page-loader"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
@@ -21,6 +20,8 @@ import {
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ChevronDown } from "lucide-react"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
@@ -230,6 +231,120 @@ interface ProductFormData {
   images?: (string | File)[]
 }
 
+function FormFieldSkeleton() {
+  return (
+    <div className="space-y-2">
+      <Skeleton className="h-4 w-24" />
+      <Skeleton className="h-10 w-full" />
+    </div>
+  )
+}
+
+function ProductFormSkeleton({ message = "Preparing form..." }: { message?: string }) {
+  return (
+    <div className="space-y-6 py-1" aria-busy="true" aria-live="polite">
+      <div className="flex items-center gap-2.5 rounded-lg border bg-muted/40 px-4 py-3">
+        <Loader2 className="h-4 w-4 animate-spin text-muted-foreground shrink-0" />
+        <p className="text-sm text-muted-foreground">{message}</p>
+      </div>
+
+      <div className="space-y-4">
+        <Skeleton className="h-6 w-44" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormFieldSkeleton />
+          <FormFieldSkeleton />
+          <FormFieldSkeleton />
+          <FormFieldSkeleton />
+        </div>
+        <div className="space-y-2">
+          <Skeleton className="h-4 w-28" />
+          <Skeleton className="h-20 w-full" />
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <Skeleton className="h-6 w-44" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormFieldSkeleton />
+          <FormFieldSkeleton />
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <Skeleton className="h-6 w-48" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormFieldSkeleton />
+          <FormFieldSkeleton />
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <Skeleton className="h-6 w-52" />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <FormFieldSkeleton />
+          <FormFieldSkeleton />
+          <FormFieldSkeleton />
+          <FormFieldSkeleton />
+        </div>
+      </div>
+
+      <div className="flex justify-end pt-2">
+        <Skeleton className="h-10 w-36" />
+      </div>
+    </div>
+  )
+}
+
+function FormDropdown({
+  label,
+  htmlFor,
+  required = false,
+  value,
+  onValueChange,
+  placeholder,
+  options,
+  allowNone = false,
+  noneLabel = "None",
+}: {
+  label: string
+  htmlFor: string
+  required?: boolean
+  value: string
+  onValueChange: (value: string) => void
+  placeholder: string
+  options: DropdownOption[]
+  allowNone?: boolean
+  noneLabel?: string
+}) {
+  return (
+    <div>
+      <Label htmlFor={htmlFor}>
+        {label}
+        {required ? " *" : ""}
+      </Label>
+      <Select value={value || undefined} onValueChange={onValueChange}>
+        <SelectTrigger id={htmlFor}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {allowNone && <SelectItem value="none">{noneLabel}</SelectItem>}
+          {!allowNone && options.length === 0 ? (
+            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+              No options available
+            </div>
+          ) : (
+            options.map((option) => (
+              <SelectItem key={option.id} value={option.id}>
+                {option.name}
+              </SelectItem>
+            ))
+          )}
+        </SelectContent>
+      </Select>
+    </div>
+  )
+}
+
 const ProductForm = ({
   onSubmit,
   loading,
@@ -344,55 +459,33 @@ const ProductForm = ({
               placeholder="Enter product name"
             />
           </div>
-          <div>
-            <Label htmlFor="unit_id">Unit *</Label>
-            <Select value={formData.unit_id} onValueChange={(value) => updateFormData("unit_id", value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select unit" />
-              </SelectTrigger>
-              <SelectContent>
-                {units.map((unit) => (
-                  <SelectItem key={unit.id} value={unit.id}>
-                    {unit.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="category_id">Category *</Label>
-            <Select value={formData.category_id} onValueChange={(value) => updateFormData("category_id", value)}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select category" />
-              </SelectTrigger>
-              <SelectContent>
-                {categories.map((category) => (
-                  <SelectItem key={category.id} value={category.id}>
-                    {category.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="subcategory_id">Subcategory</Label>
-            <Select
-              value={formData.subcategory_id || ""}
-              onValueChange={(value) => updateFormData("subcategory_id", value === "none" ? "" : value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select subcategory" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {subcategories.map((subcategory) => (
-                  <SelectItem key={subcategory.id} value={subcategory.id}>
-                    {subcategory.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <FormDropdown
+            label="Unit"
+            htmlFor="unit_id"
+            required
+            value={formData.unit_id}
+            onValueChange={(value) => updateFormData("unit_id", value)}
+            placeholder="Select unit"
+            options={units}
+          />
+          <FormDropdown
+            label="Category"
+            htmlFor="category_id"
+            required
+            value={formData.category_id}
+            onValueChange={(value) => updateFormData("category_id", value)}
+            placeholder="Select category"
+            options={categories}
+          />
+          <FormDropdown
+            label="Subcategory"
+            htmlFor="subcategory_id"
+            value={formData.subcategory_id || "none"}
+            onValueChange={(value) => updateFormData("subcategory_id", value === "none" ? "" : value)}
+            placeholder="Select subcategory"
+            options={subcategories}
+            allowNone
+          />
         </div>
         <div>
           <Label htmlFor="description">Description</Label>
@@ -674,82 +767,42 @@ const ProductForm = ({
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Additional Information</h3>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="supplier_id">Supplier</Label>
-            <Select
-              value={formData.supplier_id || ""}
-              onValueChange={(value) => updateFormData("supplier_id", value === "none" ? "" : value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select supplier" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {suppliers.map((supplier) => (
-                  <SelectItem key={supplier.id} value={supplier.id}>
-                    {supplier.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="brand_id">Brand</Label>
-            <Select
-              value={formData.brand_id || ""}
-              onValueChange={(value) => updateFormData("brand_id", value === "none" ? "" : value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select brand" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {brands.map((brand) => (
-                  <SelectItem key={brand.id} value={brand.id}>
-                    {brand.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="color_id">Color</Label>
-            <Select
-              value={formData.color_id || ""}
-              onValueChange={(value) => updateFormData("color_id", value === "none" ? "" : value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select color" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {colors.map((color) => (
-                  <SelectItem key={color.id} value={color.id}>
-                    {color.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div>
-            <Label htmlFor="size_id">Size</Label>
-            <Select
-              value={formData.size_id || ""}
-              onValueChange={(value) => updateFormData("size_id", value === "none" ? "" : value)}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select size" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">None</SelectItem>
-                {sizes.map((size) => (
-                  <SelectItem key={size.id} value={size.id}>
-                    {size.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          <FormDropdown
+            label="Supplier"
+            htmlFor="supplier_id"
+            value={formData.supplier_id || "none"}
+            onValueChange={(value) => updateFormData("supplier_id", value === "none" ? "" : value)}
+            placeholder="Select supplier"
+            options={suppliers}
+            allowNone
+          />
+          <FormDropdown
+            label="Brand"
+            htmlFor="brand_id"
+            value={formData.brand_id || "none"}
+            onValueChange={(value) => updateFormData("brand_id", value === "none" ? "" : value)}
+            placeholder="Select brand"
+            options={brands}
+            allowNone
+          />
+          <FormDropdown
+            label="Color"
+            htmlFor="color_id"
+            value={formData.color_id || "none"}
+            onValueChange={(value) => updateFormData("color_id", value === "none" ? "" : value)}
+            placeholder="Select color"
+            options={colors}
+            allowNone
+          />
+          <FormDropdown
+            label="Size"
+            htmlFor="size_id"
+            value={formData.size_id || "none"}
+            onValueChange={(value) => updateFormData("size_id", value === "none" ? "" : value)}
+            placeholder="Select size"
+            options={sizes}
+            allowNone
+          />
         </div>
       </div>
 
@@ -831,7 +884,11 @@ const ProductForm = ({
           disabled={
             // SKU is no longer a UI field — the backend auto-generates it on
             // create. We only require the fields the user actually fills in.
-            loading || !formData.name || !formData.unit_id || !formData.category_id || hasErrors
+            loading ||
+            !formData.name ||
+            !formData.unit_id ||
+            !formData.category_id ||
+            hasErrors
           }
         >
           {loading ? (
@@ -855,8 +912,10 @@ export default function Inventory() {
   const {
     products: globalProducts,
     categories: globalCategories,
-    isAnyLoading: globalLoading,
+    categoriesLoading,
+    productsLoading,
     fetchProducts,
+    fetchCategories,
     refreshProducts,
     upsertProductFromApi,
     removeProductFromStore,
@@ -867,7 +926,6 @@ export default function Inventory() {
   const { branches: posBranches, selectedBranchId } = usePosBranch()
 
   // Product cards are derived from the global store — single source of truth.
-  const [isInitialLoading, setIsInitialLoading] = useState(true)
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(10)
   const [gotoPage, setGotoPage] = useState<string>("")
@@ -886,7 +944,6 @@ export default function Inventory() {
   // State for dropdown options (these will be loaded from global store)
   const [units, setUnits] = useState<DropdownOption[]>([])
   const [taxes, setTaxes] = useState<DropdownOption[]>([])
-  const [categories, setCategories] = useState<DropdownOption[]>([])
   const [subcategories, setSubcategories] = useState<DropdownOption[]>([])
   const [suppliers, setSuppliers] = useState<DropdownOption[]>([])
   const [brands, setBrands] = useState<DropdownOption[]>([])
@@ -942,9 +999,19 @@ export default function Inventory() {
   })
   const [formLoading, setFormLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<{ sku?: string; pct_or_hs_code?: string }>({})
+  const [dropdownsLoading, setDropdownsLoading] = useState(false)
+  const [dropdownsLoadError, setDropdownsLoadError] = useState<string | null>(null)
+  const dropdownLoadIdRef = useRef(0)
   const [imagePreviews, setImagePreviews] = useState<string[]>([])     // URLs for display (all are Cloudinary URLs)
   const [existingImageUrls, setExistingImageUrls] = useState<string[]>([]) // URLs to send in PATCH/POST
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  const categoryOptions = useMemo(
+    () => globalCategories.filter((category) => category.id !== "all"),
+    [globalCategories],
+  )
+
+  const isFormDropdownsLoading = dropdownsLoading || categoriesLoading
 
   // API Service Functions
   const apiService = {
@@ -962,11 +1029,6 @@ export default function Inventory() {
 
     async getTaxes() {
       const response = await apiClient.get("/taxes", { params: { limit: 1000 } })
-      return response.data
-    },
-
-    async getCategories() {
-      const response = await apiClient.get("/categories", { params: { limit: 1000 } })
       return response.data
     },
 
@@ -1072,16 +1134,61 @@ export default function Inventory() {
     },
   }
 
-  // Load dropdown data on component mount
+  const loadDropdownData = useCallback(async () => {
+    const loadId = ++dropdownLoadIdRef.current
+    setDropdownsLoading(true)
+    setDropdownsLoadError(null)
+
+    try {
+      const [
+        unitsData,
+        taxesData,
+        subcategoriesData,
+        suppliersData,
+        brandsData,
+        colorsData,
+        sizesData,
+      ] = await Promise.all([
+        apiClient.get("/units", { params: { limit: 1000 } }),
+        apiClient.get("/taxes", { params: { limit: 1000 } }),
+        apiClient.get("/subcategories", { params: { limit: 1000 } }),
+        apiClient.get("/suppliers", { params: { fetch_all: true } }),
+        apiClient.get("/brands", { params: { limit: 1000 } }),
+        apiClient.get("/colors", { params: { limit: 1000 } }),
+        apiClient.get("/sizes", { params: { limit: 1000 } }),
+        fetchCategories(true),
+      ])
+
+      if (loadId !== dropdownLoadIdRef.current) return
+
+      setUnits(unitsData.data?.data || unitsData.data || [])
+      setTaxes(taxesData.data?.data || taxesData.data || [])
+      setSubcategories(subcategoriesData.data?.data || subcategoriesData.data || [])
+      setSuppliers(suppliersData.data?.data || suppliersData.data || [])
+      setBrands(brandsData.data?.data || brandsData.data || [])
+      setColors(colorsData.data?.data || colorsData.data || [])
+      setSizes(sizesData.data?.data || sizesData.data || [])
+    } catch (error) {
+      if (loadId !== dropdownLoadIdRef.current) return
+
+      console.log("Failed to load dropdown data:", error)
+      setDropdownsLoadError("Failed to load form options. Please try again.")
+      toast({
+        title: "Error",
+        description: "Failed to load dropdown data",
+        variant: "destructive",
+      })
+    } finally {
+      if (loadId === dropdownLoadIdRef.current) {
+        setDropdownsLoading(false)
+      }
+    }
+  }, [fetchCategories, toast])
+
+  // Preload dropdown data on mount so the first modal open is faster.
   useEffect(() => {
     loadDropdownData()
-  }, [])
-
-  useEffect(() => {
-    if (!globalLoading) {
-      setIsInitialLoading(false)
-    }
-  }, [globalLoading])
+  }, [loadDropdownData])
 
   useEffect(() => {
     fetchProducts({ force: true }).catch(() => undefined)
@@ -1152,15 +1259,23 @@ export default function Inventory() {
     return filtered
   }, [globalProducts, searchTerm, selectedCategory, selectedSubcategory, sortBy])
 
-  const totalProducts = filteredProductsAll.length
-  const activeProductCount = useMemo(
-    () => globalProducts.filter((product) => product.is_active).length,
+  const hasActiveFilters =
+    searchTerm.trim() !== "" ||
+    selectedCategory !== "__all__" ||
+    selectedSubcategory !== "__all__"
+
+  const isCatalogLoading = productsLoading && globalProducts.length === 0
+
+  const catalogStats = useMemo(
+    () => ({
+      total: globalProducts.length,
+      active: globalProducts.filter((product) => product.is_active).length,
+      featured: globalProducts.filter((product) => product.is_featured).length,
+    }),
     [globalProducts],
   )
-  const featuredProductCount = useMemo(
-    () => globalProducts.filter((product) => product.is_featured).length,
-    [globalProducts],
-  )
+
+  const filteredProductCount = filteredProductsAll.length
 
   const products = useMemo(() => {
     let paginated = filteredProductsAll
@@ -1192,46 +1307,6 @@ export default function Inventory() {
       ProductImage: imageUrls.map((url) => ({ image: url })),
       updated_at: patchPayload.updated_at || new Date().toISOString(),
     })
-  }
-
-  const loadDropdownData = async () => {
-    try {
-      // Use global categories data
-      setCategories(globalCategories)
-
-      // Load other dropdown data that's not in global store
-      const [
-        unitsData,
-        taxesData,
-        subcategoriesData,
-        suppliersData,
-        brandsData,
-        colorsData,
-        sizesData,
-      ] = await Promise.all([
-        apiService.getUnits(),
-        apiService.getTaxes(),
-        apiService.getSubcategories(),
-        apiService.getSuppliers(),
-        apiService.getBrands(),
-        apiService.getColors(),
-        apiService.getSizes(),
-      ])
-
-      setUnits(unitsData.data || unitsData)
-      setTaxes(taxesData.data || taxesData)
-      setSubcategories(subcategoriesData.data || subcategoriesData)
-      setSuppliers(suppliersData.data || suppliersData)
-      setBrands(brandsData.data || brandsData)
-      setColors(colorsData.data || colorsData)
-      setSizes(sizesData.data || sizesData)
-    } catch (error) {
-      toast({
-        title: "Error",
-        description: "Failed to load dropdown data",
-        variant: "destructive",
-      })
-    }
   }
 
   const handleCreateProduct = async () => {
@@ -1453,6 +1528,7 @@ export default function Inventory() {
     setIsEditDialogOpen(true)
     setIsLoadingEditProduct(true)
     setStockToAdd(0)
+    loadDropdownData()
 
     const toNum = (v: any): number => {
       if (v === null || v === undefined || v === "") return 0
@@ -1601,11 +1677,26 @@ export default function Inventory() {
     setImagePreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const totalPages = Math.ceil(totalProducts / pageSize)
+  const totalPages = Math.ceil(filteredProductCount / pageSize)
 
-  if (isInitialLoading && globalLoading) {
-    return <PageLoader message="Loading inventory..." />
-  }
+  const ProductGridSkeleton = () => (
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+      {Array.from({ length: 8 }).map((_, index) => (
+        <div
+          key={index}
+          className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
+        >
+          <div className="aspect-[4/3] rounded-xl bg-gray-100" />
+          <div className="mt-4 h-4 rounded bg-gray-100" />
+          <div className="mt-2 h-3 w-2/3 rounded bg-gray-100" />
+          <div className="mt-4 grid grid-cols-2 gap-2">
+            <div className="h-10 rounded-lg bg-gray-100" />
+            <div className="h-10 rounded-lg bg-gray-100" />
+          </div>
+        </div>
+      ))}
+    </div>
+  )
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -1614,8 +1705,11 @@ export default function Inventory() {
           <div>
             <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Product Management</h1>
             <p className="text-sm md:text-base text-gray-600">Manage your products and inventory</p>
-            {globalLoading && (
-              <p className="text-xs md:text-sm text-blue-600 mt-1">Loading data from cache...</p>
+            {productsLoading && (
+              <p className="text-xs md:text-sm text-muted-foreground mt-1 flex items-center gap-1.5">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                Syncing product catalog...
+              </p>
             )}
           </div>
           <Dialog
@@ -1626,6 +1720,7 @@ export default function Inventory() {
                 // behind from a previous Edit can't leak across dialogs.
                 resetForm()
                 setEditingProduct(null)
+                loadDropdownData()
               }
               setIsAddDialogOpen(open)
             }}
@@ -1645,66 +1740,94 @@ export default function Inventory() {
               <DialogHeader>
                 <DialogTitle>Add New Product</DialogTitle>
               </DialogHeader>
-              <ProductForm
-                onSubmit={handleCreateProduct}
-                loading={formLoading}
-                submitText="Create Product"
-                formData={formData}
-                formErrors={formErrors}
-                updateFormData={updateFormData}
-                units={units}
-                categories={categories}
-                subcategories={subcategories}
-                taxes={taxes}
-                suppliers={suppliers}
-                brands={brands}
-                colors={colors}
-                sizes={sizes}
-                imagePreviews={imagePreviews}
-                handleRemoveImage={handleRemoveImage}
-                fileInputRef={fileInputRef}
-                handleImageSelect={handleImageSelect}
-                stockToAdd={stockToAdd}
-                setStockToAdd={setStockToAdd}
-                stockBranchIds={stockBranchIds}
-                setStockBranchIds={setStockBranchIds}
-                branchOptions={posBranches}
-                stockLabel="Initial Stock"
-                currentBranchStocks={currentBranchStocks}
-              />
+              {isFormDropdownsLoading ? (
+                <ProductFormSkeleton />
+              ) : dropdownsLoadError ? (
+                <div className="py-8">
+                  <Alert variant="destructive">
+                    <AlertTriangle className="h-4 w-4" />
+                    <AlertTitle>Could not load form options</AlertTitle>
+                    <AlertDescription className="mt-3 flex flex-col items-start gap-3">
+                      <span>{dropdownsLoadError}</span>
+                      <Button type="button" variant="outline" size="sm" onClick={loadDropdownData}>
+                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                        Try again
+                      </Button>
+                    </AlertDescription>
+                  </Alert>
+                </div>
+              ) : (
+                <ProductForm
+                  onSubmit={handleCreateProduct}
+                  loading={formLoading}
+                  submitText="Create Product"
+                  formData={formData}
+                  formErrors={formErrors}
+                  updateFormData={updateFormData}
+                  units={units}
+                  categories={categoryOptions}
+                  subcategories={subcategories}
+                  taxes={taxes}
+                  suppliers={suppliers}
+                  brands={brands}
+                  colors={colors}
+                  sizes={sizes}
+                  imagePreviews={imagePreviews}
+                  handleRemoveImage={handleRemoveImage}
+                  fileInputRef={fileInputRef}
+                  handleImageSelect={handleImageSelect}
+                  stockToAdd={stockToAdd}
+                  setStockToAdd={setStockToAdd}
+                  stockBranchIds={stockBranchIds}
+                  setStockBranchIds={setStockBranchIds}
+                  branchOptions={posBranches}
+                  stockLabel="Initial Stock"
+                  currentBranchStocks={currentBranchStocks}
+                />
+              )}
             </DialogContent>
           </Dialog>
         </div>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Total Products</CardTitle>
-              <Package className="h-4 w-4 text-muted-foreground" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold">{totalProducts}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Active Products</CardTitle>
-              <Package className="h-4 w-4 text-green-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-green-600">{activeProductCount}</div>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-              <CardTitle className="text-sm font-medium">Featured Products</CardTitle>
-              <AlertTriangle className="h-4 w-4 text-blue-600" />
-            </CardHeader>
-            <CardContent>
-              <div className="text-2xl font-bold text-blue-600">{featuredProductCount}</div>
-            </CardContent>
-          </Card>
+          {isCatalogLoading ? (
+            <>
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+              <StatCardSkeleton />
+            </>
+          ) : (
+            <>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Total Products</CardTitle>
+                  <Package className="h-4 w-4 text-muted-foreground" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold">{catalogStats.total}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Active Products</CardTitle>
+                  <Package className="h-4 w-4 text-green-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-green-600">{catalogStats.active}</div>
+                </CardContent>
+              </Card>
+              <Card>
+                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                  <CardTitle className="text-sm font-medium">Featured Products</CardTitle>
+                  <AlertTriangle className="h-4 w-4 text-blue-600" />
+                </CardHeader>
+                <CardContent>
+                  <div className="text-2xl font-bold text-blue-600">{catalogStats.featured}</div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
 
         {/* Filters */}
@@ -1724,7 +1847,7 @@ export default function Inventory() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="__all__">All Categories</SelectItem>
-              {categories.map((category) => (
+              {categoryOptions.map((category) => (
                 <SelectItem key={category.id} value={category.id}>
                   {category.name}
                 </SelectItem>
@@ -1766,39 +1889,57 @@ export default function Inventory() {
         <Card className="border-gray-200 shadow-sm">
           <CardHeader className="pb-4">
             <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <CardTitle>Products ({totalProducts})</CardTitle>
+              <CardTitle>
+                {isCatalogLoading
+                  ? "Products"
+                  : `Products (${filteredProductCount})`}
+              </CardTitle>
               <p className="text-sm text-gray-500">
-                Browse, edit, and manage your catalog
+                {isCatalogLoading
+                  ? "Loading catalog..."
+                  : hasActiveFilters
+                    ? `Showing ${filteredProductCount} of ${catalogStats.total}`
+                    : "Browse, edit, and manage your catalog"}
               </p>
             </div>
           </CardHeader>
           <CardContent>
-            {globalLoading && isInitialLoading ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
-                {Array.from({ length: 8 }).map((_, index) => (
-                  <div
-                    key={index}
-                    className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
-                  >
-                    <div className="aspect-[4/3] rounded-xl bg-gray-100" />
-                    <div className="mt-4 h-4 rounded bg-gray-100" />
-                    <div className="mt-2 h-3 w-2/3 rounded bg-gray-100" />
-                    <div className="mt-4 grid grid-cols-2 gap-2">
-                      <div className="h-10 rounded-lg bg-gray-100" />
-                      <div className="h-10 rounded-lg bg-gray-100" />
-                    </div>
-                  </div>
-                ))}
-              </div>
-            ) : products.length === 0 ? (
+            {isCatalogLoading ? (
+              <ProductGridSkeleton />
+            ) : filteredProductCount === 0 ? (
               <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center">
                 <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-100">
                   <Package className="h-7 w-7 text-gray-400" />
                 </div>
-                <h3 className="mt-4 text-lg font-semibold text-gray-900">No products found</h3>
-                <p className="mt-1 max-w-sm text-sm text-gray-500">
-                  Try adjusting your search or category filter, or add a new product to get started.
-                </p>
+                {hasActiveFilters ? (
+                  <>
+                    <h3 className="mt-4 text-lg font-semibold text-gray-900">No matching products</h3>
+                    <p className="mt-1 max-w-sm text-sm text-gray-500">
+                      Nothing matches your current search or filters. Try different keywords or clear the filters.
+                    </p>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-4"
+                      onClick={() => {
+                        setSearchTerm("")
+                        setSelectedCategory("__all__")
+                        setSelectedSubcategory("__all__")
+                        setCurrentPage(1)
+                      }}
+                    >
+                      Clear filters
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <h3 className="mt-4 text-lg font-semibold text-gray-900">No products yet</h3>
+                    <p className="mt-1 max-w-sm text-sm text-gray-500">
+                      Your catalog is empty. Add your first product to get started.
+                    </p>
+                  </>
+                )}
               </div>
             ) : (
               <>
@@ -1952,15 +2093,15 @@ export default function Inventory() {
                 </div>
 
                 {/* Pagination */}
-                {totalProducts > 0 && (
+                {filteredProductCount > 0 && (
                   <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 py-3 border-t mt-2">
                     <p className="text-sm text-black">
                       {pageSize === 0 ? (
-                        <>Showing all {totalProducts} products</>
+                        <>Showing all {filteredProductCount} products</>
                       ) : (
                         <>
                           Showing {(currentPage - 1) * pageSize + 1}–
-                          {Math.min(currentPage * pageSize, totalProducts)} of {totalProducts}
+                          {Math.min(currentPage * pageSize, filteredProductCount)} of {filteredProductCount}
                         </>
                       )}
                     </p>
@@ -1971,7 +2112,7 @@ export default function Inventory() {
                           size="sm"
                           className="text-sm text-black"
                           onClick={() => setCurrentPage(1)}
-                          disabled={currentPage === 1 || globalLoading}
+                          disabled={currentPage === 1 || productsLoading}
                         >
                           First
                         </Button>
@@ -1980,7 +2121,7 @@ export default function Inventory() {
                           size="sm"
                           className="text-sm text-black"
                           onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                          disabled={currentPage === 1 || globalLoading}
+                          disabled={currentPage === 1 || productsLoading}
                         >
                           Previous
                         </Button>
@@ -1992,7 +2133,7 @@ export default function Inventory() {
                           size="sm"
                           className="text-sm text-black"
                           onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                          disabled={currentPage >= totalPages || globalLoading}
+                          disabled={currentPage >= totalPages || productsLoading}
                         >
                           Next
                         </Button>
@@ -2001,7 +2142,7 @@ export default function Inventory() {
                           size="sm"
                           className="text-sm text-black"
                           onClick={() => setCurrentPage(totalPages)}
-                          disabled={currentPage >= totalPages || globalLoading}
+                          disabled={currentPage >= totalPages || productsLoading}
                         >
                           Last
                         </Button>
@@ -2031,29 +2172,27 @@ export default function Inventory() {
             <DialogHeader>
               <DialogTitle>Edit Product</DialogTitle>
             </DialogHeader>
-            {isLoadingEditProduct ? (
-              // Skeleton roughly mirrors the form layout so the modal doesn't
-              // jump when the data arrives. Anything more elaborate is a CLS
-              // hazard; users care that they know it's loading, not what
-              // shape it'll be.
-              <div className="space-y-6 py-2">
-                <div className="flex items-center gap-2 text-sm text-gray-500">
-                  <Loader2 className="h-4 w-4 animate-spin" />
-                  Loading product details...
-                </div>
-                {[1, 2, 3].map((section) => (
-                  <div key={section} className="space-y-3">
-                    <div className="h-5 w-40 bg-gray-200 animate-pulse rounded" />
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      {[1, 2, 3, 4].map((row) => (
-                        <div key={row} className="space-y-1.5">
-                          <div className="h-3 w-24 bg-gray-200 animate-pulse rounded" />
-                          <div className="h-10 w-full bg-gray-100 animate-pulse rounded-md" />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+            {isLoadingEditProduct || isFormDropdownsLoading ? (
+              <ProductFormSkeleton
+                message={
+                  isLoadingEditProduct
+                    ? "Loading product details..."
+                    : "Preparing form..."
+                }
+              />
+            ) : dropdownsLoadError ? (
+              <div className="py-8">
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Could not load form options</AlertTitle>
+                  <AlertDescription className="mt-3 flex flex-col items-start gap-3">
+                    <span>{dropdownsLoadError}</span>
+                    <Button type="button" variant="outline" size="sm" onClick={loadDropdownData}>
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                      Try again
+                    </Button>
+                  </AlertDescription>
+                </Alert>
               </div>
             ) : (
               <ProductForm
@@ -2064,7 +2203,7 @@ export default function Inventory() {
                 formErrors={formErrors}
                 updateFormData={updateFormData}
                 units={units}
-                categories={categories}
+                categories={categoryOptions}
                 subcategories={subcategories}
                 taxes={taxes}
                 suppliers={suppliers}

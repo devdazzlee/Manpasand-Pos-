@@ -25,6 +25,8 @@ export function usePosData() {
   const fetchSuppliersAction = useStore(state => state.fetchSuppliers)
   const upsertProductFromApiAction = useStore(state => state.upsertProductFromApi)
   const removeProductFromStoreAction = useStore(state => state.removeProductFromStore)
+  const upsertCategoryInStoreAction = useStore(state => state.upsertCategoryInStore)
+  const removeCategoryFromStoreAction = useStore(state => state.removeCategoryFromStore)
   const clearStoreAction = useStore(state => state.clearStore)
 
   const isAnyLoading = productsLoading || categoriesLoading || customersLoading || branchesLoading || suppliersLoading
@@ -80,6 +82,8 @@ export function usePosData() {
     fetchProducts,
     upsertProductFromApi: upsertProductFromApiAction,
     removeProductFromStore: removeProductFromStoreAction,
+    upsertCategoryInStore: upsertCategoryInStoreAction,
+    removeCategoryFromStore: removeCategoryFromStoreAction,
     fetchCategories: fetchCategoriesAction,
     fetchCustomers: fetchCustomersAction,
     fetchBranches: fetchBranchesAction,
@@ -90,6 +94,7 @@ export function usePosData() {
     productsLoading, categoriesLoading, customersLoading, branchesLoading, suppliersLoading,
     isAnyLoading, refreshAllData, refreshProducts, fetchProducts,
     upsertProductFromApiAction, removeProductFromStoreAction,
+    upsertCategoryInStoreAction, removeCategoryFromStoreAction,
     fetchCategoriesAction, fetchCustomersAction, fetchBranchesAction, fetchSuppliersAction, clearStoreAction
   ])
 }
