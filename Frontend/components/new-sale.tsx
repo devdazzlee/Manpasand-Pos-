@@ -401,6 +401,7 @@ export function NewSale() {
   const [highlightedProductIndex, setHighlightedProductIndex] = useState(0);
   const lastAddedProductId = useRef<string | null>(null);
   const [activeCartLineId, setActiveCartLineId] = useState<string | null>(null);
+  const [mobileCartOpen, setMobileCartOpen] = useState(false);
   // Refs for cart items and scrollable container
   const cartItemRefs = useRef<Record<string, HTMLElement | null>>({});
   const cartScrollContainerRef = useRef<HTMLDivElement | null>(null);
@@ -498,6 +499,12 @@ export function NewSale() {
   useEffect(() => {
     activeCartLineIdRef.current = activeCartLineId;
   }, [activeCartLineId]);
+
+  useEffect(() => {
+    if (cart.length === 0) {
+      setMobileCartOpen(false);
+    }
+  }, [cart.length]);
 
   const setCartSync = (updater: (prev: CartItem[]) => CartItem[]) => {
     setCart((prev) => {
@@ -816,49 +823,24 @@ export function NewSale() {
       // If no custom price, ensure minimum quantity of 1
       finalQuantity = Math.max(1, quantity);
     }
-    
-    const isBarcodeLine = customPrice !== undefined && originalProductPrice > 0;
 
-    const prevCart = cartRef.current;
-    let affectedLineId: string;
-    let nextCart: CartItem[];
-
-    const lastLineIndex = isBarcodeLine
-      ? -1
-      : prevCart.findLastIndex(
-          (line) => line.productId === product.id || line.id === product.id,
-        );
-
-    if (lastLineIndex >= 0) {
-      const existing = prevCart[lastLineIndex];
-      const unitName = existing.unitName || existing.unit;
-      const bumpBy = isPieceUnit(unitName) ? 1 : getQuantityIncrement(unitName);
-      const nextQty = isPieceUnit(unitName)
-        ? Math.round(existing.quantity + bumpBy)
-        : Number((existing.quantity + bumpBy).toFixed(3));
-      const minQ = isPieceUnit(unitName) ? 1 : 0.01;
-      nextCart = [...prevCart];
-      nextCart[lastLineIndex] = { ...existing, quantity: Math.max(minQ, nextQty) };
-      affectedLineId = existing.id;
-    } else {
-      affectedLineId = `${product.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
-      nextCart = [
-        ...prevCart,
-        {
-          id: affectedLineId,
-          productId: product.id,
-          name: product.name,
-          price: displayPrice,
-          originalPrice: originalProductPrice,
-          actualUnitPrice: actualUnitPrice,
-          quantity: finalQuantity,
-          category: product.category,
-          unitId: product.unitId,
-          unitName: product.unitName,
-          unit: product.unitName,
-        },
-      ];
-    }
+    const affectedLineId = `${product.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const nextCart: CartItem[] = [
+      ...cartRef.current,
+      {
+        id: affectedLineId,
+        productId: product.id,
+        name: product.name,
+        price: displayPrice,
+        originalPrice: originalProductPrice,
+        actualUnitPrice: actualUnitPrice,
+        quantity: finalQuantity,
+        category: product.category,
+        unitId: product.unitId,
+        unitName: product.unitName,
+        unit: product.unitName,
+      },
+    ];
 
     setCartSync(() => nextCart);
 
@@ -914,6 +896,12 @@ export function NewSale() {
   const formatQuantityValue = (value: number) => {
     if (Number.isInteger(value)) return String(value);
     return Number(value.toFixed(3)).toString();
+  };
+
+  const normalizeStoredQuantity = (value: number) => {
+    const parsed = Number(value);
+    if (Number.isNaN(parsed)) return 0.01;
+    return Math.max(0.01, Number(parsed.toFixed(3)));
   };
 
   const isWeightUnit = (unitName?: string): boolean => {
@@ -995,7 +983,6 @@ export function NewSale() {
     unitName?: string,
     mode: "preset" | "custom" = "custom",
   ): number => {
-    const minQuantity = isPieceUnit(unitName) ? 1 : 0.01;
     let targetQuantity = currentQuantity;
 
     if (mode === "preset" && isWeightUnit(unitName)) {
@@ -1014,10 +1001,8 @@ export function NewSale() {
       targetQuantity = currentQuantity + (direction > 0 ? increment : -increment);
     }
 
-    const normalizedQuantity = isPieceUnit(unitName)
-      ? Math.round(targetQuantity)
-      : Number(targetQuantity.toFixed(3));
-    return Math.max(minQuantity, normalizedQuantity);
+    const normalizedQuantity = normalizeStoredQuantity(targetQuantity);
+    return normalizedQuantity;
   };
 
   const updateQuantity = (id: string, change: number) => {
@@ -1049,7 +1034,6 @@ export function NewSale() {
     const unitName = item?.unitName || item?.unit || product?.unitName;
     const currentQuantity = Number(item?.quantity || 0);
     const mode = quantityModes[id] ?? "preset";
-    const minQuantity = isPieceUnit(unitName) ? 1 : 0.01;
     let targetQuantity = currentQuantity;
 
     // Keep weight preset flow simple for sellers:
@@ -1076,23 +1060,15 @@ export function NewSale() {
     setCart(
       cart.map((item) => {
         if (item.id === id) {
-          const newQuantity = targetQuantity;
-          const normalizedQuantity = isPieceUnit(unitName)
-            ? Math.round(newQuantity)
-            : newQuantity;
-          return { ...item, quantity: Math.max(minQuantity, normalizedQuantity) };
+          return { ...item, quantity: normalizeStoredQuantity(targetQuantity) };
         }
         return item;
       })
     );
   };
 
-  const updateQuantityManual = (id: string, newQuantity: number, unitName?: string) => {
-    const minQuantity = isPieceUnit(unitName) ? 1 : 0.01;
-    const normalizedQuantity = isPieceUnit(unitName)
-      ? Math.round(Number(newQuantity))
-      : Number(newQuantity);
-    const validQuantity = Math.max(minQuantity, normalizedQuantity);
+  const updateQuantityManual = (id: string, newQuantity: number) => {
+    const validQuantity = normalizeStoredQuantity(newQuantity);
     setCartSync((prev) =>
       prev.map((line) => (line.id === id ? { ...line, quantity: validQuantity } : line)),
     );
@@ -1144,10 +1120,13 @@ export function NewSale() {
     if (pending === undefined || pending.trim() === "") return;
     const line = cartRef.current.find((l) => l.id === lineId);
     if (!line) return;
-    const unitName = line.unitName || line.unit;
+    const product = line.productId
+      ? products.find((p) => p.id === line.productId)
+      : undefined;
+    const unitName = line.unitName || line.unit || product?.unitName;
     const parsed = parseCustomQuantityInput(pending.trim(), unitName);
     if (parsed === null || parsed <= 0) return;
-    updateQuantityManual(lineId, parsed, unitName);
+    updateQuantityManual(lineId, parsed);
   };
 
   const switchActiveCartLine = (newId: string | null) => {
@@ -2162,13 +2141,27 @@ export function NewSale() {
   }, [cart, total, paymentDialogOpen, paymentMethodPending, startPayment, isScanning]);
 
   return (
-    <div className="flex flex-col lg:flex-row h-screen">
+    <div className="relative flex min-h-full flex-col lg:h-full lg:min-h-0 lg:flex-row">
+      {mobileCartOpen && cart.length > 0 && (
+        <button
+          type="button"
+          aria-label="Close cart"
+          className="fixed inset-0 z-20 bg-black/40 lg:hidden"
+          onClick={() => setMobileCartOpen(false)}
+        />
+      )}
+
       {/* Products Section */}
-      <div className="flex-1 p-4 md:p-6 overflow-auto">
+      <div
+        className={cn(
+          "min-h-0 flex-1 overflow-auto p-3 sm:p-4 md:p-6",
+          cart.length > 0 && "pb-56 lg:pb-6",
+        )}
+      >
         <div className="mb-4 md:mb-6">
-          <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between mb-4 gap-4">
-            <div>
-              <h1 className="text-2xl md:text-3xl font-bold text-gray-900">New Sales</h1>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mb-4">
+            <div className="min-w-0 pl-10 lg:pl-0">
+              <h1 className="text-xl font-bold text-gray-900 sm:text-2xl md:text-3xl">New Sales</h1>
               {lastTransactionId && (
                 <p className="text-sm text-green-600">
                   Last transaction: {lastTransactionId}
@@ -2204,7 +2197,7 @@ export function NewSale() {
               )}
             </div>
           </div>
-          <div className="mb-4 grid gap-4 md:grid-cols-2">
+          <div className="mb-4 grid gap-3 sm:gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
                 Customer
@@ -2239,8 +2232,8 @@ export function NewSale() {
             <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
               Product search
             </label>
-            <div className="flex w-full max-w-2xl flex-wrap items-stretch gap-2">
-              <div className="relative min-w-[12rem] w-full max-w-md flex-1">
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch">
+              <div className="relative w-full min-w-0 flex-1 sm:max-w-md">
                 <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
                 {isScanning && (
                   <LoadingSpinner size="sm" className="absolute right-3 top-1/2 transform -translate-y-1/2" />
@@ -2418,7 +2411,7 @@ export function NewSale() {
 
               <div
                 className={cn(
-                  "flex h-10 w-full min-w-[13rem] max-w-[15rem] shrink-0 items-stretch overflow-hidden rounded-md border bg-white shadow-sm transition-opacity sm:w-[15rem]",
+                  "flex h-10 w-full shrink-0 items-stretch overflow-hidden rounded-md border bg-white shadow-sm transition-opacity sm:w-[15rem]",
                   quickAdjustLine ? "border-gray-200" : "border-dashed border-gray-200 opacity-40",
                 )}
                 title={
@@ -2648,8 +2641,64 @@ export function NewSale() {
       </div>
 
       {/* Cart Section */}
-      <div className="flex w-full flex-col bg-white lg:w-[300px] lg:border-l lg:border-slate-200">
+      <div
+        className={cn(
+          "flex w-full flex-col bg-white lg:h-full lg:w-[300px] lg:shrink-0 lg:border-l lg:border-slate-200",
+          cart.length === 0
+            ? "max-lg:hidden"
+            : cn(
+                "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-30 max-lg:border-t max-lg:border-slate-200",
+                mobileCartOpen
+                  ? "max-lg:max-h-[min(85dvh,100%)] max-lg:rounded-t-2xl max-lg:shadow-2xl"
+                  : "max-lg:shadow-[0_-8px_30px_-12px_rgba(15,23,42,0.3)]",
+              ),
+        )}
+      >
         <div className="border-b border-slate-200 px-3 py-2.5">
+          <button
+            type="button"
+            className="flex w-full items-center justify-between gap-2 text-left lg:hidden"
+            onClick={() => setMobileCartOpen((open) => !open)}
+          >
+            <div className="min-w-0">
+              <h2 className="text-sm font-semibold text-slate-900">Cart</h2>
+              <p className="text-[10px] text-slate-500">
+                {cart.length} line{cart.length === 1 ? "" : "s"} · Rs {formatMoney(total)}
+              </p>
+            </div>
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-600">
+              {mobileCartOpen ? "Hide" : "View"}
+              {mobileCartOpen ? (
+                <ChevronDown className="h-3.5 w-3.5" />
+              ) : (
+                <ChevronUp className="h-3.5 w-3.5" />
+              )}
+            </span>
+          </button>
+
+          {mobileCartOpen && (
+            <div className="mt-2 flex gap-2 lg:hidden">
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={clearCart}
+                className="h-7 flex-1 px-2 text-[11px] text-slate-600"
+              >
+                Clear
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={holdCurrentSale}
+                className="h-7 flex-1 px-2 text-[11px]"
+                disabled={isHoldingSale || branchLoading || !hasBranch}
+              >
+                {isHoldingSale ? "…" : "Hold"}
+              </Button>
+            </div>
+          )}
+
+          <div className="hidden lg:block">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Cart</h2>
@@ -2755,9 +2804,15 @@ export function NewSale() {
               })}
             </div>
           )}
+          </div>
         </div>
 
-        <div className="min-h-0 flex-1 overflow-hidden">
+        <div
+          className={cn(
+            "min-h-0 flex-1 overflow-hidden",
+            !mobileCartOpen && "max-lg:hidden",
+          )}
+        >
           <div ref={cartScrollContainerRef} className="h-full overflow-y-auto px-2 py-2">
             {cart.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
@@ -3009,7 +3064,7 @@ export function NewSale() {
         </div>
 
         {cart.length > 0 && (
-          <div className="border-t border-slate-200 bg-white px-3 py-3 shadow-[0_-4px_20px_-12px_rgba(15,23,42,0.15)]">
+          <div className="border-t border-slate-200 bg-white px-3 py-3 shadow-[0_-4px_20px_-12px_rgba(15,23,42,0.15)] max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
             <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/60 shadow-sm">
               <div className="space-y-2 p-3">
                 <div className="flex items-center justify-between">
