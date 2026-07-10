@@ -196,7 +196,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
         </Button>
       </div>
 
-      <main className="flex w-full flex-1 flex-col overflow-auto pt-16 lg:pt-0">
+      <main className="flex w-full flex-1 flex-col overflow-auto pt-14 sm:pt-16 lg:pt-0">
         {renderContent()}
       </main>
     </div>

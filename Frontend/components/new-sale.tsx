@@ -196,7 +196,7 @@ function CustomerSearchCombobox({
           role="combobox"
           aria-expanded={open}
           disabled={disabled || loading}
-          className="h-10 w-full justify-between bg-white font-normal"
+          className="h-9 w-full justify-between bg-white text-sm font-normal sm:h-10"
         >
           <span className="flex min-w-0 items-center gap-2 truncate">
             <User className="h-4 w-4 shrink-0 text-gray-500" />
@@ -305,7 +305,7 @@ function CategoryFilterCombobox({
           role="combobox"
           aria-expanded={open}
           disabled={disabled || loading || categories.length === 0}
-          className="h-10 w-full justify-between bg-white font-normal"
+          className="h-9 w-full justify-between bg-white text-sm font-normal sm:h-10"
         >
           <span className="flex min-w-0 items-center gap-2 truncate">
             <LayoutGrid className="h-4 w-4 shrink-0 text-gray-500" />
@@ -2154,12 +2154,12 @@ export function NewSale() {
       {/* Products Section */}
       <div
         className={cn(
-          "min-h-0 flex-1 overflow-auto p-3 sm:p-4 md:p-6",
-          cart.length > 0 && "pb-56 lg:pb-6",
+          "min-h-0 flex-1 overflow-auto p-2 sm:p-4 md:p-6",
+          cart.length > 0 && "pb-28 sm:pb-40 lg:pb-6",
         )}
       >
-        <div className="mb-4 md:mb-6">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between sm:gap-4 mb-4">
+        <div className="mb-2 sm:mb-4 md:mb-6">
+          <div className="mb-2 hidden flex-col gap-3 sm:mb-4 sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <div className="min-w-0 pl-10 lg:pl-0">
               <h1 className="text-xl font-bold text-gray-900 sm:text-2xl md:text-3xl">New Sales</h1>
               {lastTransactionId && (
@@ -2168,7 +2168,7 @@ export function NewSale() {
                 </p>
               )}
             </div>
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="hidden flex-wrap items-center gap-2 sm:flex">
               {cart.length > 0 && (
                 <Button
                   variant="outline"
@@ -2197,9 +2197,9 @@ export function NewSale() {
               )}
             </div>
           </div>
-          <div className="mb-4 grid gap-3 sm:gap-4 sm:grid-cols-2">
+          <div className="mb-2 grid grid-cols-2 gap-2 sm:mb-4 sm:gap-4">
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
                 Customer
               </label>
               <CustomerSearchCombobox
@@ -2211,7 +2211,7 @@ export function NewSale() {
               />
             </div>
             <div>
-              <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
                 Category
               </label>
               <CategoryFilterCombobox
@@ -2228,19 +2228,19 @@ export function NewSale() {
               Branch is not configured. Hold Sale and checkout may fail until a branch is assigned.
             </p>
           )}
-          <div className="mb-3">
-            <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-gray-500">
+          <div className="mb-2 sm:mb-3">
+            <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
               Product search
             </label>
-            <div className="flex w-full flex-col gap-2 sm:flex-row sm:flex-wrap sm:items-stretch">
-              <div className="relative w-full min-w-0 flex-1 sm:max-w-md">
+            <div className="flex w-full items-stretch gap-1.5 sm:gap-2">
+              <div className="relative min-w-0 flex-1">
                 <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
                 {isScanning && (
                   <LoadingSpinner size="sm" className="absolute right-3 top-1/2 transform -translate-y-1/2" />
                 )}
                 <Input
                   ref={searchInputRef}
-                  placeholder={isScanning ? "Processing scan..." : "Scan barcode or search products..."}
+                  placeholder={isScanning ? "Scanning…" : "Scan or search…"}
                   value={searchTerm}
                   onFocus={() => {
                     if (searchTerm.trim()) setProductSearchOpen(true);
@@ -2362,7 +2362,7 @@ export function NewSale() {
                     }
                   }}
                   className={cn(
-                    "h-10 pl-10 border-gray-200 shadow-sm focus-visible:ring-1 focus-visible:ring-blue-400 focus-visible:ring-offset-0",
+                    "h-9 border-gray-200 pl-9 text-sm shadow-sm focus-visible:ring-1 focus-visible:ring-blue-400 focus-visible:ring-offset-0 sm:h-10 sm:pl-10",
                     isScanning && "border-blue-500 bg-blue-50/50 pr-10",
                   )}
                   autoFocus
@@ -2411,7 +2411,7 @@ export function NewSale() {
 
               <div
                 className={cn(
-                  "flex h-10 w-full shrink-0 items-stretch overflow-hidden rounded-md border bg-white shadow-sm transition-opacity sm:w-[15rem]",
+                  "flex h-9 w-[7.25rem] shrink-0 items-stretch overflow-hidden rounded-md border bg-white shadow-sm transition-opacity sm:h-10 sm:w-[15rem]",
                   quickAdjustLine ? "border-gray-200" : "border-dashed border-gray-200 opacity-40",
                 )}
                 title={
@@ -2424,14 +2424,14 @@ export function NewSale() {
                   type="button"
                   variant="ghost"
                   disabled={!quickAdjustLine}
-                  className="h-10 w-11 shrink-0 rounded-none border-r border-gray-200 px-0 hover:bg-slate-100 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="h-9 w-8 shrink-0 rounded-none border-r border-gray-200 px-0 hover:bg-slate-100 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-10 sm:w-11"
                   aria-label="Decrease quantity"
                   data-quick-qty="true"
                   onClick={() => quickAdjustLine && bumpQuantity(quickAdjustLine.id, -1)}
                 >
-                  <Minus className="h-4 w-4" />
+                  <Minus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </Button>
-                <div className="flex min-w-0 flex-1 flex-col items-center justify-center border-r border-gray-200 bg-slate-50/90 px-2 py-0.5">
+                <div className="flex min-w-0 flex-1 flex-col items-center justify-center border-r border-gray-200 bg-slate-50/90 px-1 py-0 sm:px-2">
                   <Input
                     ref={quickQtyInputRef}
                     disabled={!quickAdjustLine}
@@ -2504,9 +2504,9 @@ export function NewSale() {
                         bumpQuantity(quickAdjustLine.id, -1);
                       }
                     }}
-                    className="h-7 w-full max-w-[5.5rem] border-0 bg-transparent p-0 text-center text-base font-bold tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none disabled:opacity-50"
+                    className="h-7 w-full max-w-[4rem] border-0 bg-transparent p-0 text-center text-sm font-bold tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-7 sm:max-w-[5.5rem] sm:text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none disabled:opacity-50"
                   />
-                  <span className="max-w-full truncate text-[10px] leading-none text-gray-500">
+                  <span className="hidden max-w-full truncate text-[10px] leading-none text-gray-500 sm:block">
                     {quickAdjustLine
                       ? `Rs ${formatMoney(getSellingPrice(quickAdjustLine))} each`
                       : "each"}
@@ -2517,16 +2517,16 @@ export function NewSale() {
                   type="button"
                   variant="ghost"
                   disabled={!quickAdjustLine}
-                  className="h-10 w-11 shrink-0 rounded-none px-0 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0"
+                  className="h-9 w-8 shrink-0 rounded-none px-0 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-10 sm:w-11"
                   aria-label="Increase quantity"
                   data-quick-qty="true"
                   onClick={() => quickAdjustLine && bumpQuantity(quickAdjustLine.id, 1)}
                 >
-                  <Plus className="h-4 w-4" />
+                  <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                 </Button>
               </div>
             </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2 text-sm text-gray-600">
+            <div className="mt-1.5 hidden flex-wrap items-center gap-2 text-sm text-gray-600 sm:mt-3 sm:flex">
               <span>
                 {filteredProducts.length} product{filteredProducts.length === 1 ? "" : "s"}
                 {selectedCategory !== "all" ? ` in ${selectedCategoryLabel}` : ""}
@@ -2549,7 +2549,7 @@ export function NewSale() {
 
           {/* Printer info - configured globally in Printer Settings */}
           {receiptPrinter && (
-            <div className="mb-4 px-4 py-2.5 rounded-xl border border-blue-100 bg-blue-50/60 flex items-center gap-2 text-sm text-blue-800">
+            <div className="mb-2 hidden items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-sm text-blue-800 sm:mb-4 sm:flex">
               <span className="font-medium">🖨️ {receiptPrinter}</span>
               <span className="text-blue-600 text-xs">(change in Printer Settings)</span>
             </div>
@@ -2557,17 +2557,17 @@ export function NewSale() {
 
         {/* Products Grid */}
         {productsLoading ? (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
-            {Array.from({ length: 10 }).map((_, i) => (
+          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5">
+            {Array.from({ length: 12 }).map((_, i) => (
               <div
                 key={i}
-                className="animate-pulse rounded-xl border border-slate-200 bg-white p-3"
+                className="animate-pulse rounded-lg border border-slate-200 bg-white p-2 sm:rounded-xl sm:p-3"
               >
-                <div className="mb-2 h-8 rounded-md bg-slate-100" />
-                <div className="h-3 w-3/4 rounded bg-slate-100" />
-                <div className="mt-3 flex justify-between border-t border-slate-100 pt-2">
-                  <div className="h-2 w-10 rounded bg-slate-100" />
-                  <div className="h-4 w-14 rounded bg-slate-100" />
+                <div className="mb-1 h-6 rounded-md bg-slate-100 sm:mb-2 sm:h-8" />
+                <div className="h-2 w-3/4 rounded bg-slate-100" />
+                <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5 sm:mt-3 sm:pt-2">
+                  <div className="h-2 w-8 rounded bg-slate-100" />
+                  <div className="h-3 w-10 rounded bg-slate-100" />
                 </div>
               </div>
             ))}
@@ -2583,7 +2583,7 @@ export function NewSale() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5">
             {filteredProducts.map((product) => {
               const cartItems = cart.filter(
                 (item) =>
@@ -2598,8 +2598,8 @@ export function NewSale() {
                   type="button"
                   onClick={() => handleProductClick(product)}
                   className={cn(
-                    "group relative flex min-h-[5.5rem] flex-col rounded-xl border bg-white p-3 text-left shadow-sm transition-all duration-150",
-                    "hover:-translate-y-0.5 hover:border-blue-300 hover:shadow-md",
+                    "group relative flex flex-col rounded-lg border bg-white p-2 text-left shadow-sm transition-all duration-150 sm:min-h-[5.5rem] sm:rounded-xl sm:p-3",
+                    "active:scale-[0.98] sm:hover:-translate-y-0.5 sm:hover:border-blue-300 sm:hover:shadow-md",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
                     inCart
                       ? "border-blue-400 bg-blue-50/30 ring-1 ring-blue-200"
@@ -2607,29 +2607,29 @@ export function NewSale() {
                   )}
                 >
                   {inCart && (
-                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[10px] font-bold tabular-nums text-white shadow-sm">
+                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-bold tabular-nums text-white shadow-sm sm:-right-1.5 sm:-top-1.5 sm:h-5 sm:min-w-[1.25rem] sm:px-1.5 sm:text-[10px]">
                       {formatQuantityValue(totalQuantity)}
                     </span>
                   )}
 
-                  <span className="line-clamp-2 min-h-[2.25rem] flex-1 text-xs font-medium leading-snug text-slate-800 group-hover:text-slate-900">
+                  <span className="line-clamp-2 text-[10px] font-medium leading-tight text-slate-800 sm:min-h-[2.25rem] sm:flex-1 sm:text-xs sm:leading-snug group-hover:text-slate-900">
                     {product.name}
                   </span>
 
                   {/* TESTING: show product unit on card — comment out when done */}
-                  <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                  <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-600 sm:mt-1 sm:text-[10px]">
                     {product.unitName || "No unit"}
                   </span>
 
-                  <div className="mt-2 flex items-end justify-between gap-2 border-t border-slate-100 pt-2">
+                  <div className="mt-1 flex items-end justify-between gap-1 border-t border-slate-100 pt-1 sm:mt-2 sm:gap-2 sm:pt-2">
                     {product.category ? (
-                      <span className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-400">
+                      <span className="hidden truncate text-[10px] font-medium uppercase tracking-wide text-slate-400 sm:inline">
                         {product.category}
                       </span>
                     ) : (
-                      <span className="text-[10px] text-slate-300">—</span>
+                      <span className="hidden text-[10px] text-slate-300 sm:inline">—</span>
                     )}
-                    <span className="shrink-0 text-sm font-bold tabular-nums text-blue-600">
+                    <span className="ml-auto shrink-0 text-[11px] font-bold tabular-nums text-blue-600 sm:text-sm">
                       Rs {formatMoney(product.price)}
                     </span>
                   </div>
@@ -2654,27 +2654,51 @@ export function NewSale() {
               ),
         )}
       >
-        <div className="border-b border-slate-200 px-3 py-2.5">
+        <div className="border-b border-slate-200 px-2 py-1.5 sm:px-3 sm:py-2.5">
           <button
             type="button"
             className="flex w-full items-center justify-between gap-2 text-left lg:hidden"
             onClick={() => setMobileCartOpen((open) => !open)}
           >
             <div className="min-w-0">
-              <h2 className="text-sm font-semibold text-slate-900">Cart</h2>
+              <h2 className="text-xs font-semibold text-slate-900 sm:text-sm">Cart</h2>
               <p className="text-[10px] text-slate-500">
                 {cart.length} line{cart.length === 1 ? "" : "s"} · Rs {formatMoney(total)}
               </p>
             </div>
-            <span className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2.5 py-1 text-[10px] font-semibold text-slate-600">
+            <span className="flex shrink-0 items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold text-slate-600">
               {mobileCartOpen ? "Hide" : "View"}
               {mobileCartOpen ? (
-                <ChevronDown className="h-3.5 w-3.5" />
+                <ChevronDown className="h-3 w-3" />
               ) : (
-                <ChevronUp className="h-3.5 w-3.5" />
+                <ChevronUp className="h-3 w-3" />
               )}
             </span>
           </button>
+
+          {!mobileCartOpen && (
+            <div className="mt-1.5 grid grid-cols-2 gap-1.5 lg:hidden">
+              <Button
+                size="sm"
+                onClick={() => startPayment("Cash")}
+                disabled={paymentLoading || branchLoading || !hasBranch}
+                className="h-9 text-xs font-semibold"
+              >
+                <DollarSign className="mr-1.5 h-3.5 w-3.5" />
+                Cash
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => startPayment("Card")}
+                disabled={paymentLoading || branchLoading || !hasBranch}
+                className="h-9 text-xs font-semibold"
+              >
+                <CreditCard className="mr-1.5 h-3.5 w-3.5" />
+                Card
+              </Button>
+            </div>
+          )}
 
           {mobileCartOpen && (
             <div className="mt-2 flex gap-2 lg:hidden">
@@ -3064,9 +3088,14 @@ export function NewSale() {
         </div>
 
         {cart.length > 0 && (
-          <div className="border-t border-slate-200 bg-white px-3 py-3 shadow-[0_-4px_20px_-12px_rgba(15,23,42,0.15)] max-lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
-            <div className="overflow-hidden rounded-xl border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/60 shadow-sm">
-              <div className="space-y-2 p-3">
+          <div
+            className={cn(
+              "border-t border-slate-200 bg-white px-2 py-2 shadow-[0_-4px_20px_-12px_rgba(15,23,42,0.15)] sm:px-3 sm:py-3 max-lg:pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]",
+              !mobileCartOpen && "max-lg:hidden",
+            )}
+          >
+            <div className="overflow-hidden rounded-lg border border-slate-200/80 bg-gradient-to-b from-white to-slate-50/60 shadow-sm sm:rounded-xl">
+              <div className="space-y-1.5 p-2 sm:space-y-2 sm:p-3">
                 <div className="flex items-center justify-between">
                   <span className="text-xs text-slate-500">Subtotal</span>
                   <span className="text-sm font-semibold tabular-nums text-slate-800">
@@ -3128,20 +3157,20 @@ export function NewSale() {
                 )}
               </div>
 
-              <div className="flex items-center justify-between border-t border-slate-200/80 bg-blue-600 px-3 py-2.5 text-white">
-                <span className="text-xs font-semibold uppercase tracking-wide text-blue-100">
+              <div className="flex items-center justify-between border-t border-slate-200/80 bg-blue-600 px-2 py-2 text-white sm:px-3 sm:py-2.5">
+                <span className="text-[10px] font-semibold uppercase tracking-wide text-blue-100 sm:text-xs">
                   Payable
                 </span>
-                <span className="text-xl font-bold tabular-nums">{formatMoney(total)}</span>
+                <span className="text-lg font-bold tabular-nums sm:text-xl">{formatMoney(total)}</span>
               </div>
             </div>
 
-            <div className="mt-3 grid grid-cols-2 gap-2">
+            <div className="mt-2 grid grid-cols-2 gap-1.5 sm:mt-3 sm:gap-2">
               <Button
                 size="lg"
                 onClick={() => startPayment("Cash")}
                 disabled={paymentLoading || branchLoading || !hasBranch}
-                className="h-11 text-sm font-semibold"
+                className="h-10 text-sm font-semibold sm:h-11"
               >
                 <DollarSign className="mr-2 h-4 w-4" />
                 Cash
@@ -3151,7 +3180,7 @@ export function NewSale() {
                 variant="outline"
                 onClick={() => startPayment("Card")}
                 disabled={paymentLoading || branchLoading || !hasBranch}
-                className="h-11 text-sm font-semibold"
+                className="h-10 text-sm font-semibold sm:h-11"
               >
                 <CreditCard className="mr-2 h-4 w-4" />
                 Card
