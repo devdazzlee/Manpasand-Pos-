@@ -2623,6 +2623,11 @@ export function NewSale() {
                     {product.name}
                   </span>
 
+                  {/* TESTING: show product unit on card — comment out when done */}
+                  <span className="mt-1 text-[10px] font-semibold uppercase tracking-wide text-amber-600">
+                    {product.unitName || "No unit"}
+                  </span>
+
                   <div className="mt-2 flex items-end justify-between gap-2 border-t border-slate-100 pt-2">
                     {product.category ? (
                       <span className="truncate text-[10px] font-medium uppercase tracking-wide text-slate-400">
