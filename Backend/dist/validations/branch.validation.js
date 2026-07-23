@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listBranchesSchema = exports.getBranchSchema = exports.updateBranchSchema = exports.createBranchSchema = void 0;
+exports.branchCredentialsSchema = exports.listBranchesSchema = exports.getBranchSchema = exports.updateBranchSchema = exports.createBranchSchema = void 0;
 const zod_1 = require("zod");
 const branchBaseSchema = {
     name: zod_1.z.string().min(1, 'Name is required').max(100),
@@ -35,6 +35,19 @@ exports.listBranchesSchema = zod_1.z.object({
         search: zod_1.z.string().optional(),
         is_active: zod_1.z.string().optional(),
         fetch_all: zod_1.z.string().optional(),
+    }),
+});
+exports.branchCredentialsSchema = zod_1.z.object({
+    body: zod_1.z
+        .object({
+        email: zod_1.z.string().email('Invalid email address').optional(),
+        password: zod_1.z.string().min(6, 'Password must be at least 6 characters').optional(),
+    })
+        .refine((data) => data.email || data.password, {
+        message: 'Provide an email and/or password to update',
+    }),
+    params: zod_1.z.object({
+        id: zod_1.z.string().min(1, 'Branch ID is required'),
     }),
 });
 //# sourceMappingURL=branch.validation.js.map

@@ -17,5 +17,9 @@ router.get('/:id', (0, validation_middleware_1.validate)(branch_validation_1.get
 router.patch('/:id', (0, validation_middleware_1.validate)(branch_validation_1.updateBranchSchema), branch_controller_1.updateBranch);
 router.patch('/:id/status', (0, validation_middleware_1.validate)(branch_validation_1.getBranchSchema), branch_controller_1.toggleBranchStatus);
 router.delete('/:id', (0, validation_middleware_1.validate)(branch_validation_1.getBranchSchema), branch_controller_1.deleteBranch);
+// Branch login (the User account tied to a branch) is admin-only, on top of
+// the router-wide role check above.
+router.get('/:id/credentials', (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']), (0, validation_middleware_1.validate)(branch_validation_1.getBranchSchema), branch_controller_1.getBranchCredentials);
+router.put('/:id/credentials', (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']), (0, validation_middleware_1.validate)(branch_validation_1.branchCredentialsSchema), branch_controller_1.upsertBranchCredentials);
 exports.default = router;
 //# sourceMappingURL=branch.routes.js.map

@@ -109,7 +109,10 @@ export const prepareReceiptDataFromSale = (
     address: storeAddress,
     transactionId: opts?.transactionLabel || sale.sale_number || sale.id || "",
     timestamp: sale.created_at || sale.sale_date || new Date().toISOString(),
-    cashier: "Walk-in",
+    cashier:
+      (sale as any).user?.email?.split?.("@")?.[0] ||
+      (sale as any).user?.email ||
+      "Cashier",
     customerType: sale.customer?.name || sale.customer?.email || "Walk-in",
     items,
     subtotal,
@@ -796,7 +799,25 @@ export const downloadReceiptPdf = async (
   receiptData: ReceiptData,
   logoDataUri: string,
 ): Promise<void> => {
-  const pdf = await buildReceiptPdfBlob(receiptData, logoDataUri);
+  let logo = logoDataUri;
+  if (!logo) {
+    try {
+      const res = await fetch("/logo.png");
+      if (res.ok) {
+        const blob = await res.blob();
+        logo = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onloadend = () =>
+            typeof reader.result === "string" ? resolve(reader.result) : reject();
+          reader.onerror = reject;
+          reader.readAsDataURL(blob);
+        });
+      }
+    } catch {
+      // continue without logo
+    }
+  }
+  const pdf = await buildReceiptPdfBlob(receiptData, logo);
   if (!pdf) throw new Error("Failed to generate receipt PDF");
   const url = URL.createObjectURL(pdf.blob);
   const a = document.createElement("a");

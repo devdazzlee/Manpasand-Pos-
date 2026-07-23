@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.registerSchema = exports.loginSchema = void 0;
+exports.changePasswordSchema = exports.registerSchema = exports.loginSchema = void 0;
 const zod_1 = require("zod");
 const registerSchema = zod_1.z.object({
     body: zod_1.z.object({
@@ -18,4 +18,11 @@ const loginSchema = zod_1.z.object({
     }),
 });
 exports.loginSchema = loginSchema;
+const changePasswordSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        currentPassword: zod_1.z.string().min(1, 'Current password is required'),
+        newPassword: zod_1.z.string().min(6, 'New password must be at least 6 characters'),
+    }),
+});
+exports.changePasswordSchema = changePasswordSchema;
 //# sourceMappingURL=auth.validation.js.map

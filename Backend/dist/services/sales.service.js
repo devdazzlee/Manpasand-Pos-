@@ -5,15 +5,30 @@ const client_1 = require("@prisma/client");
 const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 class SaleService {
-    async getSales({ branchId, page, limit, search, startDate, endDate, }) {
+    async getSales({ branchId, page, limit, search, startDate, endDate, paymentMethod, paymentStatus, status, cashierId, customerId, sortBy = 'sale_date', sortOrder = 'desc', }) {
+        const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
         const where = {
             ...(branchId ? { branch_id: branchId } : {}),
-            ...(search
+            ...(cashierId ? { created_by: cashierId } : {}),
+            ...(customerId ? { customer_id: customerId } : {}),
+            ...(paymentMethod && Object.values(client_1.PaymentMethod).includes(paymentMethod)
+                ? { payment_method: paymentMethod }
+                : {}),
+            ...(paymentStatus && Object.values(client_1.PaymentStatus).includes(paymentStatus)
+                ? { payment_status: paymentStatus }
+                : {}),
+            ...(status && Object.values(client_1.SaleStatus).includes(status)
+                ? { status: status }
+                : {}),
+            ...(normalizedSearch
                 ? {
                     OR: [
-                        { sale_number: { contains: search, mode: 'insensitive' } },
-                        { customer: { email: { contains: search, mode: 'insensitive' } } },
-                        { customer: { name: { contains: search, mode: 'insensitive' } } },
+                        { sale_number: { contains: normalizedSearch, mode: 'insensitive' } },
+                        { invoice_number: { contains: normalizedSearch, mode: 'insensitive' } },
+                        { customer: { email: { contains: normalizedSearch, mode: 'insensitive' } } },
+                        { customer: { name: { contains: normalizedSearch, mode: 'insensitive' } } },
+                        { customer: { phone_number: { contains: normalizedSearch, mode: 'insensitive' } } },
+                        { notes: { contains: normalizedSearch, mode: 'insensitive' } },
                     ],
                 }
                 : {}),
@@ -38,14 +53,106 @@ class SaleService {
                     address: true,
                 },
             },
+            user: {
+                select: {
+                    id: true,
+                    email: true,
+                    role: true,
+                },
+            },
+            original_sale: {
+                select: {
+                    id: true,
+                    sale_number: true,
+                },
+            },
+            _count: {
+                select: {
+                    return_sales: true,
+                },
+            },
         };
+        const allowedSortFields = new Set([
+            'sale_date',
+            'sale_number',
+            'total_amount',
+            'subtotal',
+            'discount_amount',
+            'tax_amount',
+            'payment_method',
+            'payment_status',
+            'status',
+            'created_at',
+        ]);
+        const orderField = allowedSortFields.has(sortBy) ? sortBy : 'sale_date';
+        const orderDirection = sortOrder === 'asc' ? 'asc' : 'desc';
+        const orderBy = { [orderField]: orderDirection };
+        const buildSummary = async () => {
+            const [aggregates, orderCount, refundAgg] = await Promise.all([
+                client_2.prisma.sale.aggregate({
+                    where,
+                    _sum: {
+                        total_amount: true,
+                        tax_amount: true,
+                        discount_amount: true,
+                    },
+                    _count: { _all: true },
+                    _avg: { total_amount: true },
+                }),
+                client_2.prisma.sale.count({
+                    where: {
+                        ...where,
+                        status: client_1.SaleStatus.COMPLETED,
+                        original_sale_id: null,
+                    },
+                }),
+                client_2.prisma.sale.aggregate({
+                    where: {
+                        ...where,
+                        OR: [
+                            { status: client_1.SaleStatus.REFUNDED },
+                            { original_sale_id: { not: null } },
+                            { total_amount: { lt: 0 } },
+                        ],
+                    },
+                    _sum: { total_amount: true },
+                    _count: { _all: true },
+                }),
+            ]);
+            const totalSalesAmount = Number(aggregates._sum.total_amount || 0);
+            const totalTax = Number(aggregates._sum.tax_amount || 0);
+            const totalDiscounts = Number(aggregates._sum.discount_amount || 0);
+            const refundsAmount = Math.abs(Number(refundAgg._sum.total_amount || 0));
+            return {
+                totalSales: totalSalesAmount,
+                totalOrders: aggregates._count._all,
+                completedOrders: orderCount,
+                totalRefunds: refundsAmount,
+                refundCount: refundAgg._count._all,
+                averageOrderValue: orderCount > 0 ? totalSalesAmount / Math.max(orderCount, 1) : Number(aggregates._avg.total_amount || 0),
+                totalTaxCollected: totalTax,
+                totalDiscounts,
+            };
+        };
+        const cashiersPromise = client_2.prisma.user.findMany({
+            where: {
+                sales: branchId ? { some: { branch_id: branchId } } : { some: {} },
+            },
+            select: { id: true, email: true, role: true },
+            orderBy: { email: 'asc' },
+            take: 200,
+        });
         // Backward-compatible behavior: when pagination is not requested, return all rows.
         if (!page || !limit) {
-            const data = await client_2.prisma.sale.findMany({
-                where,
-                include,
-                orderBy: { sale_date: 'desc' },
-            });
+            const [data, summary, cashiers] = await Promise.all([
+                client_2.prisma.sale.findMany({
+                    where,
+                    include,
+                    orderBy,
+                }),
+                buildSummary(),
+                cashiersPromise,
+            ]);
             return {
                 data,
                 meta: {
@@ -53,21 +160,25 @@ class SaleService {
                     page: 1,
                     limit: data.length,
                     totalPages: 1,
+                    summary,
+                    cashiers,
                 },
             };
         }
         const safePage = Math.max(1, Number(page) || 1);
-        const safeLimit = Math.max(1, Number(limit) || 10);
+        const safeLimit = Math.max(1, Math.min(200, Number(limit) || 10));
         const skip = (safePage - 1) * safeLimit;
-        const [total, data] = await Promise.all([
+        const [total, data, summary, cashiers] = await Promise.all([
             client_2.prisma.sale.count({ where }),
             client_2.prisma.sale.findMany({
                 where,
                 include,
-                orderBy: { sale_date: 'desc' },
+                orderBy,
                 skip,
                 take: safeLimit,
             }),
+            buildSummary(),
+            cashiersPromise,
         ]);
         return {
             data,
@@ -76,8 +187,237 @@ class SaleService {
                 page: safePage,
                 limit: safeLimit,
                 totalPages: Math.max(1, Math.ceil(total / safeLimit)),
+                summary,
+                cashiers,
             },
         };
+    }
+    async cancelSale(saleId) {
+        const sale = await client_2.prisma.sale.findUnique({ where: { id: saleId } });
+        if (!sale)
+            throw new apiError_1.AppError(404, 'Sale not found');
+        if (sale.status === client_1.SaleStatus.CANCELLED) {
+            throw new apiError_1.AppError(400, 'Sale is already cancelled');
+        }
+        if (sale.original_sale_id) {
+            throw new apiError_1.AppError(400, 'Return/exchange transactions cannot be cancelled here');
+        }
+        return client_2.prisma.sale.update({
+            where: { id: saleId },
+            data: { status: client_1.SaleStatus.CANCELLED },
+            include: {
+                sale_items: { include: { product: true } },
+                customer: true,
+                branch: { select: { id: true, name: true, address: true } },
+                user: { select: { id: true, email: true, role: true } },
+            },
+        });
+    }
+    async updateSale(saleId, data) {
+        const existing = await client_2.prisma.sale.findUnique({
+            where: { id: saleId },
+            include: { sale_items: true },
+        });
+        if (!existing)
+            throw new apiError_1.AppError(404, 'Sale not found');
+        if (existing.original_sale_id) {
+            throw new apiError_1.AppError(400, 'Return/exchange transactions cannot be edited here');
+        }
+        if (existing.status === client_1.SaleStatus.CANCELLED) {
+            throw new apiError_1.AppError(400, 'Cancelled sales cannot be edited');
+        }
+        const branchId = existing.branch_id;
+        if (!branchId)
+            throw new apiError_1.AppError(400, 'Sale has no branch');
+        const hasItemsUpdate = Array.isArray(data.items);
+        if (hasItemsUpdate) {
+            const items = (data.items || [])
+                .map((it) => ({
+                productId: it.productId,
+                quantity: Number(it.quantity),
+                price: Number(it.price),
+                discountAmount: Math.max(0, Number(it.discountAmount || 0)),
+            }))
+                .filter((it) => it.productId && it.quantity > 0 && !Number.isNaN(it.price));
+            if (!items.length) {
+                throw new apiError_1.AppError(400, 'At least one line item is required');
+            }
+            const productIds = [...new Set(items.map((i) => i.productId))];
+            const products = await client_2.prisma.product.findMany({
+                where: { id: { in: productIds } },
+                select: { id: true },
+            });
+            if (products.length !== productIds.length) {
+                throw new apiError_1.AppError(400, 'One or more products were not found');
+            }
+            // Old sold qty per product (positive) — original sale lines only
+            const oldQtyMap = new Map();
+            for (const row of existing.sale_items) {
+                if (row.item_type && row.item_type !== client_1.SaleItemType.ORIGINAL)
+                    continue;
+                const qty = Math.abs(row.quantity.toNumber());
+                oldQtyMap.set(row.product_id, (oldQtyMap.get(row.product_id) || 0) + qty);
+            }
+            const newQtyMap = new Map();
+            for (const it of items) {
+                newQtyMap.set(it.productId, (newQtyMap.get(it.productId) || 0) + it.quantity);
+            }
+            const affectedProductIds = [
+                ...new Set([...oldQtyMap.keys(), ...newQtyMap.keys()]),
+            ];
+            const stocks = await client_2.prisma.stock.findMany({
+                where: { branch_id: branchId, product_id: { in: affectedProductIds } },
+            });
+            const stockMap = new Map(stocks.map((s) => [s.product_id, s]));
+            const movements = [];
+            for (const productId of affectedProductIds) {
+                const oldQty = oldQtyMap.get(productId) || 0;
+                const newQty = newQtyMap.get(productId) || 0;
+                const soldDelta = newQty - oldQty; // +more sold, -less sold
+                if (soldDelta === 0)
+                    continue;
+                const existingStock = stockMap.get(productId);
+                const prev = new client_1.Prisma.Decimal(existingStock?.current_quantity ?? 0);
+                // stock change is opposite of sold delta
+                const change = new client_1.Prisma.Decimal(-soldDelta);
+                const next = prev.plus(change);
+                movements.push({
+                    product_id: productId,
+                    previous_qty: prev,
+                    new_qty: next,
+                    quantity_change: change,
+                });
+            }
+            const lineSubtotals = items.map((it) => ({
+                ...it,
+                lineTotal: Math.max(0, it.price * it.quantity - (it.discountAmount || 0)),
+            }));
+            const subtotalAmt = lineSubtotals.reduce((s, it) => s + it.lineTotal, 0);
+            const orderDiscount = typeof data.discountAmount === 'number' && !Number.isNaN(data.discountAmount)
+                ? Math.max(0, data.discountAmount)
+                : Number(existing.discount_amount || 0);
+            const taxAmt = Number(existing.tax_amount || 0);
+            const finalTotal = Math.max(0, subtotalAmt - orderDiscount + taxAmt);
+            const ops = [];
+            ops.push(client_2.prisma.saleItem.deleteMany({ where: { sale_id: saleId } }));
+            ops.push(client_2.prisma.sale.update({
+                where: { id: saleId },
+                data: {
+                    ...(data.paymentMethod && Object.values(client_1.PaymentMethod).includes(data.paymentMethod)
+                        ? { payment_method: data.paymentMethod }
+                        : {}),
+                    ...(data.paymentStatus && Object.values(client_1.PaymentStatus).includes(data.paymentStatus)
+                        ? { payment_status: data.paymentStatus }
+                        : {}),
+                    ...(data.status && Object.values(client_1.SaleStatus).includes(data.status)
+                        ? { status: data.status }
+                        : {}),
+                    ...(data.notes !== undefined ? { notes: data.notes } : {}),
+                    ...(data.customerId !== undefined
+                        ? { customer_id: data.customerId || null }
+                        : {}),
+                    ...(typeof data.paymentReceived === 'number' && !Number.isNaN(data.paymentReceived)
+                        ? { payment_received: new client_1.Prisma.Decimal(Math.max(0, data.paymentReceived)) }
+                        : {}),
+                    discount_amount: new client_1.Prisma.Decimal(orderDiscount),
+                    subtotal: new client_1.Prisma.Decimal(subtotalAmt),
+                    total_amount: new client_1.Prisma.Decimal(finalTotal),
+                    sale_items: {
+                        create: lineSubtotals.map((item) => ({
+                            product: { connect: { id: item.productId } },
+                            quantity: new client_1.Prisma.Decimal(item.quantity),
+                            unit_price: new client_1.Prisma.Decimal(item.price),
+                            discount_amount: new client_1.Prisma.Decimal(item.discountAmount || 0),
+                            line_total: new client_1.Prisma.Decimal(item.lineTotal),
+                            item_type: client_1.SaleItemType.ORIGINAL,
+                        })),
+                    },
+                },
+            }));
+            for (const m of movements) {
+                ops.push(client_2.prisma.stock.upsert({
+                    where: {
+                        product_id_branch_id: {
+                            product_id: m.product_id,
+                            branch_id: branchId,
+                        },
+                    },
+                    update: {
+                        current_quantity: m.new_qty,
+                    },
+                    create: {
+                        product_id: m.product_id,
+                        branch_id: branchId,
+                        current_quantity: m.new_qty,
+                        minimum_quantity: new client_1.Prisma.Decimal(0),
+                        maximum_quantity: new client_1.Prisma.Decimal(1000),
+                        reserved_quantity: new client_1.Prisma.Decimal(0),
+                    },
+                }));
+                ops.push(client_2.prisma.stockMovement.create({
+                    data: {
+                        product_id: m.product_id,
+                        branch_id: branchId,
+                        movement_type: client_1.StockMovementType.ADJUSTMENT,
+                        quantity_change: m.quantity_change,
+                        previous_qty: m.previous_qty,
+                        new_qty: m.new_qty,
+                        reference_id: saleId,
+                        reference_type: "sale_edit",
+                        notes: `Sale edit ${existing.sale_number}`,
+                        ...(data.updatedBy || existing.created_by
+                            ? { created_by: data.updatedBy || existing.created_by || undefined }
+                            : {}),
+                    },
+                }));
+            }
+            await client_2.prisma.$transaction(ops);
+        }
+        else {
+            // Metadata-only update
+            const updateData = {};
+            if (data.paymentMethod && Object.values(client_1.PaymentMethod).includes(data.paymentMethod)) {
+                updateData.payment_method = data.paymentMethod;
+            }
+            if (data.paymentStatus && Object.values(client_1.PaymentStatus).includes(data.paymentStatus)) {
+                updateData.payment_status = data.paymentStatus;
+            }
+            if (data.status && Object.values(client_1.SaleStatus).includes(data.status)) {
+                updateData.status = data.status;
+            }
+            if (data.notes !== undefined)
+                updateData.notes = data.notes;
+            if (data.customerId !== undefined) {
+                updateData.customer = data.customerId
+                    ? { connect: { id: data.customerId } }
+                    : { disconnect: true };
+            }
+            if (typeof data.paymentReceived === 'number' && !Number.isNaN(data.paymentReceived)) {
+                updateData.payment_received = new client_1.Prisma.Decimal(Math.max(0, data.paymentReceived));
+            }
+            if (typeof data.discountAmount === 'number' && !Number.isNaN(data.discountAmount)) {
+                const discount = Math.max(0, data.discountAmount);
+                const subtotal = Number(existing.subtotal || 0);
+                const tax = Number(existing.tax_amount || 0);
+                updateData.discount_amount = new client_1.Prisma.Decimal(discount);
+                updateData.total_amount = new client_1.Prisma.Decimal(Math.max(0, subtotal - discount + tax));
+            }
+            await client_2.prisma.sale.update({ where: { id: saleId }, data: updateData });
+        }
+        return this.getSaleById(saleId);
+    }
+    async deleteSale(saleId) {
+        const sale = await client_2.prisma.sale.findUnique({
+            where: { id: saleId },
+            include: { _count: { select: { return_sales: true } } },
+        });
+        if (!sale)
+            throw new apiError_1.AppError(404, 'Sale not found');
+        if (sale._count.return_sales > 0) {
+            throw new apiError_1.AppError(400, 'Cannot delete a sale that has return/exchange records. Cancel it instead.');
+        }
+        await client_2.prisma.sale.delete({ where: { id: saleId } });
+        return { id: saleId, deleted: true };
     }
     async getAlreadyReturnedQuantities(originalSaleId) {
         const prior = await client_2.prisma.sale.findMany({
@@ -155,6 +495,36 @@ class SaleService {
                     include: { product: true },
                 },
                 customer: true,
+                branch: {
+                    select: {
+                        id: true,
+                        name: true,
+                        address: true,
+                    },
+                },
+                user: {
+                    select: {
+                        id: true,
+                        email: true,
+                        role: true,
+                    },
+                },
+                original_sale: {
+                    select: {
+                        id: true,
+                        sale_number: true,
+                    },
+                },
+                return_sales: {
+                    select: {
+                        id: true,
+                        sale_number: true,
+                        sale_date: true,
+                        total_amount: true,
+                        status: true,
+                    },
+                    orderBy: { sale_date: 'desc' },
+                },
             },
         });
         if (!sale)
@@ -813,23 +1183,41 @@ class SaleService {
         const [sale] = await client_2.prisma.$transaction(ops);
         return sale;
     }
-    async getRecentSaleItemsProductNameAndPrice(branchId) {
-        const sale = await client_2.prisma.sale.findFirst({
+    /**
+     * Most recent sales (one row per sale, not per line item) so the dashboard
+     * "Recent Sales" widget shows real recent activity instead of just the
+     * line items of whichever single sale happened to be most recent.
+     */
+    async getRecentSales(branchId, limit = 10) {
+        const sales = await client_2.prisma.sale.findMany({
             where: branchId ? { branch_id: branchId } : undefined,
             orderBy: { sale_date: 'desc' },
-            include: {
+            take: limit,
+            select: {
+                id: true,
+                sale_number: true,
+                total_amount: true,
+                status: true,
+                payment_method: true,
+                sale_date: true,
+                customer: { select: { name: true } },
+                branch: { select: { id: true, name: true } },
                 sale_items: {
-                    orderBy: { id: 'desc' },
-                    take: 5,
-                    include: { product: true },
+                    take: 1,
+                    select: { product: { select: { name: true } } },
                 },
             },
         });
-        if (!sale || sale.sale_items.length === 0)
-            return [];
-        return sale.sale_items.map((item) => ({
-            productName: item.product.name,
-            price: item.unit_price,
+        return sales.map((sale) => ({
+            id: sale.id,
+            saleNumber: sale.sale_number,
+            totalAmount: sale.total_amount,
+            status: sale.status,
+            paymentMethod: sale.payment_method,
+            saleDate: sale.sale_date,
+            customerName: sale.customer?.name || 'Walk-in Customer',
+            branch: sale.branch,
+            productName: sale.sale_items[0]?.product?.name || null,
         }));
     }
 }

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteHoldSaleController = exports.retrieveHoldSaleController = exports.createHoldSaleController = exports.getHoldSalesController = exports.getRecentSaleItemProductNameAndPrice = exports.getTodaySalesController = exports.refundSaleController = exports.createSaleController = exports.getSaleByIdController = exports.getReturnTransactionsController = exports.getSalesForReturnsController = exports.getSalesController = void 0;
+exports.deleteSaleController = exports.updateSaleController = exports.cancelSaleController = exports.deleteHoldSaleController = exports.retrieveHoldSaleController = exports.createHoldSaleController = exports.getHoldSalesController = exports.getRecentSaleItemProductNameAndPrice = exports.getTodaySalesController = exports.refundSaleController = exports.createSaleController = exports.getSaleByIdController = exports.getReturnTransactionsController = exports.getSalesForReturnsController = exports.getSalesController = void 0;
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const sales_service_1 = require("../services/sales.service");
 const apiResponse_1 = require("../utils/apiResponse");
@@ -62,6 +62,14 @@ const getSalesController = (0, asyncHandler_1.default)(async (req, res) => {
     const search = req.query.search?.trim();
     const startDateRaw = req.query.startDate;
     const endDateRaw = req.query.endDate;
+    const paymentMethod = req.query.paymentMethod?.trim();
+    const paymentStatus = req.query.paymentStatus?.trim();
+    const status = req.query.status?.trim();
+    const cashierId = req.query.cashierId?.trim();
+    const customerId = req.query.customerId?.trim();
+    const sortBy = req.query.sortBy?.trim() || "sale_date";
+    const sortOrderRaw = req.query.sortOrder?.trim()?.toLowerCase();
+    const sortOrder = sortOrderRaw === "asc" ? "asc" : "desc";
     const parsedStartDate = startDateRaw && !Number.isNaN(new Date(startDateRaw).getTime())
         ? new Date(startDateRaw)
         : undefined;
@@ -75,6 +83,13 @@ const getSalesController = (0, asyncHandler_1.default)(async (req, res) => {
         search,
         startDate: parsedStartDate,
         endDate: parsedEndDate,
+        paymentMethod,
+        paymentStatus,
+        status,
+        cashierId,
+        customerId,
+        sortBy,
+        sortOrder,
     });
     console.log(`Returning ${result.data.length} sales for branchId: ${branchId || 'ALL'} (page: ${result.meta?.page}, total: ${result.meta?.total})`);
     new apiResponse_1.ApiResponse(result.data, "Sales fetched successfully", 200, true, result.meta).send(res);
@@ -145,8 +160,9 @@ const getTodaySalesController = (0, asyncHandler_1.default)(async (req, res) => 
 exports.getTodaySalesController = getTodaySalesController;
 const getRecentSaleItemProductNameAndPrice = (0, asyncHandler_1.default)(async (req, res) => {
     const branchId = resolveBranchId(req);
-    const recentSaleItem = await saleService.getRecentSaleItemsProductNameAndPrice(branchId);
-    new apiResponse_1.ApiResponse(recentSaleItem, "Recent sale item product name and price fetched successfully").send(res);
+    const limit = req.query.limit ? Number(req.query.limit) : 10;
+    const recentSales = await saleService.getRecentSales(branchId, limit);
+    new apiResponse_1.ApiResponse(recentSales, "Recent sales fetched successfully").send(res);
 });
 exports.getRecentSaleItemProductNameAndPrice = getRecentSaleItemProductNameAndPrice;
 const getHoldSalesController = (0, asyncHandler_1.default)(async (req, res) => {
@@ -196,4 +212,33 @@ const deleteHoldSaleController = (0, asyncHandler_1.default)(async (req, res) =>
     new apiResponse_1.ApiResponse(null, "Held sale deleted successfully").send(res);
 });
 exports.deleteHoldSaleController = deleteHoldSaleController;
+const cancelSaleController = (0, asyncHandler_1.default)(async (req, res) => {
+    const sale = await saleService.cancelSale(req.params.saleId);
+    new apiResponse_1.ApiResponse(sale, "Sale cancelled successfully").send(res);
+});
+exports.cancelSaleController = cancelSaleController;
+const updateSaleController = (0, asyncHandler_1.default)(async (req, res) => {
+    const sale = await saleService.updateSale(req.params.saleId, {
+        paymentMethod: req.body?.paymentMethod,
+        paymentStatus: req.body?.paymentStatus,
+        status: req.body?.status,
+        notes: req.body?.notes,
+        discountAmount: req.body?.discountAmount !== undefined && req.body?.discountAmount !== null
+            ? Number(req.body.discountAmount)
+            : undefined,
+        customerId: req.body?.customerId !== undefined ? req.body.customerId : undefined,
+        paymentReceived: req.body?.paymentReceived !== undefined && req.body?.paymentReceived !== null
+            ? Number(req.body.paymentReceived)
+            : undefined,
+        items: Array.isArray(req.body?.items) ? req.body.items : undefined,
+        updatedBy: req.user?.id,
+    });
+    new apiResponse_1.ApiResponse(sale, "Sale updated successfully").send(res);
+});
+exports.updateSaleController = updateSaleController;
+const deleteSaleController = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await saleService.deleteSale(req.params.saleId);
+    new apiResponse_1.ApiResponse(result, "Sale deleted successfully").send(res);
+});
+exports.deleteSaleController = deleteSaleController;
 //# sourceMappingURL=sale.controller.js.map

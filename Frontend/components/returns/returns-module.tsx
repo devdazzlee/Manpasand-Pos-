@@ -1051,7 +1051,7 @@ export function ReturnsModule({
       setNewReturn((prev) => ({ ...prev, saleId, returnType }))
 
       const alreadyReturned = getAlreadyReturnedForSale(saleId)
-      const items: SelectedReturnItem[] = sale.sale_items
+      const items: SelectedReturnItem[] = (sale.sale_items || [])
         .map((item) => {
           const purchased = item.quantity
           const prior = alreadyReturned.get(item.product.id) || 0
@@ -1068,10 +1068,16 @@ export function ReturnsModule({
             disposition: "RESTOCK" as InventoryDisposition,
           }
         })
-        .filter((i) => i.remainingQuantity > 0)
+        .filter((i) => i.productId && i.remainingQuantity > 0)
 
       setSelectedReturnItems(items)
       setReturnScope("FULL")
+
+      if (items.length === 0) {
+        toast.error("No returnable items", {
+          description: "This sale has no products left to refund.",
+        })
+      }
 
       const returnedItems = items.map((i) => ({
         productId: i.productId,
@@ -1138,6 +1144,39 @@ export function ReturnsModule({
     setIsProcessOpen(true)
     void handleSaleSelect(saleId, "REFUND")
   }
+
+  // Open refund flow when navigated from Sales History
+  useEffect(() => {
+    let cancelled = false
+
+    const run = async () => {
+      const { getPendingRefund, clearPendingRefund } = await import("@/lib/pending-refund")
+      const pending = getPendingRefund()
+      if (!pending?.saleId) return
+
+      setModuleTab("returns")
+      setIsProcessOpen(true)
+      setSaleSearch(pending.saleNumber || "")
+
+      try {
+        await handleSaleSelect(pending.saleId, "REFUND")
+        if (!cancelled) {
+          clearPendingRefund()
+        }
+      } catch {
+        if (!cancelled) {
+          clearPendingRefund()
+        }
+      }
+    }
+
+    void run()
+    return () => {
+      cancelled = true
+    }
+    // intentionally run once on mount when arriving from Sales History
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const openProcessDialog = () => {
     setNewReturn((prev) => ({

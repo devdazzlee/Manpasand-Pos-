@@ -14,6 +14,9 @@ import {
     createHoldSaleController,
     retrieveHoldSaleController,
     deleteHoldSaleController,
+    cancelSaleController,
+    updateSaleController,
+    deleteSaleController,
 } from "../controllers/sale.controller";
 import { createSaleSchema, refundSaleSchema } from "../validations/sale.validation";
 
@@ -27,6 +30,7 @@ const holdSaleRoles = [
 ];
 const saleManagementRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER"];
 const metadataRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER", "WAREHOUSE_MANAGER", "PURCHASE_MANAGER"];
+const adminRoles = ["SUPER_ADMIN", "ADMIN"];
 
 router.use(authenticate);
 router.use("/hold", authorize(holdSaleRoles));
@@ -47,5 +51,8 @@ router.get("/", getSalesController);
 router.get("/:saleId", getSaleByIdController);
 router.post("/", validate(createSaleSchema), createSaleController);
 router.patch("/:saleId/refund", validate(refundSaleSchema), refundSaleController);
+router.patch("/:saleId/cancel", authorize(adminRoles), cancelSaleController);
+router.patch("/:saleId", updateSaleController);
+router.delete("/:saleId", deleteSaleController);
 
 export default router;

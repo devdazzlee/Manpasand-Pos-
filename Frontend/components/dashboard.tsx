@@ -184,17 +184,25 @@ export function Dashboard({ onLogout }: DashboardProps) {
         onClose={() => setSidebarOpen(false)}
       />
       
-      {/* Mobile Menu Button */}
-      <div className="lg:hidden fixed top-4 left-4 z-30">
+      {/* Mobile Top App Bar */}
+      <header className="lg:hidden fixed inset-x-0 top-0 z-30 flex h-14 items-center gap-3 border-b border-gray-200 bg-white px-3 shadow-sm sm:h-16 sm:px-4">
         <Button
-          variant="default"
+          variant="ghost"
           size="sm"
           onClick={() => setSidebarOpen(true)}
-          className="bg-blue-600 hover:bg-blue-700 shadow-lg"
+          className="h-9 w-9 p-0 text-gray-700 hover:bg-gray-100"
         >
           <Menu className="h-5 w-5" />
         </Button>
-      </div>
+        <div className="flex items-center gap-2">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img src="/logo.png" alt="Manpasand" className="h-8 w-8 object-contain shrink-0" />
+          <div className="leading-tight">
+            <p className="text-sm font-bold text-gray-900">MANPASAND</p>
+            <p className="-mt-0.5 text-[10px] text-gray-500">Enterprise POS</p>
+          </div>
+        </div>
+      </header>
 
       <main className="flex w-full flex-1 flex-col overflow-auto pt-14 sm:pt-16 lg:pt-0">
         {renderContent()}

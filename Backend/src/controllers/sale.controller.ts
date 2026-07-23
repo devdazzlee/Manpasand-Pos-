@@ -68,6 +68,14 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
     const search = (req.query.search as string | undefined)?.trim();
     const startDateRaw = req.query.startDate as string | undefined;
     const endDateRaw = req.query.endDate as string | undefined;
+    const paymentMethod = (req.query.paymentMethod as string | undefined)?.trim();
+    const paymentStatus = (req.query.paymentStatus as string | undefined)?.trim();
+    const status = (req.query.status as string | undefined)?.trim();
+    const cashierId = (req.query.cashierId as string | undefined)?.trim();
+    const customerId = (req.query.customerId as string | undefined)?.trim();
+    const sortBy = (req.query.sortBy as string | undefined)?.trim() || "sale_date";
+    const sortOrderRaw = (req.query.sortOrder as string | undefined)?.trim()?.toLowerCase();
+    const sortOrder = sortOrderRaw === "asc" ? "asc" : "desc";
 
     const parsedStartDate =
       startDateRaw && !Number.isNaN(new Date(startDateRaw).getTime())
@@ -85,6 +93,13 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
         search,
         startDate: parsedStartDate,
         endDate: parsedEndDate,
+        paymentMethod,
+        paymentStatus,
+        status,
+        cashierId,
+        customerId,
+        sortBy,
+        sortOrder,
     });
 
     console.log(
@@ -173,8 +188,9 @@ const getTodaySalesController = asyncHandler(async (req: Request, res: Response)
 
 const getRecentSaleItemProductNameAndPrice = asyncHandler(async (req: Request, res: Response) => {
     const branchId = resolveBranchId(req);
-    const recentSaleItem = await saleService.getRecentSaleItemsProductNameAndPrice(branchId);
-    new ApiResponse(recentSaleItem, "Recent sale item product name and price fetched successfully").send(res);
+    const limit = req.query.limit ? Number(req.query.limit) : 10;
+    const recentSales = await saleService.getRecentSales(branchId, limit);
+    new ApiResponse(recentSales, "Recent sales fetched successfully").send(res);
 });
 
 const getHoldSalesController = asyncHandler(async (req: Request, res: Response) => {
@@ -231,6 +247,37 @@ const deleteHoldSaleController = asyncHandler(async (req: Request, res: Response
     new ApiResponse(null, "Held sale deleted successfully").send(res);
 });
 
+const cancelSaleController = asyncHandler(async (req: Request, res: Response) => {
+    const sale = await saleService.cancelSale(req.params.saleId);
+    new ApiResponse(sale, "Sale cancelled successfully").send(res);
+});
+
+const updateSaleController = asyncHandler(async (req: Request, res: Response) => {
+    const sale = await saleService.updateSale(req.params.saleId, {
+        paymentMethod: req.body?.paymentMethod,
+        paymentStatus: req.body?.paymentStatus,
+        status: req.body?.status,
+        notes: req.body?.notes,
+        discountAmount:
+            req.body?.discountAmount !== undefined && req.body?.discountAmount !== null
+                ? Number(req.body.discountAmount)
+                : undefined,
+        customerId: req.body?.customerId !== undefined ? req.body.customerId : undefined,
+        paymentReceived:
+            req.body?.paymentReceived !== undefined && req.body?.paymentReceived !== null
+                ? Number(req.body.paymentReceived)
+                : undefined,
+        items: Array.isArray(req.body?.items) ? req.body.items : undefined,
+        updatedBy: req.user?.id,
+    });
+    new ApiResponse(sale, "Sale updated successfully").send(res);
+});
+
+const deleteSaleController = asyncHandler(async (req: Request, res: Response) => {
+    const result = await saleService.deleteSale(req.params.saleId);
+    new ApiResponse(result, "Sale deleted successfully").send(res);
+});
+
 export {
     getSalesController,
     getSalesForReturnsController,
@@ -244,4 +291,7 @@ export {
     createHoldSaleController,
     retrieveHoldSaleController,
     deleteHoldSaleController,
+    cancelSaleController,
+    updateSaleController,
+    deleteSaleController,
 };

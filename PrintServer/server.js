@@ -190,6 +190,19 @@ function deriveLanguageHint(p) {
   return 'generic';
 }
 
+// Windows ships a handful of virtual "printers" (Print to PDF, XPS Writer,
+// Fax, OneNote) that are not real output devices. Sending a job to any of
+// them makes Windows pop up a native "Save As" dialog on the server machine
+// for every single print — there is no supported way to suppress it. Never
+// let these be selectable as the receipt printer.
+const VIRTUAL_PRINTER_PATTERNS = [
+  /microsoft print to pdf/i,
+  /microsoft xps document writer/i,
+  /^fax$/i,
+  /onenote/i,
+];
+const isVirtualPrinter = (name) => VIRTUAL_PRINTER_PATTERNS.some((re) => re.test(name || ''));
+
 // Derive receipt profile - same as backend
 function deriveReceiptProfile(p) {
   const w = p.defaults?.pageWidthMM ?? null;
@@ -237,6 +250,10 @@ async function getAvailablePrinters() {
       languageHint: deriveLanguageHint(p),
       receiptProfile: deriveReceiptProfile(p)
     }));
+
+    // Drop virtual printers (Print to PDF, XPS, Fax, OneNote) — see
+    // isVirtualPrinter for why these can never be a valid receipt printer.
+    printers = printers.filter(p => !isVirtualPrinter(p.name));
 
     // Fallback to default if no printers found
     if (printers.length === 0) {

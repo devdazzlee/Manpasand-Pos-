@@ -4,6 +4,18 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { useToast } from "@/hooks/use-toast";
+import apiClient from "@/lib/apiClient";
 import {
   getDefaultDashboardTab,
   normalizeUserRole,
@@ -39,6 +51,10 @@ import {
   Download,
   LineChart,
   Tags,
+  KeyRound,
+  Eye,
+  EyeOff,
+  Loader2,
   type LucideIcon,
 } from "lucide-react";
 
@@ -387,6 +403,14 @@ export function Sidebar({
     "system",
   ]);
   const [role, setRole] = useState<UserRole | null>(null);
+  const [showChangePassword, setShowChangePassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [showCurrentPassword, setShowCurrentPassword] = useState(false);
+  const [showNewPassword, setShowNewPassword] = useState(false);
+  const [changingPassword, setChangingPassword] = useState(false);
+  const { toast } = useToast();
 
   useEffect(() => {
     const syncRole = () => {
@@ -398,6 +422,61 @@ export function Sidebar({
 
     return () => window.removeEventListener("storage", syncRole);
   }, []);
+
+  const resetChangePasswordForm = () => {
+    setCurrentPassword("");
+    setNewPassword("");
+    setConfirmPassword("");
+    setShowCurrentPassword(false);
+    setShowNewPassword(false);
+  };
+
+  const handleChangePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      toast({
+        variant: "destructive",
+        title: "Missing fields",
+        description: "Fill in your current password and the new password twice.",
+      });
+      return;
+    }
+    if (newPassword.length < 6) {
+      toast({
+        variant: "destructive",
+        title: "Password too short",
+        description: "New password must be at least 6 characters.",
+      });
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      toast({
+        variant: "destructive",
+        title: "Passwords don't match",
+        description: "New password and confirmation must match.",
+      });
+      return;
+    }
+
+    setChangingPassword(true);
+    try {
+      await apiClient.patch("/auth/change-password", { currentPassword, newPassword });
+      toast({
+        variant: "success",
+        title: "Password updated",
+        description: "Use your new password next time you sign in.",
+      });
+      setShowChangePassword(false);
+      resetChangePasswordForm();
+    } catch (error: any) {
+      toast({
+        variant: "destructive",
+        title: "Could not update password",
+        description: error?.response?.data?.message || "Something went wrong.",
+      });
+    } finally {
+      setChangingPassword(false);
+    }
+  };
 
   const filteredMenuSections = filterMenuSectionsByRole(role);
 
@@ -458,9 +537,8 @@ export function Sidebar({
 
         <div className="border-b border-gray-200 p-6">
           <div className="flex items-center space-x-3">
-            <div className="rounded-xl bg-gradient-to-br from-blue-600 to-blue-700 p-2.5 shadow-lg">
-              <Store className="h-6 w-6 text-white" />
-            </div>
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="Manpasand" className="h-11 w-11 object-contain shrink-0" />
             <div>
               <h1 className="text-xl font-bold text-gray-900">MANPASAND</h1>
               <p className="text-sm text-gray-500">Enterprise POS</p>
@@ -568,7 +646,15 @@ export function Sidebar({
           </div>
         </nav>
 
-        <div className="border-t border-gray-200 bg-gray-50 p-4">
+        <div className="border-t border-gray-200 bg-gray-50 p-4 space-y-1">
+          <Button
+            variant="ghost"
+            className="w-full justify-start text-gray-700 hover:bg-gray-100"
+            onClick={() => setShowChangePassword(true)}
+          >
+            <KeyRound className="mr-3 h-4 w-4" />
+            Change Password
+          </Button>
           <Button
             variant="ghost"
             className="w-full justify-start text-red-600 hover:bg-red-50 hover:text-red-700"
@@ -579,6 +665,105 @@ export function Sidebar({
           </Button>
         </div>
       </div>
+
+      <Dialog
+        open={showChangePassword}
+        onOpenChange={(open) => {
+          setShowChangePassword(open);
+          if (!open) resetChangePasswordForm();
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Change Password</DialogTitle>
+            <DialogDescription>Update the password you use to sign in.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="current-password">Current Password</Label>
+              <div className="relative">
+                <Input
+                  id="current-password"
+                  type={showCurrentPassword ? "text" : "password"}
+                  value={currentPassword}
+                  onChange={(e) => setCurrentPassword(e.target.value)}
+                  className="pr-10"
+                  disabled={changingPassword}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowCurrentPassword(!showCurrentPassword)}
+                  disabled={changingPassword}
+                >
+                  {showCurrentPassword ? (
+                    <EyeOff className="h-4 w-4 text-gray-400" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-gray-400" />
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="new-password">New Password</Label>
+              <div className="relative">
+                <Input
+                  id="new-password"
+                  type={showNewPassword ? "text" : "password"}
+                  value={newPassword}
+                  onChange={(e) => setNewPassword(e.target.value)}
+                  placeholder="Minimum 6 characters"
+                  className="pr-10"
+                  disabled={changingPassword}
+                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="absolute right-0 top-0 h-full px-3 py-2 hover:bg-transparent"
+                  onClick={() => setShowNewPassword(!showNewPassword)}
+                  disabled={changingPassword}
+                >
+                  {showNewPassword ? (
+                    <EyeOff className="h-4 w-4 text-gray-400" />
+                  ) : (
+                    <Eye className="h-4 w-4 text-gray-400" />
+                  )}
+                </Button>
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="confirm-password">Confirm New Password</Label>
+              <Input
+                id="confirm-password"
+                type={showNewPassword ? "text" : "password"}
+                value={confirmPassword}
+                onChange={(e) => setConfirmPassword(e.target.value)}
+                disabled={changingPassword}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowChangePassword(false)} disabled={changingPassword}>
+              Cancel
+            </Button>
+            <Button onClick={handleChangePassword} disabled={changingPassword}>
+              {changingPassword ? (
+                <>
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  Updating...
+                </>
+              ) : (
+                "Update Password"
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </>
   );
 }

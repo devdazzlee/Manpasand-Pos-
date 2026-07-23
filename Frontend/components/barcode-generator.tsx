@@ -5,6 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -12,15 +15,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  Table,
+  TableHeader,
+  TableBody,
+  TableRow,
+  TableHead,
+  TableCell,
+} from "@/components/ui/table";
 import {
   Printer,
   Package,
   Search,
   Loader2,
-  RefreshCw,
   X,
-  Plus,
   Trash2,
+  ChevronLeft,
+  ChevronRight,
+  Upload,
+  Download,
+  FileSpreadsheet,
+  Barcode as BarcodeIcon,
 } from "lucide-react";
 import JsBarcode from "jsbarcode";
 import { PageLoader } from "./ui/page-loader";
@@ -58,20 +74,19 @@ interface SelectedProductItem {
   copies: number;
 }
 
+const TABLE_PAGE_SIZE = 20;
+
 export default function BarcodeGenerator() {
   const [selectedProducts, setSelectedProducts] = useState<
     SelectedProductItem[]
   >([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [currentProductId, setCurrentProductId] = useState("");
   const [globalExpiryDuration, setGlobalExpiryDuration] = useState("");
   // Global default net weight + a global copies value so a whole batch can be
   // configured in one click for bulk printing workflows.
   const [globalNetWeight, setGlobalNetWeight] = useState("");
   const [globalCopies, setGlobalCopies] = useState("1");
-  const [productDropdownOpen, setProductDropdownOpen] = useState(false);
   const productSearchInputRef = useRef<HTMLInputElement | null>(null);
-  const productDropdownRef = useRef<HTMLDivElement | null>(null);
   // Global printer settings (configured in Printer Settings page)
   const { barcodePrinter, printers: globalPrinters } = usePrinterSettings();
   const [selectedPaperSize, setSelectedPaperSize] = useState("3x2inch");
@@ -80,6 +95,20 @@ export default function BarcodeGenerator() {
   const { toast } = useToast();
   const [kioskMode, setKioskMode] = useState(false);
   const [customNetWeightMode, setCustomNetWeightMode] = useState<Record<string, boolean>>({});
+
+  // Product picker table state
+  const [activeTab, setActiveTab] = useState<"select" | "bulk">("select");
+  const [categoryFilter, setCategoryFilter] = useState("all");
+  const [tablePage, setTablePage] = useState(1);
+
+  // What gets printed on the label — wired into generatePDFAndPrint below.
+  const [includeProductName, setIncludeProductName] = useState(true);
+  const [includePrice, setIncludePrice] = useState(true);
+  const [includeSku, setIncludeSku] = useState(false);
+
+  // Bulk Upload tab
+  const [bulkParsing, setBulkParsing] = useState(false);
+  const bulkFileInputRef = useRef<HTMLInputElement | null>(null);
 
   // Detect kiosk mode on mount
   useEffect(() => {
@@ -179,21 +208,6 @@ export default function BarcodeGenerator() {
     const debounceTimer = setTimeout(fetchData, 300);
     return () => clearTimeout(debounceTimer);
   }, [searchTerm]);
-
-  // Handle click outside to close dropdown
-  useEffect(() => {
-    const handleClickOutside = (event: MouseEvent) => {
-      if (
-        productDropdownRef.current &&
-        !productDropdownRef.current.contains(event.target as Node)
-      ) {
-        setProductDropdownOpen(false);
-      }
-    };
-
-    document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
 
   // Printer loading handled by global usePrinterSettings hook
 
@@ -379,19 +393,51 @@ export default function BarcodeGenerator() {
     }
   };
 
+  // Every non-empty category currently in the catalog, for the table filter.
+  const categoryOptions = useMemo(() => {
+    const set = new Set<string>();
+    products.forEach((p) => {
+      if (p.is_active !== false && p.category) set.add(p.category);
+    });
+    return Array.from(set).sort((a, b) => a.localeCompare(b));
+  }, [products]);
+
   const filteredProducts = useMemo(() => {
     // Inactive products are kept out of the barcode generator — there's no
     // point printing barcodes for items that can't be sold.
-    const activeProducts = products.filter((p) => p.is_active !== false);
-    if (!searchTerm) return activeProducts;
+    let list = products.filter((p) => p.is_active !== false);
 
-    return activeProducts.filter(
-      (product) =>
-        product.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (product.sku &&
-          product.sku.toLowerCase().includes(searchTerm.toLowerCase()))
-    );
-  }, [products, searchTerm]);
+    if (categoryFilter !== "all") {
+      list = list.filter((p) => p.category === categoryFilter);
+    }
+
+    if (searchTerm) {
+      const lower = searchTerm.toLowerCase();
+      list = list.filter(
+        (product) =>
+          product.name.toLowerCase().includes(lower) ||
+          (product.sku && product.sku.toLowerCase().includes(lower)) ||
+          (product.code && product.code.toLowerCase().includes(lower)),
+      );
+    }
+
+    return list;
+  }, [products, searchTerm, categoryFilter]);
+
+  // Reset to page 1 whenever the visible set changes, so the user never
+  // lands on a page that no longer exists after filtering.
+  useEffect(() => {
+    setTablePage(1);
+  }, [searchTerm, categoryFilter]);
+
+  const totalTablePages = Math.max(1, Math.ceil(filteredProducts.length / TABLE_PAGE_SIZE));
+  const pagedProducts = useMemo(
+    () => filteredProducts.slice((tablePage - 1) * TABLE_PAGE_SIZE, tablePage * TABLE_PAGE_SIZE),
+    [filteredProducts, tablePage],
+  );
+
+  const isProductSelected = (productId: string) =>
+    selectedProducts.some((sp) => sp.product.id === productId);
 
   const handleProductSelect = (productId: string) => {
     const product = products.find((p) => p.id === productId);
@@ -413,9 +459,7 @@ export default function BarcodeGenerator() {
         position: "top-right",
         duration: 300,
       });
-      setCurrentProductId("");
       setSearchTerm("");
-      setProductDropdownOpen(false);
       if (productSearchInputRef.current) productSearchInputRef.current.focus();
       return;
     }
@@ -443,12 +487,67 @@ export default function BarcodeGenerator() {
       position: "top-right",
       duration: 300,
     });
-    setCurrentProductId("");
     setSearchTerm("");
-    setProductDropdownOpen(false);
     if (productSearchInputRef.current) {
       // Re-focus so the next scan/search lands here without an extra click.
       productSearchInputRef.current.focus();
+    }
+  };
+
+  // Table row checkbox — add or remove a single product from the selection.
+  const toggleProductRow = (product: Product) => {
+    const existingItem = selectedProducts.find((sp) => sp.product.id === product.id);
+    if (existingItem) {
+      removeProduct(existingItem.id);
+    } else {
+      handleProductSelect(product.id);
+    }
+  };
+
+  // Silent bulk-add — used by "select all on this page" and Bulk Upload, so
+  // adding many products doesn't spam a toast per item.
+  const addProductsBulk = (productsToAdd: Product[]) => {
+    if (productsToAdd.length === 0) return 0;
+    let addedCount = 0;
+    setSelectedProducts((prev) => {
+      const existingIds = new Set(prev.map((sp) => sp.product.id));
+      const additions: SelectedProductItem[] = productsToAdd
+        .filter((p) => !existingIds.has(p.id))
+        .map((p) => {
+          const item: SelectedProductItem = {
+            id: `${Date.now()}-${p.id}`,
+            product: p,
+            netWeight: globalNetWeight || "",
+            packageDate: new Date(),
+            expiryDuration: globalExpiryDuration || "",
+            copies: Math.max(1, parseInt(globalCopies, 10) || 1),
+          };
+          if (globalExpiryDuration) {
+            item.expiryDate = calculateExpiryDate(item.packageDate, globalExpiryDuration);
+          }
+          return item;
+        });
+      addedCount = additions.length;
+      return [...prev, ...additions];
+    });
+    return addedCount;
+  };
+
+  const allOnPageSelected =
+    pagedProducts.length > 0 && pagedProducts.every((p) => isProductSelected(p.id));
+
+  const toggleSelectAllOnPage = () => {
+    if (allOnPageSelected) {
+      const pageIds = new Set(pagedProducts.map((p) => p.id));
+      setSelectedProducts((prev) => prev.filter((sp) => !pageIds.has(sp.product.id)));
+      return;
+    }
+    const added = addProductsBulk(pagedProducts.filter((p) => !isProductSelected(p.id)));
+    if (added > 0) {
+      sonnerToast.success(`Added ${added} product${added === 1 ? "" : "s"}`, {
+        position: "top-right",
+        duration: 800,
+      });
     }
   };
 
@@ -475,19 +574,115 @@ export default function BarcodeGenerator() {
         ),
       );
       setSearchTerm("");
-      setProductDropdownOpen(false);
       return;
     }
     handleProductSelect(match.id);
   };
 
-  const addProduct = () => {
-    if (!currentProductId) return;
-    handleProductSelect(currentProductId);
-  };
-
   const removeProduct = (itemId: string) => {
     setSelectedProducts((prev) => prev.filter((item) => item.id !== itemId));
+  };
+
+  // Bulk Upload tab — parse a CSV/XLSX of SKUs (with optional Net Weight /
+  // Expiry Months / Copies columns) and add every matched product at once.
+  const downloadBulkTemplate = () => {
+    const csv = "SKU,Net Weight,Expiry Months,Copies\nSKU001,500g,12,2\n";
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = "barcode_bulk_upload_template.csv";
+    link.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleBulkFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setBulkParsing(true);
+    try {
+      const XLSX = await import("xlsx");
+      const data = await file.arrayBuffer();
+      const workbook = XLSX.read(data, { type: "array" });
+      const sheet = workbook.Sheets[workbook.SheetNames[0]];
+      const rows: any[] = XLSX.utils.sheet_to_json(sheet, { defval: "" });
+
+      const existingIds = new Set(selectedProducts.map((sp) => sp.product.id));
+      const additions: SelectedProductItem[] = [];
+      let notFound = 0;
+
+      rows.forEach((row) => {
+        const skuRaw = String(row.SKU ?? row.sku ?? row.Code ?? row.code ?? "").trim();
+        if (!skuRaw) return;
+        const lower = skuRaw.toLowerCase();
+        const product = products.find(
+          (p) =>
+            p.is_active !== false &&
+            ((p.sku || "").toLowerCase() === lower || (p.code || "").toLowerCase() === lower),
+        );
+        if (!product) {
+          notFound += 1;
+          return;
+        }
+        if (existingIds.has(product.id)) return;
+        existingIds.add(product.id);
+
+        const netWeight =
+          String(row["Net Weight"] ?? row.NetWeight ?? row.netWeight ?? "").trim() ||
+          globalNetWeight ||
+          "";
+        const expiryDuration =
+          String(row["Expiry Months"] ?? row.ExpiryMonths ?? row.expiryMonths ?? "").trim() ||
+          globalExpiryDuration ||
+          "";
+        const copiesRaw = parseInt(String(row.Copies ?? row.copies ?? ""), 10);
+        const copies =
+          Number.isFinite(copiesRaw) && copiesRaw > 0
+            ? copiesRaw
+            : Math.max(1, parseInt(globalCopies, 10) || 1);
+
+        const item: SelectedProductItem = {
+          id: `${Date.now()}-${product.id}`,
+          product,
+          netWeight,
+          packageDate: new Date(),
+          expiryDuration,
+          copies,
+        };
+        if (expiryDuration) {
+          item.expiryDate = calculateExpiryDate(item.packageDate, expiryDuration);
+        }
+        additions.push(item);
+      });
+
+      if (additions.length) {
+        setSelectedProducts((prev) => [...prev, ...additions]);
+      }
+
+      toast({
+        variant: additions.length === 0 ? "destructive" : "default",
+        title: additions.length === 0 ? "No products matched" : "Bulk upload processed",
+        description:
+          additions.length === 0
+            ? "None of the SKUs in that file matched a product."
+            : `${additions.length} product${additions.length === 1 ? "" : "s"} added` +
+              (notFound ? `, ${notFound} row${notFound === 1 ? "" : "s"} didn't match any SKU.` : "."),
+      });
+
+      if (additions.length > 0) {
+        setActiveTab("select");
+      }
+    } catch (err: any) {
+      toast({
+        variant: "destructive",
+        title: "Upload failed",
+        description: err?.message || "Could not read that file. Use the CSV template.",
+      });
+    } finally {
+      setBulkParsing(false);
+      if (bulkFileInputRef.current) bulkFileInputRef.current.value = "";
+    }
   };
 
   const updateProductData = (
@@ -647,55 +842,69 @@ export default function BarcodeGenerator() {
       const leftMargin = marginPt;
       
       // Title (Product Name) - centered, bold, larger, dark
-      const title = (sp.product.name || '').toUpperCase().trim();
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(titleFontSize);
-      doc.setTextColor(0, 0, 0); // Pure black for darker text
-      
-      // Calculate text width and wrap if needed (max 2 lines)
-      const titleLines = doc.splitTextToSize(title, contentWidth * 0.95);
-      const titleHeight = Math.min(titleLines.length, 2) * titleFontSize * 1.4;
-      
-      // Center the title
-      titleLines.slice(0, 2).forEach((line: string, index: number) => {
-        const lineWidth = doc.getTextWidth(line);
-        const lineX = leftMargin + (contentWidth - lineWidth) / 2;
-        doc.text(line, lineX, y + titleFontSize + (index * titleFontSize * 1.4));
-      });
-      
-      y += titleHeight + mmToPt(0.8); // More spacing
-      
+      if (includeProductName) {
+        const title = (sp.product.name || '').toUpperCase().trim();
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(titleFontSize);
+        doc.setTextColor(0, 0, 0); // Pure black for darker text
+
+        // Calculate text width and wrap if needed (max 2 lines)
+        const titleLines = doc.splitTextToSize(title, contentWidth * 0.95);
+        const titleHeight = Math.min(titleLines.length, 2) * titleFontSize * 1.4;
+
+        // Center the title
+        titleLines.slice(0, 2).forEach((line: string, index: number) => {
+          const lineWidth = doc.getTextWidth(line);
+          const lineX = leftMargin + (contentWidth - lineWidth) / 2;
+          doc.text(line, lineX, y + titleFontSize + (index * titleFontSize * 1.4));
+        });
+
+        y += titleHeight + mmToPt(0.8); // More spacing
+      }
+
+      // SKU line (optional) - small, left-aligned
+      if (includeSku) {
+        const skuText = `SKU: ${sp.product.sku || sp.product.code || '-'}`;
+        doc.setFont('helvetica', 'bold');
+        doc.setFontSize(labelFontSize);
+        doc.setTextColor(0, 0, 0);
+        doc.text(skuText, leftMargin, y + labelFontSize);
+        y += labelFontSize * 1.5 + mmToPt(0.3);
+      }
+
       // Meta row (Weight & Price) - ALL BOLD AND DARK
       const netWeightValue = sp.netWeight ? formatWeightDisplay(sp.netWeight) : '';
       const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
       const priceText = `RS ${price}`;
-      
-      if (netWeightValue) {
-        // NET WT - ALL BOLD
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(labelFontSize);
-        doc.setTextColor(0, 0, 0); // Pure black
-        doc.text('NET WT:', leftMargin, y + labelFontSize);
-        
-        // Weight value - ALSO BOLD
-        const labelWidth = doc.getTextWidth('NET WT: ');
-        doc.setFont('helvetica', 'bold'); // Changed to bold
-        doc.setFontSize(valueFontSize);
-        doc.setTextColor(0, 0, 0);
-        doc.text(netWeightValue, leftMargin + labelWidth, y + labelFontSize);
-        
+
+      if (netWeightValue || includePrice) {
+        if (netWeightValue) {
+          // NET WT - ALL BOLD
+          doc.setFont('helvetica', 'bold');
+          doc.setFontSize(labelFontSize);
+          doc.setTextColor(0, 0, 0); // Pure black
+          doc.text('NET WT:', leftMargin, y + labelFontSize);
+
+          // Weight value - ALSO BOLD
+          const labelWidth = doc.getTextWidth('NET WT: ');
+          doc.setFont('helvetica', 'bold'); // Changed to bold
+          doc.setFontSize(valueFontSize);
+          doc.setTextColor(0, 0, 0);
+          doc.text(netWeightValue, leftMargin + labelWidth, y + labelFontSize);
+        }
+
         // Price on the right side in bold
-        if (priceText) {
+        if (includePrice) {
           doc.setFont('helvetica', 'bold');
           doc.setFontSize(priceFontSize);
           doc.setTextColor(0, 0, 0);
           const priceWidth = doc.getTextWidth(priceText);
           doc.text(priceText, leftMargin + contentWidth - priceWidth, y + priceFontSize);
         }
-        
+
         y += labelFontSize * 1.5 + mmToPt(0.5); // More spacing
       }
-      
+
       // Dates row (PKG & EXP) - ALL BOLD AND DARK
       const pkgDate = formatDate(sp.packageDate);
       const expDate = formatDate(sp.expiryDate);
@@ -1093,81 +1302,29 @@ export default function BarcodeGenerator() {
   }
 
   return (
-    <div className="p-6">
+    <div className="p-4 md:p-6 space-y-6">
+      <div>
+        <h1 className="text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
+          <BarcodeIcon className="h-6 w-6 text-blue-600" />
+          Barcode Generator
+        </h1>
+        <p className="text-sm text-gray-600 mt-1">
+          Configure label content, pick products, and print barcodes.
+        </p>
+      </div>
+
+      {/* Generation Settings + Preview */}
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        {/* Product Selection and Form */}
-        <Card className="xl:col-span-1">
+        <Card className="xl:col-span-2">
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <Package className="h-5 w-5" />
-              Multi-Product Barcode Generator
+              Generation Settings
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
-
-
-            {/* Product Search Dropdown - Combined Search and Select */}
-            <div className="space-y-2 border-t pt-4" ref={productDropdownRef}>
-              <Label htmlFor="product-search">
-                Add Product ({filteredProducts.length} available)
-              </Label>
-              <div className="relative">
-                <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <Input
-                  ref={productSearchInputRef}
-                  id="product-search"
-                  placeholder="Scan or search by name, SKU, code (Enter to add)"
-                  value={searchTerm}
-                  onFocus={() => setProductDropdownOpen(true)}
-                  autoComplete="off"
-                  onChange={(e) => {
-                    setSearchTerm(e.target.value);
-                    setProductDropdownOpen(true);
-                  }}
-                  onKeyDown={handleSearchKeyDown}
-                  className="pl-9"
-                />
-                {productDropdownOpen && (
-                  <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
-                    {productsLoading ? (
-                      <div className="px-3 py-2 text-sm text-gray-500">
-                        Loading products...
-                      </div>
-                    ) : filteredProducts.length === 0 ? (
-                      <div className="px-3 py-2 text-sm text-gray-500">
-                        {searchTerm ? "No matching products found" : "No products available"}
-                      </div>
-                    ) : (
-                      filteredProducts.map((product) => (
-                        <button
-                          key={product.id}
-                          type="button"
-                          className={`w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${
-                            currentProductId === product.id
-                              ? "bg-blue-50 font-semibold text-blue-900"
-                              : "text-gray-800"
-                          }`}
-                          onMouseDown={(event) => event.preventDefault()}
-                          onClick={() => handleProductSelect(product.id)}
-                        >
-                          <div className="flex flex-col">
-                            <span className="font-medium">{product.name}</span>
-                            <span className="text-xs text-gray-500">
-                              SKU: {product.sku || "N/A"} | Rs{" "}
-                              {product.sales_rate_exc_dis_and_tax || 0}
-                              {product.unitName && ` | Unit: ${product.unitName}`}
-                            </span>
-                          </div>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-
             {/* Barcode Printer - configured globally in Printer Settings */}
-            <div className="space-y-2 border-t pt-4">
+            <div className="space-y-2">
               <Label>Barcode Printer</Label>
               {barcodePrinter ? (
                 <div className="px-3 py-2 rounded-lg border border-purple-100 bg-purple-50/60 flex items-center gap-2 text-sm text-purple-800">
@@ -1181,47 +1338,25 @@ export default function BarcodeGenerator() {
               )}
             </div>
 
-            {/* Global Defaults — applied to every product in one click. */}
-            <div className="space-y-3 border-t pt-4">
-              <div className="flex items-center justify-between">
-                <Label>Apply to All</Label>
-                <span className="text-xs text-gray-500">For bulk batches</span>
-              </div>
-
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <Label htmlFor="global-net-weight" className="text-xs text-gray-600">
-                    Net Weight
-                  </Label>
-                  <Input
-                    id="global-net-weight"
-                    value={globalNetWeight}
-                    onChange={(e) => setGlobalNetWeight(e.target.value)}
-                    placeholder="e.g. 500g"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="global-copies" className="text-xs text-gray-600">
-                    Copies / product
-                  </Label>
-                  <Input
-                    id="global-copies"
-                    type="number"
-                    inputMode="numeric"
-                    min={1}
-                    value={globalCopies}
-                    onChange={(e) => setGlobalCopies(e.target.value)}
-                    placeholder="1"
-                  />
-                </div>
-              </div>
-
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <div>
-                <Label className="text-xs text-gray-600">Expiry</Label>
-                <Select
-                  onValueChange={setGlobalExpiryDuration}
-                  value={globalExpiryDuration}
-                >
+                <Label className="text-xs text-gray-600">Barcode Size</Label>
+                <Select value={selectedPaperSize} onValueChange={setSelectedPaperSize}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {paperSizes.map((size) => (
+                      <SelectItem key={size.value} value={size.value}>
+                        {size.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div>
+                <Label className="text-xs text-gray-600">Default Expiry</Label>
+                <Select onValueChange={setGlobalExpiryDuration} value={globalExpiryDuration}>
                   <SelectTrigger>
                     <SelectValue placeholder="Choose expiry duration" />
                   </SelectTrigger>
@@ -1234,23 +1369,134 @@ export default function BarcodeGenerator() {
                   </SelectContent>
                 </Select>
               </div>
-
-              <Button
-                onClick={applyGlobalDates}
-                variant="outline"
-                size="sm"
-                className="w-full"
-                disabled={
-                  selectedProducts.length === 0 ||
-                  (!globalExpiryDuration && !globalNetWeight && !globalCopies)
-                }
-              >
-                Apply to All Products
-              </Button>
             </div>
 
-            {/* Action Buttons */}
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label htmlFor="global-net-weight" className="text-xs text-gray-600">
+                  Default Net Weight
+                </Label>
+                <Input
+                  id="global-net-weight"
+                  value={globalNetWeight}
+                  onChange={(e) => setGlobalNetWeight(e.target.value)}
+                  placeholder="e.g. 500g"
+                />
+              </div>
+              <div>
+                <Label htmlFor="global-copies" className="text-xs text-gray-600">
+                  Copies / product
+                </Label>
+                <Input
+                  id="global-copies"
+                  type="number"
+                  inputMode="numeric"
+                  min={1}
+                  value={globalCopies}
+                  onChange={(e) => setGlobalCopies(e.target.value)}
+                  placeholder="1"
+                />
+              </div>
+            </div>
+
+            {/* Label content toggles — wired directly into what gets drawn on the printed PDF. */}
             <div className="space-y-2 border-t pt-4">
+              <Label className="text-sm font-semibold text-gray-900">Label Content</Label>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+                  <Label htmlFor="include-name" className="text-sm font-normal cursor-pointer">
+                    Product Name
+                  </Label>
+                  <Switch id="include-name" checked={includeProductName} onCheckedChange={setIncludeProductName} />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+                  <Label htmlFor="include-price" className="text-sm font-normal cursor-pointer">
+                    Price
+                  </Label>
+                  <Switch id="include-price" checked={includePrice} onCheckedChange={setIncludePrice} />
+                </div>
+                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+                  <Label htmlFor="include-sku" className="text-sm font-normal cursor-pointer">
+                    SKU
+                  </Label>
+                  <Switch id="include-sku" checked={includeSku} onCheckedChange={setIncludeSku} />
+                </div>
+              </div>
+            </div>
+
+            <Button
+              onClick={applyGlobalDates}
+              variant="outline"
+              size="sm"
+              className="w-full"
+              disabled={
+                selectedProducts.length === 0 ||
+                (!globalExpiryDuration && !globalNetWeight && !globalCopies)
+              }
+            >
+              Apply Defaults to Selected Products
+            </Button>
+          </CardContent>
+        </Card>
+
+        {/* Preview */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <BarcodeIcon className="h-5 w-5" />
+              Preview
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {(() => {
+              const previewItem = selectedProducts[0];
+              const previewPrice = previewItem
+                ? Math.round(
+                    Number(
+                      calculatePriceByWeight(
+                        previewItem.netWeight,
+                        previewItem.product.sales_rate_exc_dis_and_tax,
+                      ),
+                    ),
+                  )
+                : 0;
+              const previewBarcodeValue = previewItem
+                ? encodeLabelBarcodeValue(previewItem.product.sku, previewItem.product.code, previewPrice)
+                : "000000000";
+
+              return (
+                <>
+                  <div className="rounded-xl border-2 border-dashed border-gray-200 bg-white p-4 flex flex-col items-center justify-center gap-1.5">
+                    {includeProductName && (
+                      <p className="text-xs font-bold uppercase text-center truncate w-full">
+                        {previewItem ? previewItem.product.name : "Sample Product"}
+                      </p>
+                    )}
+                    {includeSku && (
+                      <p className="text-[10px] text-gray-500">
+                        SKU: {previewItem ? previewItem.product.sku || previewItem.product.code || "—" : "SAMPLE"}
+                      </p>
+                    )}
+                    <img
+                      src={generateBarcodeDataURL(previewBarcodeValue)}
+                      alt="Barcode preview"
+                      className="h-16 object-contain"
+                    />
+                    <p className="text-xs font-mono text-gray-600">{previewBarcodeValue}</p>
+                    {includePrice && (
+                      <p className="text-sm font-bold text-blue-600">Rs {previewItem ? previewPrice : 0}</p>
+                    )}
+                  </div>
+                  {!previewItem && (
+                    <p className="text-xs text-center text-gray-400">
+                      Select a product below to preview its real label.
+                    </p>
+                  )}
+                </>
+              );
+            })()}
+
+            <div className="space-y-2 pt-2 border-t">
               <Button
                 onClick={handlePrintAll}
                 className="w-full"
@@ -1277,32 +1523,231 @@ export default function BarcodeGenerator() {
             </div>
           </CardContent>
         </Card>
+      </div>
 
-        {/* Selected Products List */}
-        <Card className="xl:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center justify-between gap-2">
-              <span>Selected Products ({selectedProducts.length})</span>
-              {totalLabels > 0 && (
-                <span className="text-sm font-normal text-gray-600 bg-gray-100 rounded-full px-3 py-1">
-                  {totalLabels} label{totalLabels === 1 ? "" : "s"} total
-                </span>
-              )}
-            </CardTitle>
-          </CardHeader>
-          <CardContent>
-            {selectedProducts.length === 0 ? (
-              <div className="text-center text-gray-500 py-8">
-                <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-                <p>No products selected yet.</p>
-                <p className="text-sm">Add products from the dropdown above.</p>
+      {/* Product selection */}
+      <Card>
+        <CardContent className="p-0">
+          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "select" | "bulk")}>
+            <div className="border-b px-4 pt-4">
+              <TabsList>
+                <TabsTrigger value="select">Select Products</TabsTrigger>
+                <TabsTrigger value="bulk">Bulk Upload</TabsTrigger>
+              </TabsList>
+            </div>
+
+            <TabsContent value="select" className="p-4 space-y-4 mt-0">
+              <div className="flex flex-col lg:flex-row lg:items-center gap-3">
+                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                  <SelectTrigger className="w-full lg:w-48 shrink-0">
+                    <SelectValue placeholder="All Categories" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">All Categories</SelectItem>
+                    {categoryOptions.map((c) => (
+                      <SelectItem key={c} value={c}>
+                        {c}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                  <Input
+                    ref={productSearchInputRef}
+                    placeholder="Scan or search by name, SKU, code (Enter to add)"
+                    value={searchTerm}
+                    autoComplete="off"
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    onKeyDown={handleSearchKeyDown}
+                    className="pl-9"
+                  />
+                </div>
+
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className="text-sm font-medium text-green-700 whitespace-nowrap">
+                    Selected: {selectedProducts.length}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                    onClick={clearAll}
+                    disabled={selectedProducts.length === 0}
+                  >
+                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                    Clear Selection
+                  </Button>
+                  <Button size="sm" onClick={handlePrintAll} disabled={!isFormValid || isPrinting}>
+                    {isPrinting ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <BarcodeIcon className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    Generate Barcodes
+                  </Button>
+                </div>
               </div>
-            ) : (
-              <div className="space-y-3 max-h-screen overflow-y-auto pr-1">
-                {selectedProducts.map((item) => (
+
+              <div className="border rounded-lg overflow-hidden">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10">
+                        <Checkbox checked={allOnPageSelected} onCheckedChange={toggleSelectAllOnPage} />
+                      </TableHead>
+                      <TableHead className="w-10">#</TableHead>
+                      <TableHead>Product Name</TableHead>
+                      <TableHead>SKU</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Price</TableHead>
+                      <TableHead>Stock</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {productsLoading ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                          <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+                          Loading products...
+                        </TableCell>
+                      </TableRow>
+                    ) : pagedProducts.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={7} className="text-center py-8 text-gray-500">
+                          {searchTerm || categoryFilter !== "all"
+                            ? "No matching products found."
+                            : "No products available."}
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      pagedProducts.map((product, idx) => {
+                        const selected = isProductSelected(product.id);
+                        const stock = product.current_stock ?? product.stock ?? 0;
+                        return (
+                          <TableRow key={product.id} className={selected ? "bg-blue-50/50" : undefined}>
+                            <TableCell>
+                              <Checkbox checked={selected} onCheckedChange={() => toggleProductRow(product)} />
+                            </TableCell>
+                            <TableCell className="text-gray-500">
+                              {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}
+                            </TableCell>
+                            <TableCell className="font-medium">{product.name}</TableCell>
+                            <TableCell className="text-gray-600">{product.sku || product.code || "—"}</TableCell>
+                            <TableCell>
+                              {product.category ? (
+                                <Badge variant="secondary">{product.category}</Badge>
+                              ) : (
+                                <span className="text-gray-400">—</span>
+                              )}
+                            </TableCell>
+                            <TableCell>Rs {product.sales_rate_exc_dis_and_tax || 0}</TableCell>
+                            <TableCell>{stock}</TableCell>
+                          </TableRow>
+                        );
+                      })
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+
+              {filteredProducts.length > 0 && (
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
+                  <span>
+                    Showing {(tablePage - 1) * TABLE_PAGE_SIZE + 1} to{" "}
+                    {Math.min(tablePage * TABLE_PAGE_SIZE, filteredProducts.length)} of{" "}
+                    {filteredProducts.length} products
+                  </span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                      disabled={tablePage === 1}
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <span className="px-2 text-xs font-medium">
+                      {tablePage} / {totalTablePages}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 w-8 p-0"
+                      onClick={() => setTablePage((p) => Math.min(totalTablePages, p + 1))}
+                      disabled={tablePage === totalTablePages}
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="bulk" className="p-4 mt-0">
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-8 text-center space-y-3">
+                <Upload className="h-8 w-8 text-gray-400 mx-auto" />
+                <div>
+                  <p className="text-sm font-medium text-gray-700">Upload a CSV or Excel file</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Columns: SKU (required), Net Weight, Expiry Months, Copies — any missing values fall back to
+                    the defaults set in Generation Settings.
+                  </p>
+                </div>
+                <div className="flex items-center justify-center gap-2 pt-1">
+                  <Button variant="outline" size="sm" onClick={downloadBulkTemplate}>
+                    <Download className="h-3.5 w-3.5 mr-1.5" />
+                    Download Template
+                  </Button>
+                  <Button size="sm" onClick={() => bulkFileInputRef.current?.click()} disabled={bulkParsing}>
+                    {bulkParsing ? (
+                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                    ) : (
+                      <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+                    )}
+                    {bulkParsing ? "Processing..." : "Choose File"}
+                  </Button>
+                </div>
+                <input
+                  ref={bulkFileInputRef}
+                  type="file"
+                  accept=".csv,.xlsx,.xls"
+                  className="hidden"
+                  onChange={handleBulkFileChange}
+                />
+              </div>
+            </TabsContent>
+          </Tabs>
+        </CardContent>
+      </Card>
+
+      {/* Configure Selected Products */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between gap-2">
+            <span>Configure Selected Products ({selectedProducts.length})</span>
+            {totalLabels > 0 && (
+              <span className="text-sm font-normal text-gray-600 bg-gray-100 rounded-full px-3 py-1">
+                {totalLabels} label{totalLabels === 1 ? "" : "s"} total
+              </span>
+            )}
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {selectedProducts.length === 0 ? (
+            <div className="text-center text-gray-500 py-8">
+              <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
+              <p>No products selected yet.</p>
+              <p className="text-sm">Check products from the table above to configure and print their labels.</p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 max-h-[75vh] overflow-y-auto pr-1">
+              {selectedProducts.map((item) => (
                   <div
                     key={item.id}
-                    className="border rounded-lg p-3 space-y-3"
+                    className="border rounded-lg p-3 space-y-3 self-start"
                   >
                     <div className="flex justify-between items-start gap-2">
                       <div className="min-w-0">
@@ -1321,7 +1766,7 @@ export default function BarcodeGenerator() {
                       </Button>
                     </div>
 
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                    <div className="grid grid-cols-2 gap-3">
                       <div>
                         <Label htmlFor={`weight-${item.id}`}>
                           Net Weight *
@@ -1540,7 +1985,6 @@ export default function BarcodeGenerator() {
             )}
           </CardContent>
         </Card>
-      </div>
     </div>
   );
 }

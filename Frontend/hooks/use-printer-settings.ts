@@ -57,16 +57,30 @@ export function usePrinterSettings() {
     try {
       const result = await getPrinters();
       if (result.success && result.data) {
-        setPrinters(result.data as PrinterInfo[]);
+        const list = result.data as PrinterInfo[];
+        setPrinters(list);
 
-        // Auto-select defaults if nothing saved yet
         setSettings((prev) => {
-          const list = result.data as PrinterInfo[];
           const defaultP = list.find((p) => p.isDefault) || list[0];
           const updated = { ...prev };
-          if (!prev.receiptPrinter && defaultP) updated.receiptPrinter = defaultP.name;
-          if (!prev.barcodePrinter && defaultP) updated.barcodePrinter = defaultP.name;
-          persistSettings(updated);
+
+          // A saved selection can go stale — the printer might have been
+          // uninstalled, or (before the server started filtering them out)
+          // it might have been a virtual printer like "Microsoft Print to
+          // PDF", which always pops a native Save dialog and can never
+          // support unattended auto-print. Re-pick a real default instead
+          // of trusting a name that no longer exists in the current list.
+          const receiptStillValid =
+            !!prev.receiptPrinter && list.some((p) => p.name === prev.receiptPrinter);
+          const barcodeStillValid =
+            !!prev.barcodePrinter && list.some((p) => p.name === prev.barcodePrinter);
+
+          if (!receiptStillValid && defaultP) updated.receiptPrinter = defaultP.name;
+          if (!barcodeStillValid && defaultP) updated.barcodePrinter = defaultP.name;
+
+          if (updated.receiptPrinter !== prev.receiptPrinter || updated.barcodePrinter !== prev.barcodePrinter) {
+            persistSettings(updated);
+          }
           return updated;
         });
       }

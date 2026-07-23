@@ -15,6 +15,7 @@ const holdSaleRoles = [
 ];
 const saleManagementRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER"];
 const metadataRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER", "WAREHOUSE_MANAGER", "PURCHASE_MANAGER"];
+const adminRoles = ["SUPER_ADMIN", "ADMIN"];
 router.use(auth_middleware_1.authenticate);
 router.use("/hold", (0, auth_middleware_1.authorize)(holdSaleRoles));
 // Hold-sale operations should be available to any authenticated staff role.
@@ -31,5 +32,8 @@ router.get("/", sale_controller_1.getSalesController);
 router.get("/:saleId", sale_controller_1.getSaleByIdController);
 router.post("/", (0, validation_middleware_1.validate)(sale_validation_1.createSaleSchema), sale_controller_1.createSaleController);
 router.patch("/:saleId/refund", (0, validation_middleware_1.validate)(sale_validation_1.refundSaleSchema), sale_controller_1.refundSaleController);
+router.patch("/:saleId/cancel", (0, auth_middleware_1.authorize)(adminRoles), sale_controller_1.cancelSaleController);
+router.patch("/:saleId", sale_controller_1.updateSaleController);
+router.delete("/:saleId", sale_controller_1.deleteSaleController);
 exports.default = router;
 //# sourceMappingURL=sale.routes.js.map

@@ -28,6 +28,7 @@ import {
   AlertTriangle,
   CheckCircle2,
   XCircle,
+  KeyRound,
 } from "lucide-react"
 import { toast } from "sonner"
 import apiClient from "@/lib/apiClient"
@@ -110,6 +111,15 @@ export function Branches() {
     is_active: true,
   })
 
+  // Branch login (the User/BRANCH_MANAGER account tied to this branch)
+  const [addLoginEmail, setAddLoginEmail] = useState("")
+  const [addLoginPassword, setAddLoginPassword] = useState("")
+  const [editLoginEmail, setEditLoginEmail] = useState("")
+  const [editLoginEmailOriginal, setEditLoginEmailOriginal] = useState("")
+  const [editLoginPassword, setEditLoginPassword] = useState("")
+  const [editHasLogin, setEditHasLogin] = useState(false)
+  const [loadingCredentials, setLoadingCredentials] = useState(false)
+
   // Helper to map Zod validation issues
   const zodErrorsToMap = (err: z.ZodError): BranchFormErrors => {
     const map: BranchFormErrors = {}
@@ -179,14 +189,45 @@ export function Branches() {
     }
     setAddErrors({})
 
+    const loginEmail = addLoginEmail.trim()
+    const loginPassword = addLoginPassword.trim()
+    if ((loginEmail && !loginPassword) || (loginPassword && !loginEmail)) {
+      toast.error("Enter both a username and password to set up the branch login, or leave both blank.")
+      return
+    }
+    if (loginPassword && loginPassword.length < 6) {
+      toast.error("Branch login password must be at least 6 characters.")
+      return
+    }
+
     try {
       setActionLoading(true)
       const response = await apiClient.post("/branches", parsed.data)
 
       if (response.data.success) {
+        const createdBranch = response.data.data
         toast.success("Branch created successfully", {
           description: `${parsed.data.name} has been added.`,
         })
+
+        if (loginEmail && loginPassword) {
+          try {
+            await apiClient.put(`/branches/${createdBranch.id}/credentials`, {
+              email: loginEmail,
+              password: loginPassword,
+            })
+            toast.success("Branch login created", {
+              description: `${loginEmail} can now sign in to ${parsed.data.name}.`,
+            })
+          } catch (credError: any) {
+            toast.error(
+              extractApiError(
+                credError,
+                "Branch created, but the login could not be set up. Add it later from Edit.",
+              ),
+            )
+          }
+        }
 
         // Refresh the list
         await fetchBranches(currentPage, searchTerm, statusFilter === "all" ? undefined : statusFilter === "active")
@@ -201,6 +242,8 @@ export function Branches() {
           allow_neg_transferout: false,
           is_active: true,
         })
+        setAddLoginEmail("")
+        setAddLoginPassword("")
         setIsAddDialogOpen(false)
       }
     } catch (error: any) {
@@ -234,6 +277,19 @@ export function Branches() {
     }
     setEditErrors({})
 
+    const loginEmail = editLoginEmail.trim()
+    const loginPassword = editLoginPassword.trim()
+    const emailChanged = loginEmail.length > 0 && loginEmail !== editLoginEmailOriginal
+    const passwordChanged = loginPassword.length > 0
+    if (passwordChanged && loginPassword.length < 6) {
+      toast.error("New branch login password must be at least 6 characters.")
+      return
+    }
+    if (!editHasLogin && emailChanged && !passwordChanged) {
+      toast.error("Enter a password too — this branch doesn't have a login yet.")
+      return
+    }
+
     try {
       setActionLoading(true)
       const response = await apiClient.patch(`/branches/${editingBranch.id}`, parsed.data)
@@ -242,6 +298,19 @@ export function Branches() {
         toast.success("Branch updated successfully", {
           description: `${parsed.data.name} changes were saved.`,
         })
+
+        if (emailChanged || passwordChanged) {
+          try {
+            await apiClient.put(`/branches/${editingBranch.id}/credentials`, {
+              ...(emailChanged ? { email: loginEmail } : {}),
+              ...(passwordChanged ? { password: loginPassword } : {}),
+            })
+            toast.success("Branch login updated")
+          } catch (credError: any) {
+            toast.error(extractApiError(credError, "Failed to update branch login"))
+          }
+        }
+
         // Refresh the list
         fetchBranches(currentPage, searchTerm, statusFilter === "all" ? undefined : statusFilter === "active")
         setEditingBranch(null)
@@ -296,9 +365,25 @@ export function Branches() {
   }
 
   // Handle edit dialog open
-  const handleEditDialogOpen = (branch: Branch) => {
+  const handleEditDialogOpen = async (branch: Branch) => {
     setEditErrors({})
     setEditingBranch({ ...branch })
+    setEditLoginPassword("")
+    setEditLoginEmail("")
+    setEditLoginEmailOriginal("")
+    setEditHasLogin(false)
+    setLoadingCredentials(true)
+    try {
+      const res = await apiClient.get(`/branches/${branch.id}/credentials`)
+      const data = res.data?.data
+      setEditHasLogin(!!data?.hasLogin)
+      setEditLoginEmail(data?.email || "")
+      setEditLoginEmailOriginal(data?.email || "")
+    } catch (error: any) {
+      toast.error(extractApiError(error, "Failed to load branch login info"))
+    } finally {
+      setLoadingCredentials(false)
+    }
   }
 
   // Handle edit dialog close
@@ -336,7 +421,11 @@ export function Branches() {
         <Dialog
           open={isAddDialogOpen}
           onOpenChange={(open) => {
-            if (!open) setAddErrors({})
+            if (!open) {
+              setAddErrors({})
+              setAddLoginEmail("")
+              setAddLoginPassword("")
+            }
             setIsAddDialogOpen(open)
           }}
         >
@@ -416,6 +505,36 @@ export function Branches() {
                   checked={newBranch.is_active}
                   onCheckedChange={(checked) => setNewBranch({ ...newBranch, is_active: checked })}
                 />
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-blue-600" />
+                  <Label className="text-sm font-bold text-gray-900">Branch Login (optional)</Label>
+                </div>
+                <p className="text-xs text-gray-500 -mt-1">
+                  Give this branch its own sign-in now, or set it up later from Edit.
+                </p>
+                <div>
+                  <Label htmlFor="add-login-email">Username / Email</Label>
+                  <Input
+                    id="add-login-email"
+                    type="email"
+                    value={addLoginEmail}
+                    onChange={(e) => setAddLoginEmail(e.target.value)}
+                    placeholder="branch@manpasand.com"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="add-login-password">Password</Label>
+                  <Input
+                    id="add-login-password"
+                    type="password"
+                    value={addLoginPassword}
+                    onChange={(e) => setAddLoginPassword(e.target.value)}
+                    placeholder="Minimum 6 characters"
+                  />
+                </div>
               </div>
 
               <Button onClick={handleAddBranch} className="w-full" disabled={actionLoading}>
@@ -720,6 +839,46 @@ export function Branches() {
                   checked={editingBranch.is_active}
                   onCheckedChange={(checked) => setEditingBranch({ ...editingBranch, is_active: checked })}
                 />
+              </div>
+
+              <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
+                <div className="flex items-center gap-2">
+                  <KeyRound className="h-4 w-4 text-blue-600" />
+                  <Label className="text-sm font-bold text-gray-900">Branch Login</Label>
+                </div>
+                {loadingCredentials ? (
+                  <p className="text-xs text-gray-500 flex items-center gap-1.5">
+                    <Loader2 className="h-3 w-3 animate-spin" /> Loading login info...
+                  </p>
+                ) : (
+                  <>
+                    <p className="text-xs text-gray-500 -mt-1">
+                      {editHasLogin
+                        ? "Update the username or set a new password below."
+                        : "No login exists yet for this branch — set one up below."}
+                    </p>
+                    <div>
+                      <Label htmlFor="edit-login-email">Username / Email</Label>
+                      <Input
+                        id="edit-login-email"
+                        type="email"
+                        value={editLoginEmail}
+                        onChange={(e) => setEditLoginEmail(e.target.value)}
+                        placeholder="branch@manpasand.com"
+                      />
+                    </div>
+                    <div>
+                      <Label htmlFor="edit-login-password">{editHasLogin ? "New Password" : "Password"}</Label>
+                      <Input
+                        id="edit-login-password"
+                        type="password"
+                        value={editLoginPassword}
+                        onChange={(e) => setEditLoginPassword(e.target.value)}
+                        placeholder={editHasLogin ? "Leave blank to keep current password" : "Minimum 6 characters"}
+                      />
+                    </div>
+                  </>
+                )}
               </div>
 
               <Button onClick={handleEditBranch} className="w-full" disabled={actionLoading}>

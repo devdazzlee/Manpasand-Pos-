@@ -35,10 +35,11 @@ export class ReportsService {
    * Get best selling products
    */
   async getBestSellingProducts({ branchId, userRole, limit = 10 }: { branchId?: string; userRole?: string; limit?: number }) {
+    const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
     const where: Prisma.SaleItemWhereInput = {};
-    
+
     // Only filter by branch if user is not admin
-    if (userRole !== 'ADMIN' && userRole !== 'SUPER_ADMIN' && branchId) {
+    if (!isAdmin && branchId) {
       where.sale = {
         branch_id: branchId,
       };
@@ -72,6 +73,38 @@ export class ReportsService {
       },
     });
 
+    // Admin/global view spans every branch — work out which branch sold the
+    // most of each top product so the dashboard can tag it (e.g. "Main
+    // Warehouse"). Skipped for branch users since it's trivially their own branch.
+    let topBranchByProduct = new Map<string, { id: string; name: string; quantity: number }>();
+    if (isAdmin && !branchId && productIds.length > 0) {
+      const itemsWithBranch = await prisma.saleItem.findMany({
+        where: { product_id: { in: productIds } },
+        select: {
+          product_id: true,
+          quantity: true,
+          sale: { select: { branch_id: true, branch: { select: { id: true, name: true } } } },
+        },
+      });
+
+      const tally = new Map<string, Map<string, { id: string; name: string; quantity: number }>>();
+      for (const item of itemsWithBranch) {
+        const branch = item.sale?.branch;
+        if (!branch) continue;
+        if (!tally.has(item.product_id)) tally.set(item.product_id, new Map());
+        const perBranch = tally.get(item.product_id)!;
+        const existing = perBranch.get(branch.id);
+        const qty = Number(item.quantity || 0);
+        if (existing) existing.quantity += qty;
+        else perBranch.set(branch.id, { id: branch.id, name: branch.name, quantity: qty });
+      }
+
+      for (const [productId, perBranch] of tally.entries()) {
+        const top = [...perBranch.values()].sort((a, b) => b.quantity - a.quantity)[0];
+        if (top) topBranchByProduct.set(productId, top);
+      }
+    }
+
     // Combine data
     return products.map(item => {
       const product = productDetails.find(p => p.id === item.product_id);
@@ -83,6 +116,7 @@ export class ReportsService {
         order_count: item._count.id,
         price: Number(product?.sales_rate_inc_dis_and_tax || product?.sales_rate_exc_dis_and_tax || 0),
         category: product?.category?.name || 'Uncategorized',
+        topBranch: topBranchByProduct.get(item.product_id) || null,
       };
     });
   }

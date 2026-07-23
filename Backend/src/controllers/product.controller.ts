@@ -1,13 +1,16 @@
 import { Request, Response } from 'express';
 import { ProductService } from '../services/product.service';
+import { ReportsService } from '../services/reports.service';
 import { ApiResponse } from '../utils/apiResponse';
 import asyncHandler from '../middleware/asyncHandler';
+import { resolveBranchId } from '../utils/resolveBranchId';
 import { parse as csvParse } from 'csv-parse/sync';
 import XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
 
 const productService = new ProductService();
+const reportsService = new ReportsService();
 
 /**
  * Upload a single image to Cloudinary and return the URL.
@@ -319,7 +322,13 @@ export const getFeaturedProducts = asyncHandler(async (req: Request, res: Respon
 });
 
 export const getBestSellingProducts = asyncHandler(async (req: Request, res: Response) => {
-    const bestSellingProducts = await productService.getBestSellingProducts();
+    const branchId = resolveBranchId(req);
+    const limit = req.query.limit ? Number(req.query.limit) : 10;
+    const bestSellingProducts = await reportsService.getBestSellingProducts({
+        branchId,
+        userRole: req.user?.role,
+        limit,
+    });
     new ApiResponse(bestSellingProducts, 'Best selling products retrieved successfully', 200).send(res);
 });
 

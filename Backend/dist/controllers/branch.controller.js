@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteBranch = exports.getBranchDetails = exports.listBranches = exports.toggleBranchStatus = exports.updateBranch = exports.getBranch = exports.createBranch = void 0;
+exports.upsertBranchCredentials = exports.getBranchCredentials = exports.deleteBranch = exports.getBranchDetails = exports.listBranches = exports.toggleBranchStatus = exports.updateBranch = exports.getBranch = exports.createBranch = void 0;
 const branch_service_1 = require("../services/branch.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -43,5 +43,13 @@ exports.getBranchDetails = (0, asyncHandler_1.default)(async (req, res) => {
 exports.deleteBranch = (0, asyncHandler_1.default)(async (req, res) => {
     const result = await branchService.deleteBranch(req.params.id);
     new apiResponse_1.ApiResponse(null, result.message).send(res);
+});
+exports.getBranchCredentials = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await branchService.getBranchCredentials(req.params.id);
+    new apiResponse_1.ApiResponse(result, 'Branch login fetched successfully').send(res);
+});
+exports.upsertBranchCredentials = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await branchService.upsertBranchCredentials(req.params.id, req.body);
+    new apiResponse_1.ApiResponse(result, 'Branch login saved successfully').send(res);
 });
 //# sourceMappingURL=branch.controller.js.map

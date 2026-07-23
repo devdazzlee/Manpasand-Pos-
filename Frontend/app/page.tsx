@@ -99,11 +99,22 @@ export default function Home() {
     } catch {
       // Proceed with local cleanup even if backend call fails
     }
-    localStorage.removeItem("token");
-    localStorage.removeItem("role");
-    localStorage.removeItem("branch");
-    localStorage.removeItem("branchName");
-    localStorage.removeItem("branchAddress");
+
+    // Wipe every bit of session/UI state so nothing from this account leaks
+    // into the next login on this device — except the user's explicit
+    // "remember me" / "save password" opt-in, which is meant to survive
+    // logout by design (that's the whole point of those checkboxes).
+    const preserveKeys = ["rememberMe", "savedUsername", "rememberPassword", "savedPassword"];
+    const preserved: Record<string, string> = {};
+    preserveKeys.forEach((key) => {
+      const value = localStorage.getItem(key);
+      if (value !== null) preserved[key] = value;
+    });
+
+    localStorage.clear();
+
+    Object.entries(preserved).forEach(([key, value]) => localStorage.setItem(key, value));
+
     clearTabFromUrl();
     setToken(null);
   };

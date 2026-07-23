@@ -96,6 +96,18 @@ class AuthService {
     async logout(_userId) {
         return;
     }
+    async changePassword(userId, currentPassword, newPassword) {
+        const user = await client_1.prisma.user.findUnique({ where: { id: userId } });
+        if (!user) {
+            throw new apiError_1.AppError(404, 'User not found');
+        }
+        const matches = await bcryptjs_1.default.compare(currentPassword, user.password);
+        if (!matches) {
+            throw new apiError_1.AppError(400, 'Current password is incorrect');
+        }
+        const hashedPassword = await bcryptjs_1.default.hash(newPassword, 10);
+        await client_1.prisma.user.update({ where: { id: userId }, data: { password: hashedPassword } });
+    }
 }
 exports.AuthService = AuthService;
 //# sourceMappingURL=auth.service.js.map

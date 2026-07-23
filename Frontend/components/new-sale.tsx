@@ -369,12 +369,6 @@ export function NewSale() {
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
-  const [autoPrint, setAutoPrint] = useState(() => {
-    if (typeof window !== "undefined") {
-      return localStorage.getItem("pos_auto_print") !== "false";
-    }
-    return true;
-  });
   const {
     branchLoading,
     selectedBranchId,
@@ -476,17 +470,46 @@ export function NewSale() {
     };
 
     fetchData();
-
-    // Cleanup function to prevent memory leaks and state updates after unmount
     return () => {
       mounted = false;
-      // Clear scan timeout on unmount
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
         scanTimeoutRef.current = null;
       }
     };
-  }, []); // Empty dependency array since we only want to fetch once on mount
+  }, []);
+
+  // Load cart duplicated from Sales History
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("duplicate_sale_cart");
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      sessionStorage.removeItem("duplicate_sale_cart");
+      if (!Array.isArray(parsed?.items) || parsed.items.length === 0) return;
+
+      setCart(
+        parsed.items.map((item: any, index: number) => ({
+          id: String(item.id || `dup-${Date.now()}-${index}`),
+          productId: item.productId,
+          name: String(item.name || "Item"),
+          price: Number(item.price) || 0,
+          originalPrice: Number(item.originalPrice ?? item.price) || 0,
+          actualUnitPrice: Number(item.actualUnitPrice ?? item.price) || 0,
+          quantity: Number(item.quantity) || 1,
+          category: String(item.category || "all"),
+          unitId: item.unitId,
+          unitName: item.unitName,
+          unit: item.unit,
+        })),
+      );
+      if (parsed.customerId) {
+        setSelectedCustomer(parsed.customerId);
+      }
+    } catch {
+      sessionStorage.removeItem("duplicate_sale_cart");
+    }
+  }, []);
 
   useEffect(() => {
     cartRef.current = cart;
@@ -1503,10 +1526,10 @@ export function NewSale() {
     const change = moneyChange(amountNumber, total);
     setPaymentError("");
 
-    const success = await handlePayment(paymentMethodPending, amountNumber, change);
-    if (success) {
-      resetPaymentState();
-    }
+    // On success, handlePayment itself closes this dialog right before
+    // opening the success modal (see comment there) — nothing left to do
+    // here. On failure it deliberately stays open so the error is visible.
+    await handlePayment(paymentMethodPending, amountNumber, change);
   };
 
   const handlePayment = async (
@@ -1664,6 +1687,10 @@ export function NewSale() {
             ""
         );
         setCompletedCustomerEmail(customerAtSale?.email || "");
+        // Close the payment dialog and open the success modal in the same
+        // tick — closing it in the caller (after this promise resolves)
+        // left both dialogs mounted for a render, stacking two overlays.
+        resetPaymentState();
         setSaleSuccessOpen(true);
 
         // Save transaction to local storage (simulate database)
@@ -1675,34 +1702,32 @@ export function NewSale() {
 
         setLastTransactionId(transactionId);
 
-        // Auto-print receipt
-        if (autoPrint) {
-          try {
-            // Get printer from global settings (Printer Settings page)
-            const printerToUse = getReceiptPrinterObj();
-            if (!printerToUse) {
-              throw new Error("No receipt printer configured. Go to Printer Settings to select one.");
-            }
-
-            const printerObj = {
-              ...printerToUse,
-              columns: printerToUse.receiptProfile?.columns || { fontA: 48, fontB: 64 },
-            };
-
-            const job = {
-              copies: 1,
-              cut: true,
-              openDrawer: false,
-            };
-
-            await printReceiptViaServer(
-              printerObj,
-              receiptDataForServer,
-              job
-            );
-          } catch (printError) {
-            console.error("Print error:", printError);
+        // Always auto-print the receipt — there's no user toggle for this.
+        try {
+          // Get printer from global settings (Printer Settings page)
+          const printerToUse = getReceiptPrinterObj();
+          if (!printerToUse) {
+            throw new Error("No receipt printer configured. Go to Printer Settings to select one.");
           }
+
+          const printerObj = {
+            ...printerToUse,
+            columns: printerToUse.receiptProfile?.columns || { fontA: 48, fontB: 64 },
+          };
+
+          const job = {
+            copies: 1,
+            cut: true,
+            openDrawer: false,
+          };
+
+          await printReceiptViaServer(
+            printerObj,
+            receiptDataForServer,
+            job
+          );
+        } catch (printError) {
+          console.error("Print error:", printError);
         }
 
         setTimeout(() => {
@@ -2536,7 +2561,7 @@ export function NewSale() {
                   type="button"
                   variant="ghost"
                   size="sm"
-                  className="h-7 px-2 text-gray-600 hover:text-gray-900"
+                  className="h-7 px-2 text-red-600 hover:text-red-700 hover:bg-red-50"
                   onClick={() => handleCategoryChange("all")}
                 >
                   <X className="mr-1 h-3.5 w-3.5" />
@@ -2557,15 +2582,15 @@ export function NewSale() {
 
         {/* Products Grid */}
         {productsLoading ? (
-          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
             {Array.from({ length: 12 }).map((_, i) => (
               <div
                 key={i}
-                className="animate-pulse rounded-lg border border-slate-200 bg-white p-2 sm:rounded-xl sm:p-3"
+                className="animate-pulse rounded-lg border border-slate-200 bg-white p-2 sm:rounded-xl sm:p-2.5"
               >
-                <div className="mb-1 h-6 rounded-md bg-slate-100 sm:mb-2 sm:h-8" />
+                <div className="mb-1 h-5 rounded-md bg-slate-100 sm:h-6" />
                 <div className="h-2 w-3/4 rounded bg-slate-100" />
-                <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5 sm:mt-3 sm:pt-2">
+                <div className="mt-1.5 flex justify-between border-t border-slate-100 pt-1.5">
                   <div className="h-2 w-8 rounded bg-slate-100" />
                   <div className="h-3 w-10 rounded bg-slate-100" />
                 </div>
@@ -2583,7 +2608,7 @@ export function NewSale() {
             </p>
           </div>
         ) : (
-          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-3 sm:gap-3 lg:grid-cols-4 xl:grid-cols-5">
+          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
             {filteredProducts.map((product) => {
               const cartItems = cart.filter(
                 (item) =>
@@ -2598,7 +2623,7 @@ export function NewSale() {
                   type="button"
                   onClick={() => handleProductClick(product)}
                   className={cn(
-                    "group relative flex flex-col rounded-lg border bg-white p-2 text-left shadow-sm transition-all duration-150 sm:min-h-[5.5rem] sm:rounded-xl sm:p-3",
+                    "group relative flex flex-col rounded-lg border bg-white p-2 text-left shadow-sm transition-all duration-150 sm:min-h-[4rem] sm:rounded-xl sm:p-2.5",
                     "active:scale-[0.98] sm:hover:-translate-y-0.5 sm:hover:border-blue-300 sm:hover:shadow-md",
                     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
                     inCart
@@ -2612,16 +2637,16 @@ export function NewSale() {
                     </span>
                   )}
 
-                  <span className="line-clamp-2 text-[10px] font-medium leading-tight text-slate-800 sm:min-h-[2.25rem] sm:flex-1 sm:text-xs sm:leading-snug group-hover:text-slate-900">
+                  <span className="line-clamp-2 text-[10px] font-medium leading-tight text-slate-800 sm:min-h-[1.6rem] sm:flex-1 sm:text-xs sm:leading-snug group-hover:text-slate-900">
                     {product.name}
                   </span>
 
                   {/* TESTING: show product unit on card — comment out when done */}
-                  <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-600 sm:mt-1 sm:text-[10px]">
+                  <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-600 sm:text-[10px]">
                     {product.unitName || "No unit"}
                   </span>
 
-                  <div className="mt-1 flex items-end justify-between gap-1 border-t border-slate-100 pt-1 sm:mt-2 sm:gap-2 sm:pt-2">
+                  <div className="mt-1 flex items-end justify-between gap-1 border-t border-slate-100 pt-1 sm:gap-1.5">
                     {product.category ? (
                       <span className="hidden truncate text-[10px] font-medium uppercase tracking-wide text-slate-400 sm:inline">
                         {product.category}
@@ -3241,22 +3266,6 @@ export function NewSale() {
                 min="0"
                 step="0.01"
               />
-            </div>
-            <div className="flex items-center space-x-2 py-1">
-              <input
-                type="checkbox"
-                id="auto-print"
-                checked={autoPrint}
-                onChange={(e) => {
-                  const val = e.target.checked;
-                  setAutoPrint(val);
-                  localStorage.setItem("pos_auto_print", String(val));
-                }}
-                className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
-              />
-              <label htmlFor="auto-print" className="text-sm font-medium text-gray-700 cursor-pointer select-none">
-                Print Receipt automatically
-              </label>
             </div>
             {paymentError && (
               <p className="text-sm text-red-600">{paymentError}</p>

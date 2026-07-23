@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getCurrentUser = exports.registerAdmin = exports.logout = exports.login = exports.register = void 0;
+exports.changePassword = exports.getCurrentUser = exports.registerAdmin = exports.logout = exports.login = exports.register = void 0;
 const auth_service_1 = require("../services/auth.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -33,4 +33,10 @@ const getCurrentUser = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(req.user, 'Current user fetched').send(res);
 });
 exports.getCurrentUser = getCurrentUser;
+const changePassword = (0, asyncHandler_1.default)(async (req, res) => {
+    const { currentPassword, newPassword } = req.body;
+    await authService.changePassword(req.user.id, currentPassword, newPassword);
+    new apiResponse_1.ApiResponse(null, 'Password updated successfully').send(res);
+});
+exports.changePassword = changePassword;
 //# sourceMappingURL=auth.controller.js.map

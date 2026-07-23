@@ -6,10 +6,10 @@ import { Button } from "@/components/ui/button"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardDescription, CardHeader } from "@/components/ui/card"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { useToast } from "@/hooks/use-toast"
-import { Store, Eye, EyeOff } from "lucide-react"
+import { Eye, EyeOff } from "lucide-react"
 import { loginRequest } from "@/lib/api"
 import { Checkbox } from "@/components/ui/checkbox"
 
@@ -105,15 +105,13 @@ export function LoginForm({ onLogin }: LoginFormProps) {
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md shadow-lg">
         <CardHeader className="text-center">
-          <div className="flex justify-center mb-4">
-            <div className="bg-blue-600 p-3 rounded-full">
-              <Store className="h-8 w-8 text-white" />
-            </div>
+          <div className="flex justify-center mb-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src="/logo.png" alt="Manpasand" className="h-20 w-20 object-contain" />
           </div>
-          <CardTitle className="text-2xl font-bold text-gray-900">MANPASAND</CardTitle>
-          <CardDescription>Point of Sale System</CardDescription>
+          <CardDescription className="text-sm tracking-wide text-gray-500">Point of Sale System</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-4">
@@ -159,7 +157,7 @@ export function LoginForm({ onLogin }: LoginFormProps) {
               </div>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-gray-700">
+            <div className="flex flex-col space-y-2.5">
               <div className="flex items-center space-x-2">
                 <Checkbox
                   id="remember-me"
@@ -167,7 +165,7 @@ export function LoginForm({ onLogin }: LoginFormProps) {
                   onCheckedChange={(checked) => setRememberMe(Boolean(checked))}
                   disabled={isLoading}
                 />
-                <Label htmlFor="remember-me" className="text-xs font-normal cursor-pointer">
+                <Label htmlFor="remember-me" className="text-sm font-normal text-gray-700 cursor-pointer">
                   Remember me
                 </Label>
               </div>
@@ -178,7 +176,7 @@ export function LoginForm({ onLogin }: LoginFormProps) {
                   onCheckedChange={(checked) => setRememberPassword(Boolean(checked))}
                   disabled={isLoading}
                 />
-                <Label htmlFor="remember-password" className="text-[11px] font-normal cursor-pointer text-gray-600">
+                <Label htmlFor="remember-password" className="text-sm font-normal text-gray-700 cursor-pointer">
                   Save password on this device
                 </Label>
               </div>

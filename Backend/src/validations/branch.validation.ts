@@ -40,5 +40,20 @@ export const listBranchesSchema = z.object({
   }),
 });
 
+export const branchCredentialsSchema = z.object({
+  body: z
+    .object({
+      email: z.string().email('Invalid email address').optional(),
+      password: z.string().min(6, 'Password must be at least 6 characters').optional(),
+    })
+    .refine((data) => data.email || data.password, {
+      message: 'Provide an email and/or password to update',
+    }),
+  params: z.object({
+    id: z.string().min(1, 'Branch ID is required'),
+  }),
+});
+
 export type CreateBranchInput = z.infer<typeof createBranchSchema>['body'];
 export type UpdateBranchInput = z.infer<typeof updateBranchSchema>['body'];
+export type BranchCredentialsInput = z.infer<typeof branchCredentialsSchema>['body'];

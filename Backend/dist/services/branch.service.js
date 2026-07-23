@@ -1,16 +1,24 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BranchService = void 0;
-const client_1 = require("../prisma/client");
+const bcryptjs_1 = __importDefault(require("bcryptjs"));
+const client_1 = require("@prisma/client");
+const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const date_fns_1 = require("date-fns");
+// A branch's "login" is the primary staff account tied to it — a
+// BRANCH_MANAGER for regular branches, a WAREHOUSE_MANAGER for warehouses.
+const primaryRoleFor = (branchType) => branchType === 'WAREHOUSE' ? client_1.Role.WAREHOUSE_MANAGER : client_1.Role.BRANCH_MANAGER;
 class BranchService {
     async createBranch(data) {
         // Codes follow `BRANCH-NNN` / `WAREHOUSE-NNN`. The previous
         // `parseInt(lastBranch.code)` against e.g. `BRANCH-004` returned NaN, so
         // generate the next number from rows matching the same prefix.
         const prefix = data.branch_type === 'WAREHOUSE' ? 'WAREHOUSE' : 'BRANCH';
-        const siblings = await client_1.prisma.branch.findMany({
+        const siblings = await client_2.prisma.branch.findMany({
             where: { code: { startsWith: `${prefix}-` } },
             select: { code: true },
         });
@@ -19,7 +27,7 @@ class BranchService {
             return Number.isFinite(n) && n > acc ? n : acc;
         }, 0);
         const code = `${prefix}-${String(maxN + 1).padStart(3, '0')}`;
-        const branch = await client_1.prisma.branch.create({
+        const branch = await client_2.prisma.branch.create({
             data: {
                 ...data,
                 code,
@@ -28,10 +36,10 @@ class BranchService {
         return branch;
     }
     async deleteBranch(id) {
-        const branch = await client_1.prisma.branch.findUnique({ where: { id } });
+        const branch = await client_2.prisma.branch.findUnique({ where: { id } });
         if (!branch)
             throw new apiError_1.AppError(404, 'Branch not found');
-        await client_1.prisma.$transaction(async (tx) => {
+        await client_2.prisma.$transaction(async (tx) => {
             // Break return links before removing sales from this branch.
             await tx.sale.updateMany({
                 where: { original_sale: { branch_id: id } },
@@ -81,7 +89,7 @@ class BranchService {
         return { message: 'Branch deleted successfully' };
     }
     async getBranchById(id) {
-        const branch = await client_1.prisma.branch.findUnique({
+        const branch = await client_2.prisma.branch.findUnique({
             where: {
                 id,
             },
@@ -92,7 +100,7 @@ class BranchService {
         return branch;
     }
     async updateBranch(id, data) {
-        const branch = await client_1.prisma.branch.findUnique({
+        const branch = await client_2.prisma.branch.findUnique({
             where: {
                 id,
             },
@@ -100,7 +108,7 @@ class BranchService {
         if (!branch) {
             throw new apiError_1.AppError(404, 'Branch not found');
         }
-        const updatedBranch = await client_1.prisma.branch.update({
+        const updatedBranch = await client_2.prisma.branch.update({
             where: {
                 id,
             },
@@ -110,12 +118,12 @@ class BranchService {
     }
     async toggleBranchStatus(id) {
         // Check if branch exists
-        const branch = await client_1.prisma.branch.findUnique({ where: { id } });
+        const branch = await client_2.prisma.branch.findUnique({ where: { id } });
         if (!branch) {
             throw new apiError_1.AppError(404, 'Branch not found');
         }
         // Toggle the is_active status
-        const updatedBranch = await client_1.prisma.branch.update({
+        const updatedBranch = await client_2.prisma.branch.update({
             where: { id },
             data: { is_active: !branch.is_active },
         });
@@ -136,8 +144,8 @@ class BranchService {
         const take = fetch_all ? 1000 : limit;
         const skip = fetch_all ? 0 : (page - 1) * limit;
         const [total, branches] = await Promise.all([
-            client_1.prisma.branch.count({ where }),
-            client_1.prisma.branch.findMany({
+            client_2.prisma.branch.count({ where }),
+            client_2.prisma.branch.findMany({
                 where,
                 skip,
                 take,
@@ -156,9 +164,65 @@ class BranchService {
             },
         };
     }
+    async getBranchCredentials(branchId) {
+        const branch = await client_2.prisma.branch.findUnique({ where: { id: branchId } });
+        if (!branch)
+            throw new apiError_1.AppError(404, 'Branch not found');
+        const role = primaryRoleFor(branch.branch_type);
+        const user = await client_2.prisma.user.findFirst({
+            where: { branch_id: branchId, role },
+            select: { id: true, email: true, role: true, created_at: true },
+        });
+        return {
+            hasLogin: !!user,
+            userId: user?.id ?? null,
+            email: user?.email ?? null,
+            role,
+        };
+    }
+    async upsertBranchCredentials(branchId, data) {
+        const branch = await client_2.prisma.branch.findUnique({ where: { id: branchId } });
+        if (!branch)
+            throw new apiError_1.AppError(404, 'Branch not found');
+        const role = primaryRoleFor(branch.branch_type);
+        const existing = await client_2.prisma.user.findFirst({ where: { branch_id: branchId, role } });
+        if (!existing) {
+            if (!data.email || !data.password) {
+                throw new apiError_1.AppError(400, 'Email and password are both required to create a branch login');
+            }
+            const emailTaken = await client_2.prisma.user.findUnique({ where: { email: data.email } });
+            if (emailTaken)
+                throw new apiError_1.AppError(400, 'Email already in use');
+            const hashedPassword = await bcryptjs_1.default.hash(data.password, 10);
+            const user = await client_2.prisma.user.create({
+                data: { email: data.email, password: hashedPassword, role, branch_id: branchId },
+                select: { id: true, email: true, role: true, created_at: true },
+            });
+            return { hasLogin: true, userId: user.id, email: user.email, role: user.role };
+        }
+        const updateData = {};
+        if (data.email && data.email !== existing.email) {
+            const emailTaken = await client_2.prisma.user.findUnique({ where: { email: data.email } });
+            if (emailTaken && emailTaken.id !== existing.id)
+                throw new apiError_1.AppError(400, 'Email already in use');
+            updateData.email = data.email;
+        }
+        if (data.password) {
+            updateData.password = await bcryptjs_1.default.hash(data.password, 10);
+        }
+        if (Object.keys(updateData).length === 0) {
+            throw new apiError_1.AppError(400, 'Nothing to update');
+        }
+        const updated = await client_2.prisma.user.update({
+            where: { id: existing.id },
+            data: updateData,
+            select: { id: true, email: true, role: true, created_at: true },
+        });
+        return { hasLogin: true, userId: updated.id, email: updated.email, role: updated.role };
+    }
     async getBranchDetails(branchId) {
         const today = new Date();
-        const branch = await client_1.prisma.branch.findUnique({
+        const branch = await client_2.prisma.branch.findUnique({
             where: { id: branchId },
             include: {
                 employees: {

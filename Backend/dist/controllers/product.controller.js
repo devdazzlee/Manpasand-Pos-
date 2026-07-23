@@ -38,12 +38,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteAllProducts = exports.bulkUploadProducts = exports.importProductRow = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.exportProductsToExcel = exports.listProducts = exports.deleteProduct = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
 const product_service_1 = require("../services/product.service");
+const reports_service_1 = require("../services/reports.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
+const resolveBranchId_1 = require("../utils/resolveBranchId");
 const sync_1 = require("csv-parse/sync");
 const xlsx_1 = __importDefault(require("xlsx"));
 const path_1 = __importDefault(require("path"));
 const productService = new product_service_1.ProductService();
+const reportsService = new reports_service_1.ReportsService();
 /**
  * Upload a single image to Cloudinary and return the URL.
  * This is called BEFORE create/update so the PATCH/POST body stays tiny.
@@ -284,7 +287,13 @@ exports.getFeaturedProducts = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(featuredProducts, 'Featured products retrieved successfully', 200).send(res);
 });
 exports.getBestSellingProducts = (0, asyncHandler_1.default)(async (req, res) => {
-    const bestSellingProducts = await productService.getBestSellingProducts();
+    const branchId = (0, resolveBranchId_1.resolveBranchId)(req);
+    const limit = req.query.limit ? Number(req.query.limit) : 10;
+    const bestSellingProducts = await reportsService.getBestSellingProducts({
+        branchId,
+        userRole: req.user?.role,
+        limit,
+    });
     new apiResponse_1.ApiResponse(bestSellingProducts, 'Best selling products retrieved successfully', 200).send(res);
 });
 /** Read first non-empty cell from a spreadsheet row (supports Stock In template headers). */

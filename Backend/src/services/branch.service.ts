@@ -1,8 +1,14 @@
-import { Prisma } from '@prisma/client';
+import bcrypt from 'bcryptjs';
+import { Prisma, Role } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateBranchInput, UpdateBranchInput } from '../validations/branch.validation';
 import { endOfDay, startOfDay } from 'date-fns';
+
+// A branch's "login" is the primary staff account tied to it — a
+// BRANCH_MANAGER for regular branches, a WAREHOUSE_MANAGER for warehouses.
+const primaryRoleFor = (branchType: string): Role =>
+  branchType === 'WAREHOUSE' ? Role.WAREHOUSE_MANAGER : Role.BRANCH_MANAGER;
 
 export class BranchService {
   public async createBranch(data: CreateBranchInput) {
@@ -198,6 +204,71 @@ export class BranchService {
         totalPages: Math.ceil(total / limit),
       },
     };
+  }
+
+  public async getBranchCredentials(branchId: string) {
+    const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+    if (!branch) throw new AppError(404, 'Branch not found');
+
+    const role = primaryRoleFor(branch.branch_type);
+    const user = await prisma.user.findFirst({
+      where: { branch_id: branchId, role },
+      select: { id: true, email: true, role: true, created_at: true },
+    });
+
+    return {
+      hasLogin: !!user,
+      userId: user?.id ?? null,
+      email: user?.email ?? null,
+      role,
+    };
+  }
+
+  public async upsertBranchCredentials(branchId: string, data: { email?: string; password?: string }) {
+    const branch = await prisma.branch.findUnique({ where: { id: branchId } });
+    if (!branch) throw new AppError(404, 'Branch not found');
+
+    const role = primaryRoleFor(branch.branch_type);
+    const existing = await prisma.user.findFirst({ where: { branch_id: branchId, role } });
+
+    if (!existing) {
+      if (!data.email || !data.password) {
+        throw new AppError(400, 'Email and password are both required to create a branch login');
+      }
+      const emailTaken = await prisma.user.findUnique({ where: { email: data.email } });
+      if (emailTaken) throw new AppError(400, 'Email already in use');
+
+      const hashedPassword = await bcrypt.hash(data.password, 10);
+      const user = await prisma.user.create({
+        data: { email: data.email, password: hashedPassword, role, branch_id: branchId },
+        select: { id: true, email: true, role: true, created_at: true },
+      });
+      return { hasLogin: true, userId: user.id, email: user.email, role: user.role };
+    }
+
+    const updateData: Prisma.UserUpdateInput = {};
+
+    if (data.email && data.email !== existing.email) {
+      const emailTaken = await prisma.user.findUnique({ where: { email: data.email } });
+      if (emailTaken && emailTaken.id !== existing.id) throw new AppError(400, 'Email already in use');
+      updateData.email = data.email;
+    }
+
+    if (data.password) {
+      updateData.password = await bcrypt.hash(data.password, 10);
+    }
+
+    if (Object.keys(updateData).length === 0) {
+      throw new AppError(400, 'Nothing to update');
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: existing.id },
+      data: updateData,
+      select: { id: true, email: true, role: true, created_at: true },
+    });
+
+    return { hasLogin: true, userId: updated.id, email: updated.email, role: updated.role };
   }
 
   public async getBranchDetails(branchId: string) {

@@ -3,15 +3,38 @@
 import { useState, useEffect } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { LoadingButton } from "@/components/ui/loading-button"
 import { Button } from "@/components/ui/button"
+import { LoadingButton } from "@/components/ui/loading-button"
 import { PageLoader } from "@/components/ui/page-loader"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog"
 import { useLoading } from "@/hooks/use-loading"
 import { useToast } from "@/hooks/use-toast"
-import { DollarSign, ShoppingCart, Users, Package, TrendingUp, TrendingDown, RefreshCw, Download, Loader2 } from "lucide-react"
+import {
+  DollarSign,
+  ShoppingCart,
+  Users,
+  Package,
+  TrendingUp,
+  Download,
+  Loader2,
+  MapPin,
+  Building2,
+  Wallet,
+  CreditCard,
+  Smartphone,
+} from "lucide-react"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import apiClient from "@/lib/apiClient"
+import { API_BASE } from "@/config/constants"
 import { normalizeUserRole, type UserRole } from "@/lib/role-utils"
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri"
 
 const INVENTORY_NAV_ROLES: UserRole[] = [
   "SUPER_ADMIN",
@@ -24,32 +47,72 @@ interface TopProduct {
   id: string
   name: string
   sku: string
-  sales_rate_inc_dis_and_tax: string
-  _count: {
-    order_items: number
-  }
+  quantity_sold: number
+  order_count: number
+  price: number
+  category: string
+  topBranch: { id: string; name: string; quantity: number } | null
 }
 
 interface RecentSale {
-  productName: string
-  price: string
+  id: string
+  saleNumber: string
+  totalAmount: string | number
+  status: string
+  paymentMethod: string
+  saleDate: string
+  customerName: string
+  branch: { id: string; name: string } | null
+  productName: string | null
+}
+
+interface TodaySale {
+  id: string
+  sale_number: string
+  total_amount: string | number
+  status: string
+  created_at: string
+  branch: { id: string; name: string } | null
 }
 
 interface DashboardStats {
+  branch: { id: string; name: string } | null
+  isAllBranches: boolean
   totalCustomers: number
+  newCustomersToday: number
   lowStockProducts: Array<{
     id: string
     current_quantity: number
-    product: {
-      name: string
-      sku: string
-    }
+    product: { name: string; sku: string }
+    branch: { id: string; name: string } | null
   }>
-  todaySales: any[]
+  lowStockCount: number
+  todaySales: TodaySale[]
+  todaySalesCount: number
+  todaySalesTotal: number
+  paymentBreakdown: Array<{ method: string; total: number; count: number }>
+}
+
+interface CustomerRow {
+  id: string
+  name: string | null
+  phone_number: string | null
+  email: string | null
+  created_at: string
+  sale_count?: number
+  total_sale_amount?: number
 }
 
 interface DashboardHomeProps {
   onNavigate?: (tab: string) => void;
+}
+
+type ModalKind = "sales" | "transactions" | "customers" | "lowstock" | null
+
+const PAYMENT_ICON: Record<string, any> = {
+  CASH: Wallet,
+  CARD: CreditCard,
+  ONLINE: Smartphone,
 }
 
 export function DashboardHome({ onNavigate }: DashboardHomeProps) {
@@ -58,25 +121,24 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const [stats, setStats] = useState<DashboardStats | null>(null)
   const [initialLoading, setInitialLoading] = useState(true)
   const [role, setRole] = useState<UserRole | null>(null)
+  const [activeModal, setActiveModal] = useState<ModalKind>(null)
+  const [customers, setCustomers] = useState<CustomerRow[]>([])
+  const [customersLoading, setCustomersLoading] = useState(false)
+  const [customersFetched, setCustomersFetched] = useState(false)
 
-  const { loading: refreshLoading, withLoading: withRefreshLoading } = useLoading()
   const { loading: exportLoading, withLoading: withExportLoading } = useLoading()
   const { toast } = useToast()
+  const logoDataUri = useLogoDataUri()
   const canOpenInventory = role ? INVENTORY_NAV_ROLES.includes(role) : false
+  const isAdmin = role === "SUPER_ADMIN" || role === "ADMIN"
 
   const getTopProducts = async () => {
     try {
-      console.log('🔄 Fetching top products...')
       const response = await apiClient.get('/products/best-selling')
-      console.log('✅ Top products response:', response.data)
       if (response?.data?.success) {
         setTopProducts(response.data.data || [])
-      } else {
-        console.warn('⚠️ Top products response not successful:', response.data)
       }
     } catch (error: any) {
-      console.error("❌ Error fetching top products:", error)
-      console.error("Error details:", error.response?.data)
       toast({
         variant: "destructive",
         title: "Top Products Error",
@@ -85,20 +147,15 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
     }
   }
 
-
   const getRecentSales = async () => {
     try {
-      const response = await apiClient.get('/sale/recent')
-      console.log('✅ Recent Sales Response:', response.data)
+      const response = await apiClient.get('/sale/recent', { params: { limit: 20 } })
       if (response?.data?.success) {
         setRecentSales(response.data.data || [])
-        console.log('📊 Recent Sales Data:', response.data.data)
       } else {
-        console.warn('⚠️ Recent sales response not successful:', response.data)
         setRecentSales([])
       }
     } catch (error: any) {
-      console.error("❌ Error fetching recent sales:", error.response?.data || error.message)
       setRecentSales([])
       toast({
         variant: "destructive",
@@ -111,16 +168,12 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
   const getStats = async () => {
     try {
       const response = await apiClient.get('/dashboard/stats')
-      console.log('✅ Dashboard Stats Response:', response.data)
       if (response?.data?.success) {
         setStats(response.data.data || null)
-        console.log('📊 Dashboard Stats Data:', response.data.data)
       } else {
-        console.warn('⚠️ Dashboard stats response not successful:', response.data)
         setStats(null)
       }
     } catch (error: any) {
-      console.error("❌ Error fetching stats:", error.response?.data || error.message)
       setStats(null)
       toast({
         variant: "destructive",
@@ -144,138 +197,329 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
     loadAllData()
   }, [])
 
-  const handleRefreshData = async () => {
-    await withRefreshLoading(async () => {
-      try {
-        await loadAllData()
-        toast({
-          variant: "success",
-          title: "Data Refreshed",
-          description: "Dashboard data has been updated successfully",
-        })
-      } catch (error) {
+  useEffect(() => {
+    if (activeModal !== "customers" || customersFetched) return
+    setCustomersLoading(true)
+    apiClient
+      .get(`${API_BASE}/customer`)
+      .then((res) => {
+        const list: CustomerRow[] = res.data?.data || []
+        list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())
+        setCustomers(list)
+        setCustomersFetched(true)
+      })
+      .catch((error: any) => {
         toast({
           variant: "destructive",
-          title: "Refresh Failed",
-          description: "Could not refresh dashboard data",
+          title: "Error",
+          description: error.response?.data?.message || "Failed to load customers",
         })
-      }
-    })
-  }
+      })
+      .finally(() => setCustomersLoading(false))
+  }, [activeModal, customersFetched])
 
-  const generateReport = async () => {
-    if (!stats || !topProducts || !recentSales) return
+  type PdfCol = { label: string; width: number; align?: "right" }
+
+  const generateReport = async (): Promise<string> => {
+    if (!stats) throw new Error("No dashboard data loaded yet")
 
     const { jsPDF } = await import("jspdf")
     const doc = new jsPDF({ unit: "mm", format: "a4" })
-    let y = 15
 
+    const pageWidth = 210
+    const pageHeight = 297
+    const margin = 14
+    const usableWidth = pageWidth - margin * 2
+    const bottomLimit = pageHeight - 16
+    const generatedAt = new Date()
+    const scopeLabel = stats.branch ? stats.branch.name : "All Branches"
+    let y = margin
+
+    const shortTime = (d: string) => new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+
+    // ---------- Header band ----------
+    const bandHeight = 28
+    doc.setFillColor(15, 23, 42) // slate-900
+    doc.rect(0, 0, pageWidth, bandHeight, "F")
+
+    let textX = margin
+    if (logoDataUri) {
+      try {
+        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
+          const el = new Image()
+          el.onload = () => resolve(el)
+          el.onerror = reject
+          el.src = logoDataUri
+        })
+        const aspect = img.naturalWidth / img.naturalHeight || 2.6
+        const maxH = 13
+        let imgH = maxH
+        let imgW = imgH * aspect
+        if (imgW > 28) {
+          imgW = 28
+          imgH = imgW / aspect
+        }
+        doc.addImage(logoDataUri, "PNG", margin, (bandHeight - imgH) / 2, imgW, imgH)
+        textX = margin + imgW + 5
+      } catch {
+        // ignore — image load failed; header continues without logo
+      }
+    }
+
+    doc.setTextColor(255, 255, 255)
     doc.setFont("helvetica", "bold")
-    doc.setFontSize(18)
-    doc.text("MANPASAND POS SYSTEM", 14, y)
-    y += 8
-    doc.setFontSize(14)
-    doc.text("Daily Sales Report", 14, y)
-    y += 8
-
+    doc.setFontSize(15)
+    doc.text("MANPASAND POS", textX, 13)
     doc.setFont("helvetica", "normal")
-    doc.setFontSize(10)
-    doc.text(`Generated: ${new Date().toLocaleString()}`, 14, y)
-    y += 8
-    doc.line(14, y, 196, y)
-    y += 8
+    doc.setFontSize(9)
+    doc.text("Daily Sales Report", textX, 19.5)
 
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(12)
-    doc.text("Summary", 14, y)
-    y += 6
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(10)
-    const summaryLines = [
-      `- Total Customers: ${stats.totalCustomers}`,
-      `- Low Stock Items: ${stats.lowStockProducts.length}`,
-      stats.todaySales.length > 0 ? `- Today's Sales: ${stats.todaySales.length}` : "- No sales today",
+    doc.setFontSize(8)
+    doc.text(`Generated ${generatedAt.toLocaleString()}`, pageWidth - margin, 11, { align: "right" })
+    doc.text(`Scope: ${scopeLabel}`, pageWidth - margin, 16.5, { align: "right" })
+    doc.text(`${stats.totalCustomers} total customers`, pageWidth - margin, 22, { align: "right" })
+
+    y = bandHeight + 8
+
+    // ---------- Summary KPI tiles (mirrors the dashboard's 4 stat cards) ----------
+    const kpis: { label: string; value: string; sub: string }[] = [
+      { label: "TODAY'S SALES", value: formatCurrency(stats.todaySalesTotal), sub: `${stats.todaySalesCount} transactions` },
+      { label: "RECENT TRANSACTIONS", value: String(recentSales.length), sub: "Latest activity" },
+      { label: "TOTAL CUSTOMERS", value: String(stats.totalCustomers), sub: `+${stats.newCustomersToday} new today` },
+      { label: "LOW STOCK ITEMS", value: String(stats.lowStockCount), sub: "Need restock" },
     ]
-    summaryLines.forEach((line) => {
-      doc.text(line, 16, y)
-      y += 5
+    const boxGap = 4
+    const boxW = (usableWidth - boxGap * 3) / 4
+    const boxH = 22
+    kpis.forEach((kpi, i) => {
+      const x = margin + i * (boxW + boxGap)
+      doc.setDrawColor(226, 232, 240)
+      doc.setFillColor(248, 250, 252)
+      doc.roundedRect(x, y, boxW, boxH, 2, 2, "FD")
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(6.3)
+      doc.setTextColor(100, 116, 139)
+      doc.text(kpi.label, x + 3, y + 6)
+      doc.setFontSize(11)
+      doc.setTextColor(15, 23, 42)
+      doc.text(kpi.value, x + 3, y + 13)
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(6.3)
+      doc.setTextColor(100, 116, 139)
+      doc.text(kpi.sub, x + 3, y + 18)
     })
-    y += 2
+    y += boxH + 10
 
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(12)
-    doc.text("Recent Transactions", 14, y)
-    y += 6
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(10)
-    const transactions = recentSales.length
-      ? recentSales.map((sale) => `- ${sale.productName} - Rs ${sale.price}`)
-      : ["- No recent transactions"]
-    transactions.forEach((line) => {
-      if (y > 275) {
+    const ensureSpace = (needed: number) => {
+      if (y + needed > bottomLimit) {
         doc.addPage()
-        y = 15
+        y = margin
       }
-      const wrapped = doc.splitTextToSize(line, 178)
-      doc.text(wrapped, 16, y)
-      y += wrapped.length * 5
-    })
-    y += 2
+    }
 
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(12)
-    doc.text("Top Products", 14, y)
-    y += 6
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(10)
-    const productLines = topProducts.length
-      ? topProducts.slice(0, 5).map((product, index) =>
-          `${index + 1}. ${product.name} - ${product._count.order_items} orders - Rs ${product.sales_rate_inc_dis_and_tax}`,
-        )
-      : ["No top products data"]
-    productLines.forEach((line) => {
-      if (y > 275) {
-        doc.addPage()
-        y = 15
+    const drawSectionTitle = (title: string) => {
+      ensureSpace(12)
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(11)
+      doc.setTextColor(15, 23, 42)
+      doc.text(title, margin, y)
+      doc.setDrawColor(37, 99, 235)
+      doc.setLineWidth(0.6)
+      doc.line(margin, y + 1.6, margin + 10, y + 1.6)
+      y += 7
+    }
+
+    const drawTableHeader = (cols: PdfCol[]) => {
+      doc.setFillColor(241, 245, 249)
+      doc.rect(margin, y, usableWidth, 6.5, "F")
+      doc.setFont("helvetica", "bold")
+      doc.setFontSize(7)
+      doc.setTextColor(51, 65, 85)
+      let x = margin
+      cols.forEach((c) => {
+        const tx = c.align === "right" ? x + c.width - 2 : x + 2
+        doc.text(c.label, tx, y + 4.4, c.align === "right" ? { align: "right" } : undefined)
+        x += c.width
+      })
+      y += 6.5
+    }
+
+    const drawTable = (title: string, cols: PdfCol[], rows: (string | number)[][]) => {
+      drawSectionTitle(title)
+      drawTableHeader(cols)
+      if (!rows.length) {
+        doc.setFont("helvetica", "italic")
+        doc.setFontSize(8)
+        doc.setTextColor(148, 163, 184)
+        doc.text("No data available", margin + 2, y + 4.5)
+        y += 8
+        return
       }
-      const wrapped = doc.splitTextToSize(line, 178)
-      doc.text(wrapped, 16, y)
-      y += wrapped.length * 5
-    })
-    y += 2
+      const rowH = 6.2
+      rows.forEach((row, idx) => {
+        if (y + rowH > bottomLimit) {
+          doc.addPage()
+          y = margin
+          drawTableHeader(cols)
+        }
+        if (idx % 2 === 1) {
+          doc.setFillColor(248, 250, 252)
+          doc.rect(margin, y, usableWidth, rowH, "F")
+        }
+        doc.setFont("helvetica", "normal")
+        doc.setFontSize(7.2)
+        doc.setTextColor(30, 41, 59)
+        let x = margin
+        row.forEach((cell, ci) => {
+          const c = cols[ci]
+          const tx = c.align === "right" ? x + c.width - 2 : x + 2
+          const text = doc.splitTextToSize(String(cell ?? "-"), c.width - 4)[0] ?? ""
+          doc.text(text, tx, y + rowH - 1.8, c.align === "right" ? { align: "right" } : undefined)
+          x += c.width
+        })
+        y += rowH
+      })
+      y += 6
+    }
 
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(12)
-    doc.text("Low Stock Alerts", 14, y)
-    y += 6
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(10)
-    const lowStockLines = stats.lowStockProducts.length
-      ? stats.lowStockProducts.map(
-          (item) => `- ${item.product.name} (${item.product.sku}) - Quantity: ${item.current_quantity}`,
-        )
-      : ["- No low stock alerts"]
-    lowStockLines.forEach((line) => {
-      if (y > 275) {
-        doc.addPage()
-        y = 15
-      }
-      const wrapped = doc.splitTextToSize(line, 178)
-      doc.text(wrapped, 16, y)
-      y += wrapped.length * 5
-    })
+    // ---------- Today's Sales (exact match of the Today's Sales KPI + modal) ----------
+    const todaySalesCols: PdfCol[] = isAdmin
+      ? [
+          { label: "SALE #", width: 42 },
+          { label: "BRANCH", width: 38 },
+          { label: "TIME", width: 26 },
+          { label: "STATUS", width: 26 },
+          { label: "AMOUNT", width: usableWidth - 42 - 38 - 26 - 26, align: "right" },
+        ]
+      : [
+          { label: "SALE #", width: 55 },
+          { label: "TIME", width: 40 },
+          { label: "STATUS", width: 35 },
+          { label: "AMOUNT", width: usableWidth - 55 - 40 - 35, align: "right" },
+        ]
+    const todaySalesRows = stats.todaySales.map((s) =>
+      isAdmin
+        ? [s.sale_number, s.branch?.name || "-", shortTime(s.created_at), s.status, formatCurrency(s.total_amount)]
+        : [s.sale_number, shortTime(s.created_at), s.status, formatCurrency(s.total_amount)],
+    )
+    drawTable(`Today's Sales — ${formatCurrency(stats.todaySalesTotal)}`, todaySalesCols, todaySalesRows)
 
-    doc.save(`daily-sales-report-${Date.now()}.pdf`)
+    // ---------- Recent Transactions ----------
+    const recentCols: PdfCol[] = isAdmin
+      ? [
+          { label: "CUSTOMER", width: 38 },
+          { label: "SALE #", width: 32 },
+          { label: "BRANCH", width: 30 },
+          { label: "TIME", width: 25 },
+          { label: "STATUS", width: 22 },
+          { label: "AMOUNT", width: usableWidth - 38 - 32 - 30 - 25 - 22, align: "right" },
+        ]
+      : [
+          { label: "CUSTOMER", width: 48 },
+          { label: "SALE #", width: 42 },
+          { label: "TIME", width: 30 },
+          { label: "STATUS", width: 25 },
+          { label: "AMOUNT", width: usableWidth - 48 - 42 - 30 - 25, align: "right" },
+        ]
+    const recentRows = recentSales.map((sale) =>
+      isAdmin
+        ? [sale.customerName, sale.saleNumber, sale.branch?.name || "-", shortTime(sale.saleDate), sale.status, formatCurrency(sale.totalAmount)]
+        : [sale.customerName, sale.saleNumber, shortTime(sale.saleDate), sale.status, formatCurrency(sale.totalAmount)],
+    )
+    drawTable("Recent Transactions", recentCols, recentRows)
+
+    // ---------- Top Products ----------
+    const topCols: PdfCol[] = isAdmin
+      ? [
+          { label: "#", width: 8 },
+          { label: "PRODUCT", width: 46 },
+          { label: "CATEGORY", width: 26 },
+          { label: "BRANCH", width: 30 },
+          { label: "ORDERS", width: 18 },
+          { label: "SOLD", width: 18 },
+          { label: "PRICE", width: usableWidth - 8 - 46 - 26 - 30 - 18 - 18, align: "right" },
+        ]
+      : [
+          { label: "#", width: 8 },
+          { label: "PRODUCT", width: 64 },
+          { label: "CATEGORY", width: 32 },
+          { label: "ORDERS", width: 20 },
+          { label: "SOLD", width: 20 },
+          { label: "PRICE", width: usableWidth - 8 - 64 - 32 - 20 - 20, align: "right" },
+        ]
+    const topRows = topProducts.map((product, index) =>
+      isAdmin
+        ? [index + 1, product.name, product.category, product.topBranch?.name || "-", product.order_count, product.quantity_sold, formatCurrency(product.price)]
+        : [index + 1, product.name, product.category, product.order_count, product.quantity_sold, formatCurrency(product.price)],
+    )
+    drawTable("Top Products", topCols, topRows)
+
+    // ---------- Payment Methods Today ----------
+    const paymentCols: PdfCol[] = [
+      { label: "METHOD", width: 70 },
+      { label: "TRANSACTIONS", width: 60 },
+      { label: "TOTAL", width: usableWidth - 70 - 60, align: "right" },
+    ]
+    const paymentRows = stats.paymentBreakdown.map((p) => [
+      p.method.charAt(0) + p.method.slice(1).toLowerCase(),
+      p.count,
+      formatCurrency(p.total),
+    ])
+    drawTable("Payment Methods Today", paymentCols, paymentRows)
+
+    // ---------- Low Stock Alerts ----------
+    const lowStockCols: PdfCol[] = isAdmin
+      ? [
+          { label: "PRODUCT", width: 62 },
+          { label: "SKU", width: 36 },
+          { label: "BRANCH", width: 42 },
+          { label: "QTY LEFT", width: usableWidth - 62 - 36 - 42, align: "right" },
+        ]
+      : [
+          { label: "PRODUCT", width: 90 },
+          { label: "SKU", width: 50 },
+          { label: "QTY LEFT", width: usableWidth - 90 - 50, align: "right" },
+        ]
+    const lowStockRows = stats.lowStockProducts.map((item) =>
+      isAdmin
+        ? [item.product.name, item.product.sku, item.branch?.name || "-", item.current_quantity]
+        : [item.product.name, item.product.sku, item.current_quantity],
+    )
+    drawTable("Low Stock Alerts", lowStockCols, lowStockRows)
+
+    // ---------- Footer on every page ----------
+    const totalPages = doc.getNumberOfPages()
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i)
+      doc.setDrawColor(226, 232, 240)
+      doc.setLineWidth(0.3)
+      doc.line(margin, pageHeight - 13, pageWidth - margin, pageHeight - 13)
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(7.5)
+      doc.setTextColor(148, 163, 184)
+      doc.text("Manpasand POS · Confidential business report", margin, pageHeight - 8)
+      doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 8, { align: "right" })
+    }
+
+    const dateSlug = generatedAt.toISOString().slice(0, 10)
+    const scopeSlug = scopeLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
+    const filename = `manpasand-daily-report-${scopeSlug}-${dateSlug}.pdf`
+    doc.save(filename)
+    return filename
   }
 
   const handleExportReport = async () => {
+    toast({
+      title: "Preparing your report",
+      description: "Building a PDF from the exact numbers shown on this dashboard...",
+    })
     await withExportLoading(async () => {
       try {
-        await generateReport()
+        const filename = await generateReport()
         toast({
           variant: "success",
-          title: "Report Exported",
-          description: "Daily sales report PDF has been downloaded successfully",
+          title: "Report downloaded",
+          description: `Saved to your downloads as ${filename}`,
         })
       } catch (error) {
         toast({
@@ -287,9 +531,19 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
     })
   }
 
-  // Don't show full page loader, show skeletons instead
-
   const formatCurrency = (amount: string | number) => `Rs ${Number(amount).toFixed(2)}`
+
+  const timeAgo = (dateStr: string) => {
+    const diffMs = Date.now() - new Date(dateStr).getTime()
+    const mins = Math.floor(diffMs / 60000)
+    if (mins < 1) return "just now"
+    if (mins < 60) return `${mins}m ago`
+    const hours = Math.floor(mins / 60)
+    if (hours < 24) return `${hours}h ago`
+    return `${Math.floor(hours / 24)}d ago`
+  }
+
+  if (initialLoading && !stats) return <PageLoader message="Loading dashboard..." />
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
@@ -300,17 +554,17 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
             Welcome back! Here's what's happening today.
           </p>
         </div>
-        <div className="flex flex-col sm:flex-row gap-2">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-full border border-gray-200 bg-white px-3 py-1.5 text-xs font-medium text-gray-700 shadow-sm shrink-0">
+            {stats?.branch ? <MapPin className="h-3.5 w-3.5 text-blue-600 shrink-0" /> : <Building2 className="h-3.5 w-3.5 text-blue-600 shrink-0" />}
+            <span className="truncate max-w-[160px]">{stats?.branch ? stats.branch.name : "All Branches"}</span>
+          </div>
           <LoadingButton
-            variant="outline"
-            onClick={handleRefreshData}
-            loading={refreshLoading}
-            loadingText="Refreshing..."
+            onClick={handleExportReport}
+            loading={exportLoading}
+            loadingText="Generating..."
+            className="w-full sm:w-auto"
           >
-            <RefreshCw className="h-4 w-4 mr-2" />
-            Refresh
-          </LoadingButton>
-          <LoadingButton onClick={handleExportReport} loading={exportLoading} loadingText="Generating...">
             <Download className="h-4 w-4 mr-2" />
             Export Report
           </LoadingButton>
@@ -328,55 +582,59 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
           </>
         ) : (
           <>
-            <Card className="hover:shadow-md transition-shadow">
+            <Card
+              className="hover:shadow-md transition-shadow cursor-pointer"
+              onClick={() => setActiveModal("sales")}
+            >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Today's Sales</CardTitle>
                 <DollarSign className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold">{stats?.todaySales?.length || 0}</div>
+                <div className="text-2xl font-bold">{formatCurrency(stats?.todaySalesTotal || 0)}</div>
+                <p className="text-xs text-blue-600 mt-1">{stats?.todaySalesCount || 0} transactions today →</p>
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-md transition-shadow">
+            <Card
+              className="hover:shadow-md transition-shadow cursor-pointer"
+              onClick={() => setActiveModal("transactions")}
+            >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Recent Transactions</CardTitle>
                 <ShoppingCart className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{recentSales.length}</div>
+                <p className="text-xs text-blue-600 mt-1">View details →</p>
               </CardContent>
             </Card>
 
-            <Card className="hover:shadow-md transition-shadow">
+            <Card
+              className="hover:shadow-md transition-shadow cursor-pointer"
+              onClick={() => setActiveModal("customers")}
+            >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Total Customers</CardTitle>
                 <Users className="h-4 w-4 text-muted-foreground" />
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{stats?.totalCustomers || 0}</div>
+                <p className="text-xs text-blue-600 mt-1">+{stats?.newCustomersToday || 0} new today →</p>
               </CardContent>
             </Card>
 
             <Card
-              className={`transition-shadow ${
-                canOpenInventory ? "cursor-pointer hover:shadow-md" : "hover:shadow-md"
-              }`}
-              onClick={() => {
-                if (canOpenInventory) {
-                  onNavigate?.("inventory-dashboard")
-                }
-              }}
+              className="cursor-pointer hover:shadow-md transition-shadow"
+              onClick={() => setActiveModal("lowstock")}
             >
               <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
                 <CardTitle className="text-sm font-medium">Low Stock Items</CardTitle>
                 <Package className="h-4 w-4 text-yellow-600" />
               </CardHeader>
               <CardContent>
-                <div className="text-2xl font-bold text-yellow-600">{stats?.lowStockProducts?.length || 0}</div>
-                {onNavigate && canOpenInventory && (
-                  <p className="text-xs text-blue-600 mt-1">View inventory →</p>
-                )}
+                <div className="text-2xl font-bold text-yellow-600">{stats?.lowStockCount || 0}</div>
+                <p className="text-xs text-blue-600 mt-1">View details →</p>
               </CardContent>
             </Card>
           </>
@@ -393,7 +651,7 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="space-y-3">
               {initialLoading ? (
                 <div className="flex flex-col items-center justify-center py-8 space-y-2">
                   <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
@@ -401,21 +659,35 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 </div>
               ) : (
                 <>
-                  {recentSales.slice(0, 5).map((sale, index) => (
+                  {recentSales.slice(0, 6).map((sale) => (
                     <div
-                      key={index}
-                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
+                      key={sale.id}
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 border rounded-lg hover:bg-gray-50 transition-colors"
                     >
-                      <div>
-                        <div className="font-medium">{sale.productName}</div>
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">{sale.customerName}</div>
+                        <div className="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
+                          <span>{sale.saleNumber}</span>
+                          <span>·</span>
+                          <span>{timeAgo(sale.saleDate)}</span>
+                          {isAdmin && sale.branch && (
+                            <>
+                              <span>·</span>
+                              <span className="inline-flex items-center gap-0.5 text-blue-600">
+                                <MapPin className="h-3 w-3" />
+                                {sale.branch.name}
+                              </span>
+                            </>
+                          )}
+                        </div>
                       </div>
-                      <div className="text-right">
-                        <div className="font-medium">{formatCurrency(sale.price)}</div>
+                      <div className="flex items-center justify-between sm:flex-col sm:items-end sm:text-right shrink-0">
+                        <div className="font-medium">{formatCurrency(sale.totalAmount)}</div>
                         <Badge
                           variant="default"
-                          className="bg-green-100 text-green-800 hover:bg-neutral-500"
+                          className="bg-green-100 text-green-800 hover:bg-green-100"
                         >
-                          completed
+                          {sale.status?.toLowerCase() || "completed"}
                         </Badge>
                       </div>
                     </div>
@@ -438,7 +710,7 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
             </CardTitle>
           </CardHeader>
           <CardContent>
-            <div className="space-y-4">
+            <div className="space-y-3">
               {initialLoading ? (
                 <div className="flex flex-col items-center justify-center py-8 space-y-2">
                   <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
@@ -446,22 +718,33 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
                 </div>
               ) : (
                 <>
-                  {topProducts.slice(0, 5).map((product, index) => (
+                  {topProducts.slice(0, 6).map((product, index) => (
                     <div
                       key={product.id}
-                      className="flex items-center justify-between p-3 border rounded-lg hover:bg-gray-50 transition-colors"
+                      className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 border rounded-lg hover:bg-gray-50 transition-colors"
                     >
-                      <div className="flex items-center space-x-3">
-                        <Badge variant="secondary">#{index + 1}</Badge>
-                        <div>
-                          <div className="font-medium flex items-center space-x-2">
-                            <span>{product.name}</span>
-                            <TrendingUp className="h-3 w-3 text-green-600" />
+                      <div className="flex items-center space-x-3 min-w-0">
+                        <Badge variant="secondary" className="shrink-0">#{index + 1}</Badge>
+                        <div className="min-w-0">
+                          <div className="font-medium flex items-center space-x-2 truncate">
+                            <span className="truncate">{product.name}</span>
+                            <TrendingUp className="h-3 w-3 text-green-600 shrink-0" />
                           </div>
-                          <div className="text-sm text-gray-500">{product._count.order_items} orders</div>
+                          <div className="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 gap-y-0.5">
+                            <span>{product.order_count} orders · {product.quantity_sold} sold</span>
+                            {isAdmin && product.topBranch && (
+                              <>
+                                <span>·</span>
+                                <span className="inline-flex items-center gap-0.5 text-blue-600">
+                                  <MapPin className="h-3 w-3" />
+                                  {product.topBranch.name}
+                                </span>
+                              </>
+                            )}
+                          </div>
                         </div>
                       </div>
-                      <div className="font-medium">{formatCurrency(product.sales_rate_inc_dis_and_tax)}</div>
+                      <div className="font-medium shrink-0 pl-9 sm:pl-0">{formatCurrency(product.price)}</div>
                     </div>
                   ))}
                   {topProducts.length === 0 && (
@@ -473,6 +756,220 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
           </CardContent>
         </Card>
       </div>
+
+      {/* Payment Methods Today */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center justify-between">
+            Payment Methods Today
+            <Badge variant="secondary">{stats?.todaySalesCount || 0} sales</Badge>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          {initialLoading ? (
+            <div className="flex items-center justify-center py-6">
+              <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+            </div>
+          ) : stats?.paymentBreakdown?.length ? (
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+              {stats.paymentBreakdown.map((p) => {
+                const Icon = PAYMENT_ICON[p.method] || Wallet
+                return (
+                  <div key={p.method} className="flex items-center gap-3 p-3 border rounded-lg">
+                    <div className="h-9 w-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                      <Icon className="h-4 w-4 text-blue-600" />
+                    </div>
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium capitalize truncate">{p.method.toLowerCase()}</p>
+                      <p className="text-xs text-gray-500">{p.count} transactions</p>
+                    </div>
+                    <div className="text-sm font-semibold shrink-0">{formatCurrency(p.total)}</div>
+                  </div>
+                )
+              })}
+            </div>
+          ) : (
+            <div className="text-center text-gray-500 py-4">No sales recorded today</div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* KPI detail modals — clicking a stat card opens the underlying data here instead of dumping the user onto another page to hunt for it. */}
+      <Dialog open={activeModal !== null} onOpenChange={(open) => !open && setActiveModal(null)}>
+        <DialogContent className="max-w-lg w-[92vw] sm:w-full max-h-[85vh] flex flex-col">
+          {activeModal === "sales" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Today's Sales</DialogTitle>
+                <DialogDescription>
+                  {formatCurrency(stats?.todaySalesTotal || 0)} across {stats?.todaySalesCount || 0} transactions
+                  {stats?.branch ? ` at ${stats.branch.name}` : " — all branches"}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
+                {stats?.todaySales?.length ? stats.todaySales.map((s) => (
+                  <div key={s.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 border rounded-lg">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{s.sale_number}</div>
+                      <div className="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
+                        <span>{timeAgo(s.created_at)}</span>
+                        {isAdmin && s.branch && (
+                          <>
+                            <span>·</span>
+                            <span className="inline-flex items-center gap-0.5 text-blue-600">
+                              <MapPin className="h-3 w-3" />
+                              {s.branch.name}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between sm:flex-col sm:items-end sm:text-right shrink-0">
+                      <div className="font-medium text-sm">{formatCurrency(s.total_amount)}</div>
+                      <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100">
+                        {s.status?.toLowerCase()}
+                      </Badge>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="text-center text-gray-500 py-8">No sales yet today</div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setActiveModal(null); onNavigate?.("sales-history") }}>
+                  Open Sales History
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {activeModal === "transactions" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Recent Transactions</DialogTitle>
+                <DialogDescription>Last {recentSales.length} sales{isAdmin ? " across all branches" : ""}</DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
+                {recentSales.length ? recentSales.map((sale) => (
+                  <div key={sale.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 border rounded-lg">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{sale.customerName}</div>
+                      <div className="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
+                        <span>{sale.saleNumber}</span>
+                        <span>·</span>
+                        <span>{timeAgo(sale.saleDate)}</span>
+                        {isAdmin && sale.branch && (
+                          <>
+                            <span>·</span>
+                            <span className="inline-flex items-center gap-0.5 text-blue-600">
+                              <MapPin className="h-3 w-3" />
+                              {sale.branch.name}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between sm:flex-col sm:items-end sm:text-right shrink-0">
+                      <div className="font-medium text-sm">{formatCurrency(sale.totalAmount)}</div>
+                      <Badge variant="default" className="bg-green-100 text-green-800 hover:bg-green-100">
+                        {sale.status?.toLowerCase() || "completed"}
+                      </Badge>
+                    </div>
+                  </div>
+                )) : (
+                  <div className="text-center text-gray-500 py-8">No recent transactions</div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setActiveModal(null); onNavigate?.("sales-history") }}>
+                  Open Sales History
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {activeModal === "customers" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Customers</DialogTitle>
+                <DialogDescription>
+                  {stats?.totalCustomers || 0} total · {stats?.newCustomersToday || 0} new today
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
+                {customersLoading ? (
+                  <div className="flex flex-col items-center justify-center py-8 space-y-2">
+                    <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+                    <span className="text-sm text-gray-500">Loading customers...</span>
+                  </div>
+                ) : customers.length ? customers.slice(0, 20).map((c) => (
+                  <div key={c.id} className="flex items-center justify-between gap-2 p-3 border rounded-lg">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{c.name || "Unnamed Customer"}</div>
+                      <div className="text-xs text-gray-500 truncate">{c.phone_number || c.email || "No contact info"}</div>
+                    </div>
+                    {typeof c.sale_count === "number" && (
+                      <div className="text-xs text-gray-500 shrink-0 whitespace-nowrap">{c.sale_count} orders</div>
+                    )}
+                  </div>
+                )) : (
+                  <div className="text-center text-gray-500 py-8">No customers found</div>
+                )}
+              </div>
+              <DialogFooter>
+                <Button variant="outline" onClick={() => { setActiveModal(null); onNavigate?.("customers") }}>
+                  Open Customers
+                </Button>
+              </DialogFooter>
+            </>
+          )}
+
+          {activeModal === "lowstock" && (
+            <>
+              <DialogHeader>
+                <DialogTitle>Low Stock Items</DialogTitle>
+                <DialogDescription>
+                  {stats?.lowStockCount || 0} items below threshold
+                  {stats?.branch ? ` at ${stats.branch.name}` : " — all branches"}
+                </DialogDescription>
+              </DialogHeader>
+              <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
+                {stats?.lowStockProducts?.length ? stats.lowStockProducts.map((item) => (
+                  <div key={item.id} className="flex items-center justify-between gap-2 p-3 border rounded-lg">
+                    <div className="min-w-0">
+                      <div className="font-medium text-sm truncate">{item.product.name}</div>
+                      <div className="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
+                        <span>{item.product.sku}</span>
+                        {isAdmin && item.branch && (
+                          <>
+                            <span>·</span>
+                            <span className="inline-flex items-center gap-0.5 text-blue-600">
+                              <MapPin className="h-3 w-3" />
+                              {item.branch.name}
+                            </span>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                    <Badge variant="outline" className="border-yellow-300 text-yellow-700 shrink-0 whitespace-nowrap">
+                      {item.current_quantity} left
+                    </Badge>
+                  </div>
+                )) : (
+                  <div className="text-center text-gray-500 py-8">No low stock items</div>
+                )}
+              </div>
+              {canOpenInventory && (
+                <DialogFooter>
+                  <Button variant="outline" onClick={() => { setActiveModal(null); onNavigate?.("inventory-dashboard") }}>
+                    Open Inventory Dashboard
+                  </Button>
+                </DialogFooter>
+              )}
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

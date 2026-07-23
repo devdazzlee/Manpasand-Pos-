@@ -49,3 +49,13 @@ export const deleteBranch = asyncHandler(async (req: Request, res: Response) => 
     const result = await branchService.deleteBranch(req.params.id);
     new ApiResponse(null, result.message).send(res);
 });
+
+export const getBranchCredentials = asyncHandler(async (req: Request, res: Response) => {
+    const result = await branchService.getBranchCredentials(req.params.id);
+    new ApiResponse(result, 'Branch login fetched successfully').send(res);
+});
+
+export const upsertBranchCredentials = asyncHandler(async (req: Request, res: Response) => {
+    const result = await branchService.upsertBranchCredentials(req.params.id, req.body);
+    new ApiResponse(result, 'Branch login saved successfully').send(res);
+});
