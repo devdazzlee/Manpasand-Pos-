@@ -19,12 +19,22 @@ import {
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
-import { Plus, Search, Eye, CheckCircle, XCircle, Loader2, Minus, X, ChevronLeft, ChevronRight, Printer, Download, MessageCircle, RotateCcw, DollarSign, CreditCard, ArrowLeftRight, Package } from "lucide-react"
+import { Plus, Search, Eye, CheckCircle, XCircle, Loader2, Minus, X, ChevronLeft, ChevronRight, Printer, Download, MessageCircle, RotateCcw, DollarSign, CreditCard, ArrowLeftRight, Package, Filter } from "lucide-react"
+import {
+  startOfDay,
+  endOfDay,
+  startOfWeek,
+  endOfWeek,
+  startOfMonth,
+  endOfMonth,
+  subDays,
+  format,
+} from "date-fns"
 import { toast } from "sonner"
-import { PageLoader } from "@/components/ui/page-loader"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { DatePicker } from "@/components/ui/date-picker"
 import apiClient from "@/lib/apiClient"
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri"
 import {
@@ -296,6 +306,67 @@ const findIneligibleSaleMatch = (sales: any[], searchTerm: string) => {
   }
 }
 
+function ReturnsPageSkeleton({ isExchanges }: { isExchanges: boolean }) {
+  return (
+    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+        <div className="space-y-2">
+          <Skeleton className="h-8 w-40" />
+          <Skeleton className="h-4 w-72 max-w-full" />
+        </div>
+        <div className="flex gap-2">
+          <Skeleton className="h-9 w-28" />
+          <Skeleton className="h-9 w-36" />
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-6">
+        {Array.from({ length: 4 }).map((_, index) => (
+          <Card key={index}>
+            <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+              <Skeleton className="h-4 w-28" />
+              <Skeleton className="h-4 w-4 rounded-full" />
+            </CardHeader>
+            <CardContent className="space-y-2">
+              <Skeleton className="h-8 w-20" />
+              <Skeleton className="h-3 w-24" />
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="border-gray-200 shadow-sm">
+        <CardContent className="pt-4 space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            <Skeleton className="h-10 xl:col-span-2" />
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+            <Skeleton className="h-10" />
+          </div>
+        </CardContent>
+      </Card>
+
+      <div className="space-y-2">
+        <Skeleton className="h-6 w-40" />
+        <Skeleton className="h-4 w-80 max-w-full" />
+        <Card>
+          <CardContent className="pt-6 space-y-3">
+            <Skeleton className="h-4 w-full" />
+            {Array.from({ length: 6 }).map((_, index) => (
+              <Skeleton key={index} className="h-10 w-full" />
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+
+      <span className="sr-only">
+        Loading {isExchanges ? "exchanges" : "returns"}…
+      </span>
+    </div>
+  )
+}
+
 function SelectedSaleDetailsSkeleton() {
   return (
     <div className="rounded-md bg-gray-50 p-4 space-y-3">
@@ -348,6 +419,38 @@ export type ReturnsModuleProps = {
   hideModuleTabs?: boolean
 }
 
+type DatePreset = "all" | "today" | "yesterday" | "week" | "month" | "custom"
+
+const HISTORY_PAYMENT_METHODS = [
+  "CASH",
+  "CARD",
+  "MOBILE_MONEY",
+  "BANK_TRANSFER",
+  "CREDIT",
+  "STORE_CREDIT",
+] as const
+
+const getHistoryDateRange = (preset: DatePreset): { start?: Date; end?: Date } => {
+  const now = new Date()
+  switch (preset) {
+    case "today":
+      return { start: startOfDay(now), end: endOfDay(now) }
+    case "yesterday": {
+      const yesterday = subDays(now, 1)
+      return { start: startOfDay(yesterday), end: endOfDay(yesterday) }
+    }
+    case "week":
+      return {
+        start: startOfWeek(now, { weekStartsOn: 1 }),
+        end: endOfWeek(now, { weekStartsOn: 1 }),
+      }
+    case "month":
+      return { start: startOfMonth(now), end: endOfMonth(now) }
+    default:
+      return {}
+  }
+}
+
 export function ReturnsModule({
   initialTab = "returns",
   hideModuleTabs = false,
@@ -397,6 +500,13 @@ export function ReturnsModule({
   const logoDataUri = useLogoDataUri()
   const { receiptPrinter, getReceiptPrinterObj, printers } = usePrinterSettings()
   const [searchTerm, setSearchTerm] = useState("")
+  const [datePreset, setDatePreset] = useState<DatePreset>("all")
+  const [customStart, setCustomStart] = useState<Date | undefined>(undefined)
+  const [customEnd, setCustomEnd] = useState<Date | undefined>(undefined)
+  const [paymentMethodFilter, setPaymentMethodFilter] = useState("all")
+  const [amountMin, setAmountMin] = useState("")
+  const [amountMax, setAmountMax] = useState("")
+  const [showFilters, setShowFilters] = useState(true)
   const [saleSearch, setSaleSearch] = useState("")
   const [saleSearchPending, setSaleSearchPending] = useState(false)
   const [moduleTab, setModuleTab] = useState<ReturnsModuleTab>(initialTab)
@@ -665,19 +775,91 @@ export function ReturnsModule({
     }
   }
 
+  const availablePaymentMethods = useMemo(() => {
+    const fromData = new Set(
+      returns
+        .map((r) => String(r.payment_method || "").toUpperCase())
+        .filter(Boolean),
+    )
+    HISTORY_PAYMENT_METHODS.forEach((m) => fromData.add(m))
+    return Array.from(fromData).sort()
+  }, [returns])
+
+  const activeFilterCount = useMemo(() => {
+    let count = 0
+    if (normalizeSaleSearchTerm(searchTerm)) count += 1
+    if (datePreset !== "all") count += 1
+    if (paymentMethodFilter !== "all") count += 1
+    if (amountMin.trim()) count += 1
+    if (amountMax.trim()) count += 1
+    return count
+  }, [searchTerm, datePreset, paymentMethodFilter, amountMin, amountMax])
+
+  const clearHistoryFilters = () => {
+    setSearchTerm("")
+    setDatePreset("all")
+    setCustomStart(undefined)
+    setCustomEnd(undefined)
+    setPaymentMethodFilter("all")
+    setAmountMin("")
+    setAmountMax("")
+  }
+
   const filteredReturns = useMemo(() => {
     const normalizedTerm = normalizeSaleSearchTerm(searchTerm).toLowerCase()
+    const minAmount = amountMin.trim() ? Number(amountMin) : null
+    const maxAmount = amountMax.trim() ? Number(amountMax) : null
+
+    let rangeStart: Date | undefined
+    let rangeEnd: Date | undefined
+    if (datePreset === "custom") {
+      if (customStart) rangeStart = startOfDay(customStart)
+      if (customEnd) rangeEnd = endOfDay(customEnd)
+    } else {
+      const range = getHistoryDateRange(datePreset)
+      rangeStart = range.start
+      rangeEnd = range.end
+    }
 
     return returns.filter((returnItem) => {
       const matchesSearch =
+        !normalizedTerm ||
         returnItem.id.toLowerCase().includes(normalizedTerm) ||
         returnItem.sale_number.toLowerCase().includes(normalizedTerm) ||
-        (returnItem.customer?.name && returnItem.customer.name.toLowerCase().includes(normalizedTerm)) ||
-        (returnItem.customer?.email && returnItem.customer.email.toLowerCase().includes(normalizedTerm))
+        (returnItem.original_sale_number || "").toLowerCase().includes(normalizedTerm) ||
+        (returnItem.customer?.name || "").toLowerCase().includes(normalizedTerm) ||
+        (returnItem.customer?.email || "").toLowerCase().includes(normalizedTerm) ||
+        (returnItem.payment_method || "").toLowerCase().includes(normalizedTerm) ||
+        (returnItem.notes || "").toLowerCase().includes(normalizedTerm)
 
-      return matchesSearch
+      if (!matchesSearch) return false
+
+      if (paymentMethodFilter !== "all") {
+        if (String(returnItem.payment_method || "").toUpperCase() !== paymentMethodFilter) {
+          return false
+        }
+      }
+
+      const saleDate = new Date(returnItem.sale_date)
+      if (rangeStart && saleDate < rangeStart) return false
+      if (rangeEnd && saleDate > rangeEnd) return false
+
+      const amount = Math.abs(Number(returnItem.total_amount) || 0)
+      if (minAmount !== null && !Number.isNaN(minAmount) && amount < minAmount) return false
+      if (maxAmount !== null && !Number.isNaN(maxAmount) && amount > maxAmount) return false
+
+      return true
     })
-  }, [returns, searchTerm])
+  }, [
+    returns,
+    searchTerm,
+    datePreset,
+    customStart,
+    customEnd,
+    paymentMethodFilter,
+    amountMin,
+    amountMax,
+  ])
 
   const searchableSales = useMemo(() => {
     const eligibleSalesFromCache = allSalesForMetrics
@@ -742,10 +924,10 @@ export function ReturnsModule({
   const activeHistory =
     moduleTab === "exchanges" ? exchangeHistory : refundHistory
 
-  // Reset to page 1 when search term or tab changes
+  // Reset to page 1 when search/filters or tab changes
   useEffect(() => {
     setCurrentPage(1)
-  }, [searchTerm, moduleTab])
+  }, [searchTerm, datePreset, customStart, customEnd, paymentMethodFilter, amountMin, amountMax, moduleTab])
 
   // Prepare ReceiptData (same shape as sales-history) whenever a return is
   // opened. The data feeds the Print / Download / Share actions — there's no
@@ -826,45 +1008,46 @@ export function ReturnsModule({
     }
   }
 
-  const today = new Date()
-  const yesterday = new Date()
-  yesterday.setDate(yesterday.getDate() - 1)
-  const sameDay = (dateValue: string, compareDate: Date) => {
-    const d = new Date(dateValue)
-    return d.toDateString() === compareDate.toDateString()
-  }
+  const statsScopeLabel = useMemo(() => {
+    if (datePreset === "today") return "Today"
+    if (datePreset === "yesterday") return "Yesterday"
+    if (datePreset === "week") return "This week"
+    if (datePreset === "month") return "This month"
+    if (datePreset === "custom") {
+      if (customStart && customEnd) {
+        return `${format(customStart, "MMM d, yyyy")} → ${format(customEnd, "MMM d, yyyy")}`
+      }
+      if (customStart) return `From ${format(customStart, "MMM d, yyyy")}`
+      if (customEnd) return `Until ${format(customEnd, "MMM d, yyyy")}`
+      return "Custom range"
+    }
+    if (activeFilterCount > 0) return "Matching filters"
+    return "All time"
+  }, [datePreset, customStart, customEnd, activeFilterCount])
 
-  const todayRefundCount = refundHistory.filter((r) => sameDay(r.sale_date, today)).length
-  const yesterdayRefundCount = refundHistory.filter((r) => sameDay(r.sale_date, yesterday)).length
-  const todayRefundValue = refundHistory
-    .filter((r) => sameDay(r.sale_date, today))
-    .reduce((sum, r) => sum + Math.abs(Number(r.total_amount)), 0)
-  const pendingRefunds = refundHistory.filter((r) => r.status === "PENDING").length
+  const totalRefundCount = refundHistory.length
+  const totalRefundValue = refundHistory.reduce(
+    (sum, r) => sum + Math.abs(Number(r.total_amount) || 0),
+    0,
+  )
+  const averageRefundValue =
+    totalRefundCount > 0 ? totalRefundValue / totalRefundCount : 0
   const returnRate =
     allSalesForMetrics.length > 0
-      ? ((refundHistory.length / allSalesForMetrics.length) * 100).toFixed(1)
+      ? ((totalRefundCount / allSalesForMetrics.length) * 100).toFixed(1)
       : "0.0"
-  const returnsDelta = todayRefundCount - yesterdayRefundCount
-  const returnsDeltaText =
-    returnsDelta === 0
-      ? "Same as yesterday"
-      : `${returnsDelta > 0 ? "+" : ""}${returnsDelta} from yesterday`
 
-  const todayExchangeCount = exchangeHistory.filter((r) => sameDay(r.sale_date, today)).length
-  const yesterdayExchangeCount = exchangeHistory.filter((r) => sameDay(r.sale_date, yesterday)).length
-  const todayExchangeValue = exchangeHistory
-    .filter((r) => sameDay(r.sale_date, today))
-    .reduce((sum, r) => sum + Math.abs(Number(r.total_amount)), 0)
-  const pendingExchanges = exchangeHistory.filter((r) => r.status === "PENDING").length
+  const totalExchangeCount = exchangeHistory.length
+  const totalExchangeValue = exchangeHistory.reduce(
+    (sum, r) => sum + Math.abs(Number(r.total_amount) || 0),
+    0,
+  )
+  const averageExchangeValue =
+    totalExchangeCount > 0 ? totalExchangeValue / totalExchangeCount : 0
   const exchangeRate =
     allSalesForMetrics.length > 0
-      ? ((exchangeHistory.length / allSalesForMetrics.length) * 100).toFixed(1)
+      ? ((totalExchangeCount / allSalesForMetrics.length) * 100).toFixed(1)
       : "0.0"
-  const exchangesDelta = todayExchangeCount - yesterdayExchangeCount
-  const exchangesDeltaText =
-    exchangesDelta === 0
-      ? "Same as yesterday"
-      : `${exchangesDelta > 0 ? "+" : ""}${exchangesDelta} from yesterday`
 
   // Handle exchange product selection
   const handleExchangeProductSelect = (productId: string) => {
@@ -1540,13 +1723,16 @@ export function ReturnsModule({
     const endIndex = pageSize === 0 ? returnsData.length : startIndex + pageSize
     const paginatedData = returnsData.slice(startIndex, endIndex)
     const hasSearchTerm = Boolean(normalizeSaleSearchTerm(searchTerm))
+    const hasActiveFilters = activeFilterCount > 0
     const emptyStateMessage =
       options?.emptyMessage ??
       (hasSearchTerm && pageSearchMatchingSales.length > 0
         ? "No return history found for this search. Matching sales are shown above."
         : hasSearchTerm && pageSearchIneligibleSaleMatch
           ? "No return history found for this search. Sale status details are shown above."
-          : "No returns found")
+          : hasActiveFilters
+            ? "No returns match your filters."
+            : "No returns found")
     
     return (
       <>
@@ -1699,7 +1885,7 @@ export function ReturnsModule({
   }
 
   if (loading) {
-    return <PageLoader message="Loading returns..." />
+    return <ReturnsPageSkeleton isExchanges={moduleTab === "exchanges"} />
   }
 
   return (
@@ -1716,19 +1902,25 @@ export function ReturnsModule({
           </p>
         </div>
         {(moduleTab === "returns" || moduleTab === "exchanges") && (
-          <Button onClick={openProcessDialog} className="shrink-0">
-            {moduleTab === "exchanges" ? (
-              <>
-                <ArrowLeftRight className="w-4 h-4 mr-2" />
-                Process Exchange
-              </>
-            ) : (
-              <>
-                <RotateCcw className="w-4 h-4 mr-2" />
-                Process Return
-              </>
-            )}
-          </Button>
+          <div className="flex flex-wrap items-center gap-2 shrink-0">
+            <Button variant="outline" size="sm" onClick={() => setShowFilters((v) => !v)}>
+              <Filter className="mr-2 h-4 w-4" />
+              Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
+            </Button>
+            <Button onClick={openProcessDialog}>
+              {moduleTab === "exchanges" ? (
+                <>
+                  <ArrowLeftRight className="w-4 h-4 mr-2" />
+                  Process Exchange
+                </>
+              ) : (
+                <>
+                  <RotateCcw className="w-4 h-4 mr-2" />
+                  Process Return
+                </>
+              )}
+            </Button>
+          </div>
         )}
       </div>
 
@@ -2386,12 +2578,12 @@ export function ReturnsModule({
               <>
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Today&apos;s Returns</CardTitle>
+                    <CardTitle className="text-sm font-medium">Total Returns</CardTitle>
                     <RotateCcw className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{todayRefundCount}</div>
-                    <p className="text-xs text-muted-foreground">{returnsDeltaText}</p>
+                    <div className="text-2xl font-bold">{totalRefundCount}</div>
+                    <p className="text-xs text-muted-foreground">{statsScopeLabel}</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -2400,8 +2592,22 @@ export function ReturnsModule({
                     <DollarSign className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">Rs {todayRefundValue.toLocaleString()}</div>
-                    <p className="text-xs text-muted-foreground">Today&apos;s total</p>
+                    <div className="text-2xl font-bold">
+                      Rs {totalRefundValue.toLocaleString()}
+                    </div>
+                    <p className="text-xs text-muted-foreground">{statsScopeLabel}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Avg. Return</CardTitle>
+                    <CreditCard className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      Rs {Math.round(averageRefundValue).toLocaleString()}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Per return</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -2414,27 +2620,17 @@ export function ReturnsModule({
                     <p className="text-xs text-muted-foreground">Of total sales</p>
                   </CardContent>
                 </Card>
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Pending</CardTitle>
-                    <CreditCard className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{pendingRefunds}</div>
-                    <p className="text-xs text-muted-foreground">Awaiting approval</p>
-                  </CardContent>
-                </Card>
               </>
             ) : (
               <>
                 <Card>
                   <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Today&apos;s Exchanges</CardTitle>
+                    <CardTitle className="text-sm font-medium">Total Exchanges</CardTitle>
                     <ArrowLeftRight className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">{todayExchangeCount}</div>
-                    <p className="text-xs text-muted-foreground">{exchangesDeltaText}</p>
+                    <div className="text-2xl font-bold">{totalExchangeCount}</div>
+                    <p className="text-xs text-muted-foreground">{statsScopeLabel}</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -2443,8 +2639,22 @@ export function ReturnsModule({
                     <DollarSign className="h-4 w-4 text-muted-foreground" />
                   </CardHeader>
                   <CardContent>
-                    <div className="text-2xl font-bold">Rs {todayExchangeValue.toLocaleString()}</div>
-                    <p className="text-xs text-muted-foreground">Today&apos;s total</p>
+                    <div className="text-2xl font-bold">
+                      Rs {totalExchangeValue.toLocaleString()}
+                    </div>
+                    <p className="text-xs text-muted-foreground">{statsScopeLabel}</p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+                    <CardTitle className="text-sm font-medium">Avg. Exchange</CardTitle>
+                    <CreditCard className="h-4 w-4 text-muted-foreground" />
+                  </CardHeader>
+                  <CardContent>
+                    <div className="text-2xl font-bold">
+                      Rs {Math.round(averageExchangeValue).toLocaleString()}
+                    </div>
+                    <p className="text-xs text-muted-foreground">Per exchange</p>
                   </CardContent>
                 </Card>
                 <Card>
@@ -2457,33 +2667,124 @@ export function ReturnsModule({
                     <p className="text-xs text-muted-foreground">Of total sales</p>
                   </CardContent>
                 </Card>
-                <Card>
-                  <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                    <CardTitle className="text-sm font-medium">Pending</CardTitle>
-                    <CreditCard className="h-4 w-4 text-muted-foreground" />
-                  </CardHeader>
-                  <CardContent>
-                    <div className="text-2xl font-bold">{pendingExchanges}</div>
-                    <p className="text-xs text-muted-foreground">Awaiting approval</p>
-                  </CardContent>
-                </Card>
               </>
             )}
           </div>
 
-          <div className="relative">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder={
-                moduleTab === "exchanges"
-                  ? "Search exchanges or paste a sale #"
-                  : "Search returns or paste a sale #"
-              }
-              className="pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
+          {showFilters && (
+            <Card className="border-gray-200 shadow-sm">
+              <CardContent className="pt-4 space-y-3">
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                  <div className="relative xl:col-span-2">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                    <Input
+                      className="pl-9"
+                      placeholder={
+                        moduleTab === "exchanges"
+                          ? "Search exchange #, original sale #, customer…"
+                          : "Search return #, original sale #, customer…"
+                      }
+                      value={searchTerm}
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <Select
+                      value={datePreset}
+                      onValueChange={(v) => setDatePreset(v as DatePreset)}
+                    >
+                      <SelectTrigger>
+                        <SelectValue placeholder="Date range" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All dates</SelectItem>
+                        <SelectItem value="today">Today</SelectItem>
+                        <SelectItem value="yesterday">Yesterday</SelectItem>
+                        <SelectItem value="week">This Week</SelectItem>
+                        <SelectItem value="month">This Month</SelectItem>
+                        <SelectItem value="custom">Custom Range</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Select value={paymentMethodFilter} onValueChange={setPaymentMethodFilter}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Payment method" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Payment Methods</SelectItem>
+                        {availablePaymentMethods.map((m) => (
+                          <SelectItem key={m} value={m}>
+                            {m.replace(/_/g, " ")}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div>
+                    <Label className="text-xs text-gray-500">Min amount (Rs)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="e.g. 500"
+                      value={amountMin}
+                      onChange={(e) => setAmountMin(e.target.value)}
+                    />
+                  </div>
+
+                  <div>
+                    <Label className="text-xs text-gray-500">Max amount (Rs)</Label>
+                    <Input
+                      type="number"
+                      min={0}
+                      step="0.01"
+                      placeholder="e.g. 5000"
+                      value={amountMax}
+                      onChange={(e) => setAmountMax(e.target.value)}
+                    />
+                  </div>
+                </div>
+
+                {datePreset === "custom" && (
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+                    <div className="space-y-1">
+                      <Label className="text-xs text-gray-500">From</Label>
+                      <DatePicker
+                        date={customStart}
+                        onDateChange={setCustomStart}
+                        placeholder="Pick start date"
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs text-gray-500">To</Label>
+                      <DatePicker
+                        date={customEnd}
+                        onDateChange={setCustomEnd}
+                        placeholder="Pick end date"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                {activeFilterCount > 0 && (
+                  <div className="flex justify-end">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearHistoryFilters}
+                      className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                    >
+                      <X className="mr-1 h-4 w-4" /> Clear filters
+                    </Button>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           {moduleTab === "returns" &&
             normalizeSaleSearchTerm(searchTerm) &&
@@ -2544,17 +2845,25 @@ export function ReturnsModule({
               {moduleTab === "exchanges" ? "Exchange history" : "Return history"}
             </h2>
             <p className="text-sm text-gray-600">
-              Completed {moduleTab === "exchanges" ? "exchange" : "return"} transactions ({activeHistory.length}) — click the eye icon for line-item details
+              Completed {moduleTab === "exchanges" ? "exchange" : "return"} transactions (
+              {activeHistory.length}
+              {activeFilterCount > 0 ? " matching filters" : ""}) — click the eye icon for
+              line-item details
             </p>
             <Card>
               <CardContent className="pt-6">
                 {renderReturnsTable(activeHistory, {
                   emptyMessage:
                     moduleTab === "exchanges"
-                      ? normalizeSaleSearchTerm(searchTerm)
-                        ? "No exchange history found for this search."
+                      ? activeFilterCount > 0
+                        ? "No exchange history matches your filters."
                         : "No exchanges found"
-                      : undefined,
+                      : activeFilterCount > 0
+                        ? normalizeSaleSearchTerm(searchTerm) &&
+                          pageSearchMatchingSales.length > 0
+                          ? "No return history matches your filters. Matching sales are shown above."
+                          : "No return history matches your filters."
+                        : undefined,
                   recordLabel: moduleTab === "exchanges" ? "exchanges" : "returns",
                 })}
               </CardContent>

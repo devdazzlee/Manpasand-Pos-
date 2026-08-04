@@ -1113,7 +1113,12 @@ export function SalesHistory() {
 
             {activeFilterCount > 0 && (
               <div className="flex justify-end">
-                <Button variant="ghost" size="sm" onClick={clearFilters}>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={clearFilters}
+                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
+                >
                   <X className="mr-1 h-4 w-4" /> Clear filters
                 </Button>
               </div>
