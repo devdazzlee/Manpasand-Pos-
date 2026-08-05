@@ -369,45 +369,69 @@ function ReturnsPageSkeleton({ isExchanges }: { isExchanges: boolean }) {
 
 function SelectedSaleDetailsSkeleton() {
   return (
-    <div className="rounded-md bg-gray-50 p-4 space-y-3">
-      <Skeleton className="h-5 w-44" />
-      <Skeleton className="h-4 w-full max-w-md" />
-      <Skeleton className="h-4 w-full max-w-sm" />
-      <Skeleton className="h-4 w-32" />
-      <Skeleton className="h-4 w-24" />
+    <div className="rounded-md bg-gray-50 p-3 sm:p-4 space-y-3 min-w-0 overflow-hidden">
+      <Skeleton className="h-5 w-40 max-w-full" />
+      <Skeleton className="h-4 w-full" />
+      <Skeleton className="h-4 w-[85%] max-w-full" />
+      <Skeleton className="h-4 w-28 max-w-full" />
+      <Skeleton className="h-4 w-20 max-w-full" />
     </div>
   )
 }
 
 function ReturnProductsTableSkeleton() {
   return (
-    <div className="rounded-lg border overflow-hidden">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead className="w-10" />
-            <TableHead>Product</TableHead>
-            <TableHead>SKU</TableHead>
-            <TableHead>Purchased</TableHead>
-            <TableHead>Returnable</TableHead>
-            <TableHead>Qty</TableHead>
-            <TableHead>Inventory</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {Array.from({ length: 2 }).map((_, index) => (
-            <TableRow key={index}>
-              <TableCell><Skeleton className="h-4 w-4" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-36" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-20" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-8" /></TableCell>
-              <TableCell><Skeleton className="h-4 w-8" /></TableCell>
-              <TableCell><Skeleton className="h-8 w-24" /></TableCell>
-              <TableCell><Skeleton className="h-8 w-28" /></TableCell>
+    <div className="min-w-0 space-y-3">
+      {/* Mobile card skeleton */}
+      <div className="space-y-3 md:hidden">
+        {Array.from({ length: 2 }).map((_, index) => (
+          <div key={index} className="rounded-lg border p-3 space-y-3">
+            <div className="flex items-start gap-3">
+              <Skeleton className="h-4 w-4 mt-1 shrink-0" />
+              <div className="min-w-0 flex-1 space-y-2">
+                <Skeleton className="h-4 w-[75%] max-w-full" />
+                <Skeleton className="h-3 w-[50%] max-w-full" />
+              </div>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Skeleton className="h-8 w-full" />
+              <Skeleton className="h-8 w-full" />
+            </div>
+            <Skeleton className="h-9 w-full" />
+            <Skeleton className="h-9 w-full" />
+          </div>
+        ))}
+      </div>
+
+      {/* Desktop table skeleton */}
+      <div className="hidden md:block rounded-lg border overflow-hidden">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead className="w-10" />
+              <TableHead>Product</TableHead>
+              <TableHead>SKU</TableHead>
+              <TableHead>Purchased</TableHead>
+              <TableHead>Returnable</TableHead>
+              <TableHead>Qty</TableHead>
+              <TableHead>Inventory</TableHead>
             </TableRow>
-          ))}
-        </TableBody>
-      </Table>
+          </TableHeader>
+          <TableBody>
+            {Array.from({ length: 2 }).map((_, index) => (
+              <TableRow key={index}>
+                <TableCell><Skeleton className="h-4 w-4" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-36" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-20" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-8" /></TableCell>
+                <TableCell><Skeleton className="h-4 w-8" /></TableCell>
+                <TableCell><Skeleton className="h-8 w-24" /></TableCell>
+                <TableCell><Skeleton className="h-8 w-28" /></TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      </div>
     </div>
   )
 }
@@ -761,17 +785,17 @@ export function ReturnsModule({
   const getStatusColor = (status: string) => {
     switch (status) {
       case "PENDING":
-        return "bg-yellow-100 text-yellow-800"
+        return "bg-yellow-100 text-yellow-800 hover:bg-yellow-100"
       case "COMPLETED":
-        return "bg-green-100 text-green-800"
+        return "bg-green-100 text-green-800 hover:bg-green-100"
       case "CANCELLED":
-        return "bg-red-100 text-red-800"
+        return "bg-red-100 text-red-800 hover:bg-red-100"
       case "REFUNDED":
-        return "bg-blue-100 text-blue-800"
+        return "bg-blue-100 text-blue-800 hover:bg-blue-100"
       case "EXCHANGED":
-        return "bg-purple-100 text-purple-800"
+        return "bg-purple-100 text-purple-800 hover:bg-purple-100"
       default:
-        return "bg-gray-100 text-gray-800"
+        return "bg-gray-100 text-gray-800 hover:bg-gray-100"
     }
   }
 
@@ -1736,92 +1760,148 @@ export function ReturnsModule({
     
     return (
       <>
-        <div className="overflow-x-auto -mx-4 md:mx-0">
-          <div className="inline-block min-w-full align-middle">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead className="min-w-[120px]">Sale ID</TableHead>
-                  <TableHead className="min-w-[150px]">Customer</TableHead>
-                  <TableHead className="min-w-[120px]">Date</TableHead>
-                  <TableHead className="min-w-[100px]">Amount</TableHead>
-                  <TableHead className="min-w-[130px]">Payment Method</TableHead>
-                  <TableHead className="min-w-[100px]">Status</TableHead>
-                  <TableHead className="min-w-[100px]">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-          <TableBody>
-            {returnsData.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={7} className="text-center py-8 text-gray-500">
-                  {emptyStateMessage}
-                </TableCell>
-              </TableRow>
-            ) : (
-              paginatedData.map((returnItem) => (
-            <TableRow key={returnItem.id}>
-              <TableCell className="font-medium">{returnItem.sale_number}</TableCell>
-              <TableCell>{returnItem.customer?.name || returnItem.customer?.email || "N/A"}</TableCell>
-              <TableCell>{new Date(returnItem.sale_date).toLocaleDateString()}</TableCell>
-              <TableCell>Rs {Math.abs(Number(returnItem.total_amount)).toLocaleString()}</TableCell>
-              <TableCell className="capitalize">{returnItem.payment_method}</TableCell>
-              <TableCell>
-                <Badge className={getStatusColor(returnItem.status)}>
-                  {getReturnStatusLabel(returnItem.status)}
-                </Badge>
-              </TableCell>
-              <TableCell>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => handleViewReturn(returnItem)}>
-                    <Eye className="w-4 h-4" />
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ))
+        {returnsData.length === 0 ? (
+          <div className="rounded-lg border border-dashed py-10 text-center text-sm text-gray-500">
+            {emptyStateMessage}
+          </div>
+        ) : (
+          <>
+            {/* Mobile cards */}
+            <div className="space-y-3 md:hidden">
+              {paginatedData.map((returnItem) => (
+                <Card key={returnItem.id} className="border-gray-200 shadow-sm">
+                  <CardContent className="p-4 space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="font-semibold text-base truncate">{returnItem.sale_number}</p>
+                        <p className="text-sm text-gray-600 truncate">
+                          {returnItem.customer?.name || returnItem.customer?.email || "N/A"}
+                        </p>
+                      </div>
+                      <Badge className={cn("shrink-0", getStatusColor(returnItem.status))}>
+                        {getReturnStatusLabel(returnItem.status)}
+                      </Badge>
+                    </div>
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-gray-500">Date</p>
+                        <p className="font-medium">
+                          {new Date(returnItem.sale_date).toLocaleDateString()}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-gray-500">Amount</p>
+                        <p className="font-semibold">
+                          Rs {Math.abs(Number(returnItem.total_amount)).toLocaleString()}
+                        </p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-xs text-gray-500">Payment Method</p>
+                        <p className="font-medium capitalize">{returnItem.payment_method}</p>
+                      </div>
+                    </div>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full"
+                      onClick={() => handleViewReturn(returnItem)}
+                    >
+                      <Eye className="w-4 h-4 mr-2" />
+                      View details
+                    </Button>
+                  </CardContent>
+                </Card>
+              ))}
+            </div>
+
+            {/* Desktop table */}
+            <div className="hidden md:block overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="min-w-[120px]">Sale ID</TableHead>
+                    <TableHead className="min-w-[150px]">Customer</TableHead>
+                    <TableHead className="min-w-[120px]">Date</TableHead>
+                    <TableHead className="min-w-[100px]">Amount</TableHead>
+                    <TableHead className="min-w-[130px]">Payment Method</TableHead>
+                    <TableHead className="min-w-[100px]">Status</TableHead>
+                    <TableHead className="min-w-[100px]">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {paginatedData.map((returnItem) => (
+                    <TableRow key={returnItem.id}>
+                      <TableCell className="font-medium">{returnItem.sale_number}</TableCell>
+                      <TableCell>
+                        {returnItem.customer?.name || returnItem.customer?.email || "N/A"}
+                      </TableCell>
+                      <TableCell>{new Date(returnItem.sale_date).toLocaleDateString()}</TableCell>
+                      <TableCell>
+                        Rs {Math.abs(Number(returnItem.total_amount)).toLocaleString()}
+                      </TableCell>
+                      <TableCell className="capitalize">{returnItem.payment_method}</TableCell>
+                      <TableCell>
+                        <Badge className={getStatusColor(returnItem.status)}>
+                          {getReturnStatusLabel(returnItem.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleViewReturn(returnItem)}
+                        >
+                          <Eye className="w-4 h-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          </>
         )}
-            </TableBody>
-          </Table>
-        </div>
-      </div>
-      
+
       {/* Pagination */}
       {returnsData.length > 0 && (
-      <div className="mt-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-        <div className="flex items-center gap-2">
-          <Label htmlFor="returns-page-size" className="text-sm font-medium whitespace-nowrap">
-            Items per page:
-          </Label>
-          <Select 
-            value={String(pageSize)} 
-            onValueChange={value => { 
-              setPageSize(Number(value)); 
-              setCurrentPage(1); 
-            }}
-          >
-            <SelectTrigger className="w-32" id="returns-page-size">
-              <SelectValue placeholder="Page Size" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="10">10</SelectItem>
-              <SelectItem value="25">25</SelectItem>
-              <SelectItem value="50">50</SelectItem>
-              <SelectItem value="100">100</SelectItem>
-              <SelectItem value="0">All</SelectItem>
-            </SelectContent>
-          </Select>
-          <span className="text-sm text-gray-600">
+      <div className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+          <div className="flex items-center gap-2">
+            <Label htmlFor="returns-page-size" className="text-sm font-medium whitespace-nowrap">
+              Items per page:
+            </Label>
+            <Select 
+              value={String(pageSize)} 
+              onValueChange={value => { 
+                setPageSize(Number(value)); 
+                setCurrentPage(1); 
+              }}
+            >
+              <SelectTrigger className="w-24 sm:w-32" id="returns-page-size">
+                <SelectValue placeholder="Page Size" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10</SelectItem>
+                <SelectItem value="25">25</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+                <SelectItem value="0">All</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <span className="text-xs sm:text-sm text-gray-600">
             Showing {startIndex + 1} to {Math.min(endIndex, returnsData.length)} of {returnsData.length} {recordLabel}
           </span>
         </div>
 
         {pageSize !== 0 && totalPages > 1 && (
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2">
             <Button
               variant="outline"
               size="sm"
               onClick={() => setCurrentPage(1)}
               disabled={currentPage === 1}
+              className="hidden sm:inline-flex"
             >
               First
             </Button>
@@ -1832,7 +1912,7 @@ export function ReturnsModule({
               disabled={currentPage === 1}
             >
               <ChevronLeft className="h-4 w-4" />
-              Previous
+              <span className="hidden sm:inline">Previous</span>
             </Button>
             <div className="flex items-center gap-1">
               {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
@@ -1852,7 +1932,7 @@ export function ReturnsModule({
                     variant={currentPage === page ? "default" : "outline"}
                     size="sm"
                     onClick={() => setCurrentPage(page)}
-                    className="min-w-[40px]"
+                    className="min-w-[36px] px-2"
                   >
                     {page}
                   </Button>
@@ -1865,7 +1945,7 @@ export function ReturnsModule({
               onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
               disabled={currentPage === totalPages}
             >
-              Next
+              <span className="hidden sm:inline">Next</span>
               <ChevronRight className="h-4 w-4" />
             </Button>
             <Button
@@ -1873,6 +1953,7 @@ export function ReturnsModule({
               size="sm"
               onClick={() => setCurrentPage(totalPages)}
               disabled={currentPage === totalPages}
+              className="hidden sm:inline-flex"
             >
               Last
             </Button>
@@ -1902,12 +1983,17 @@ export function ReturnsModule({
           </p>
         </div>
         {(moduleTab === "returns" || moduleTab === "exchanges") && (
-          <div className="flex flex-wrap items-center gap-2 shrink-0">
-            <Button variant="outline" size="sm" onClick={() => setShowFilters((v) => !v)}>
+          <div className="flex flex-col sm:flex-row flex-wrap items-stretch sm:items-center gap-2 shrink-0 w-full lg:w-auto">
+            <Button
+              variant="outline"
+              size="sm"
+              className="w-full sm:w-auto"
+              onClick={() => setShowFilters((v) => !v)}
+            >
               <Filter className="mr-2 h-4 w-4" />
               Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
             </Button>
-            <Button onClick={openProcessDialog}>
+            <Button className="w-full sm:w-auto" onClick={openProcessDialog}>
               {moduleTab === "exchanges" ? (
                 <>
                   <ArrowLeftRight className="w-4 h-4 mr-2" />
@@ -1937,21 +2023,22 @@ export function ReturnsModule({
         >
           <DialogContent
             className={cn(
-              "max-h-[90vh] overflow-y-auto",
-              newReturn.returnType === "EXCHANGE" ? "max-w-6xl" : "max-w-4xl",
+              "max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 p-4 sm:p-6",
+              "max-w-[calc(100vw-1.5rem)]",
+              newReturn.returnType === "EXCHANGE" ? "sm:max-w-6xl" : "sm:max-w-4xl",
             )}
           >
-            <DialogHeader>
-              <DialogTitle>
+            <DialogHeader className="pr-6 min-w-0">
+              <DialogTitle className="text-lg sm:text-xl break-words">
                 {newReturn.returnType === "EXCHANGE" ? "Process Exchange" : "Process Return"}
               </DialogTitle>
-              <DialogDescription>
+              <DialogDescription className="text-xs sm:text-sm break-words">
                 {newReturn.returnType === "EXCHANGE"
                   ? "Return selected items and issue replacement products. Price difference is calculated automatically."
                   : "Return items from an original sale and issue a refund."}
               </DialogDescription>
             </DialogHeader>
-            <div className="space-y-4">
+            <div className="space-y-4 min-w-0 overflow-x-hidden">
               <div className="space-y-2" ref={saleDropdownRef}>
                 <Label htmlFor="sale-search">Select Sale *</Label>
                 <div className="relative">
@@ -2052,11 +2139,11 @@ export function ReturnsModule({
                   onValueChange={(value) => handleReturnScopeChange(value as "FULL" | "PARTIAL")}
                   className="w-full"
                 >
-                  <TabsList className="grid h-10 w-full grid-cols-2">
+                  <TabsList className="grid h-auto min-h-10 w-full grid-cols-2 gap-1 p-1">
                     <TabsTrigger
                       value="FULL"
                       disabled={saleDetailsLoading}
-                      className="w-full"
+                      className="w-full whitespace-normal px-2 py-2 text-xs sm:text-sm"
                     >
                       {newReturn.returnType === "EXCHANGE"
                         ? "Full order exchange"
@@ -2065,7 +2152,7 @@ export function ReturnsModule({
                     <TabsTrigger
                       value="PARTIAL"
                       disabled={saleDetailsLoading}
-                      className="w-full"
+                      className="w-full whitespace-normal px-2 py-2 text-xs sm:text-sm"
                     >
                       {newReturn.returnType === "EXCHANGE" ? "Partial exchange" : "Partial return"}
                     </TabsTrigger>
@@ -2175,13 +2262,13 @@ export function ReturnsModule({
 
               {(saleDetailsLoading || selectedSale) && (
                 <div className="space-y-2">
-                  <div className="flex items-center justify-between gap-2">
+                  <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                     <Label>Products from original order</Label>
                     <Input
                       placeholder="Filter by name or SKU"
                       value={itemSearch}
                       onChange={(e) => setItemSearch(e.target.value)}
-                      className="max-w-xs h-8 text-sm"
+                      className="w-full sm:max-w-xs h-8 text-sm"
                       disabled={saleDetailsLoading}
                     />
                   </div>
@@ -2193,7 +2280,150 @@ export function ReturnsModule({
                       No returnable items remain on this sale.
                     </div>
                   ) : (
-                    <div className="rounded-lg border overflow-hidden">
+                    <>
+                      {/* Mobile product cards */}
+                      <div className="space-y-3 md:hidden">
+                        {filteredSelectedItems.map((item) => {
+                          const isItemSelected = item.selected
+                          const qtyDisabled =
+                            saleDetailsLoading || returnScope === "FULL" || !isItemSelected
+                          const qtyDraft = returnQuantityInputs[item.productId]
+                          const qtyHasError =
+                            qtyDraft !== undefined &&
+                            exceedsReturnableQuantity(qtyDraft, item.remainingQuantity)
+
+                          return (
+                            <div
+                              key={item.productId}
+                              className={cn(
+                                "rounded-lg border p-3 space-y-3",
+                                isItemSelected ? "border-blue-300 bg-blue-50/40" : "bg-white",
+                              )}
+                            >
+                              <div className="flex items-start gap-3">
+                                <Checkbox
+                                  checked={isItemSelected}
+                                  disabled={saleDetailsLoading || returnScope === "FULL"}
+                                  onCheckedChange={(checked) =>
+                                    handleReturnItemToggle(item.productId, checked === true)
+                                  }
+                                  aria-label={`Select ${item.productName} for return`}
+                                  className="mt-1"
+                                />
+                                <div className="min-w-0 flex-1">
+                                  <p className="font-semibold text-sm leading-snug">{item.productName}</p>
+                                  <p className="text-xs text-gray-500 mt-0.5">SKU: {item.sku}</p>
+                                </div>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 text-sm">
+                                <div>
+                                  <p className="text-xs text-gray-500">Purchased</p>
+                                  <p className="font-medium">{item.originalQuantity}</p>
+                                </div>
+                                <div>
+                                  <p className="text-xs text-gray-500">Returnable</p>
+                                  <p className="font-medium">{item.remainingQuantity}</p>
+                                </div>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-xs text-gray-500">Qty to return</p>
+                                <div className="flex items-center gap-1">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      const step = getReturnQtyStep(item.remainingQuantity)
+                                      const nextQty = Number(
+                                        Math.max(0, item.returnQuantity - step).toFixed(3),
+                                      )
+                                      if (nextQty <= 0 && returnScope === "PARTIAL") {
+                                        handleReturnItemToggle(item.productId, false)
+                                        return
+                                      }
+                                      handleReturnQuantityChange(item.productId, nextQty)
+                                    }}
+                                    disabled={qtyDisabled || item.returnQuantity <= 0}
+                                  >
+                                    <Minus className="w-3 h-3" />
+                                  </Button>
+                                  <Input
+                                    type="text"
+                                    inputMode="decimal"
+                                    disabled={qtyDisabled}
+                                    value={
+                                      returnQuantityInputs[item.productId] !== undefined
+                                        ? returnQuantityInputs[item.productId]
+                                        : item.returnQuantity === 0
+                                          ? ""
+                                          : String(item.returnQuantity)
+                                    }
+                                    onChange={(e) => {
+                                      handleReturnQuantityInputChange(item.productId, e.target.value)
+                                    }}
+                                    onBlur={(e) => {
+                                      commitReturnQuantityInput(item.productId, e.target.value)
+                                    }}
+                                    aria-invalid={qtyHasError || undefined}
+                                    className={cn(
+                                      "flex-1 text-center h-8 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
+                                      qtyHasError &&
+                                        "border-red-500 focus-visible:ring-red-500",
+                                    )}
+                                  />
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => {
+                                      const step = getReturnQtyStep(item.remainingQuantity)
+                                      handleReturnQuantityChange(
+                                        item.productId,
+                                        Number(
+                                          Math.min(
+                                            item.remainingQuantity,
+                                            item.returnQuantity + step,
+                                          ).toFixed(3),
+                                        ),
+                                      )
+                                    }}
+                                    disabled={
+                                      qtyDisabled || item.returnQuantity >= item.remainingQuantity
+                                    }
+                                  >
+                                    <Plus className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                              <div className="space-y-1.5">
+                                <p className="text-xs text-gray-500">Inventory</p>
+                                <Select
+                                  value={item.disposition}
+                                  disabled={!isItemSelected || saleDetailsLoading}
+                                  onValueChange={(v) =>
+                                    handleDispositionChange(
+                                      item.productId,
+                                      v as InventoryDisposition,
+                                    )
+                                  }
+                                >
+                                  <SelectTrigger className="h-9 text-xs">
+                                    <SelectValue />
+                                  </SelectTrigger>
+                                  <SelectContent>
+                                    {INVENTORY_DISPOSITIONS.map((d) => (
+                                      <SelectItem key={d.value} value={d.value}>
+                                        {d.label}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+
+                      {/* Desktop product table */}
+                      <div className="hidden md:block rounded-lg border overflow-x-auto">
                       <Table>
                         <TableHeader>
                           <TableRow>
@@ -2313,13 +2543,14 @@ export function ReturnsModule({
                         </TableBody>
                       </Table>
                     </div>
+                    </>
                   )}
                 </div>
               )}
 
               {/* Replacement products — card grid (Exchange only) */}
               {newReturn.returnType === "EXCHANGE" && (saleDetailsLoading || selectedSale) && (
-                <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-4">
+                <div className="space-y-4 rounded-lg border border-gray-200 bg-white p-3 sm:p-4">
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <div className="flex items-center gap-2">
                       <Package className="h-4 w-4 text-gray-500" />
@@ -2537,15 +2768,20 @@ export function ReturnsModule({
                 />
               </div>
             </div>
-            <DialogFooter>
+            <DialogFooter className="gap-2 sm:gap-0">
               <Button 
                 variant="outline" 
+                className="w-full sm:w-auto"
                 onClick={() => setIsProcessOpen(false)}
                 disabled={processingReturn || saleDetailsLoading}
               >
                 Cancel
               </Button>
-              <Button onClick={handleProcessReturn} disabled={processingReturn || saleDetailsLoading}>
+              <Button
+                className="w-full sm:w-auto"
+                onClick={handleProcessReturn}
+                disabled={processingReturn || saleDetailsLoading}
+              >
                 {processingReturn && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
                 {processingReturn
                   ? newReturn.returnType === "EXCHANGE"
@@ -2564,9 +2800,9 @@ export function ReturnsModule({
           onValueChange={(v) => setModuleTab(v as ReturnsModuleTab)}
           className="space-y-4"
         >
-          <TabsList className="grid w-full max-w-md grid-cols-2">
-            <TabsTrigger value="returns">Returns</TabsTrigger>
-            <TabsTrigger value="exchanges">Exchanges</TabsTrigger>
+          <TabsList className="grid w-full max-w-md grid-cols-2 h-auto">
+            <TabsTrigger value="returns" className="text-sm">Returns</TabsTrigger>
+            <TabsTrigger value="exchanges" className="text-sm">Exchanges</TabsTrigger>
           </TabsList>
         </Tabs>
       )}
@@ -2802,14 +3038,14 @@ export function ReturnsModule({
                       key={sale.id}
                       className="flex flex-col gap-3 rounded-lg border border-green-200 bg-white/80 p-3 md:flex-row md:items-center md:justify-between"
                     >
-                      <div className="space-y-1">
-                        <div className="flex items-center gap-2">
+                      <div className="space-y-1 min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold">{sale.sale_number}</span>
                           <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
                             READY FOR RETURN
                           </Badge>
                         </div>
-                        <div className="text-sm text-gray-600">
+                        <div className="text-sm text-gray-600 truncate">
                           {sale.customer?.name || sale.customer?.email || "Walk-in customer"}
                         </div>
                         <div className="text-xs text-gray-500">
@@ -2817,7 +3053,7 @@ export function ReturnsModule({
                           {Math.abs(Number(sale.total_amount)).toLocaleString()}
                         </div>
                       </div>
-                      <Button onClick={() => handleStartReturnForSale(sale.id)}>
+                      <Button className="w-full md:w-auto shrink-0" onClick={() => handleStartReturnForSale(sale.id)}>
                         Process Return
                       </Button>
                     </div>
@@ -2873,8 +3109,8 @@ export function ReturnsModule({
       )}
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <DialogContent className="max-w-lg">
-          <DialogHeader>
+        <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-lg max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 p-4 sm:p-6">
+          <DialogHeader className="pr-6">
             <DialogTitle>Confirm {newReturn.returnType === "EXCHANGE" ? "exchange" : "return"}</DialogTitle>
             <DialogDescription>Review payment details before completing.</DialogDescription>
           </DialogHeader>
@@ -2883,9 +3119,9 @@ export function ReturnsModule({
           ) : (
             <p className="text-sm text-gray-500">Select a sale and items to see payment details.</p>
           )}
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirmOpen(false)}>Cancel</Button>
-            <Button onClick={submitReturnOrExchange} disabled={processingReturn}>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button variant="outline" className="w-full sm:w-auto" onClick={() => setConfirmOpen(false)}>Cancel</Button>
+            <Button className="w-full sm:w-auto" onClick={submitReturnOrExchange} disabled={processingReturn}>
               {processingReturn && <Loader2 className="w-4 h-4 mr-2 animate-spin" />}
               Confirm & complete
             </Button>
@@ -2903,9 +3139,9 @@ export function ReturnsModule({
           }
         }}
       >
-        <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-2xl font-bold">
+        <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-5xl max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 p-4 sm:p-6">
+          <DialogHeader className="pr-6">
+            <DialogTitle className="text-lg sm:text-2xl font-bold break-words">
               {returnDetailsAfterCompletion
                 ? selectedReturn?.status === "EXCHANGED"
                   ? "Exchange completed"
@@ -2914,7 +3150,7 @@ export function ReturnsModule({
                   ? `Exchange Details — ${selectedReturn?.sale_number || selectedReturn?.id}`
                   : `Return Details — ${selectedReturn?.sale_number || selectedReturn?.id}`}
             </DialogTitle>
-            <DialogDescription>
+            <DialogDescription className="text-xs sm:text-sm">
               {returnDetailsAfterCompletion
                 ? "Transaction completed successfully. Review the breakdown below, then print or share the receipt."
                 : "Full return / exchange breakdown with items and settlement."}
@@ -3002,38 +3238,64 @@ export function ReturnsModule({
               {selectedReturnSummary.returnedItems.length > 0 && (
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-lg text-red-800">
+                    <CardTitle className="text-base sm:text-lg text-red-800">
                       Returned items ({selectedReturnSummary.returnedItems.length})
                     </CardTitle>
                     <CardDescription>Items taken back from the customer</CardDescription>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Product</TableHead>
-                          <TableHead>SKU</TableHead>
-                          <TableHead className="text-right">Qty</TableHead>
-                          <TableHead className="text-right">Unit price</TableHead>
-                          <TableHead className="text-right">Credit</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedReturnSummary.returnedItems.map((item, index) => (
-                          <TableRow key={`return-${index}`}>
-                            <TableCell className="font-medium">{item.productName}</TableCell>
-                            <TableCell className="text-gray-500">{item.sku}</TableCell>
-                            <TableCell className="text-right">{item.quantity}</TableCell>
-                            <TableCell className="text-right">
-                              {formatMoney(item.unitPrice)}
-                            </TableCell>
-                            <TableCell className="text-right font-semibold text-red-600">
-                              -{formatMoney(item.lineTotal)}
-                            </TableCell>
+                    {/* Mobile cards */}
+                    <div className="space-y-3 p-4 md:hidden">
+                      {selectedReturnSummary.returnedItems.map((item, index) => (
+                        <div key={`return-m-${index}`} className="rounded-lg border bg-gray-50 p-3 space-y-2">
+                          <p className="font-semibold text-sm">{item.productName}</p>
+                          <p className="text-xs text-gray-500">SKU: {item.sku}</p>
+                          <div className="grid grid-cols-3 gap-2 text-sm pt-1 border-t">
+                            <div>
+                              <p className="text-xs text-gray-500">Qty</p>
+                              <p className="font-medium">{item.quantity}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500">Unit</p>
+                              <p className="font-medium">{formatMoney(item.unitPrice)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-gray-500">Credit</p>
+                              <p className="font-semibold text-red-600">-{formatMoney(item.lineTotal)}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Desktop table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Product</TableHead>
+                            <TableHead>SKU</TableHead>
+                            <TableHead className="text-right">Qty</TableHead>
+                            <TableHead className="text-right">Unit price</TableHead>
+                            <TableHead className="text-right">Credit</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedReturnSummary.returnedItems.map((item, index) => (
+                            <TableRow key={`return-${index}`}>
+                              <TableCell className="font-medium">{item.productName}</TableCell>
+                              <TableCell className="text-gray-500">{item.sku}</TableCell>
+                              <TableCell className="text-right">{item.quantity}</TableCell>
+                              <TableCell className="text-right">
+                                {formatMoney(item.unitPrice)}
+                              </TableCell>
+                              <TableCell className="text-right font-semibold text-red-600">
+                                -{formatMoney(item.lineTotal)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -3041,38 +3303,64 @@ export function ReturnsModule({
               {selectedReturnSummary.replacementItems.length > 0 && (
                 <Card>
                   <CardHeader className="pb-2">
-                    <CardTitle className="text-lg text-blue-800">
+                    <CardTitle className="text-base sm:text-lg text-blue-800">
                       Replacement items ({selectedReturnSummary.replacementItems.length})
                     </CardTitle>
                     <CardDescription>New items given to the customer</CardDescription>
                   </CardHeader>
                   <CardContent className="p-0">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Product</TableHead>
-                          <TableHead>SKU</TableHead>
-                          <TableHead className="text-right">Qty</TableHead>
-                          <TableHead className="text-right">Unit price</TableHead>
-                          <TableHead className="text-right">Amount</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedReturnSummary.replacementItems.map((item, index) => (
-                          <TableRow key={`exchange-${index}`}>
-                            <TableCell className="font-medium">{item.productName}</TableCell>
-                            <TableCell className="text-gray-500">{item.sku}</TableCell>
-                            <TableCell className="text-right">{item.quantity}</TableCell>
-                            <TableCell className="text-right">
-                              {formatMoney(item.unitPrice)}
-                            </TableCell>
-                            <TableCell className="text-right font-semibold">
-                              {formatMoney(item.lineTotal)}
-                            </TableCell>
+                    {/* Mobile cards */}
+                    <div className="space-y-3 p-4 md:hidden">
+                      {selectedReturnSummary.replacementItems.map((item, index) => (
+                        <div key={`exchange-m-${index}`} className="rounded-lg border bg-gray-50 p-3 space-y-2">
+                          <p className="font-semibold text-sm">{item.productName}</p>
+                          <p className="text-xs text-gray-500">SKU: {item.sku}</p>
+                          <div className="grid grid-cols-3 gap-2 text-sm pt-1 border-t">
+                            <div>
+                              <p className="text-xs text-gray-500">Qty</p>
+                              <p className="font-medium">{item.quantity}</p>
+                            </div>
+                            <div>
+                              <p className="text-xs text-gray-500">Unit</p>
+                              <p className="font-medium">{formatMoney(item.unitPrice)}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-xs text-gray-500">Amount</p>
+                              <p className="font-semibold">{formatMoney(item.lineTotal)}</p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                    {/* Desktop table */}
+                    <div className="hidden md:block overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead>Product</TableHead>
+                            <TableHead>SKU</TableHead>
+                            <TableHead className="text-right">Qty</TableHead>
+                            <TableHead className="text-right">Unit price</TableHead>
+                            <TableHead className="text-right">Amount</TableHead>
                           </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedReturnSummary.replacementItems.map((item, index) => (
+                            <TableRow key={`exchange-${index}`}>
+                              <TableCell className="font-medium">{item.productName}</TableCell>
+                              <TableCell className="text-gray-500">{item.sku}</TableCell>
+                              <TableCell className="text-right">{item.quantity}</TableCell>
+                              <TableCell className="text-right">
+                                {formatMoney(item.unitPrice)}
+                              </TableCell>
+                              <TableCell className="text-right font-semibold">
+                                {formatMoney(item.lineTotal)}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
                   </CardContent>
                 </Card>
               )}
@@ -3088,8 +3376,8 @@ export function ReturnsModule({
             </div>
           )}
           <DialogFooter className="pt-2">
-            <div className="flex flex-wrap items-center gap-2 w-full justify-end">
-              <Button variant="outline" onClick={() => setIsViewOpen(false)} size="sm">
+            <div className="flex flex-col-reverse sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full sm:justify-end">
+              <Button variant="outline" onClick={() => setIsViewOpen(false)} size="sm" className="w-full sm:w-auto">
                 Close
               </Button>
               {printers.length > 0 && (
@@ -3097,6 +3385,7 @@ export function ReturnsModule({
                   onClick={handleServerPrint}
                   disabled={!receiptPrinter || !receiptData}
                   size="sm"
+                  className="w-full sm:w-auto"
                 >
                   <Printer className="h-4 w-4 mr-2" />
                   Print
@@ -3107,6 +3396,7 @@ export function ReturnsModule({
                 onClick={handleDownloadReceipt}
                 disabled={!receiptData}
                 size="sm"
+                className="w-full sm:w-auto"
               >
                 <Download className="h-4 w-4 mr-2" />
                 Download PDF
@@ -3114,7 +3404,7 @@ export function ReturnsModule({
               <Button
                 onClick={handleShareReceiptOnWhatsApp}
                 disabled={!receiptData}
-                className="bg-[#25D366] hover:bg-[#1ebe57] text-white"
+                className="bg-[#25D366] hover:bg-[#1ebe57] text-white w-full sm:w-auto"
                 size="sm"
               >
                 <MessageCircle className="h-4 w-4 mr-2" />

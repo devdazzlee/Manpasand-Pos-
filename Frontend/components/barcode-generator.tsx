@@ -1302,33 +1302,34 @@ export default function BarcodeGenerator() {
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
-          <BarcodeIcon className="h-6 w-6 text-blue-600" />
-          Barcode Generator
+    <div className="p-3 sm:p-4 md:p-6 space-y-4 md:space-y-6 min-w-0 overflow-x-hidden">
+      <div className="min-w-0">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
+          <BarcodeIcon className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600 shrink-0" />
+          <span className="truncate">Barcode Generator</span>
         </h1>
-        <p className="text-sm text-gray-600 mt-1">
+        <p className="text-xs sm:text-sm text-gray-600 mt-1">
           Configure label content, pick products, and print barcodes.
         </p>
       </div>
 
       {/* Generation Settings + Preview */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-6">
-        <Card className="xl:col-span-2">
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Package className="h-5 w-5" />
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-6 min-w-0">
+        <Card className="xl:col-span-2 min-w-0 overflow-hidden">
+          <CardHeader className="px-4 py-3 sm:p-6">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <Package className="h-5 w-5 shrink-0" />
               Generation Settings
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 px-4 pb-4 sm:p-6 sm:pt-0">
             {/* Barcode Printer - configured globally in Printer Settings */}
-            <div className="space-y-2">
+            <div className="space-y-2 min-w-0">
               <Label>Barcode Printer</Label>
               {barcodePrinter ? (
-                <div className="px-3 py-2 rounded-lg border border-purple-100 bg-purple-50/60 flex items-center gap-2 text-sm text-purple-800">
-                  🖨️ <span className="font-medium">{barcodePrinter}</span>
+                <div className="px-3 py-2 rounded-lg border border-purple-100 bg-purple-50/60 flex flex-wrap items-center gap-2 text-sm text-purple-800 min-w-0">
+                  <span className="shrink-0">🖨️</span>
+                  <span className="font-medium break-all">{barcodePrinter}</span>
                   <span className="text-purple-600 text-xs">(change in Printer Settings)</span>
                 </div>
               ) : (
@@ -1440,14 +1441,14 @@ export default function BarcodeGenerator() {
         </Card>
 
         {/* Preview */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <BarcodeIcon className="h-5 w-5" />
+        <Card className="min-w-0 overflow-hidden">
+          <CardHeader className="px-4 py-3 sm:p-6">
+            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
+              <BarcodeIcon className="h-5 w-5 shrink-0" />
               Preview
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
+          <CardContent className="space-y-4 px-4 pb-4 sm:p-6 sm:pt-0">
             {(() => {
               const previewItem = selectedProducts[0];
               const previewPrice = previewItem
@@ -1466,23 +1467,23 @@ export default function BarcodeGenerator() {
 
               return (
                 <>
-                  <div className="rounded-xl border-2 border-dashed border-gray-200 bg-white p-4 flex flex-col items-center justify-center gap-1.5">
+                  <div className="rounded-xl border-2 border-dashed border-gray-200 bg-white p-3 sm:p-4 flex flex-col items-center justify-center gap-1.5 min-w-0 overflow-hidden">
                     {includeProductName && (
                       <p className="text-xs font-bold uppercase text-center truncate w-full">
                         {previewItem ? previewItem.product.name : "Sample Product"}
                       </p>
                     )}
                     {includeSku && (
-                      <p className="text-[10px] text-gray-500">
+                      <p className="text-[10px] text-gray-500 truncate max-w-full">
                         SKU: {previewItem ? previewItem.product.sku || previewItem.product.code || "—" : "SAMPLE"}
                       </p>
                     )}
                     <img
                       src={generateBarcodeDataURL(previewBarcodeValue)}
                       alt="Barcode preview"
-                      className="h-16 object-contain"
+                      className="h-14 sm:h-16 max-w-full object-contain"
                     />
-                    <p className="text-xs font-mono text-gray-600">{previewBarcodeValue}</p>
+                    <p className="text-xs font-mono text-gray-600 break-all text-center">{previewBarcodeValue}</p>
                     {includePrice && (
                       <p className="text-sm font-bold text-blue-600">Rs {previewItem ? previewPrice : 0}</p>
                     )}
@@ -1526,140 +1527,216 @@ export default function BarcodeGenerator() {
       </div>
 
       {/* Product selection */}
-      <Card>
+      <Card className="min-w-0 overflow-hidden">
         <CardContent className="p-0">
           <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "select" | "bulk")}>
-            <div className="border-b px-4 pt-4">
-              <TabsList>
-                <TabsTrigger value="select">Select Products</TabsTrigger>
-                <TabsTrigger value="bulk">Bulk Upload</TabsTrigger>
+            <div className="border-b px-3 sm:px-4 pt-3 sm:pt-4">
+              <TabsList className="grid w-full max-w-md grid-cols-2 h-auto">
+                <TabsTrigger value="select" className="text-xs sm:text-sm">Select Products</TabsTrigger>
+                <TabsTrigger value="bulk" className="text-xs sm:text-sm">Bulk Upload</TabsTrigger>
               </TabsList>
             </div>
 
-            <TabsContent value="select" className="p-4 space-y-4 mt-0">
-              <div className="flex flex-col lg:flex-row lg:items-center gap-3">
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-full lg:w-48 shrink-0">
-                    <SelectValue placeholder="All Categories" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {categoryOptions.map((c) => (
-                      <SelectItem key={c} value={c}>
-                        {c}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            <TabsContent value="select" className="p-3 sm:p-4 space-y-4 mt-0">
+              <div className="flex flex-col gap-3 min-w-0">
+                <div className="flex flex-col sm:flex-row gap-3 min-w-0">
+                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+                    <SelectTrigger className="w-full sm:w-48 shrink-0">
+                      <SelectValue placeholder="All Categories" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Categories</SelectItem>
+                      {categoryOptions.map((c) => (
+                        <SelectItem key={c} value={c}>
+                          {c}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
 
-                <div className="relative flex-1">
-                  <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                  <Input
-                    ref={productSearchInputRef}
-                    placeholder="Scan or search by name, SKU, code (Enter to add)"
-                    value={searchTerm}
-                    autoComplete="off"
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    onKeyDown={handleSearchKeyDown}
-                    className="pl-9"
-                  />
+                  <div className="relative flex-1 min-w-0">
+                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+                    <Input
+                      ref={productSearchInputRef}
+                      placeholder="Scan or search by name, SKU, code"
+                      value={searchTerm}
+                      autoComplete="off"
+                      onChange={(e) => setSearchTerm(e.target.value)}
+                      onKeyDown={handleSearchKeyDown}
+                      className="pl-9 w-full"
+                    />
+                  </div>
                 </div>
 
-                <div className="flex items-center gap-2 shrink-0">
-                  <span className="text-sm font-medium text-green-700 whitespace-nowrap">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
+                  <span className="text-sm font-medium text-green-700 shrink-0">
                     Selected: {selectedProducts.length}
                   </span>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
-                    onClick={clearAll}
-                    disabled={selectedProducts.length === 0}
-                  >
-                    <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                    Clear Selection
-                  </Button>
-                  <Button size="sm" onClick={handlePrintAll} disabled={!isFormValid || isPrinting}>
-                    {isPrinting ? (
-                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <BarcodeIcon className="h-3.5 w-3.5 mr-1.5" />
-                    )}
-                    Generate Barcodes
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-2 flex-1 sm:justify-end">
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="w-full sm:w-auto text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+                      onClick={clearAll}
+                      disabled={selectedProducts.length === 0}
+                    >
+                      <Trash2 className="h-3.5 w-3.5 mr-1.5" />
+                      Clear Selection
+                    </Button>
+                    <Button
+                      size="sm"
+                      className="w-full sm:w-auto"
+                      onClick={handlePrintAll}
+                      disabled={!isFormValid || isPrinting}
+                    >
+                      {isPrinting ? (
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                      ) : (
+                        <BarcodeIcon className="h-3.5 w-3.5 mr-1.5" />
+                      )}
+                      Generate Barcodes
+                    </Button>
+                  </div>
                 </div>
               </div>
 
-              <div className="border rounded-lg overflow-hidden">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10">
-                        <Checkbox checked={allOnPageSelected} onCheckedChange={toggleSelectAllOnPage} />
-                      </TableHead>
-                      <TableHead className="w-10">#</TableHead>
-                      <TableHead>Product Name</TableHead>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Price</TableHead>
-                      <TableHead>Stock</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {productsLoading ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-500">
-                          <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-                          Loading products...
-                        </TableCell>
-                      </TableRow>
-                    ) : pagedProducts.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={7} className="text-center py-8 text-gray-500">
-                          {searchTerm || categoryFilter !== "all"
-                            ? "No matching products found."
-                            : "No products available."}
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      pagedProducts.map((product, idx) => {
-                        const selected = isProductSelected(product.id);
-                        const stock = product.current_stock ?? product.stock ?? 0;
-                        return (
-                          <TableRow key={product.id} className={selected ? "bg-blue-50/50" : undefined}>
-                            <TableCell>
-                              <Checkbox checked={selected} onCheckedChange={() => toggleProductRow(product)} />
-                            </TableCell>
-                            <TableCell className="text-gray-500">
-                              {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}
-                            </TableCell>
-                            <TableCell className="font-medium">{product.name}</TableCell>
-                            <TableCell className="text-gray-600">{product.sku || product.code || "—"}</TableCell>
-                            <TableCell>
-                              {product.category ? (
-                                <Badge variant="secondary">{product.category}</Badge>
-                              ) : (
-                                <span className="text-gray-400">—</span>
-                              )}
-                            </TableCell>
-                            <TableCell>Rs {product.sales_rate_exc_dis_and_tax || 0}</TableCell>
-                            <TableCell>{stock}</TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </div>
+              {productsLoading ? (
+                <div className="rounded-lg border py-10 text-center text-gray-500">
+                  <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+                  Loading products...
+                </div>
+              ) : pagedProducts.length === 0 ? (
+                <div className="rounded-lg border border-dashed py-10 text-center text-gray-500 text-sm">
+                  {searchTerm || categoryFilter !== "all"
+                    ? "No matching products found."
+                    : "No products available."}
+                </div>
+              ) : (
+                <>
+                  {/* Mobile product cards */}
+                  <div className="space-y-3 md:hidden">
+                    <div className="flex items-center gap-2 px-1">
+                      <Checkbox
+                        checked={allOnPageSelected}
+                        onCheckedChange={toggleSelectAllOnPage}
+                        id="select-all-mobile"
+                      />
+                      <Label htmlFor="select-all-mobile" className="text-sm font-normal cursor-pointer">
+                        Select all on this page
+                      </Label>
+                    </div>
+                    {pagedProducts.map((product, idx) => {
+                      const selected = isProductSelected(product.id);
+                      const stock = product.current_stock ?? product.stock ?? 0;
+                      return (
+                        <div
+                          key={product.id}
+                          role="button"
+                          tabIndex={0}
+                          onClick={() => toggleProductRow(product)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              toggleProductRow(product);
+                            }
+                          }}
+                          className={`w-full text-left rounded-lg border p-3 space-y-2 transition cursor-pointer ${
+                            selected
+                              ? "border-blue-300 bg-blue-50/60"
+                              : "border-gray-200 bg-white"
+                          }`}
+                        >
+                          <div className="flex items-start gap-3">
+                            <Checkbox
+                              checked={selected}
+                              onCheckedChange={() => toggleProductRow(product)}
+                              onClick={(e) => e.stopPropagation()}
+                              className="mt-0.5"
+                              aria-label={`Select ${product.name}`}
+                            />
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="font-semibold text-sm leading-snug">
+                                  {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}. {product.name}
+                                </p>
+                                <span className="text-sm font-bold text-green-700 shrink-0">
+                                  Rs {product.sales_rate_exc_dis_and_tax || 0}
+                                </span>
+                              </div>
+                              <p className="text-xs text-gray-500 mt-1 truncate">
+                                SKU: {product.sku || product.code || "—"}
+                              </p>
+                              <div className="flex flex-wrap items-center gap-2 mt-2">
+                                {product.category ? (
+                                  <Badge variant="secondary" className="text-[10px]">
+                                    {product.category}
+                                  </Badge>
+                                ) : null}
+                                <span className="text-xs text-gray-600">Stock: {stock}</span>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Desktop table */}
+                  <div className="hidden md:block border rounded-lg overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="w-10">
+                            <Checkbox checked={allOnPageSelected} onCheckedChange={toggleSelectAllOnPage} />
+                          </TableHead>
+                          <TableHead className="w-10">#</TableHead>
+                          <TableHead>Product Name</TableHead>
+                          <TableHead>SKU</TableHead>
+                          <TableHead>Category</TableHead>
+                          <TableHead>Price</TableHead>
+                          <TableHead>Stock</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {pagedProducts.map((product, idx) => {
+                          const selected = isProductSelected(product.id);
+                          const stock = product.current_stock ?? product.stock ?? 0;
+                          return (
+                            <TableRow key={product.id} className={selected ? "bg-blue-50/50" : undefined}>
+                              <TableCell>
+                                <Checkbox checked={selected} onCheckedChange={() => toggleProductRow(product)} />
+                              </TableCell>
+                              <TableCell className="text-gray-500">
+                                {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}
+                              </TableCell>
+                              <TableCell className="font-medium">{product.name}</TableCell>
+                              <TableCell className="text-gray-600">{product.sku || product.code || "—"}</TableCell>
+                              <TableCell>
+                                {product.category ? (
+                                  <Badge variant="secondary">{product.category}</Badge>
+                                ) : (
+                                  <span className="text-gray-400">—</span>
+                                )}
+                              </TableCell>
+                              <TableCell>Rs {product.sales_rate_exc_dis_and_tax || 0}</TableCell>
+                              <TableCell>{stock}</TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+                </>
+              )}
 
               {filteredProducts.length > 0 && (
                 <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
-                  <span>
+                  <span className="text-xs sm:text-sm text-center sm:text-left">
                     Showing {(tablePage - 1) * TABLE_PAGE_SIZE + 1} to{" "}
                     {Math.min(tablePage * TABLE_PAGE_SIZE, filteredProducts.length)} of{" "}
                     {filteredProducts.length} products
                   </span>
-                  <div className="flex items-center gap-1">
+                  <div className="flex items-center justify-center gap-1">
                     <Button
                       variant="outline"
                       size="sm"
@@ -1686,22 +1763,22 @@ export default function BarcodeGenerator() {
               )}
             </TabsContent>
 
-            <TabsContent value="bulk" className="p-4 mt-0">
-              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-8 text-center space-y-3">
+            <TabsContent value="bulk" className="p-3 sm:p-4 mt-0">
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 sm:p-8 text-center space-y-3">
                 <Upload className="h-8 w-8 text-gray-400 mx-auto" />
                 <div>
                   <p className="text-sm font-medium text-gray-700">Upload a CSV or Excel file</p>
-                  <p className="text-xs text-gray-500 mt-1">
+                  <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">
                     Columns: SKU (required), Net Weight, Expiry Months, Copies — any missing values fall back to
                     the defaults set in Generation Settings.
                   </p>
                 </div>
-                <div className="flex items-center justify-center gap-2 pt-1">
-                  <Button variant="outline" size="sm" onClick={downloadBulkTemplate}>
+                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2 pt-1">
+                  <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={downloadBulkTemplate}>
                     <Download className="h-3.5 w-3.5 mr-1.5" />
                     Download Template
                   </Button>
-                  <Button size="sm" onClick={() => bulkFileInputRef.current?.click()} disabled={bulkParsing}>
+                  <Button size="sm" className="w-full sm:w-auto" onClick={() => bulkFileInputRef.current?.click()} disabled={bulkParsing}>
                     {bulkParsing ? (
                       <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                     ) : (
@@ -1724,35 +1801,35 @@ export default function BarcodeGenerator() {
       </Card>
 
       {/* Configure Selected Products */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between gap-2">
-            <span>Configure Selected Products ({selectedProducts.length})</span>
+      <Card className="min-w-0 overflow-hidden">
+        <CardHeader className="px-4 py-3 sm:p-6">
+          <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-base sm:text-lg">
+            <span className="min-w-0">Configure Selected Products ({selectedProducts.length})</span>
             {totalLabels > 0 && (
-              <span className="text-sm font-normal text-gray-600 bg-gray-100 rounded-full px-3 py-1">
+              <span className="text-xs sm:text-sm font-normal text-gray-600 bg-gray-100 rounded-full px-3 py-1 w-fit">
                 {totalLabels} label{totalLabels === 1 ? "" : "s"} total
               </span>
             )}
           </CardTitle>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-3 sm:px-6 pb-4 sm:pb-6">
           {selectedProducts.length === 0 ? (
-            <div className="text-center text-gray-500 py-8">
+            <div className="text-center text-gray-500 py-8 px-2">
               <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
               <p>No products selected yet.</p>
-              <p className="text-sm">Check products from the table above to configure and print their labels.</p>
+              <p className="text-sm">Check products from the list above to configure and print their labels.</p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-4 max-h-[75vh] overflow-y-auto pr-1">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 sm:gap-4 max-h-[75vh] overflow-y-auto overflow-x-hidden pr-0 sm:pr-1">
               {selectedProducts.map((item) => (
                   <div
                     key={item.id}
-                    className="border rounded-lg p-3 space-y-3 self-start"
+                    className="border rounded-lg p-3 space-y-3 self-start min-w-0 overflow-hidden"
                   >
                     <div className="flex justify-between items-start gap-2">
                       <div className="min-w-0">
                         <h3 className="font-medium text-sm truncate">{item.product.name}</h3>
-                        <p className="text-xs text-gray-600">
+                        <p className="text-xs text-gray-600 break-words">
                           SKU: {item.product.sku} · Price: Rs {item.product.sales_rate_exc_dis_and_tax}
                         </p>
                       </div>
@@ -1760,13 +1837,13 @@ export default function BarcodeGenerator() {
                         onClick={() => removeProduct(item.id)}
                         variant="ghost"
                         size="sm"
-                        className="h-7 w-7 p-0 text-gray-500 hover:text-red-600"
+                        className="h-7 w-7 p-0 text-gray-500 hover:text-red-600 shrink-0"
                       >
                         <X className="h-4 w-4" />
                       </Button>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-3">
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <Label htmlFor={`weight-${item.id}`}>
                           Net Weight *
@@ -1937,7 +2014,7 @@ export default function BarcodeGenerator() {
 
                     {/* Compact preview — keeps the visual confirmation
                         without dominating the card height. */}
-                    <div className="bg-gray-50 px-3 py-2 rounded border flex items-center gap-3">
+                    <div className="bg-gray-50 px-3 py-2 rounded border flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 min-w-0">
                       <img
                         src={generateBarcodeDataURL(
                           encodeLabelBarcodeValue(
@@ -1954,14 +2031,14 @@ export default function BarcodeGenerator() {
                           ),
                         )}
                         alt="Barcode Preview"
-                        className="h-8 object-contain bg-white p-1 rounded shrink-0"
+                        className="h-8 max-w-full object-contain bg-white p-1 rounded shrink-0 self-center sm:self-auto"
                       />
                       <div className="flex-1 min-w-0 text-xs text-gray-700 space-y-0.5">
                         <div className="flex justify-between gap-2">
                           <span className="truncate">
                             Net: {formatWeightDisplay(item.netWeight)}
                           </span>
-                          <span className="font-semibold">
+                          <span className="font-semibold shrink-0">
                             Rs{" "}
                             {Math.round(
                               Number(
@@ -1974,8 +2051,8 @@ export default function BarcodeGenerator() {
                           </span>
                         </div>
                         <div className="flex justify-between gap-2 text-gray-500">
-                          <span>PKG {formatDate(item.packageDate)}</span>
-                          <span>EXP {formatDate(item.expiryDate)}</span>
+                          <span className="truncate">PKG {formatDate(item.packageDate)}</span>
+                          <span className="truncate shrink-0">EXP {formatDate(item.expiryDate)}</span>
                         </div>
                       </div>
                     </div>

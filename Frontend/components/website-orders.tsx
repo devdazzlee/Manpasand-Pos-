@@ -705,12 +705,12 @@ const WebsiteOrders: React.FC = () => {
   }
 
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+    <div className="p-3 sm:p-4 md:p-6 space-y-4 md:space-y-6 min-w-0 overflow-x-hidden">
       <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
+        <div className="min-w-0">
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-2">
-            <Globe className="h-6 w-6 md:h-8 md:w-8 text-blue-600" />
-            Website Orders
+            <Globe className="h-6 w-6 md:h-8 md:w-8 text-blue-600 shrink-0" />
+            <span className="truncate">Website Orders</span>
           </h1>
           <p className="text-sm md:text-base text-gray-600">View & manage orders from website</p>
         </div>
@@ -769,20 +769,20 @@ const WebsiteOrders: React.FC = () => {
       </div>
 
       {/* Filters */}
-      <div className="rounded-xl border bg-white p-4 space-y-3">
+      <div className="rounded-xl border bg-white p-3 sm:p-4 space-y-3 min-w-0 overflow-hidden">
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm font-medium text-gray-700">
-            <Filter className="h-4 w-4" />
-            Filters & Options
+          <div className="flex items-center gap-2 text-sm font-medium text-gray-700 min-w-0">
+            <Filter className="h-4 w-4 shrink-0" />
+            <span className="truncate">Filters & Options</span>
           </div>
           <Button
             onClick={fetchOrders}
             variant="outline"
             size="sm"
-            className="h-9 text-sm text-black"
+            className="h-9 text-sm text-black shrink-0"
           >
-            <RefreshCcw className="w-4 h-4 mr-2" />
-            Refresh
+            <RefreshCcw className="w-4 h-4 sm:mr-2" />
+            <span className="hidden sm:inline">Refresh</span>
           </Button>
         </div>
 
@@ -799,7 +799,7 @@ const WebsiteOrders: React.FC = () => {
               key={s.v || "ALL"}
               size="sm"
               variant={statusFilter === s.v ? "default" : "outline"}
-              className="h-8 text-sm"
+              className="h-8 text-xs sm:text-sm px-2.5 sm:px-3"
               onClick={() => setStatusFilter(s.v)}
             >
               {s.label}
@@ -807,19 +807,19 @@ const WebsiteOrders: React.FC = () => {
           ))}
         </div>
 
-        {/* One aligned row: search + the three dropdowns */}
-        <div className="flex flex-col lg:flex-row gap-3">
-          <div className="relative flex-1 min-w-[200px]">
+        {/* Search + dropdowns — stack on mobile */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 min-w-0">
+          <div className="relative min-w-0 sm:col-span-2 lg:col-span-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
             <Input
               placeholder="Search Order #"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="h-10 pl-10"
+              className="h-10 pl-10 w-full"
             />
           </div>
           <Select value={paymentFilter} onValueChange={setPaymentFilter}>
-            <SelectTrigger className="h-10 flex-1 min-w-[150px]">
+            <SelectTrigger className="h-10 w-full min-w-0">
               <SelectValue placeholder="All Payments" />
             </SelectTrigger>
             <SelectContent>
@@ -831,7 +831,7 @@ const WebsiteOrders: React.FC = () => {
             </SelectContent>
           </Select>
           <Select value={dateRangeFilter} onValueChange={setDateRangeFilter}>
-            <SelectTrigger className="h-10 flex-1 min-w-[140px]">
+            <SelectTrigger className="h-10 w-full min-w-0">
               <SelectValue placeholder="All Dates" />
             </SelectTrigger>
             <SelectContent>
@@ -842,7 +842,7 @@ const WebsiteOrders: React.FC = () => {
             </SelectContent>
           </Select>
           <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="h-10 flex-1 min-w-[150px]">
+            <SelectTrigger className="h-10 w-full min-w-0">
               <SelectValue placeholder="Sort" />
             </SelectTrigger>
             <SelectContent>
@@ -856,16 +856,16 @@ const WebsiteOrders: React.FC = () => {
       </div>
 
       {/* Orders Grid */}
-      <Card className="border-gray-200 shadow-sm">
-        <CardHeader className="pb-4">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle>Website Orders ({filtered.length})</CardTitle>
-            <p className="text-sm text-gray-500">
+      <Card className="border-gray-200 shadow-sm min-w-0 overflow-hidden">
+        <CardHeader className="pb-4 px-4 sm:px-6">
+          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between min-w-0">
+            <CardTitle className="text-base sm:text-lg">Website Orders ({filtered.length})</CardTitle>
+            <p className="text-xs sm:text-sm text-gray-500">
               Online checkout orders and delivery requests
             </p>
           </div>
         </CardHeader>
-        <CardContent>
+        <CardContent className="px-3 sm:px-6">
           {isLoading ? (
             <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
               {Array.from({ length: 6 }).map((_, index) => (
@@ -906,8 +906,8 @@ const WebsiteOrders: React.FC = () => {
                       key={o.id}
                       className="group flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md"
                     >
-                      <div className="border-b border-gray-100 bg-gradient-to-r from-slate-50 to-blue-50/40 px-4 py-4">
-                        <div className="flex items-start justify-between gap-3">
+                      <div className="border-b border-gray-100 bg-gradient-to-r from-slate-50 to-blue-50/40 px-3 sm:px-4 py-3 sm:py-4">
+                        <div className="flex items-start justify-between gap-2 sm:gap-3">
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 text-blue-700">
                               <Globe className="h-4 w-4 shrink-0" />
@@ -922,43 +922,43 @@ const WebsiteOrders: React.FC = () => {
                               {o.customer_name?.trim() || "Guest Customer"}
                             </p>
                           </div>
-                          <div className="text-right">
+                          <div className="text-right shrink-0">
                             <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
                               Total
                             </p>
-                            <p className="text-xl font-bold text-green-700">
+                            <p className="text-lg sm:text-xl font-bold text-green-700">
                               Rs. {(Number(o.total_amount) || 0).toFixed(2)}
                             </p>
                           </div>
                         </div>
                       </div>
 
-                      <div className="flex flex-1 flex-col p-4">
-                        <div className="grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3">
-                          <div>
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                      <div className="flex flex-1 flex-col p-3 sm:p-4">
+                        <div className="grid grid-cols-3 gap-1.5 sm:gap-2 rounded-xl bg-slate-50 p-2.5 sm:p-3">
+                          <div className="min-w-0">
+                            <p className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-gray-500">
                               Payment
                             </p>
-                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                            <p className="mt-1 text-xs sm:text-sm font-semibold text-gray-900 truncate">
                               {o.payment_method || "CASH"}
                             </p>
                           </div>
-                          <div>
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                          <div className="min-w-0">
+                            <p className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-gray-500">
                               Items
                             </p>
-                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                            <p className="mt-1 text-xs sm:text-sm font-semibold text-gray-900">
                               {o.items?.length || 0}
                             </p>
                           </div>
-                          <div>
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                          <div className="min-w-0">
+                            <p className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-gray-500">
                               Date
                             </p>
-                            <p className="mt-1 text-sm font-semibold text-gray-900">
+                            <p className="mt-1 text-xs sm:text-sm font-semibold text-gray-900 truncate">
                               {ts.toLocaleDateString()}
                             </p>
-                            <p className="text-[11px] text-gray-500">
+                            <p className="text-[10px] sm:text-[11px] text-gray-500">
                               {ts.toLocaleTimeString([], {
                                 hour: "2-digit",
                                 minute: "2-digit",
@@ -1043,9 +1043,9 @@ const WebsiteOrders: React.FC = () => {
               </div>
 
               {/* Pagination */}
-              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 mt-4 pt-4 border-t">
-                <div className="flex items-center gap-3 text-sm text-black">
-                  <span>
+              <div className="flex flex-col gap-3 mt-4 pt-4 border-t">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-black">
+                  <span className="text-xs sm:text-sm text-center sm:text-left">
                     Showing {(safePage - 1) * pageSize + 1}–
                     {Math.min(safePage * pageSize, filtered.length)} of {filtered.length}
                   </span>
@@ -1053,7 +1053,7 @@ const WebsiteOrders: React.FC = () => {
                     value={String(pageSize)}
                     onValueChange={(v) => setPageSize(Number(v))}
                   >
-                    <SelectTrigger className="h-9 w-[120px] text-sm">
+                    <SelectTrigger className="h-9 w-full sm:w-[120px] text-sm mx-auto sm:mx-0">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1064,11 +1064,11 @@ const WebsiteOrders: React.FC = () => {
                     </SelectContent>
                   </Select>
                 </div>
-                <div className="flex items-center gap-1">
+                <div className="flex flex-wrap items-center justify-center gap-1.5">
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-sm text-black"
+                    className="hidden sm:inline-flex text-sm text-black"
                     onClick={() => setCurrentPage(1)}
                     disabled={safePage === 1}
                   >
@@ -1083,8 +1083,8 @@ const WebsiteOrders: React.FC = () => {
                   >
                     Previous
                   </Button>
-                  <span className="text-sm text-black px-3">
-                    Page {safePage} of {totalPages}
+                  <span className="text-xs sm:text-sm text-black px-2 sm:px-3">
+                    {safePage} / {totalPages}
                   </span>
                   <Button
                     variant="outline"
@@ -1098,7 +1098,7 @@ const WebsiteOrders: React.FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-sm text-black"
+                    className="hidden sm:inline-flex text-sm text-black"
                     onClick={() => setCurrentPage(totalPages)}
                     disabled={safePage >= totalPages}
                   >
@@ -1122,15 +1122,15 @@ const WebsiteOrders: React.FC = () => {
           }
         }}
       >
-        <DialogContent className="w-[95vw] max-h-[90vh] sm:max-w-4xl rounded-xl p-4 sm:p-6 overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="text-xl font-bold flex items-center gap-2">
-              <Globe className="h-5 w-5 text-blue-600" />
+        <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-4xl max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 rounded-xl p-4 sm:p-6">
+          <DialogHeader className="pr-6 min-w-0">
+            <DialogTitle className="text-lg sm:text-xl font-bold flex items-center gap-2 break-words">
+              <Globe className="h-5 w-5 text-blue-600 shrink-0" />
               Website Order Details
             </DialogTitle>
           </DialogHeader>
           {isDetailLoading ? (
-            <div className="min-h-[55vh] sm:min-h-[420px] flex flex-col justify-center">
+            <div className="min-h-[40vh] sm:min-h-[420px] flex flex-col justify-center min-w-0">
               <PageLoader message="Loading order details..." />
               <div className="mt-6 space-y-3 animate-pulse">
                 <div className="h-16 bg-gray-100 rounded-lg" />
@@ -1139,19 +1139,19 @@ const WebsiteOrders: React.FC = () => {
               </div>
             </div>
           ) : selectedOrder ? (
-            <div className="space-y-6">
+            <div className="space-y-4 sm:space-y-6 min-w-0 overflow-x-hidden">
               {/* Order Information Card */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Order Information</CardTitle>
+              <Card className="min-w-0 overflow-hidden">
+                <CardHeader className="px-4 py-3 sm:p-6">
+                  <CardTitle className="text-base sm:text-lg">Order Information</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
+                <CardContent className="px-4 pb-4 sm:p-6 sm:pt-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                    <div className="min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Order Number</Label>
-                      <p className="text-base font-semibold mt-1">{selectedOrder.order_number}</p>
+                      <p className="text-base font-semibold mt-1 break-all">{selectedOrder.order_number}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Order Status</Label>
                       <div className="mt-1">
                         {(() => {
@@ -1178,9 +1178,9 @@ const WebsiteOrders: React.FC = () => {
                               </Select>
                               
                               {isTerminal && (
-                                <div className="mt-2 flex items-center gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
-                                  <CheckCircle2 className="h-4 w-4 text-amber-600 shrink-0" />
-                                  <div className="flex flex-col">
+                                <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
+                                  <CheckCircle2 className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                                  <div className="flex flex-col min-w-0">
                                     <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Terminal State</span>
                                     <p className="text-[11px] text-amber-700 font-medium">
                                       This order is {selectedOrder.status} and cannot be modified.
@@ -1193,66 +1193,66 @@ const WebsiteOrders: React.FC = () => {
                         })()}
                       </div>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Order Date</Label>
-                      <p className="text-base mt-1">{new Date(selectedOrder.created_at).toLocaleString()}</p>
+                      <p className="text-sm sm:text-base mt-1 break-words">{new Date(selectedOrder.created_at).toLocaleString()}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Payment Method</Label>
                       <p className="text-base mt-1 font-semibold">{selectedOrder.payment_method || 'CASH'}</p>
                     </div>
-                    <div className="md:col-span-2">
+                    <div className="sm:col-span-2 min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Total Amount</Label>
-                      <p className="text-2xl font-bold text-green-600 mt-1">Rs. {(Number(selectedOrder.total_amount) || 0).toFixed(2)}</p>
+                      <p className="text-xl sm:text-2xl font-bold text-green-600 mt-1">Rs. {(Number(selectedOrder.total_amount) || 0).toFixed(2)}</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Delivery Details</CardTitle>
+              <Card className="min-w-0 overflow-hidden">
+                <CardHeader className="px-4 py-3 sm:p-6">
+                  <CardTitle className="text-base sm:text-lg">Delivery Details</CardTitle>
                 </CardHeader>
-                <CardContent>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div>
+                <CardContent className="px-4 pb-4 sm:p-6 sm:pt-0">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
+                    <div className="min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Customer Name</Label>
-                      <p className="text-base mt-1">{selectedOrder.customer_name || "N/A"}</p>
+                      <p className="text-base mt-1 break-words">{selectedOrder.customer_name || "N/A"}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Phone</Label>
-                      <p className="text-base mt-1">{selectedOrder.customer_phone || "N/A"}</p>
+                      <p className="text-base mt-1 break-all">{selectedOrder.customer_phone || "N/A"}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Email</Label>
-                      <p className="text-base mt-1">{selectedOrder.customer_email || "N/A"}</p>
+                      <p className="text-base mt-1 break-all">{selectedOrder.customer_email || "N/A"}</p>
                     </div>
-                    <div>
+                    <div className="min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Postal Code</Label>
                       <p className="text-base mt-1">{selectedOrder.delivery_postal_code || "N/A"}</p>
                     </div>
-                    <div className="md:col-span-2">
+                    <div className="sm:col-span-2 min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Delivery Address</Label>
-                      <p className="text-base mt-1">
+                      <p className="text-base mt-1 break-words">
                         {selectedOrder.delivery_address
                           ? `${selectedOrder.delivery_address}${selectedOrder.delivery_city ? `, ${selectedOrder.delivery_city}` : ""}`
                           : "N/A"}
                       </p>
                     </div>
-                    <div className="md:col-span-2">
+                    <div className="sm:col-span-2 min-w-0">
                       <Label className="text-sm font-medium text-gray-500">Order Notes</Label>
-                      <p className="text-base mt-1">{selectedOrder.order_notes || "N/A"}</p>
+                      <p className="text-base mt-1 break-words">{selectedOrder.order_notes || "N/A"}</p>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Order Items Card */}
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-lg">Order Items ({selectedOrder.items.length})</CardTitle>
+              <Card className="min-w-0 overflow-hidden">
+                <CardHeader className="px-4 py-3 sm:p-6">
+                  <CardTitle className="text-base sm:text-lg">Order Items ({selectedOrder.items.length})</CardTitle>
                 </CardHeader>
-                <CardContent>
+                <CardContent className="px-4 pb-4 sm:p-6 sm:pt-0">
                   {selectedOrder.items.length === 0 ? (
                     <div className="text-center text-gray-500 py-6">
                       Product details are not available for this order.
@@ -1391,22 +1391,22 @@ const WebsiteOrders: React.FC = () => {
 
       {/* Delete Confirmation Alert Dialog */}
       <AlertDialog open={!!orderToDelete} onOpenChange={(open) => !open && !isDeleting && setOrderToDelete(null)}>
-        <AlertDialogContent className="w-[95vw] max-w-md rounded-xl p-5 sm:p-6">
+        <AlertDialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-md rounded-xl p-4 sm:p-6 overflow-x-hidden min-w-0">
           <AlertDialogHeader>
             <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
             <AlertDialogDescription>
               This action cannot be undone. This will permanently delete the order and remove its data from our servers.
             </AlertDialogDescription>
           </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
+          <AlertDialogFooter className="flex-col-reverse sm:flex-row gap-2 sm:gap-0">
+            <AlertDialogCancel disabled={isDeleting} className="w-full sm:w-auto mt-0">Cancel</AlertDialogCancel>
             <AlertDialogAction 
               onClick={(e) => {
                 e.preventDefault();
                 executeDelete();
               }} 
               disabled={isDeleting}
-              className="bg-red-600 hover:bg-red-700"
+              className="bg-red-600 hover:bg-red-700 w-full sm:w-auto"
             >
               {isDeleting ? (
                 <>
