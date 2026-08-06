@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.logoutCustomer = exports.deleteCustomer = exports.updateCustomer = exports.updateCustomerByAdmin = exports.getCustomers = exports.getCustomerById = exports.loginCustomer = exports.createShopCustomer = exports.createCustomer = void 0;
+exports.deleteCustomerPayment = exports.createCustomerPayment = exports.getCustomerLedger = exports.getCustomerPurchases = exports.logoutCustomer = exports.deleteCustomer = exports.updateCustomer = exports.updateCustomerByAdmin = exports.getCustomers = exports.getCustomerById = exports.loginCustomer = exports.createShopCustomer = exports.createCustomer = void 0;
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const customer_service_1 = __importDefault(require("../services/customer.service"));
@@ -44,5 +44,21 @@ exports.deleteCustomer = (0, asyncHandler_1.default)(async (req, res) => {
 exports.logoutCustomer = (0, asyncHandler_1.default)(async (req, res) => {
     const customers = await customerService.logoutCustomer(req.customer?.id);
     new apiResponse_1.ApiResponse(customers, 'Customers logout').send(res);
+});
+exports.getCustomerPurchases = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await customerService.getCustomerPurchases(req.params.customerId);
+    new apiResponse_1.ApiResponse(data, 'Customer purchases retrieved').send(res);
+});
+exports.getCustomerLedger = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await customerService.getCustomerLedger(req.params.customerId);
+    new apiResponse_1.ApiResponse(data, 'Customer ledger retrieved').send(res);
+});
+exports.createCustomerPayment = (0, asyncHandler_1.default)(async (req, res) => {
+    const payment = await customerService.createCustomerPayment(req.params.customerId, req.body, req.user.id);
+    new apiResponse_1.ApiResponse(payment, 'Payment recorded successfully', 201).send(res);
+});
+exports.deleteCustomerPayment = (0, asyncHandler_1.default)(async (req, res) => {
+    await customerService.deleteCustomerPayment(req.params.customerId, req.params.paymentId);
+    new apiResponse_1.ApiResponse(null, 'Payment deleted successfully').send(res);
 });
 //# sourceMappingURL=customer.controller.js.map

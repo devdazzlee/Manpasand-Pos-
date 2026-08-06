@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listSuppliers = exports.deleteSupplier = exports.toggleSupplierStatus = exports.updateSupplier = exports.getSupplier = exports.createSupplier = void 0;
+exports.deleteSupplierPayment = exports.createSupplierPayment = exports.getSupplierLedger = exports.getSupplierPurchases = exports.listSuppliers = exports.deleteSupplier = exports.toggleSupplierStatus = exports.updateSupplier = exports.getSupplier = exports.createSupplier = void 0;
 const supplier_service_1 = require("../services/supplier.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -50,6 +50,22 @@ exports.listSuppliers = (0, asyncHandler_1.default)(async (req, res) => {
         display_on_pos: parseOptionalBoolean(req.query.display_on_pos),
         fetch_all: String(fetch_all) === 'true',
     });
-    new apiResponse_1.ApiResponse(result.data, 'Suppliers retrieved successfully', 200).send(res);
+    new apiResponse_1.ApiResponse(result.data, 'Suppliers retrieved successfully', 200, true, result.meta).send(res);
+});
+exports.getSupplierPurchases = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await supplierService.getSupplierPurchases(req.params.id);
+    new apiResponse_1.ApiResponse(data, 'Supplier purchases retrieved').send(res);
+});
+exports.getSupplierLedger = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await supplierService.getSupplierLedger(req.params.id);
+    new apiResponse_1.ApiResponse(data, 'Supplier ledger retrieved').send(res);
+});
+exports.createSupplierPayment = (0, asyncHandler_1.default)(async (req, res) => {
+    const payment = await supplierService.createSupplierPayment(req.params.id, req.body, req.user.id);
+    new apiResponse_1.ApiResponse(payment, 'Payment recorded successfully', 201).send(res);
+});
+exports.deleteSupplierPayment = (0, asyncHandler_1.default)(async (req, res) => {
+    await supplierService.deleteSupplierPayment(req.params.id, req.params.paymentId);
+    new apiResponse_1.ApiResponse(null, 'Payment deleted successfully').send(res);
 });
 //# sourceMappingURL=supplier.controller.js.map

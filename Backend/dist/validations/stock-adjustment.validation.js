@@ -21,6 +21,19 @@ exports.listAdjustmentsSchema = zod_1.z.object({
         limit: zod_1.z.string().optional().default('20'),
         productId: zod_1.z.string().optional(),
         branchId: zod_1.z.string().optional(),
+        adjustmentType: zod_1.z
+            .enum(['ADDITION', 'SUBTRACTION', 'RECONCILIATION'])
+            .optional(),
+        adjustmentCategory: zod_1.z
+            .enum([
+            'CORRECTION',
+            'DAMAGE',
+            'EXPIRED',
+            'THEFT',
+            'RETURN_TO_SUPPLIER',
+            'ADMINISTRATIVE',
+        ])
+            .optional(),
         startDate: zod_1.z.string().optional(),
         endDate: zod_1.z.string().optional(),
     }),

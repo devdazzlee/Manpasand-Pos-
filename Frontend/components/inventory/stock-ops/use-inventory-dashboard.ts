@@ -3,10 +3,11 @@
 import { useCallback, useEffect, useState } from "react";
 import {
   fetchInventoryDashboard,
+  type InventoryBranchSummary,
   type InventoryDashboardStats,
 } from "@/lib/inventory-api";
 
-export type { InventoryDashboardStats };
+export type { InventoryDashboardStats, InventoryBranchSummary };
 
 export interface InventoryDashboardKpis {
   totalInventoryValue: number;
@@ -19,7 +20,7 @@ export interface InventoryDashboardKpis {
   pendingTransferCount: number;
 }
 
-const EMPTY: InventoryDashboardKpis = {
+const EMPTY_KPIS: InventoryDashboardKpis = {
   totalInventoryValue: 0,
   totalStockQuantity: 0,
   negativeStockCount: 0,
@@ -44,7 +45,10 @@ function toKpis(data: InventoryDashboardStats): InventoryDashboardKpis {
 }
 
 export function useInventoryDashboard(branchId?: string) {
-  const [stats, setStats] = useState<InventoryDashboardKpis>(EMPTY);
+  const [stats, setStats] = useState<InventoryDashboardKpis>(EMPTY_KPIS);
+  const [branchSummary, setBranchSummary] = useState<InventoryBranchSummary[]>(
+    [],
+  );
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
@@ -52,8 +56,10 @@ export function useInventoryDashboard(branchId?: string) {
     try {
       const data = await fetchInventoryDashboard(branchId);
       setStats(toKpis(data));
+      setBranchSummary(data.branchSummary || []);
     } catch {
-      setStats(EMPTY);
+      setStats(EMPTY_KPIS);
+      setBranchSummary([]);
     } finally {
       setLoading(false);
     }
@@ -63,5 +69,5 @@ export function useInventoryDashboard(branchId?: string) {
     refresh();
   }, [refresh]);
 
-  return { stats, loading, refresh };
+  return { stats, branchSummary, loading, refresh };
 }

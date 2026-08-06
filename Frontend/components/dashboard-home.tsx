@@ -29,6 +29,10 @@ import {
   Wallet,
   CreditCard,
   Smartphone,
+  Receipt,
+  Boxes,
+  Tag,
+  UserPlus,
 } from "lucide-react"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import apiClient from "@/lib/apiClient"
@@ -91,6 +95,10 @@ interface DashboardStats {
   todaySalesCount: number
   todaySalesTotal: number
   paymentBreakdown: Array<{ method: string; total: number; count: number }>
+  avgOrderValue: number
+  itemsSoldToday: number
+  discountToday: number
+  taxToday: number
 }
 
 interface CustomerRow {
@@ -113,6 +121,9 @@ const PAYMENT_ICON: Record<string, any> = {
   CASH: Wallet,
   CARD: CreditCard,
   ONLINE: Smartphone,
+  MOBILE_MONEY: Smartphone,
+  BANK_TRANSFER: CreditCard,
+  CREDIT: CreditCard,
 }
 
 export function DashboardHome({ onNavigate }: DashboardHomeProps) {
@@ -641,6 +652,115 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
         )}
       </div>
 
+      {/* Payment Methods + Today's Insights */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center justify-between">
+              Payment Methods Today
+              <Badge variant="secondary">{stats?.todaySalesCount || 0} sales</Badge>
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            {initialLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+              </div>
+            ) : stats?.paymentBreakdown?.length ? (
+              <div className="space-y-3">
+                {stats.paymentBreakdown.map((p) => {
+                  const Icon = PAYMENT_ICON[p.method] || Wallet
+                  return (
+                    <div key={p.method} className="flex items-center gap-3 p-3 border rounded-lg">
+                      <div className="h-9 w-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                        <Icon className="h-4 w-4 text-blue-600" />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium capitalize truncate">{p.method.toLowerCase().replace(/_/g, " ")}</p>
+                        <p className="text-xs text-gray-500">{p.count} transactions</p>
+                      </div>
+                      <div className="text-sm font-semibold shrink-0">{formatCurrency(p.total)}</div>
+                    </div>
+                  )
+                })}
+              </div>
+            ) : (
+              <div className="text-center text-gray-500 py-4">No sales recorded today</div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card>
+          <CardHeader>
+            <CardTitle>Today&apos;s Insights</CardTitle>
+          </CardHeader>
+          <CardContent>
+            {initialLoading ? (
+              <div className="flex items-center justify-center py-6">
+                <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+              </div>
+            ) : (
+              <div className="grid grid-cols-2 gap-3">
+                <div className="flex items-start gap-3 p-3 border rounded-lg">
+                  <div className="h-9 w-9 rounded-lg bg-emerald-50 flex items-center justify-center shrink-0">
+                    <Receipt className="h-4 w-4 text-emerald-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-gray-500">Sales Today</p>
+                    <p className="text-lg font-semibold tabular-nums">{stats?.todaySalesCount || 0}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 p-3 border rounded-lg">
+                  <div className="h-9 w-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
+                    <TrendingUp className="h-4 w-4 text-blue-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-gray-500">Avg Order Value</p>
+                    <p className="text-lg font-semibold tabular-nums truncate">{formatCurrency(stats?.avgOrderValue || 0)}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 p-3 border rounded-lg">
+                  <div className="h-9 w-9 rounded-lg bg-violet-50 flex items-center justify-center shrink-0">
+                    <Boxes className="h-4 w-4 text-violet-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-gray-500">Items Sold</p>
+                    <p className="text-lg font-semibold tabular-nums">{stats?.itemsSoldToday || 0}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 p-3 border rounded-lg">
+                  <div className="h-9 w-9 rounded-lg bg-amber-50 flex items-center justify-center shrink-0">
+                    <UserPlus className="h-4 w-4 text-amber-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-gray-500">New Customers</p>
+                    <p className="text-lg font-semibold tabular-nums">{stats?.newCustomersToday || 0}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 p-3 border rounded-lg">
+                  <div className="h-9 w-9 rounded-lg bg-rose-50 flex items-center justify-center shrink-0">
+                    <Tag className="h-4 w-4 text-rose-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-gray-500">Discounts Given</p>
+                    <p className="text-lg font-semibold tabular-nums truncate">{formatCurrency(stats?.discountToday || 0)}</p>
+                  </div>
+                </div>
+                <div className="flex items-start gap-3 p-3 border rounded-lg">
+                  <div className="h-9 w-9 rounded-lg bg-sky-50 flex items-center justify-center shrink-0">
+                    <DollarSign className="h-4 w-4 text-sky-600" />
+                  </div>
+                  <div className="min-w-0">
+                    <p className="text-xs text-gray-500">Tax Collected</p>
+                    <p className="text-lg font-semibold tabular-nums truncate">{formatCurrency(stats?.taxToday || 0)}</p>
+                  </div>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 md:gap-6">
         {/* Recent Sales */}
         <Card>
@@ -756,43 +876,6 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
           </CardContent>
         </Card>
       </div>
-
-      {/* Payment Methods Today */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="flex items-center justify-between">
-            Payment Methods Today
-            <Badge variant="secondary">{stats?.todaySalesCount || 0} sales</Badge>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          {initialLoading ? (
-            <div className="flex items-center justify-center py-6">
-              <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-            </div>
-          ) : stats?.paymentBreakdown?.length ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {stats.paymentBreakdown.map((p) => {
-                const Icon = PAYMENT_ICON[p.method] || Wallet
-                return (
-                  <div key={p.method} className="flex items-center gap-3 p-3 border rounded-lg">
-                    <div className="h-9 w-9 rounded-lg bg-blue-50 flex items-center justify-center shrink-0">
-                      <Icon className="h-4 w-4 text-blue-600" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-medium capitalize truncate">{p.method.toLowerCase()}</p>
-                      <p className="text-xs text-gray-500">{p.count} transactions</p>
-                    </div>
-                    <div className="text-sm font-semibold shrink-0">{formatCurrency(p.total)}</div>
-                  </div>
-                )
-              })}
-            </div>
-          ) : (
-            <div className="text-center text-gray-500 py-4">No sales recorded today</div>
-          )}
-        </CardContent>
-      </Card>
 
       {/* KPI detail modals — clicking a stat card opens the underlying data here instead of dumping the user onto another page to hunt for it. */}
       <Dialog open={activeModal !== null} onOpenChange={(open) => !open && setActiveModal(null)}>

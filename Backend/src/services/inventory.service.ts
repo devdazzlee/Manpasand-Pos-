@@ -294,6 +294,7 @@ export class InventoryService {
     branchId?: string;
     productId?: string;
     movementType?: string;
+    direction?: 'in' | 'out';
     startDate?: Date;
     endDate?: Date;
     page?: number;
@@ -322,6 +323,8 @@ export class InventoryService {
 
     if (params.productId) where.product_id = params.productId;
     if (params.movementType) where.movement_type = params.movementType as any;
+    if (params.direction === 'in') where.quantity_change = { gt: 0 };
+    if (params.direction === 'out') where.quantity_change = { lt: 0 };
     if (params.startDate || params.endDate) {
       where.created_at = {};
       if (params.startDate) where.created_at.gte = params.startDate;

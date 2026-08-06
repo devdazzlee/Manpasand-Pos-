@@ -3,11 +3,15 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.logReturn = exports.listStockOut = exports.logBulkStockOut = exports.logStockOut = void 0;
+exports.logReturn = exports.listStockOut = exports.logBulkStockOut = exports.logStockOut = exports.getMonthlyStats = void 0;
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const stock_out_service_1 = require("../services/stock-out.service");
 const stockOutService = new stock_out_service_1.StockOutService();
+exports.getMonthlyStats = (0, asyncHandler_1.default)(async (req, res) => {
+    const stats = await stockOutService.getMonthlyStats(req.query.branchId);
+    new apiResponse_1.ApiResponse(stats, 'Monthly stock-out stats retrieved').send(res);
+});
 exports.logStockOut = (0, asyncHandler_1.default)(async (req, res) => {
     const result = await stockOutService.logStockOut({
         ...req.body,

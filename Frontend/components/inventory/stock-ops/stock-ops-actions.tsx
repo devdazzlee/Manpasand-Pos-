@@ -5,127 +5,76 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import {
-  BarChart3,
-  ChevronDown,
-  FileSpreadsheet,
-  FileText,
-  History,
-  MoreHorizontal,
-  Printer,
-  Upload,
-} from "lucide-react";
-import { INVENTORY_REPORT_LINKS } from "./constants";
+import { ChevronDown, FileSpreadsheet, FileText, Loader2 } from "lucide-react";
 
 interface StockOpsActionsProps {
-  onNavigate?: (tab: string) => void;
-  onExportCsv?: () => void;
-  onExportExcel?: () => void;
-  onPrint?: () => void;
-  onImport?: () => void;
+  onExportExcel?: () => void | Promise<void>;
+  onExportPdf?: () => void | Promise<void>;
   disabled?: boolean;
+  exporting?: boolean;
 }
 
-/** Compact toolbar for Stock In / Stock Out / Stock by Location pages. */
+/** Export-only toolbar: Excel + PDF. */
 export function StockOpsActions({
-  onNavigate,
-  onExportCsv,
   onExportExcel,
-  onPrint,
-  onImport,
+  onExportPdf,
   disabled,
+  exporting,
 }: StockOpsActionsProps) {
-  const hasExport = onExportCsv || onExportExcel || onPrint || onImport;
+  if (!onExportExcel && !onExportPdf) return null;
+
+  const busy = Boolean(exporting);
 
   return (
     <div className="flex flex-wrap items-center gap-2">
-      {onImport ? (
-        <Button variant="outline" size="sm" onClick={onImport} className="h-9 text-sm text-black">
-          <Upload className="h-4 w-4 mr-1.5" />
-          Import
-        </Button>
-      ) : null}
-
-      {hasExport ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={disabled}
-              className="h-9 text-sm text-black"
-            >
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={disabled || busy}
+            className="h-9 text-sm text-black"
+          >
+            {busy ? (
+              <Loader2 className="h-4 w-4 mr-1.5 animate-spin" />
+            ) : (
               <FileSpreadsheet className="h-4 w-4 mr-1.5" />
-              Export
+            )}
+            {busy ? "Exporting…" : "Export"}
+            {!busy ? (
               <ChevronDown className="h-3.5 w-3.5 ml-1.5 opacity-60" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-48">
-            {onExportCsv ? (
-              <DropdownMenuItem onClick={onExportCsv}>
-                <FileText className="h-4 w-4 mr-2" />
-                Download CSV
-              </DropdownMenuItem>
             ) : null}
-            {onExportExcel ? (
-              <DropdownMenuItem onClick={onExportExcel}>
-                <FileSpreadsheet className="h-4 w-4 mr-2" />
-                Download Excel
-              </DropdownMenuItem>
-            ) : null}
-            {onPrint ? (
-              <DropdownMenuItem onClick={onPrint}>
-                <Printer className="h-4 w-4 mr-2" />
-                Print report
-              </DropdownMenuItem>
-            ) : null}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
-
-      {onNavigate ? (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <Button variant="outline" size="sm" className="h-9 text-sm text-black">
-              <MoreHorizontal className="h-4 w-4 mr-1.5" />
-              More
-              <ChevronDown className="h-3.5 w-3.5 ml-1.5 opacity-60" />
-            </Button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-56">
-            <DropdownMenuLabel>Go to</DropdownMenuLabel>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem onClick={() => onNavigate("stock-management")}>
-              Stock Management
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-48">
+          {onExportExcel ? (
+            <DropdownMenuItem
+              disabled={busy}
+              onSelect={(e) => {
+                e.preventDefault();
+                void onExportExcel();
+              }}
+            >
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              Export Excel
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onNavigate("purchases")}>
-              Stock In
+          ) : null}
+          {onExportPdf ? (
+            <DropdownMenuItem
+              disabled={busy}
+              onSelect={(e) => {
+                e.preventDefault();
+                void onExportPdf();
+              }}
+            >
+              <FileText className="h-4 w-4 mr-2" />
+              Export PDF
             </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onNavigate("stock-out")}>
-              Stock Out
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onNavigate("transfers")}>
-              Transfers
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>Reports</DropdownMenuLabel>
-            {INVENTORY_REPORT_LINKS.map((link) => (
-              <DropdownMenuItem key={link.label} onClick={() => onNavigate(link.tab)}>
-                {link.tab === "stock-movement-log" ? (
-                  <History className="h-4 w-4 mr-2" />
-                ) : (
-                  <BarChart3 className="h-4 w-4 mr-2" />
-                )}
-                {link.label}
-              </DropdownMenuItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      ) : null}
+          ) : null}
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   );
 }

@@ -4,6 +4,8 @@ import { AppError } from '../utils/apiError';
 import jwt from 'jsonwebtoken';
 import { config } from '../config/app';
 import bcrypt from 'bcryptjs';
+import { asNumber } from '../utils/helpers';
+import { CreateCustomerPaymentInput } from '../validations/customer.validation';
 
 class CustomerService {
     private generateToken(cusId: Customer['id'], email: Customer['email']): string {
@@ -142,16 +144,36 @@ class CustomerService {
         }
 
         const customerIds = customers.map((customer) => customer.id);
-        const saleAggregates = await prisma.sale.groupBy({
-            by: ['customer_id'],
-            where: {
-                customer_id: { in: customerIds },
-                status: 'COMPLETED',
-            },
-            _sum: { total_amount: true },
-            _count: { id: true },
-            _max: { sale_date: true },
-        });
+
+        const [saleAggregates, completedSales, paymentAggregates] = await Promise.all([
+            prisma.sale.groupBy({
+                by: ['customer_id'],
+                where: {
+                    customer_id: { in: customerIds },
+                    status: 'COMPLETED',
+                },
+                _sum: { total_amount: true },
+                _count: { id: true },
+                _max: { sale_date: true },
+            }),
+            prisma.sale.findMany({
+                where: {
+                    customer_id: { in: customerIds },
+                    status: 'COMPLETED',
+                    original_sale_id: null,
+                },
+                select: {
+                    customer_id: true,
+                    total_amount: true,
+                    payment_received: true,
+                },
+            }),
+            prisma.customerPayment.groupBy({
+                by: ['customer_id'],
+                where: { customer_id: { in: customerIds } },
+                _sum: { amount: true },
+            }),
+        ]);
 
         const statsByCustomerId = new Map(
             saleAggregates
@@ -166,13 +188,39 @@ class CustomerService {
                 ]),
         );
 
+        const unpaidByCustomerId = new Map<string, number>();
+        for (const sale of completedSales) {
+            if (!sale.customer_id) continue;
+            const unpaid = Math.max(
+                0,
+                asNumber(sale.total_amount) - asNumber(sale.payment_received),
+            );
+            unpaidByCustomerId.set(
+                sale.customer_id,
+                (unpaidByCustomerId.get(sale.customer_id) ?? 0) + unpaid,
+            );
+        }
+
+        const paymentsByCustomerId = new Map(
+            paymentAggregates.map((row) => [
+                row.customer_id,
+                asNumber(row._sum.amount),
+            ]),
+        );
+
         return customers.map((customer) => {
             const stats = statsByCustomerId.get(customer.id);
+            const opening = asNumber(customer.previous_credit_balance);
+            const unpaid = unpaidByCustomerId.get(customer.id) ?? 0;
+            const payments = paymentsByCustomerId.get(customer.id) ?? 0;
+            const balance_due = Math.max(0, opening + unpaid - payments);
+
             return {
                 ...customer,
                 total_sale_amount: stats?.total_sale_amount ?? 0,
                 sale_count: stats?.sale_count ?? 0,
                 last_sale_date: stats?.last_sale_date ?? null,
+                balance_due,
             };
         });
     }
@@ -228,6 +276,10 @@ class CustomerService {
 
         await prisma.$transaction(
             async (tx) => {
+                await tx.customerPayment.deleteMany({
+                    where: { customer_id: customerId },
+                });
+
                 await tx.sale.updateMany({
                     where: { original_sale: { customer_id: customerId } },
                     data: { original_sale_id: null },
@@ -262,6 +314,309 @@ class CustomerService {
     // route stays valid.
     public async logoutCustomer(_customerId: Customer['id']) {
         return { message: 'Logged out successfully' };
+    }
+
+    public async getCustomerPurchases(customerId: string) {
+        await this.getCustomerById(customerId);
+
+        const sales = await prisma.sale.findMany({
+            where: {
+                customer_id: customerId,
+                status: { in: ['COMPLETED', 'REFUNDED', 'EXCHANGED'] },
+                original_sale_id: null,
+            },
+            include: {
+                sale_items: {
+                    include: {
+                        product: { select: { id: true, name: true, sku: true } },
+                    },
+                },
+                branch: { select: { id: true, name: true } },
+            },
+            orderBy: { sale_date: 'desc' },
+        });
+
+        const productMap = new Map<
+            string,
+            {
+                productId: string;
+                productName: string;
+                sku: string | null;
+                totalQty: number;
+                totalValue: number;
+                orderCount: number;
+            }
+        >();
+
+        let totalQuantity = 0;
+        let totalValue = 0;
+
+        const orders = sales.map((sale) => {
+            const items = sale.sale_items.map((item) => {
+                const qty = asNumber(item.quantity);
+                const lineTotal = asNumber(item.line_total);
+                totalQuantity += qty;
+                totalValue += lineTotal;
+
+                const pid = item.product_id;
+                const existing = productMap.get(pid);
+                if (existing) {
+                    existing.totalQty += qty;
+                    existing.totalValue += lineTotal;
+                    existing.orderCount += 1;
+                } else {
+                    productMap.set(pid, {
+                        productId: pid,
+                        productName: item.product?.name || 'Unknown',
+                        sku: item.product?.sku || null,
+                        totalQty: qty,
+                        totalValue: lineTotal,
+                        orderCount: 1,
+                    });
+                }
+
+                return {
+                    id: item.id,
+                    product_id: item.product_id,
+                    quantity: qty,
+                    unit_price: asNumber(item.unit_price),
+                    discount_amount: asNumber(item.discount_amount),
+                    tax_amount: asNumber(item.tax_amount),
+                    line_total: lineTotal,
+                    item_type: item.item_type,
+                    product: item.product,
+                };
+            });
+
+            return {
+                id: sale.id,
+                sale_number: sale.sale_number,
+                invoice_number: sale.invoice_number,
+                sale_date: sale.sale_date,
+                status: sale.status,
+                payment_method: sale.payment_method,
+                payment_status: sale.payment_status,
+                subtotal: asNumber(sale.subtotal),
+                tax_amount: asNumber(sale.tax_amount),
+                discount_amount: asNumber(sale.discount_amount),
+                total_amount: asNumber(sale.total_amount),
+                payment_received: asNumber(sale.payment_received),
+                notes: sale.notes,
+                branch: sale.branch,
+                items,
+            };
+        });
+
+        return {
+            orders,
+            productSummary: Array.from(productMap.values()).sort(
+                (a, b) => b.totalValue - a.totalValue,
+            ),
+            summary: {
+                orderCount: orders.length,
+                productCount: productMap.size,
+                totalQuantity,
+                totalValue,
+            },
+        };
+    }
+
+    public async getCustomerLedger(customerId: string) {
+        const customer = await this.getCustomerById(customerId);
+
+        const [sales, payments] = await Promise.all([
+            prisma.sale.findMany({
+                where: {
+                    customer_id: customerId,
+                    status: 'COMPLETED',
+                    original_sale_id: null,
+                },
+                orderBy: { sale_date: 'asc' },
+            }),
+            prisma.customerPayment.findMany({
+                where: { customer_id: customerId },
+                include: { user: { select: { email: true } } },
+                orderBy: { payment_date: 'asc' },
+            }),
+        ]);
+
+        type LedgerType = 'OPENING' | 'SALE' | 'SALE_PAYMENT' | 'PAYMENT';
+        type LedgerEntry = {
+            id: string;
+            date: Date;
+            type: LedgerType;
+            description: string;
+            reference: string | null;
+            debit: number;
+            credit: number;
+            balance: number;
+            meta?: Record<string, unknown>;
+        };
+
+        const typeOrder: Record<LedgerType, number> = {
+            OPENING: 0,
+            SALE: 1,
+            SALE_PAYMENT: 2,
+            PAYMENT: 3,
+        };
+
+        const raw: Omit<LedgerEntry, 'balance'>[] = [];
+
+        const opening = asNumber(customer.previous_credit_balance);
+        if (opening > 0) {
+            raw.push({
+                id: `opening-${customer.id}`,
+                date: customer.created_at,
+                type: 'OPENING',
+                description: 'Opening credit balance',
+                reference: null,
+                debit: opening,
+                credit: 0,
+                meta: { previous_credit_balance: opening },
+            });
+        }
+
+        for (const sale of sales) {
+            const total = asNumber(sale.total_amount);
+            const received = asNumber(sale.payment_received);
+
+            raw.push({
+                id: `sale-${sale.id}`,
+                date: sale.sale_date,
+                type: 'SALE',
+                description: `Sale · ${sale.invoice_number || sale.sale_number}`,
+                reference: sale.invoice_number || sale.sale_number,
+                debit: total,
+                credit: 0,
+                meta: {
+                    saleId: sale.id,
+                    saleNumber: sale.sale_number,
+                    invoiceNumber: sale.invoice_number,
+                },
+            });
+
+            if (received > 0) {
+                raw.push({
+                    id: `sale-payment-${sale.id}`,
+                    date: sale.sale_date,
+                    type: 'SALE_PAYMENT',
+                    description: `Sale payment · ${sale.invoice_number || sale.sale_number}`,
+                    reference: sale.invoice_number || sale.sale_number,
+                    debit: 0,
+                    credit: received,
+                    meta: {
+                        saleId: sale.id,
+                        paymentMethod: sale.payment_method,
+                    },
+                });
+            }
+        }
+
+        for (const pay of payments) {
+            raw.push({
+                id: `payment-${pay.id}`,
+                date: pay.payment_date,
+                type: 'PAYMENT',
+                description: `Payment · ${pay.method}${pay.notes ? ` · ${pay.notes}` : ''}`,
+                reference: pay.reference,
+                debit: 0,
+                credit: asNumber(pay.amount),
+                meta: {
+                    paymentId: pay.id,
+                    method: pay.method,
+                    createdBy: pay.user?.email || null,
+                },
+            });
+        }
+
+        raw.sort((a, b) => {
+            const d = a.date.getTime() - b.date.getTime();
+            if (d !== 0) return d;
+            return typeOrder[a.type] - typeOrder[b.type];
+        });
+
+        let running = 0;
+        const entries: LedgerEntry[] = raw.map((e) => {
+            running += e.debit - e.credit;
+            return { ...e, balance: running };
+        });
+
+        const totalPaid = entries.reduce((acc, e) => acc + e.credit, 0);
+        const balanceDue = Math.max(0, running);
+        const creditLimit =
+            customer.credit_limit === null || customer.credit_limit === undefined
+                ? null
+                : asNumber(customer.credit_limit);
+        const creditAvailable =
+            creditLimit === null ? null : Math.max(0, creditLimit - balanceDue);
+
+        return {
+            summary: {
+                totalPaid,
+                balanceDue,
+                creditLimit,
+                creditAvailable,
+                openingBalance: opening,
+                saleCount: sales.length,
+                paymentCount: payments.length,
+            },
+            entries: entries.reverse(),
+            payments: payments
+                .map((p) => ({
+                    id: p.id,
+                    amount: asNumber(p.amount),
+                    payment_date: p.payment_date,
+                    method: p.method,
+                    reference: p.reference,
+                    notes: p.notes,
+                    created_at: p.created_at,
+                    user: p.user,
+                }))
+                .reverse(),
+        };
+    }
+
+    public async createCustomerPayment(
+        customerId: string,
+        data: CreateCustomerPaymentInput,
+        createdBy: string,
+    ) {
+        await this.getCustomerById(customerId);
+
+        const payment = await prisma.customerPayment.create({
+            data: {
+                customer_id: customerId,
+                amount: data.amount,
+                payment_date: data.paymentDate
+                    ? new Date(data.paymentDate)
+                    : new Date(),
+                method: data.method || 'CASH',
+                reference: data.reference || null,
+                notes: data.notes || null,
+                created_by: createdBy,
+            },
+            include: { user: { select: { email: true } } },
+        });
+
+        return {
+            id: payment.id,
+            amount: asNumber(payment.amount),
+            payment_date: payment.payment_date,
+            method: payment.method,
+            reference: payment.reference,
+            notes: payment.notes,
+            created_at: payment.created_at,
+            user: payment.user,
+        };
+    }
+
+    public async deleteCustomerPayment(customerId: string, paymentId: string) {
+        const payment = await prisma.customerPayment.findFirst({
+            where: { id: paymentId, customer_id: customerId },
+        });
+        if (!payment) throw new AppError(404, 'Payment not found');
+        await prisma.customerPayment.delete({ where: { id: paymentId } });
+        return { message: 'Payment deleted successfully' };
     }
 }
 

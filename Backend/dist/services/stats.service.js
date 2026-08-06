@@ -87,13 +87,51 @@ class StatsService {
             count: g._count.id,
         }));
     }
+    async todaySalesAggregate(branchId) {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const saleWhere = {
+            created_at: { gte: today },
+            status: { notIn: ["CANCELLED"] },
+        };
+        if (branchId)
+            saleWhere.branch_id = branchId;
+        const [totals, itemsSold] = await Promise.all([
+            client_1.prisma.sale.aggregate({
+                where: saleWhere,
+                _sum: {
+                    total_amount: true,
+                    discount_amount: true,
+                    tax_amount: true,
+                },
+                _count: { id: true },
+                _avg: { total_amount: true },
+            }),
+            client_1.prisma.saleItem.aggregate({
+                where: {
+                    sale: saleWhere,
+                    item_type: { not: "RETURN" },
+                },
+                _sum: { quantity: true },
+            }),
+        ]);
+        return {
+            salesCount: totals._count.id,
+            salesTotal: Number(totals._sum.total_amount || 0),
+            discountToday: Number(totals._sum.discount_amount || 0),
+            taxToday: Number(totals._sum.tax_amount || 0),
+            avgOrderValue: Number(totals._avg.total_amount || 0),
+            itemsSoldToday: Number(itemsSold._sum.quantity || 0),
+        };
+    }
     async getDashboardStats(branchId) {
-        const [totalCustomers, newCustomersToday, lowStockProducts, todaySales, paymentBreakdown, branch] = await Promise.all([
+        const [totalCustomers, newCustomersToday, lowStockProducts, todaySales, paymentBreakdown, todayAgg, branch,] = await Promise.all([
             this.totalCustomers(branchId),
             this.newCustomersToday(),
             this.lowStockProducts(branchId),
             this.todaySales(branchId),
             this.paymentBreakdownToday(branchId),
+            this.todaySalesAggregate(branchId),
             branchId
                 ? client_1.prisma.branch.findUnique({ where: { id: branchId }, select: { id: true, name: true } })
                 : Promise.resolve(null),
@@ -110,6 +148,10 @@ class StatsService {
             todaySalesCount: todaySales.length,
             todaySalesTotal,
             paymentBreakdown,
+            avgOrderValue: todayAgg.avgOrderValue,
+            itemsSoldToday: todayAgg.itemsSoldToday,
+            discountToday: todayAgg.discountToday,
+            taxToday: todayAgg.taxToday,
         };
     }
 }

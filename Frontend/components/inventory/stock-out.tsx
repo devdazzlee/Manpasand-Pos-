@@ -1,9 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -13,43 +13,71 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
 import { Badge } from "@/components/ui/badge";
 import {
   Popover,
-  PopoverAnchor,
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import {
   Search,
   CalendarIcon,
   Loader2,
-  Plus,
-  Trash2,
   PackageMinus,
-  History,
-  ListChecks,
-  Info,
   FileSpreadsheet,
+  Plus,
+  List,
+  LayoutGrid,
+  X,
+  Eye,
+  DollarSign,
+  Boxes,
   AlertTriangle,
+  FileText,
+  Trash2,
+  ChevronDown,
+  RotateCcw,
 } from "lucide-react";
-import * as XLSX from "xlsx";
-import { z } from "zod";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { toast } from "sonner";
-import { usePosData } from "@/hooks/use-pos-data";
 import { PageLoader } from "@/components/ui/page-loader";
 import { ExcelUploadDialog, type ExcelField } from "@/components/inventory/excel-upload-dialog";
 import { STOCK_OUT_REASONS } from "@/components/inventory/stock-ops/constants";
-import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
-import { StockModuleToolbar } from "@/components/inventory/stock-ops/stock-module-toolbar";
-import { useInventoryDashboard } from "@/components/inventory/stock-ops/use-inventory-dashboard";
 import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
-import { formatMoney } from "@/components/inventory/stock-ops/export-utils";
+import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
+import {
+  downloadExcel,
+  downloadBrandedPdf,
+  formatMoney,
+  formatQty,
+  yieldForUi,
+} from "@/components/inventory/stock-ops/export-utils";
+import { StockSelectSkeleton } from "@/components/inventory/stock-ops/stock-operation-dialog";
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change";
+import { cn } from "@/lib/utils";
+import * as XLSX from "xlsx";
+import { z } from "zod";
+import { usePosData } from "@/hooks/use-pos-data";
 import {
   StockProductPicker,
   type StockLineItem,
@@ -64,17 +92,12 @@ const REASON_OPTIONS = STOCK_OUT_REASONS.filter(
     ["SALE", "DAMAGE", "LOSS", "EXPIRED", "RETURN"].includes(r.value),
 );
 
-// Zod schema for the dispatch form. Kept narrow on purpose — only the fields
-// the user might forget. Errors land next to the offending input so they
-// don't have to hunt for what's missing.
 const dispatchSchema = z.object({
   branchId: z.string().min(1, "Pick a branch before saving"),
   reason: z.enum(["SALE", "DAMAGE", "LOSS", "EXPIRED", "RETURN"], {
     errorMap: () => ({ message: "Pick a reason" }),
   }),
-  lines: z
-    .array(z.any())
-    .min(1, "Add at least one line to dispatch"),
+  lines: z.array(z.any()).min(1, "Add at least one line to dispatch"),
 });
 
 type DispatchFieldErrors = Partial<Record<"branchId" | "reason" | "lines", string>>;
@@ -93,61 +116,153 @@ interface MovementRow {
   created_at: string;
   movement_type: string;
   quantity_change: string | number;
+  previous_qty?: string | number | null;
+  new_qty?: string | number | null;
+  unit_cost?: string | number | null;
   notes?: string | null;
   product?: { id: string; name: string; sku?: string | null } | null;
   branch?: { id: string; name: string } | null;
   user?: { email?: string | null } | null;
 }
 
+interface StockOutMonthStats {
+  totalDispatches: number;
+  totalQuantity: number;
+  totalValue: number;
+  byReason: Record<string, number>;
+}
+
+function reasonLabel(type?: string | null) {
+  if (!type) return "—";
+  return REASON_OPTIONS.find((r) => r.value === type)?.label || type;
+}
+
+function reasonTone(type?: string | null) {
+  switch ((type || "").toUpperCase()) {
+    case "DAMAGE":
+      return "bg-rose-50 text-rose-700 border-rose-200";
+    case "EXPIRED":
+      return "bg-amber-50 text-amber-800 border-amber-200";
+    case "LOSS":
+      return "bg-orange-50 text-orange-800 border-orange-200";
+    case "RETURN":
+      return "bg-sky-50 text-sky-800 border-sky-200";
+    case "SALE":
+      return "bg-slate-100 text-slate-700 border-slate-200";
+    default:
+      return "bg-gray-50 text-gray-700 border-gray-200";
+  }
+}
+
+function parseDispatchNotes(notes?: string | null) {
+  if (!notes) return { documentRef: "", rate: "", userNotes: "" };
+  const parts = notes.split(" | ");
+  let documentRef = "";
+  let rate = "";
+  const remaining: string[] = [];
+  parts.forEach((p) => {
+    if (p.startsWith("Ref: ")) {
+      documentRef = p.replace("Ref: ", "");
+    } else if (p.startsWith("Rate: ")) {
+      rate = p.replace("Rate: ", "");
+    } else {
+      remaining.push(p);
+    }
+  });
+  return {
+    documentRef,
+    rate,
+    userNotes: remaining.join(" | "),
+  };
+}
+
+function removedQty(row: MovementRow) {
+  return Math.abs(Number(row.quantity_change) || 0);
+}
+
+function lineRate(row: MovementRow) {
+  const fromField = Number(row.unit_cost);
+  if (Number.isFinite(fromField) && fromField > 0) return fromField;
+  const parsed = Number(parseDispatchNotes(row.notes).rate);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : 0;
+}
+
 export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void }) {
-  const { stats: dashboardStats, loading: dashboardLoading } = useInventoryDashboard();
+  void onNavigate;
+  const logoDataUri = useLogoDataUri();
   const {
     products,
     branches,
     categories,
     productsLoading,
+    branchesLoading,
     fetchProducts,
     fetchBranches,
   } = usePosData();
 
   const [tab, setTab] = useState<"history" | "new">("history");
 
-  // ---------- History tab ----------
+  // ------- history -------
   const [rows, setRows] = useState<MovementRow[]>([]);
   const [historyLoading, setHistoryLoading] = useState(true);
-  const [historyPage, setHistoryPage] = useState(1);
-  const [historyTotalPages, setHistoryTotalPages] = useState(1);
-  const [historyTotal, setHistoryTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
   const PAGE_SIZE = 20;
+  useScrollToTopOnPageChange(page);
 
+  const [searchQuery, setSearchQuery] = useState("");
   const [filterReason, setFilterReason] = useState<string>("all");
+  const [filterBranch, setFilterBranch] = useState<string>("all");
   const [filterStart, setFilterStart] = useState<Date | undefined>(undefined);
   const [filterEnd, setFilterEnd] = useState<Date | undefined>(undefined);
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [exporting, setExporting] = useState(false);
+
+  const [monthStats, setMonthStats] = useState<StockOutMonthStats>({
+    totalDispatches: 0,
+    totalQuantity: 0,
+    totalValue: 0,
+    byReason: {},
+  });
+  const [statsLoading, setStatsLoading] = useState(true);
+
+  // ------- detail modal -------
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailRow, setDetailRow] = useState<MovementRow | null>(null);
+
+  const openDetail = (row: MovementRow) => {
+    setDetailRow(row);
+    setDetailOpen(true);
+  };
 
   const fetchHistory = useCallback(
-    async (pg = historyPage) => {
+    async (pg = page) => {
       setHistoryLoading(true);
       try {
-        const params: any = { page: pg, limit: PAGE_SIZE };
+        const params: Record<string, string | number> = {
+          page: pg,
+          limit: PAGE_SIZE,
+        };
         if (filterReason !== "all") params.reason = filterReason;
+        if (filterBranch !== "all") params.branchId = filterBranch;
         if (filterStart) params.startDate = filterStart.toISOString();
         if (filterEnd) {
-          // Treat the end date as inclusive — push to end-of-day.
           const e = new Date(filterEnd);
           e.setHours(23, 59, 59, 999);
           params.endDate = e.toISOString();
         }
         const res = await apiClient.get(`${API_BASE}/stock-out`, { params });
         setRows(res.data?.data || []);
-        setHistoryTotal(res.data?.meta?.total ?? 0);
-        setHistoryTotalPages(res.data?.meta?.totalPages ?? 1);
+        setTotal(res.data?.meta?.total ?? 0);
+        setTotalPages(res.data?.meta?.totalPages ?? 1);
       } catch (e: any) {
         toast.error(e?.response?.data?.message || "Failed to load stock-out history");
       } finally {
         setHistoryLoading(false);
       }
     },
-    [filterReason, filterStart, filterEnd, historyPage],
+    [filterReason, filterBranch, filterStart, filterEnd, page],
   );
 
   useEffect(() => {
@@ -159,19 +274,206 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
     fetchHistory();
   }, [fetchHistory]);
 
-  // ---------- New dispatch tab ----------
-  const [reason, setReason] = useState<Reason>("SALE");
+  const fetchStats = useCallback(async () => {
+    setStatsLoading(true);
+    try {
+      const params: Record<string, string> = {};
+      if (filterBranch !== "all") params.branchId = filterBranch;
+      const res = await apiClient.get(`${API_BASE}/stock-out/stats`, { params });
+      const data = res.data?.data || {};
+      setMonthStats({
+        totalDispatches: Number(data.totalDispatches) || 0,
+        totalQuantity: Number(data.totalQuantity) || 0,
+        totalValue: Number(data.totalValue) || 0,
+        byReason: data.byReason || {},
+      });
+    } catch {
+      setMonthStats({
+        totalDispatches: 0,
+        totalQuantity: 0,
+        totalValue: 0,
+        byReason: {},
+      });
+    } finally {
+      setStatsLoading(false);
+    }
+  }, [filterBranch]);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  const filteredRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return rows;
+    return rows.filter((r) => {
+      const product = (r.product?.name || "").toLowerCase();
+      const sku = (r.product?.sku || "").toLowerCase();
+      const branch = (r.branch?.name || "").toLowerCase();
+      const notes = (r.notes || "").toLowerCase();
+      const reason = reasonLabel(r.movement_type).toLowerCase();
+      return (
+        product.includes(q) ||
+        sku.includes(q) ||
+        branch.includes(q) ||
+        notes.includes(q) ||
+        reason.includes(q)
+      );
+    });
+  }, [rows, searchQuery]);
+
+  const pageTotals = useMemo(() => {
+    let units = 0;
+    let value = 0;
+    for (const r of filteredRows) {
+      const qty = removedQty(r);
+      units += qty;
+      value += qty * lineRate(r);
+    }
+    return { units, value };
+  }, [filteredRows]);
+
+  const hasActiveFilters =
+    searchQuery.trim() !== "" ||
+    filterReason !== "all" ||
+    filterBranch !== "all" ||
+    !!filterStart ||
+    !!filterEnd;
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setFilterReason("all");
+    setFilterBranch("all");
+    setFilterStart(undefined);
+    setFilterEnd(undefined);
+    setPage(1);
+  };
+
+  const exportHeaders = [
+    "Date",
+    "Product",
+    "SKU",
+    "Branch",
+    "Reason",
+    "Qty removed",
+    "Rate",
+    "Value",
+    "Previous qty",
+    "New qty",
+    "Notes",
+    "User",
+  ];
+
+  const buildExportRows = () =>
+    filteredRows.map((r) => {
+      const qty = removedQty(r);
+      const rate = lineRate(r);
+      return [
+        r.created_at ? new Date(r.created_at).toLocaleString() : "",
+        r.product?.name || "",
+        r.product?.sku || "",
+        r.branch?.name || "",
+        reasonLabel(r.movement_type),
+        qty,
+        rate,
+        qty * rate,
+        Number(r.previous_qty) || 0,
+        Number(r.new_qty) || 0,
+        r.notes || "",
+        r.user?.email || "",
+      ];
+    });
+
+  const exportExcel = async () => {
+    if (filteredRows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      downloadExcel(
+        `stock-out-${Date.now()}.xlsx`,
+        "Stock Out",
+        exportHeaders,
+        buildExportRows(),
+      );
+      toast.success("Excel downloaded");
+    } catch {
+      toast.error("Failed to export Excel");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportPdf = async () => {
+    if (filteredRows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      const pdfRows = filteredRows.map((r) => {
+        const qty = removedQty(r);
+        const rate = lineRate(r);
+        return [
+          r.created_at ? new Date(r.created_at).toLocaleDateString() : "",
+          r.product?.name || "",
+          r.branch?.name || "",
+          reasonLabel(r.movement_type),
+          formatQty(qty),
+          formatMoney(rate),
+          formatMoney(qty * rate),
+        ];
+      });
+
+      await downloadBrandedPdf({
+        filename: `stock-out-${Date.now()}.pdf`,
+        title: "Stock Out — Dispatches",
+        subtitle: "Outbound stock movements",
+        logoDataUri,
+        summary: [
+          { label: "Records", value: filteredRows.length.toLocaleString() },
+          {
+            label: "This month",
+            value: monthStats.totalDispatches.toLocaleString(),
+          },
+          { label: "Month value", value: formatMoney(monthStats.totalValue) },
+        ],
+        columns: [
+          { header: "Date", width: 1.1 },
+          { header: "Product", width: 2.2 },
+          { header: "Branch", width: 1.3 },
+          { header: "Reason", width: 1.4 },
+          { header: "Qty", align: "right", width: 0.8 },
+          { header: "Rate", align: "right", width: 1 },
+          { header: "Value", align: "right", width: 1.1 },
+        ],
+        rows: pdfRows,
+      });
+      toast.success("PDF downloaded");
+    } catch {
+      toast.error("Failed to export PDF");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  // ------- new dispatch form -------
+  const [reason, setReason] = useState<Reason>("DAMAGE");
   const [branchId, setBranchId] = useState<string>("");
-  const [customerId, setCustomerId] = useState<string>("");
   const [documentRef, setDocumentRef] = useState<string>("");
   const [dispatchDate, setDispatchDate] = useState<Date>(new Date());
   const [notes, setNotes] = useState<string>("");
   const [lines, setLines] = useState<DraftLine[]>([]);
   const [saving, setSaving] = useState(false);
   const [formErrors, setFormErrors] = useState<DispatchFieldErrors>({});
+  const [excelDialogOpen, setExcelDialogOpen] = useState(false);
+  const [unmatched, setUnmatched] = useState<string[]>([]);
+  const [stockMap, setStockMap] = useState<Record<string, number>>({});
+  const [showMoreDetails, setShowMoreDetails] = useState(false);
 
-  // Clearing a field error as soon as the user fixes it is more forgiving
-  // than leaving stale red text under an already-valid input.
   const clearError = (key: keyof DispatchFieldErrors) =>
     setFormErrors((prev) => {
       if (!prev[key]) return prev;
@@ -180,7 +482,11 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
       return next;
     });
 
-  const [stockMap, setStockMap] = useState<Record<string, number>>({});
+  useEffect(() => {
+    if (!branchId && branches.length > 0) {
+      setBranchId(branches[0].id);
+    }
+  }, [branches, branchId]);
 
   useEffect(() => {
     if (!branchId) {
@@ -236,33 +542,23 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
     clearError("lines");
   };
 
-  const removeLine = (productId: string) => {
-    setLines((prev) => prev.filter((l) => l.productId !== productId));
-  };
-
-  // --- Excel upload (Step 1) ---
-  const [excelDialogOpen, setExcelDialogOpen] = useState(false);
-  const [unmatched, setUnmatched] = useState<string[]>([]);
-
   const STOCK_OUT_FIELDS: ExcelField[] = [
     {
       name: "Name",
       required: true,
-      description: 'Product name in your catalog. Aliases: Product, Product Name.',
+      description: "Product name in your catalog. Aliases: Product, Product Name.",
     },
     {
       name: "Quantity",
       required: true,
-      description: 'Units to dispatch (must be > 0). Aliases: Qty, quantity.',
+      description: "Units to dispatch (must be > 0). Aliases: Qty, quantity.",
     },
     {
       name: "Rate",
-      description: 'Optional unit price for the line. Aliases: Price, Unit Price.',
+      description: "Optional unit price for the line. Aliases: Price, Unit Price.",
     },
   ];
 
-  // Build a name → product index once per products refresh for O(1) matching
-  // by normalized name.
   const productNameIndex = useMemo(() => {
     const map = new Map<string, any>();
     for (const p of products) {
@@ -272,26 +568,23 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
     return map;
   }, [products]);
 
-  // Per-row processor used by the live-progress upload dialog. The dialog
-  // parses the sheet itself and hands us each row; we look up the product,
-  // check available stock, and append a draft line. Resolves with
-  // { ok, error } so the dialog can mark this row green / red.
   const availabilityCacheRef = useRef(new Map<string, number>());
+
   const processRow = async (
     row: Record<string, any>,
   ): Promise<{ ok: boolean; error?: string }> => {
     if (!branchId) {
-      return { ok: false, error: "Pick a branch in step 2 first" };
+      return { ok: false, error: "Pick a branch first" };
     }
 
-    // Header tolerance — name / product / "product name", qty / quantity, rate / price.
     const pick = (keys: string[]) => {
       const normalized: Record<string, any> = {};
       for (const k of Object.keys(row)) normalized[k.trim().toLowerCase()] = row[k];
       for (const k of keys) {
         const key = k.toLowerCase();
-        if (normalized[key] !== undefined && normalized[key] !== "")
+        if (normalized[key] !== undefined && normalized[key] !== "") {
           return normalized[key];
+        }
       }
       return undefined;
     };
@@ -307,8 +600,6 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
     const match = productNameIndex.get(name.toLowerCase());
     if (!match) return { ok: false, error: "Product name not found in catalog" };
 
-    // Cache available-stock lookups across rows in the same upload so a 100-
-    // row file doesn't fire 100 HTTP requests for the same product.
     let available = availabilityCacheRef.current.get(match.id);
     if (available === undefined) {
       try {
@@ -322,14 +613,13 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
       availabilityCacheRef.current.set(match.id, available);
     }
 
-    if (reason === "SALE" && qty > available) {
+    if (qty > (available || 0)) {
       return {
         ok: false,
         error: `Only ${available} in stock — can't dispatch ${qty}`,
       };
     }
 
-    // Merge into the existing draft (same as manual add — bump qty for dupes).
     setLines((prev) => {
       const byId = new Map(prev.map((l) => [l.productId, { ...l }]));
       const ex = byId.get(match.id);
@@ -352,15 +642,12 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
     return { ok: true };
   };
 
-  // Reset the per-upload availability cache so a fresh upload re-reads stock
-  // (it may have changed since the previous upload).
   const resetUploadCaches = () => {
     availabilityCacheRef.current = new Map<string, number>();
     setUnmatched([]);
   };
 
   const downloadTemplate = () => {
-    // Tiny built-in template so users always have a known-good starting file.
     const ws = XLSX.utils.aoa_to_sheet([
       ["Name", "Quantity", "Rate"],
       ["Sample Product A", 10, 100],
@@ -378,11 +665,29 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
     return { lineCount, units, value };
   }, [lines]);
 
+  const overstockLines = useMemo(
+    () => lines.filter((l) => l.quantity > l.available),
+    [lines],
+  );
+
+  const detailsReady = Boolean(branchId && reason);
+  const canSave =
+    detailsReady && lines.length > 0 && overstockLines.length === 0 && !saving;
+
+  const resetDraft = () => {
+    setLines([]);
+    setNotes("");
+    setDocumentRef("");
+    setReason("DAMAGE");
+    setDispatchDate(new Date());
+    setFormErrors({});
+    setUnmatched([]);
+    setShowMoreDetails(false);
+  };
+
   const handleSave = async () => {
     if (saving) return;
 
-    // Validate up-front so missing fields show inline rather than the button
-    // being silently disabled — much easier UX when the form has many fields.
     const parsed = dispatchSchema.safeParse({ branchId, reason, lines });
     if (!parsed.success) {
       const next: DispatchFieldErrors = {};
@@ -393,14 +698,20 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
       setFormErrors(next);
       return;
     }
-    setFormErrors({});
 
+    if (overstockLines.length > 0) {
+      toast.error(
+        `${overstockLines.length} line${overstockLines.length === 1 ? "" : "s"} exceed available stock`,
+      );
+      return;
+    }
+
+    setFormErrors({});
     setSaving(true);
     try {
       await apiClient.post(`${API_BASE}/stock-out/bulk`, {
         branchId,
         reason,
-        customerId: customerId || undefined,
         documentRef: documentRef || undefined,
         dispatchDate: dispatchDate.toISOString(),
         notes: notes || undefined,
@@ -410,15 +721,16 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
           rate: l.rate || undefined,
         })),
       });
-      toast.success(`Dispatched ${lines.length} line${lines.length === 1 ? "" : "s"}`);
-      // Reset the dispatch form and bounce to history.
+      toast.success(
+        `Dispatched ${lines.length} line${lines.length === 1 ? "" : "s"}`,
+      );
       setLines([]);
       setNotes("");
       setDocumentRef("");
-      setCustomerId("");
       setTab("history");
-      setHistoryPage(1);
+      setPage(1);
       fetchHistory(1);
+      fetchStats();
     } catch (e: any) {
       toast.error(e?.response?.data?.message || "Failed to save dispatch");
     } finally {
@@ -426,188 +738,677 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
     }
   };
 
-  if (historyLoading && rows.length === 0 && tab === "history") {
-    return <PageLoader message="Loading stock-out..." />;
+  if (productsLoading && products.length === 0 && branches.length === 0) {
+    return <PageLoader message="Loading stock out..." />;
   }
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-6 text-black">
-      <div className="flex items-start gap-3">
-        <div className="bg-gray-900 text-white p-2.5 rounded-lg shrink-0">
-          <PackageMinus className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-black tracking-tight">Stock Out</h1>
-          <p className="text-sm text-gray-600 mt-1 max-w-2xl">
-            Bulk stock deductions for damage, expiry, consumption, supplier returns, and adjustments with availability validation.
+    <div className="p-4 md:p-6 space-y-5 text-black min-w-0">
+      {/* Header */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between pb-1 border-b border-gray-100">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-rose-600 mb-1">
+            <PackageMinus className="h-4 w-4" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]">
+              Inventory
+            </span>
+          </div>
+          <h1 className="text-2xl md:text-[1.75rem] font-bold text-gray-900 tracking-tight leading-none">
+            Stock Out
+          </h1>
+          <p className="text-sm text-gray-500 mt-1.5">
+            Record damage, expiry, loss, supplier returns, and dispatches
           </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+          {tab === "history" ? (
+            <Button size="sm" className="h-9 text-sm" onClick={() => setTab("new")}>
+              <Plus className="h-4 w-4 mr-1.5" />
+              New dispatch
+            </Button>
+          ) : null}
+          <StockOpsActions
+            onExportExcel={exportExcel}
+            onExportPdf={exportPdf}
+            disabled={historyLoading || filteredRows.length === 0}
+            exporting={exporting}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 text-sm text-black"
+            onClick={() => setExcelDialogOpen(true)}
+          >
+            <FileSpreadsheet className="h-4 w-4 mr-1.5" />
+            Import lines
+          </Button>
         </div>
       </div>
 
-      <StockModuleToolbar
-        tabs={[
-          { id: "history", label: "History" },
-          { id: "new", label: "New dispatch" },
-        ]}
-        activeTab={tab}
-        onTabChange={(id) => setTab(id as "history" | "new")}
+      <Tabs
+        value={tab}
+        onValueChange={(v) => setTab(v as "history" | "new")}
+        className="space-y-5"
       >
-        <StockOpsActions onNavigate={onNavigate} disabled={false} />
-      </StockModuleToolbar>
+        <TabsList className="bg-white p-1 rounded-xl border border-slate-200 shadow-sm h-10 shrink-0 w-full max-w-xs grid grid-cols-2">
+          <TabsTrigger
+            value="history"
+            className="rounded-lg h-8 text-xs sm:text-sm data-[state=active]:bg-gray-900 data-[state=active]:text-white"
+          >
+            History
+          </TabsTrigger>
+          <TabsTrigger
+            value="new"
+            className="rounded-lg h-8 text-xs sm:text-sm data-[state=active]:bg-gray-900 data-[state=active]:text-white"
+          >
+            New dispatch
+          </TabsTrigger>
+        </TabsList>
 
-      <InventoryKpiGrid
-        columns={4}
-        loading={dashboardLoading}
-        items={[
-          { label: "Inventory Value", value: formatMoney(dashboardStats.totalInventoryValue) },
-          { label: "Out of Stock SKUs", value: dashboardStats.outOfStockCount, tone: "danger" },
-          { label: "Low Stock Alerts", value: dashboardStats.lowStockCount, tone: "warning" },
-          { label: "Negative Stock Rows", value: dashboardStats.negativeStockCount, tone: "danger" },
-        ]}
-      />
+        <TabsContent value="history" className="mt-0 space-y-5 focus-visible:outline-none">
+          <InventoryKpiGrid
+            columns={4}
+            loading={statsLoading}
+            items={[
+              {
+                label: "Dispatches (month)",
+                value: monthStats.totalDispatches.toLocaleString(),
+                icon: Trash2,
+                hint: "This calendar month",
+              },
+              {
+                label: "Qty removed (month)",
+                value: formatQty(monthStats.totalQuantity),
+                icon: Boxes,
+              },
+              {
+                label: "Value (month)",
+                value: formatMoney(monthStats.totalValue),
+                icon: DollarSign,
+              },
+              {
+                label: "Records shown",
+                value: total.toLocaleString(),
+                icon: FileText,
+                hint: "Matching current filters",
+              },
+            ]}
+          />
 
-      {tab === "history" ? (
-        <HistoryView
-          rows={rows}
-          loading={historyLoading}
-          page={historyPage}
-          totalPages={historyTotalPages}
-          total={historyTotal}
-          setPage={(p) => {
-            setHistoryPage(p);
-          }}
-          filterReason={filterReason}
-          setFilterReason={(v) => {
-            setFilterReason(v);
-            setHistoryPage(1);
-          }}
-          filterStart={filterStart}
-          setFilterStart={(d) => {
-            setFilterStart(d);
-            setHistoryPage(1);
-          }}
-          filterEnd={filterEnd}
-          setFilterEnd={(d) => {
-            setFilterEnd(d);
-            setHistoryPage(1);
-          }}
-          onRefresh={() => fetchHistory()}
-        />
-      ) : (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <div className="lg:col-span-2 space-y-6">
-            {/* Info banner */}
-            <Card className="p-4 border border-blue-100 bg-blue-50/50 shadow-sm rounded-xl">
-              <div className="flex items-start gap-3">
-                <Info className="h-5 w-5 text-blue-600 mt-0.5 shrink-0" />
-                <div className="text-xs md:text-sm text-slate-700 leading-relaxed space-y-1">
-                  <h4 className="font-bold text-slate-900">What this list shows</h4>
-                  <p>
-                    This screen displays outgoing stock movements (removed items). Saving a dispatch logs negative inventory adjustments.
-                  </p>
-                  <p className="text-slate-500 text-xs mt-1 border-t border-blue-100/50 pt-1">
-                    Note: Standard POS sales are recorded separately and can be tracked in detail inside the general Movement Log.
-                  </p>
-                </div>
-              </div>
-            </Card>
-
-            {/* Step 1 — Excel upload */}
-            <Card className="p-6 border border-slate-200 bg-white shadow-sm rounded-xl">
-              <div className="flex flex-col md:flex-row md:items-center justify-between gap-6">
-                <div className="flex-1 space-y-2">
-                  <div className="flex items-center gap-2">
-                    <div className="bg-emerald-50 text-emerald-700 p-1.5 rounded-lg shrink-0">
-                      <FileSpreadsheet className="h-5 w-5" />
-                    </div>
-                    <h2 className="text-base font-bold text-slate-900">
-                      Step 1 — Bulk Import Dispatch Items (Optional)
-                    </h2>
-                  </div>
-                  <p className="text-sm text-slate-600 leading-relaxed">
-                    Quickly add lines to your draft below from an Excel spreadsheet. Outbound quantities are <span className="font-semibold text-slate-800">not reduced</span> from stock until you save in Step 2.
-                  </p>
-                </div>
-                <div className="flex flex-col items-stretch md:items-end gap-2 shrink-0 min-w-[200px]">
-                  <Button
-                    onClick={() => setExcelDialogOpen(true)}
-                    className="w-full bg-emerald-600 hover:bg-emerald-700 active:bg-emerald-800 text-white font-semibold transition-colors shadow-sm h-10 px-4 rounded-lg flex items-center justify-center gap-2"
-                  >
-                    <FileSpreadsheet className="h-4 w-4 shrink-0" />
-                    Upload Excel file
-                  </Button>
-                  <span className="text-xs text-slate-400 text-left md:text-right font-medium">
-                    See required columns in the upload dialog
-                  </span>
-                </div>
-              </div>
-              {!branchId && (
-                <div className="mt-4 border-t border-amber-100 pt-4 text-xs text-amber-600 flex items-center gap-1.5">
-                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" /> Pick a branch in step 2 first so we can check stock.
-                </div>
+          {/* Reason quick chips */}
+          <div className="flex flex-wrap gap-2">
+            <button
+              type="button"
+              onClick={() => {
+                setFilterReason("all");
+                setPage(1);
+              }}
+              className={cn(
+                "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                filterReason === "all"
+                  ? "border-gray-900 bg-gray-900 text-white"
+                  : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
               )}
+            >
+              All
+              <span className="ml-1.5 tabular-nums opacity-70">
+                {monthStats.totalDispatches}
+              </span>
+            </button>
+            {REASON_OPTIONS.map((r) => {
+              const count = monthStats.byReason[r.value] || 0;
+              return (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => {
+                    setFilterReason(r.value);
+                    setPage(1);
+                  }}
+                  className={cn(
+                    "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                    filterReason === r.value
+                      ? "border-gray-900 bg-gray-900 text-white"
+                      : cn("bg-white hover:bg-gray-50", reasonTone(r.value)),
+                  )}
+                >
+                  {r.label}
+                  <span className="ml-1.5 tabular-nums opacity-70">{count}</span>
+                </button>
+              );
+            })}
+          </div>
 
-                {unmatched.length > 0 && (
-                  <div className="mt-2 rounded-md border border-amber-200 bg-amber-50 p-3">
-                    <p className="text-sm font-medium text-amber-900 flex items-center gap-1.5">
-                      <AlertTriangle className="h-4 w-4" /> {unmatched.length} row
-                      {unmatched.length === 1 ? "" : "s"} skipped — name didn't match a product
-                    </p>
-                    <ul className="mt-2 text-xs text-amber-800 list-disc pl-5 max-h-24 overflow-y-auto">
-                      {unmatched.slice(0, 30).map((n, i) => (
-                        <li key={`${n}-${i}`}>{n}</li>
-                      ))}
-                      {unmatched.length > 30 && (
-                        <li>…and {unmatched.length - 30} more</li>
-                      )}
-                    </ul>
-                  </div>
+          {/* Filters */}
+          <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+              <div className="relative md:col-span-2 xl:col-span-1">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  placeholder="Search product, SKU, branch, notes..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="pl-9 h-10 text-sm text-black"
+                />
+              </div>
+
+              <Select
+                value={filterReason}
+                onValueChange={(v) => {
+                  setFilterReason(v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-10 text-sm text-black">
+                  <SelectValue placeholder="All reasons" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-sm">
+                    All reasons
+                  </SelectItem>
+                  {REASON_OPTIONS.map((r) => (
+                    <SelectItem key={r.value} value={r.value} className="text-sm">
+                      {r.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={filterBranch}
+                onValueChange={(v) => {
+                  setFilterBranch(v);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-10 text-sm text-black">
+                  <SelectValue placeholder="All branches" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all" className="text-sm">
+                    All branches
+                  </SelectItem>
+                  {branches.map((b: any) => (
+                    <SelectItem key={b.id} value={b.id} className="text-sm">
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-10 w-full justify-start text-left text-sm font-normal text-black"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                    {filterStart ? (
+                      format(filterStart, "dd MMM yyyy")
+                    ) : (
+                      <span className="text-gray-400">From date</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={filterStart}
+                    onSelect={(d) => {
+                      setFilterStart(d);
+                      setPage(1);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-10 w-full justify-start text-left text-sm font-normal text-black"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                    {filterEnd ? (
+                      format(filterEnd, "dd MMM yyyy")
+                    ) : (
+                      <span className="text-gray-400">To date</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={filterEnd}
+                    onSelect={(d) => {
+                      setFilterEnd(d);
+                      setPage(1);
+                    }}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              {hasActiveFilters ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-10 text-sm text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
+                  onClick={clearFilters}
+                >
+                  <X className="h-4 w-4 mr-1.5" />
+                  Clear filters
+                </Button>
+              ) : null}
+            </div>
+
+            <p className="text-xs text-gray-500">
+              Showing {filteredRows.length.toLocaleString()} of {total.toLocaleString()}{" "}
+              records
+              {searchQuery.trim() ? " (client search on this page)" : ""}
+              {" · "}
+              Page qty {formatQty(pageTotals.units)} · Page value{" "}
+              {formatMoney(pageTotals.value)}
+            </p>
+          </div>
+
+          {/* List header + view toggle */}
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h2 className="text-sm font-semibold text-gray-900">Dispatch history</h2>
+              <p className="text-xs text-gray-500">
+                Outbound movements with availability-checked deductions
+              </p>
+            </div>
+            <div className="inline-flex rounded-lg border border-gray-200 p-0.5 self-start">
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+                  viewMode === "table"
+                    ? "bg-gray-900 text-white"
+                    : "text-gray-600 hover:bg-gray-50",
                 )}
-            </Card>
+              >
+                <List className="h-3.5 w-3.5" />
+                Table
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("grid")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+                  viewMode === "grid"
+                    ? "bg-gray-900 text-white"
+                    : "text-gray-600 hover:bg-gray-50",
+                )}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+                Grid
+              </button>
+            </div>
+          </div>
 
-            {/* Step 2 — Record dispatch */}
-            <Card className="p-5 border border-gray-200">
-              <div className="space-y-4">
-                <div>
-                  <h2 className="text-base font-semibold text-black">
-                    Step 2 — Record dispatch
-                  </h2>
-                  <p className="text-sm text-gray-600 mt-1">
-                    Set who/why, add lines, then save. For Sale, quantities cannot exceed
-                    available stock.
+          <Card className="border border-gray-200 overflow-hidden bg-white shadow-sm">
+            <CardContent className="p-0 relative">
+              {historyLoading && rows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6">
+                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                  <p className="text-sm text-gray-500 mt-3">Loading dispatches...</p>
+                </div>
+              ) : filteredRows.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                  <PackageMinus className="h-8 w-8 text-gray-300 mb-3" />
+                  <p className="text-sm font-medium text-gray-900">No stock-out records</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    {hasActiveFilters
+                      ? "Try clearing filters or adjusting your search."
+                      : "Save a dispatch from New dispatch to see it here."}
                   </p>
                 </div>
+              ) : (
+                <>
+                  {historyLoading ? (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/70 backdrop-blur-[1px]">
+                      <div className="flex flex-col items-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                        <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+                        <p className="text-xs text-gray-500">Updating...</p>
+                      </div>
+                    </div>
+                  ) : null}
 
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-3">
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">Reason</Label>
-                    <Select
-                      value={reason}
-                      onValueChange={(v) => {
-                        setReason(v as Reason);
-                        clearError("reason");
-                      }}
+                  {viewMode === "table" ? (
+                    <div className="overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                            <TableHead className="text-xs font-semibold text-gray-600 pl-3 pr-2">
+                              Date
+                            </TableHead>
+                            <TableHead className="text-xs font-semibold text-gray-600 px-2">
+                              Product
+                            </TableHead>
+                            <TableHead className="text-xs font-semibold text-gray-600 px-2">
+                              Branch
+                            </TableHead>
+                            <TableHead className="text-xs font-semibold text-gray-600 px-2">
+                              Reason
+                            </TableHead>
+                            <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">
+                              Qty
+                            </TableHead>
+                            <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">
+                              Rate
+                            </TableHead>
+                            <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">
+                              Value
+                            </TableHead>
+                            <TableHead className="text-xs font-semibold text-gray-600 text-right pl-2 pr-3">
+                              Action
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredRows.map((r) => {
+                            const qty = removedQty(r);
+                            const rate = lineRate(r);
+                            const ts = new Date(r.created_at);
+                            const parsed = parseDispatchNotes(r.notes);
+                            return (
+                              <TableRow key={r.id}>
+                                <TableCell className="py-2.5 pl-3 pr-2 whitespace-nowrap text-sm text-gray-700">
+                                  <div>{ts.toLocaleDateString()}</div>
+                                  <div className="text-[11px] text-gray-400">
+                                    {ts.toLocaleTimeString([], {
+                                      hour: "2-digit",
+                                      minute: "2-digit",
+                                    })}
+                                  </div>
+                                </TableCell>
+                                <TableCell className="py-2.5 px-2">
+                                  <p className="text-sm font-medium text-gray-900 line-clamp-1">
+                                    {r.product?.name || "—"}
+                                  </p>
+                                  {parsed.documentRef ? (
+                                    <p className="text-[11px] text-gray-400 font-mono">
+                                      Ref {parsed.documentRef}
+                                    </p>
+                                  ) : r.product?.sku ? (
+                                    <p className="text-[11px] text-gray-400 font-mono">
+                                      {r.product.sku}
+                                    </p>
+                                  ) : null}
+                                </TableCell>
+                                <TableCell className="py-2.5 px-2 text-sm text-gray-700">
+                                  {r.branch?.name || "—"}
+                                </TableCell>
+                                <TableCell className="py-2.5 px-2">
+                                  <Badge
+                                    variant="outline"
+                                    className={cn(
+                                      "text-[10px] font-semibold",
+                                      reasonTone(r.movement_type),
+                                    )}
+                                  >
+                                    {reasonLabel(r.movement_type)}
+                                  </Badge>
+                                </TableCell>
+                                <TableCell className="py-2.5 px-2 text-sm text-right tabular-nums font-medium text-rose-600">
+                                  −{formatQty(qty)}
+                                </TableCell>
+                                <TableCell className="py-2.5 px-2 text-sm text-right tabular-nums text-gray-700">
+                                  {rate > 0 ? formatMoney(rate) : "—"}
+                                </TableCell>
+                                <TableCell className="py-2.5 px-2 text-sm text-right tabular-nums font-medium text-gray-900">
+                                  {rate > 0 ? formatMoney(qty * rate) : "—"}
+                                </TableCell>
+                                <TableCell className="py-2.5 pl-2 pr-3 text-right">
+                                  <Button
+                                    variant="ghost"
+                                    size="sm"
+                                    className="h-8 text-xs"
+                                    onClick={() => openDetail(r)}
+                                  >
+                                    <Eye className="h-3.5 w-3.5 mr-1" />
+                                    View
+                                  </Button>
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <InventoryCardGrid empty={false} loading={false}>
+                      {filteredRows.map((r) => {
+                        const ts = new Date(r.created_at);
+                        const qty = removedQty(r);
+                        const rate = lineRate(r);
+                        const value = qty * rate;
+                        const parsed = parseDispatchNotes(r.notes);
+                        return (
+                          <TransactionRecordCard
+                            key={r.id}
+                            date={`${ts.toLocaleDateString(undefined, {
+                              day: "2-digit",
+                              month: "short",
+                              year: "numeric",
+                            })} · ${ts.toLocaleTimeString([], {
+                              hour: "2-digit",
+                              minute: "2-digit",
+                            })}`}
+                            title={r.product?.name || "Stock out"}
+                            subtitle={
+                              parsed.documentRef
+                                ? `Ref ${parsed.documentRef}`
+                                : r.product?.sku
+                                  ? `SKU ${r.product.sku}`
+                                  : undefined
+                            }
+                            amount={rate > 0 ? formatMoney(value) : `−${formatQty(qty)}`}
+                            amountLabel={rate > 0 ? "Value" : "Qty"}
+                            meta={
+                              <div className="space-y-1">
+                                <p>
+                                  <span className="text-gray-400">Branch · </span>
+                                  <span className="font-medium text-gray-800">
+                                    {r.branch?.name || "—"}
+                                  </span>
+                                </p>
+                                {r.user?.email ? (
+                                  <p>
+                                    <span className="text-gray-400">By · </span>
+                                    <span className="font-medium text-gray-800">
+                                      {r.user.email}
+                                    </span>
+                                  </p>
+                                ) : null}
+                              </div>
+                            }
+                            badge={
+                              <span
+                                className={cn(
+                                  "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                                  reasonTone(r.movement_type),
+                                )}
+                              >
+                                {reasonLabel(r.movement_type)}
+                              </span>
+                            }
+                            highlights={[
+                              {
+                                label: "Qty",
+                                value: `−${formatQty(qty)}`,
+                                tone: "danger",
+                              },
+                              {
+                                label: "Rate",
+                                value: rate > 0 ? formatMoney(rate) : "—",
+                              },
+                              {
+                                label: "After",
+                                value: formatQty(Number(r.new_qty) || 0),
+                              },
+                            ]}
+                            actions={
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs"
+                                onClick={() => openDetail(r)}
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-1" />
+                                View
+                              </Button>
+                            }
+                          />
+                        );
+                      })}
+                    </InventoryCardGrid>
+                  )}
+                </>
+              )}
+            </CardContent>
+
+            {total > 0 ? (
+              <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 sm:px-6 py-3 border-t border-gray-200">
+                <p className="text-sm text-black">
+                  Showing {(page - 1) * PAGE_SIZE + 1}–
+                  {Math.min(page * PAGE_SIZE, total)} of {total}
+                </p>
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-sm text-black"
+                    onClick={() => setPage(1)}
+                    disabled={page === 1 || historyLoading}
+                  >
+                    First
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-sm text-black"
+                    onClick={() => setPage(Math.max(1, page - 1))}
+                    disabled={page === 1 || historyLoading}
+                  >
+                    Previous
+                  </Button>
+                  <span className="text-sm text-black px-3">
+                    Page {page} of {totalPages}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-sm text-black"
+                    onClick={() => setPage(Math.min(totalPages, page + 1))}
+                    disabled={page >= totalPages || historyLoading}
+                  >
+                    Next
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-sm text-black"
+                    onClick={() => setPage(totalPages)}
+                    disabled={page >= totalPages || historyLoading}
+                  >
+                    Last
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="new" className="mt-0 space-y-3 focus-visible:outline-none">
+          {unmatched.length > 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5">
+              <p className="text-sm font-medium text-amber-900 flex items-center gap-1.5">
+                <AlertTriangle className="h-4 w-4" />
+                {unmatched.length} row{unmatched.length === 1 ? "" : "s"} skipped
+              </p>
+            </div>
+          ) : null}
+
+          <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+            <div className="px-4 py-2.5 border-b border-gray-100 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 bg-gradient-to-r from-rose-50/40 to-white">
+              <div>
+                <h2 className="text-sm font-semibold text-gray-900">New stock out</h2>
+                <p className="text-[11px] text-gray-500">
+                  Set reason &amp; branch, pick products on the left, save from the bill panel
+                </p>
+              </div>
+              <div className="flex items-center gap-2 shrink-0">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8 text-xs text-black"
+                  onClick={() => setExcelDialogOpen(true)}
+                  disabled={!branchId}
+                >
+                  <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
+                  Import lines
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs text-gray-600"
+                  onClick={resetDraft}
+                  disabled={saving}
+                >
+                  <RotateCcw className="h-3.5 w-3.5 mr-1.5" />
+                  Reset
+                </Button>
+              </div>
+            </div>
+
+            <div className="p-3 sm:p-4 space-y-3">
+              <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-600">
+                    Reason <span className="text-red-500">*</span>
+                  </Label>
+                  <Select
+                    value={reason}
+                    onValueChange={(v) => {
+                      setReason(v as Reason);
+                      clearError("reason");
+                    }}
+                  >
+                    <SelectTrigger
+                      className={cn(
+                        "h-9 text-sm text-black",
+                        formErrors.reason && "border-red-500",
+                      )}
                     >
-                      <SelectTrigger
-                        className={`h-9 text-sm text-black ${formErrors.reason ? "border-red-500 focus:ring-red-500" : ""}`}
-                      >
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {REASON_OPTIONS.map((r) => (
-                          <SelectItem key={r.value} value={r.value} className="text-sm">
-                            {r.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                    {formErrors.reason && (
-                      <p className="text-xs text-red-600">{formErrors.reason}</p>
-                    )}
-                  </div>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REASON_OPTIONS.map((r) => (
+                        <SelectItem key={r.value} value={r.value} className="text-sm">
+                          {r.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {formErrors.reason ? (
+                    <p className="text-[11px] text-red-600">{formErrors.reason}</p>
+                  ) : null}
+                </div>
 
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">Branch</Label>
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-600">
+                    Branch <span className="text-red-500">*</span>
+                  </Label>
+                  {branchesLoading || (!branchId && branches.length === 0) ? (
+                    <StockSelectSkeleton label="Loading branches" className="h-9" />
+                  ) : (
                     <Select
                       value={branchId}
                       onValueChange={(v) => {
@@ -616,7 +1417,10 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                       }}
                     >
                       <SelectTrigger
-                        className={`h-9 text-sm text-black ${formErrors.branchId ? "border-red-500 focus:ring-red-500" : ""}`}
+                        className={cn(
+                          "h-9 text-sm text-black",
+                          formErrors.branchId && "border-red-500",
+                        )}
                       >
                         <SelectValue placeholder="Select branch" />
                       </SelectTrigger>
@@ -628,379 +1432,326 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                         ))}
                       </SelectContent>
                     </Select>
-                    {formErrors.branchId && (
-                      <p className="text-xs text-red-600">{formErrors.branchId}</p>
-                    )}
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">Document ref</Label>
-                    <Input
-                      placeholder="Invoice or gate pass"
-                      value={documentRef}
-                      onChange={(e) => setDocumentRef(e.target.value)}
-                      className="h-9 text-sm text-black"
-                    />
-                  </div>
-
-                  <div className="space-y-1.5">
-                    <Label className="text-sm text-black">Dispatch date</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          variant="outline"
-                          className="h-9 w-full justify-start text-left text-sm font-normal text-black"
-                        >
-                          <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
-                          {format(dispatchDate, "PPP")}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent className="w-auto p-0" align="start">
-                        <CalendarComponent
-                          mode="single"
-                          selected={dispatchDate}
-                          onSelect={(d) => d && setDispatchDate(d)}
-                          initialFocus
-                        />
-                      </PopoverContent>
-                    </Popover>
-                  </div>
+                  )}
+                  {formErrors.branchId ? (
+                    <p className="text-[11px] text-red-600">{formErrors.branchId}</p>
+                  ) : null}
                 </div>
 
-                {!branchId && (
-                  <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800 flex items-center gap-1.5">
-                    <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                    Select a branch above before adding products.
-                  </div>
-                )}
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-600">
+                    Date <span className="text-red-500">*</span>
+                  </Label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <Button
+                        variant="outline"
+                        className="h-9 w-full justify-start text-left text-sm font-normal text-black"
+                      >
+                        <CalendarIcon className="mr-2 h-3.5 w-3.5 text-gray-500" />
+                        {format(dispatchDate, "dd MMM yyyy")}
+                      </Button>
+                    </PopoverTrigger>
+                    <PopoverContent className="w-auto p-0" align="start">
+                      <CalendarComponent
+                        mode="single"
+                        selected={dispatchDate}
+                        onSelect={(d) => d && setDispatchDate(d)}
+                        initialFocus
+                      />
+                    </PopoverContent>
+                  </Popover>
+                </div>
 
-                <StockProductPicker
-                  products={products}
-                  categories={categories}
-                  loading={productsLoading}
-                  lines={pickerLines}
-                  onLinesChange={onPickerLinesChange}
-                  quantityLabel="Dispatch qty"
-                  showUnitCost
-                  unitCostLabel="Rate (Rs)"
-                  showCurrentQty
-                  disabled={!branchId}
-                  getCurrentQty={(id) =>
-                    branchId ? (stockMap[id] ?? 0) : null
-                  }
-                  error={formErrors.lines}
-                />
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-600">Document ref</Label>
+                  <Input
+                    placeholder="Gate pass / invoice"
+                    value={documentRef}
+                    onChange={(e) => setDocumentRef(e.target.value)}
+                    className="h-9 text-sm text-black"
+                  />
+                </div>
               </div>
-            </Card>
+
+              <button
+                type="button"
+                onClick={() => setShowMoreDetails((v) => !v)}
+                className="inline-flex items-center gap-1 text-[11px] font-medium text-gray-500 hover:text-gray-800"
+              >
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 transition-transform",
+                    showMoreDetails && "rotate-180",
+                  )}
+                />
+                {showMoreDetails ? "Hide" : "More"} options
+              </button>
+
+              {showMoreDetails ? (
+                <div className="pt-1 border-t border-dashed border-gray-200">
+                  <Label className="text-xs text-gray-600">Notes</Label>
+                  <Input
+                    placeholder="Driver, vehicle, approval…"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="h-9 text-sm text-black mt-1"
+                  />
+                </div>
+              ) : null}
+
+              {overstockLines.length > 0 ? (
+                <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800 flex items-center gap-1.5">
+                  <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                  {overstockLines.length} line
+                  {overstockLines.length === 1 ? "" : "s"} exceed available stock
+                </div>
+              ) : null}
+            </div>
           </div>
 
-          {/* Sidebar summary */}
-          <div className="space-y-4">
-            <Card className="p-5 border border-gray-200">
-              <div className="flex items-center gap-2 mb-4">
-                <ListChecks className="h-5 w-5 text-gray-500" />
+          <StockProductPicker
+            layout="split"
+            products={products}
+            categories={categories}
+            loading={productsLoading}
+            lines={pickerLines}
+            onLinesChange={onPickerLinesChange}
+            quantityLabel="Qty"
+            showUnitCost
+            unitCostLabel="Rate (Rs)"
+            showCurrentQty
+            disabled={!detailsReady}
+            disabledHint="Choose reason and branch above to unlock the catalog"
+            getCurrentQty={(id) => (branchId ? (stockMap[id] ?? 0) : null)}
+            error={formErrors.lines}
+            cartFooter={
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-xs text-gray-500">Reason</span>
+                  <Badge
+                    variant="outline"
+                    className={cn("text-[10px] font-semibold", reasonTone(reason))}
+                  >
+                    {reasonLabel(reason)}
+                  </Badge>
+                </div>
+                <div className="space-y-1.5 text-sm">
+                  <div className="flex justify-between text-gray-600">
+                    <span>Lines</span>
+                    <span className="font-medium tabular-nums text-gray-900">
+                      {totals.lineCount}
+                    </span>
+                  </div>
+                  <div className="flex justify-between text-gray-600">
+                    <span>Qty out</span>
+                    <span className="font-medium tabular-nums text-rose-600">
+                      −{formatQty(totals.units)}
+                    </span>
+                  </div>
+                  <div className="flex justify-between items-baseline pt-1 border-t border-slate-200">
+                    <span className="text-gray-600">Value</span>
+                    <span className="text-lg font-bold tabular-nums text-gray-900">
+                      {formatMoney(totals.value)}
+                    </span>
+                  </div>
+                </div>
+
+                {!detailsReady ? (
+                  <p className="text-[11px] text-amber-700">
+                    Select reason &amp; branch to continue
+                  </p>
+                ) : overstockLines.length > 0 ? (
+                  <p className="text-[11px] text-rose-700">Fix overstock quantities</p>
+                ) : lines.length === 0 ? (
+                  <p className="text-[11px] text-amber-700">
+                    Add at least one product from the catalog
+                  </p>
+                ) : Object.keys(formErrors).length > 0 ? (
+                  <p className="text-[11px] text-red-600">Fix highlighted fields</p>
+                ) : null}
+
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-10 text-sm text-black flex-1"
+                    onClick={() => setTab("history")}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleSave}
+                    disabled={!canSave}
+                    size="sm"
+                    className="h-10 text-sm flex-[1.4]"
+                  >
+                    {saving ? (
+                      <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                    ) : null}
+                    Save dispatch
+                  </Button>
+                </div>
+              </div>
+            }
+          />
+        </TabsContent>
+      </Tabs>
+
+      {/* Detail dialog */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle className="text-base">Dispatch detail</DialogTitle>
+            <DialogDescription className="text-xs">
+              Outbound stock movement record
+            </DialogDescription>
+          </DialogHeader>
+          {detailRow ? (
+            <div className="space-y-4 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[10px] font-semibold",
+                    reasonTone(detailRow.movement_type),
+                  )}
+                >
+                  {reasonLabel(detailRow.movement_type)}
+                </Badge>
+                <span className="text-xs text-gray-500">
+                  {new Date(detailRow.created_at).toLocaleString()}
+                </span>
+              </div>
+
+              <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3 space-y-2">
                 <div>
-                  <h3 className="text-base font-semibold text-black">Summary</h3>
-                  <p className="text-xs text-gray-500">Review totals, then save.</p>
+                  <p className="text-[10px] uppercase tracking-wide text-gray-400">
+                    Product
+                  </p>
+                  <p className="font-semibold text-gray-900">
+                    {detailRow.product?.name || "—"}
+                  </p>
+                  {detailRow.product?.sku ? (
+                    <p className="text-xs font-mono text-gray-500">
+                      {detailRow.product.sku}
+                    </p>
+                  ) : null}
+                </div>
+                <div className="grid grid-cols-2 gap-3 pt-1">
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-gray-400">
+                      Branch
+                    </p>
+                    <p className="font-medium text-gray-800">
+                      {detailRow.branch?.name || "—"}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[10px] uppercase tracking-wide text-gray-400">
+                      User
+                    </p>
+                    <p className="font-medium text-gray-800">
+                      {detailRow.user?.email || "—"}
+                    </p>
+                  </div>
                 </div>
               </div>
 
-              <div className="space-y-3">
-                <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-                  <span className="text-sm text-gray-600">Lines</span>
-                  <span className="text-sm text-black">{totals.lineCount}</span>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="rounded-lg border border-gray-100 p-2.5 text-center">
+                  <p className="text-[10px] uppercase text-gray-400">Removed</p>
+                  <p className="text-base font-bold text-rose-600 tabular-nums mt-0.5">
+                    −{formatQty(removedQty(detailRow))}
+                  </p>
                 </div>
-                <div className="flex items-center justify-between border-b border-gray-100 pb-2">
-                  <span className="text-sm text-gray-600">Total units</span>
-                  <span className="text-sm text-black">{totals.units}</span>
+                <div className="rounded-lg border border-gray-100 p-2.5 text-center">
+                  <p className="text-[10px] uppercase text-gray-400">Before</p>
+                  <p className="text-base font-semibold tabular-nums mt-0.5">
+                    {formatQty(Number(detailRow.previous_qty) || 0)}
+                  </p>
                 </div>
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-gray-600">Total value (at rates above)</span>
-                  <span className="text-sm font-semibold text-black">
-                    Rs {totals.value.toLocaleString("en-US", {
-                      minimumFractionDigits: 2,
-                      maximumFractionDigits: 2,
-                    })}
+                <div className="rounded-lg border border-gray-100 p-2.5 text-center">
+                  <p className="text-[10px] uppercase text-gray-400">After</p>
+                  <p className="text-base font-semibold tabular-nums mt-0.5">
+                    {formatQty(Number(detailRow.new_qty) || 0)}
+                  </p>
+                </div>
+              </div>
+
+              {lineRate(detailRow) > 0 ? (
+                <div className="flex items-center justify-between border-t border-gray-100 pt-3">
+                  <span className="text-gray-600">
+                    Rate {formatMoney(lineRate(detailRow))}
+                  </span>
+                  <span className="font-semibold tabular-nums">
+                    {formatMoney(removedQty(detailRow) * lineRate(detailRow))}
                   </span>
                 </div>
-              </div>
+              ) : null}
 
-              <div className="mt-5 space-y-1.5">
-                <Label className="text-sm text-black">Notes for this dispatch</Label>
-                <Textarea
-                  placeholder="Driver, vehicle, approval, etc."
-                  value={notes}
-                  onChange={(e) => setNotes(e.target.value)}
-                  className="text-sm text-black min-h-[80px] resize-none"
-                />
-              </div>
-
-              <Button
-                onClick={handleSave}
-                disabled={saving}
-                size="sm"
-                className="w-full mt-4 text-sm"
-              >
-                {saving ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : null}
-                Save dispatch
-              </Button>
-              {Object.keys(formErrors).length > 0 && (
-                <p className="mt-2 text-xs text-red-600">
-                  Please fix the highlighted fields above.
-                </p>
-              )}
-
-              <p className="mt-3 text-xs text-gray-500">
-                Saving deducts stock immediately (per line). Reference and dispatch date
-                are copied into the movement notes for auditing.
-              </p>
-            </Card>
-          </div>
-        </div>
-      )}
+              {detailRow.notes ? (
+                <div>
+                  <p className="text-[10px] uppercase tracking-wide text-gray-400 mb-1">
+                    Notes
+                  </p>
+                  <p className="text-xs text-gray-700 leading-relaxed whitespace-pre-wrap">
+                    {detailRow.notes}
+                  </p>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
 
       <ExcelUploadDialog
         open={excelDialogOpen}
         onOpenChange={(open) => {
           setExcelDialogOpen(open);
-          if (open) resetUploadCaches();
+          if (open) {
+            resetUploadCaches();
+            if (tab !== "new") setTab("new");
+          }
         }}
         title="Load dispatch lines from Excel"
         description={
           <>
-            Each row adds a line to the dispatch draft. Products must already exist in
-            the catalog — names are matched case-insensitively. Pick a branch in step 2
-            before uploading so available stock can be checked.
+            Each row adds a line to the dispatch draft. Products must already exist —
+            names are matched case-insensitively. Pick a branch before uploading so
+            available stock can be checked.
           </>
         }
         fields={STOCK_OUT_FIELDS}
-        nameColumns={["Name", "name", "Product", "product", "Product Name", "product name"]}
+        nameColumns={[
+          "Name",
+          "name",
+          "Product",
+          "product",
+          "Product Name",
+          "product name",
+        ]}
         footnote={
           <>
-            Rows with unknown product names are skipped and listed after upload. Empty
-            name rows are ignored.
+            Rows with unknown product names are skipped. Empty name rows are ignored.
+            Stock is not deducted until you save.
           </>
         }
         onRow={processRow}
-        onBatchComplete={({ ok, failed, total }) => {
-          // Surface a clear summary toast after the live list finishes.
+        onBatchComplete={({ ok, failed, total: rowTotal }) => {
           if (failed === 0) {
-            toast.success(`Added ${ok} of ${total} line${total === 1 ? "" : "s"} to the draft`);
+            toast.success(
+              `Added ${ok} of ${rowTotal} line${rowTotal === 1 ? "" : "s"} to the draft`,
+            );
           } else if (ok === 0) {
             toast.error(`No rows could be added (${failed} failed)`);
           } else {
-            toast.warning(`Added ${ok} of ${total}, ${failed} failed`);
+            toast.warning(`Added ${ok} of ${rowTotal}, ${failed} failed`);
           }
         }}
         onDownloadTemplate={downloadTemplate}
       />
-    </div>
-  );
-}
-
-// ---------- History sub-component ----------
-interface HistoryViewProps {
-  rows: MovementRow[];
-  loading: boolean;
-  page: number;
-  totalPages: number;
-  total: number;
-  setPage: (p: number) => void;
-  filterReason: string;
-  setFilterReason: (v: string) => void;
-  filterStart?: Date;
-  setFilterStart: (d?: Date) => void;
-  filterEnd?: Date;
-  setFilterEnd: (d?: Date) => void;
-  onRefresh: () => void;
-}
-
-function HistoryView({
-  rows,
-  loading,
-  page,
-  totalPages,
-  total,
-  setPage,
-  filterReason,
-  setFilterReason,
-  filterStart,
-  setFilterStart,
-  filterEnd,
-  setFilterEnd,
-  onRefresh,
-}: HistoryViewProps) {
-  return (
-    <div className="space-y-4">
-      {/* Filters */}
-      <Card className="p-4 border border-gray-200">
-        <div className="flex flex-col lg:flex-row gap-3">
-          <div className="flex flex-col gap-1 flex-1 min-w-[160px]">
-            <Label className="text-sm text-black">Reason</Label>
-            <Select value={filterReason} onValueChange={setFilterReason}>
-              <SelectTrigger className="h-9 text-sm text-black w-full">
-                <SelectValue placeholder="All Reasons" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-sm">All Reasons</SelectItem>
-                {REASON_OPTIONS.map((r) => (
-                  <SelectItem key={r.value} value={r.value} className="text-sm">
-                    {r.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="flex flex-col gap-1 flex-1 min-w-[150px]">
-            <Label className="text-sm text-black">From date</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="h-9 w-full justify-start text-left text-sm font-normal text-black"
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
-                  {filterStart ? format(filterStart, "MM/dd/yyyy") : (
-                    <span className="text-gray-400">Start date</span>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <CalendarComponent mode="single" selected={filterStart} onSelect={setFilterStart} />
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          <div className="flex flex-col gap-1 flex-1 min-w-[150px]">
-            <Label className="text-sm text-black">To date</Label>
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  variant="outline"
-                  className="h-9 w-full justify-start text-left text-sm font-normal text-black"
-                >
-                  <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
-                  {filterEnd ? format(filterEnd, "MM/dd/yyyy") : (
-                    <span className="text-gray-400">End date</span>
-                  )}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-auto p-0" align="start">
-                <CalendarComponent mode="single" selected={filterEnd} onSelect={setFilterEnd} />
-              </PopoverContent>
-            </Popover>
-          </div>
-
-          <div className="flex flex-col gap-1 justify-end">
-            <Label className="text-sm text-transparent select-none hidden lg:block">
-              Action
-            </Label>
-            <div className="flex items-center gap-2">
-              <Button onClick={onRefresh} size="sm" className="h-9 text-sm px-4">
-                <Search className="h-4 w-4 mr-2" /> Search
-              </Button>
-              {(filterStart || filterEnd || filterReason !== "all") && (
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="h-9 text-sm text-black"
-                  onClick={() => {
-                    setFilterReason("all");
-                    setFilterStart(undefined);
-                    setFilterEnd(undefined);
-                  }}
-                >
-                  Clear
-                </Button>
-              )}
-            </div>
-          </div>
-        </div>
-      </Card>
-
-      <Card className="border border-gray-200 overflow-hidden">
-        <InventoryCardGrid
-          empty={!loading && rows.length === 0}
-          emptyTitle="No stock-out records yet"
-          emptyDescription="Dispatches will appear here after you save them."
-          loading={loading}
-        >
-          {rows.map((r) => {
-            const ts = new Date(r.created_at);
-            const qty = Number(r.quantity_change);
-            return (
-              <TransactionRecordCard
-                key={r.id}
-                date={`${ts.toLocaleDateString()} · ${ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
-                title={r.product?.name || "Product"}
-                subtitle={r.product?.sku ? `SKU: ${r.product.sku}` : undefined}
-                meta={r.branch?.name}
-                badge={
-                  <Badge variant="outline" className="text-xs">
-                    {r.movement_type}
-                  </Badge>
-                }
-                highlights={[
-                  { label: "Qty removed", value: qty, tone: "danger" },
-                ]}
-                footer={r.user?.email || r.notes || undefined}
-              />
-            );
-          })}
-        </InventoryCardGrid>
-        {/* Pagination */}
-        {total > 0 && (
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-6 py-3 border-t border-gray-200">
-            <p className="text-sm text-black">
-              Showing {(page - 1) * 20 + 1}–{Math.min(page * 20, total)} of {total}
-            </p>
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-sm text-black"
-                onClick={() => setPage(1)}
-                disabled={page === 1 || loading}
-              >
-                First
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-sm text-black"
-                onClick={() => setPage(Math.max(1, page - 1))}
-                disabled={page === 1 || loading}
-              >
-                Previous
-              </Button>
-              <span className="text-sm text-black px-3">
-                Page {page} of {totalPages}
-              </span>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-sm text-black"
-                onClick={() => setPage(Math.min(totalPages, page + 1))}
-                disabled={page >= totalPages || loading}
-              >
-                Next
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-sm text-black"
-                onClick={() => setPage(totalPages)}
-                disabled={page >= totalPages || loading}
-              >
-                Last
-              </Button>
-            </div>
-          </div>
-        )}
-      </Card>
     </div>
   );
 }

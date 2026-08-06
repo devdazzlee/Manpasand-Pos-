@@ -119,6 +119,8 @@ export class StockAdjustmentService {
     limit?: number;
     productId?: string;
     branchId?: string;
+    adjustmentType?: StockAdjustmentType;
+    adjustmentCategory?: StockAdjustmentCategory;
     startDate?: Date;
     endDate?: Date;
   }) {
@@ -129,6 +131,10 @@ export class StockAdjustmentService {
     const where: any = {};
     if (params.productId) where.product_id = params.productId;
     if (params.branchId) where.branch_id = params.branchId;
+    if (params.adjustmentType) where.adjustment_type = params.adjustmentType;
+    if (params.adjustmentCategory) {
+      where.adjustment_category = params.adjustmentCategory;
+    }
     if (params.startDate || params.endDate) {
       where.adjustment_date = {};
       if (params.startDate) where.adjustment_date.gte = params.startDate;

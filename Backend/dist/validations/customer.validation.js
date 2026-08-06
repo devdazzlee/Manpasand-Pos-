@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.customerUpdateSchema = exports.customerCreateByAdminSchema = exports.customerLoginSchema = exports.cusRegisterationSchema = void 0;
+exports.getCustomerParamsSchema = exports.deleteCustomerPaymentSchema = exports.createCustomerPaymentSchema = exports.customerUpdateSchema = exports.customerCreateByAdminSchema = exports.customerLoginSchema = exports.cusRegisterationSchema = void 0;
 const zod_1 = require("zod");
 const phoneRegex = /^[0-9+\-\s]+$/;
 const optionalEmail = zod_1.z
@@ -79,4 +79,33 @@ const customerUpdateSchema = zod_1.z.object({
     }),
 });
 exports.customerUpdateSchema = customerUpdateSchema;
+const getCustomerParamsSchema = zod_1.z.object({
+    params: zod_1.z.object({
+        customerId: zod_1.z.string().min(1, 'Customer ID is required'),
+    }),
+});
+exports.getCustomerParamsSchema = getCustomerParamsSchema;
+const createCustomerPaymentSchema = zod_1.z.object({
+    params: zod_1.z.object({
+        customerId: zod_1.z.string().min(1, 'Customer ID is required'),
+    }),
+    body: zod_1.z.object({
+        amount: zod_1.z.coerce.number().positive('Amount must be greater than 0'),
+        paymentDate: zod_1.z.string().optional(),
+        method: zod_1.z
+            .enum(['CASH', 'CARD', 'BANK_TRANSFER', 'MOBILE_MONEY', 'OTHER'])
+            .optional()
+            .default('CASH'),
+        reference: zod_1.z.string().optional(),
+        notes: zod_1.z.string().optional(),
+    }),
+});
+exports.createCustomerPaymentSchema = createCustomerPaymentSchema;
+const deleteCustomerPaymentSchema = zod_1.z.object({
+    params: zod_1.z.object({
+        customerId: zod_1.z.string().min(1, 'Customer ID is required'),
+        paymentId: zod_1.z.string().min(1, 'Payment ID is required'),
+    }),
+});
+exports.deleteCustomerPaymentSchema = deleteCustomerPaymentSchema;
 //# sourceMappingURL=customer.validation.js.map

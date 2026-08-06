@@ -55,5 +55,46 @@ export const listSuppliers = asyncHandler(async (req: Request, res: Response) =>
         fetch_all: String(fetch_all) === 'true',
     });
 
-    new ApiResponse(result.data, 'Suppliers retrieved successfully', 200).send(res);
+    new ApiResponse(
+        result.data,
+        'Suppliers retrieved successfully',
+        200,
+        true,
+        result.meta,
+    ).send(res);
 });
+
+export const getSupplierPurchases = asyncHandler(
+    async (req: Request, res: Response) => {
+        const data = await supplierService.getSupplierPurchases(req.params.id);
+        new ApiResponse(data, 'Supplier purchases retrieved').send(res);
+    },
+);
+
+export const getSupplierLedger = asyncHandler(
+    async (req: Request, res: Response) => {
+        const data = await supplierService.getSupplierLedger(req.params.id);
+        new ApiResponse(data, 'Supplier ledger retrieved').send(res);
+    },
+);
+
+export const createSupplierPayment = asyncHandler(
+    async (req: Request, res: Response) => {
+        const payment = await supplierService.createSupplierPayment(
+            req.params.id,
+            req.body,
+            req.user!.id,
+        );
+        new ApiResponse(payment, 'Payment recorded successfully', 201).send(res);
+    },
+);
+
+export const deleteSupplierPayment = asyncHandler(
+    async (req: Request, res: Response) => {
+        await supplierService.deleteSupplierPayment(
+            req.params.id,
+            req.params.paymentId,
+        );
+        new ApiResponse(null, 'Payment deleted successfully').send(res);
+    },
+);

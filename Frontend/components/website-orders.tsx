@@ -28,6 +28,7 @@ import { Badge } from "@/components/ui/badge";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change";
 import {
   downloadReceiptPdf,
   generateReceiptHtml,
@@ -271,6 +272,7 @@ const WebsiteOrders: React.FC = () => {
   // new view.
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
+  useScrollToTopOnPageChange(currentPage);
 
   useEffect(() => {
     fetchOrders();

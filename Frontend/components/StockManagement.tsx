@@ -44,6 +44,8 @@ import { toast } from "sonner";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { usePosData } from "@/hooks/use-pos-data";
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -56,13 +58,12 @@ import {
 } from "@/components/inventory/stock-ops/constants";
 import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
 import { StockManagementToolbar } from "@/components/inventory/stock-ops/stock-management-toolbar";
-import { useInventoryDashboard } from "@/components/inventory/stock-ops/use-inventory-dashboard";
 import {
-  downloadCsv,
   downloadExcel,
+  downloadBrandedPdf,
   getProductBarcode,
   getStockRowImage,
-  printHtmlDocument,
+  yieldForUi,
 } from "@/components/inventory/stock-ops/export-utils";
 import {
   getStockStatusDisplay,
@@ -75,6 +76,7 @@ import {
 import {
   StockOperationDialog,
   STOCK_DLG,
+  StockSelectSkeleton,
 } from "@/components/inventory/stock-ops/stock-operation-dialog";
 import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
 import { StockRecordCard } from "@/components/inventory/stock-ops/stock-record-card";
@@ -200,26 +202,31 @@ interface Movement {
 }
 
 export function StockManagement({ onNavigate }: StockManagementProps) {
-  const { stats: dashboardStats, loading: dashboardLoading, refresh: refreshDashboard } =
-    useInventoryDashboard();
+  const logoDataUri = useLogoDataUri();
 
-  // Global store data
+  // Global store data — shared catalog across Stock In / Out / Management
   const { 
     products: globalProducts, 
     categories,
+    branches,
+    suppliers,
+    branchesLoading,
+    suppliersLoading,
     isAnyLoading: globalLoading,
+    fetchProducts,
+    fetchBranches,
+    fetchSuppliers,
     refreshAllData: triggerGlobalRefresh,
   } = usePosData();
   
   // Data lists
-  const [branches, setBranches] = useState<Branch[]>([]);
   const [brands, setBrands] = useState<{ id: string; name: string }[]>([]);
-  const [supplierOptions, setSupplierOptions] = useState<{ id: string; name: string }[]>([]);
+  const [brandsLoading, setBrandsLoading] = useState(true);
   const [allStocks, setAllStocks] = useState<Stock[]>([]);
   const [history, setHistory] = useState<Movement[]>([]);
   const [todayMovements, setTodayMovements] = useState<Movement[]>([]);
   
-  // Pagination and meta
+  // Pagination and meta — single source of truth for KPIs + chips + table
   const [totalStocks, setTotalStocks] = useState(0);
   const [stockMeta, setStockMeta] = useState({
     page: 1,
@@ -232,6 +239,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     totalInventoryValue: 0,
     totalProducts: 0,
   });
+  const [hasStockMeta, setHasStockMeta] = useState(false);
 
   // UI state
   const [branchFilter, setBranchFilter] = useState<string>(ALL_BRANCHES);
@@ -292,6 +300,8 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
   const [stockPageSize, setStockPageSize] = useState(20);
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
   const [activeTab, setActiveTab] = useState("stock");
+  useScrollToTopOnPageChange(stockPage);
+  const [exporting, setExporting] = useState(false);
 
   // Dialog state
   const [isTransferOpen, setIsTransferOpen] = useState(false);
@@ -359,28 +369,47 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     [getStockQty],
   );
 
-  // 1) Fetch branches on mount
+  const supplierOptions = useMemo(
+    () =>
+      (suppliers || [])
+        .filter((s: any) => s?.id && s?.name)
+        .map((s: any) => ({ id: s.id, name: s.name })),
+    [suppliers],
+  );
+
+  // Shared POS store for products/branches/suppliers (cache-aware). Brands stay local.
   useEffect(() => {
+    let cancelled = false;
     const loadMeta = async () => {
       setIsInitialLoading(true);
+      setBrandsLoading(true);
       try {
-        const [bRes, brandRes, supplierRes] = await Promise.all([
-          apiClient.get(`${API_BASE}/branches?fetch_all=true`),
-          apiClient.get(`${API_BASE}/brands`, { params: { limit: 1000 } }),
-          apiClient.get(`${API_BASE}/suppliers`, { params: { fetch_all: true } }),
+        await Promise.all([
+          fetchProducts(),
+          fetchBranches(),
+          fetchSuppliers(),
         ]);
-        setBranches(bRes.data.data);
-        setBrands(brandRes.data?.data || brandRes.data || []);
-        setSupplierOptions(supplierRes.data?.data || supplierRes.data || []);
+        const brandRes = await apiClient.get(`${API_BASE}/brands`, {
+          params: { limit: 1000 },
+        });
+        if (!cancelled) {
+          setBrands(brandRes.data?.data || brandRes.data || []);
+        }
       } catch (e: any) {
         console.error(e);
-        toast.error("Failed to load branches");
+        toast.error("Failed to load catalog metadata");
       } finally {
-        setIsInitialLoading(false);
+        if (!cancelled) {
+          setBrandsLoading(false);
+          setIsInitialLoading(false);
+        }
       }
     };
     loadMeta();
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchProducts, fetchBranches, fetchSuppliers]);
 
   const showErrorToast = (e: any) => {
     console.error("Inventory Operation Error:", e);
@@ -420,10 +449,12 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         
         setAllStocks(sRes.data.data || []);
         setTotalStocks(sRes.data.meta?.total || 0);
-        if (sRes.data.meta) setStockMeta(sRes.data.meta);
+        if (sRes.data.meta) {
+          setStockMeta(sRes.data.meta);
+          setHasStockMeta(true);
+        }
         setHistory(hRes.data.data || []);
         setTodayMovements(tRes.data.data || []);
-        refreshDashboard();
       } catch (e: any) {
         toast.error("Failed to load stock data");
       } finally {
@@ -438,7 +469,6 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
       combinedSearch,
       stockPage,
       stockPageSize,
-      refreshDashboard,
     ]);
 
   useEffect(() => {
@@ -483,51 +513,101 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     "Branch",
   ];
 
-  const handleExport = () => {
-    if (allStocks.length === 0) return;
-    downloadCsv(
-      `inventory_export_${new Date().toISOString().split("T")[0]}.csv`,
-      exportHeaders,
-      buildExportRows(),
-    );
-    toast.success("CSV downloaded");
+  const handleExportExcel = async () => {
+    if (allStocks.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      downloadExcel(
+        `inventory_export_${new Date().toISOString().split("T")[0]}.xlsx`,
+        "Inventory",
+        exportHeaders,
+        buildExportRows(),
+      );
+      toast.success("Excel downloaded");
+    } catch {
+      toast.error("Failed to export Excel");
+    } finally {
+      setExporting(false);
+    }
   };
 
-  const handleExportExcel = () => {
-    if (allStocks.length === 0) return;
-    downloadExcel(
-      `inventory_export_${new Date().toISOString().split("T")[0]}.xlsx`,
-      "Inventory",
-      exportHeaders,
-      buildExportRows(),
-    );
-    toast.success("Excel downloaded");
-  };
+  const handleExportPdf = async () => {
+    if (allStocks.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      const branchLabel =
+        branchFilter === ALL_BRANCHES
+          ? "All branches"
+          : branches.find((b) => b.id === branchFilter)?.name || "Selected branch";
 
-  const handlePrintReport = () => {
-    if (allStocks.length === 0) return;
-    const rows = buildExportRows()
-      .map(
-        (row) =>
-          `<tr>${row
-            .map((cell, idx) =>
-              `<td class="${idx >= 5 ? "num" : ""}">${cell}</td>`,
-            )
-            .join("")}</tr>`,
-      )
-      .join("");
-    printHtmlDocument(
-      "Inventory Report",
-      `<h1>Inventory Report</h1>
-      <p class="meta">Generated ${new Date().toLocaleString()}  |  ${totalStocks} records</p>
-      <table><thead><tr>${exportHeaders.map((h) => `<th>${h}</th>`).join("")}</tr></thead><tbody>${rows}</tbody></table>`,
-    );
+      const pdfRows = allStocks.map((s) => {
+        const qty = Number(s.current_quantity || 0);
+        const reserved = Number(s.reserved_quantity || 0);
+        const available = qty - reserved;
+        const cost = Number(s.product?.purchase_rate || 0);
+        return [
+          s.product?.name || "",
+          s.product?.sku || getProductBarcode(s.product) || "",
+          s.branch?.name || "",
+          formatQty(available),
+          formatMoney(cost),
+          formatMoney(qty * cost),
+        ];
+      });
+
+      await downloadBrandedPdf({
+        filename: `inventory_export_${new Date().toISOString().split("T")[0]}.pdf`,
+        title: "Stock Management Report",
+        subtitle: branchLabel,
+        logoDataUri,
+        summary: [
+          { label: "Records", value: totalStocks.toLocaleString() },
+          { label: "Quantity", value: formatQty(stockMeta.totalQuantity || 0) },
+          {
+            label: "Inventory Value",
+            value: formatMoney(stockMeta.totalInventoryValue || 0),
+          },
+          {
+            label: "Low Stock",
+            value: (stockMeta.lowStockCount || 0).toLocaleString(),
+          },
+        ],
+        columns: [
+          { header: "Product", width: 2.2 },
+          { header: "SKU", width: 1.1 },
+          { header: "Branch", width: 1.3 },
+          { header: "Available", align: "right", width: 0.9 },
+          { header: "Cost", align: "right", width: 0.9 },
+          { header: "Value", align: "right", width: 1 },
+        ],
+        rows: pdfRows,
+      });
+      toast.success("PDF downloaded");
+    } catch {
+      toast.error("Failed to export PDF");
+    } finally {
+      setExporting(false);
+    }
   };
-  // Derived analytics
+  // Derived analytics — same stockMeta as the table (no separate dashboard race)
   const paginationOptions = [20, 50, 100, 500];
   const totalUnits = stockMeta.totalQuantity || 0;
   const alerts = stockMeta.lowStockCount || 0;
   const totalStockPages = stockMeta.totalPages || 1;
+  const statsLoading = !hasStockMeta && isLoading;
+  const allStatusCount = stockMeta.totalProducts || totalStocks;
+  const inStockCount = Math.max(
+    0,
+    allStatusCount - (stockMeta.outOfStockCount || 0) - (stockMeta.lowStockCount || 0),
+  );
 
   const runBatchStockOps = async (
     lines: StockLineItem[],
@@ -790,15 +870,10 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         <StockManagementToolbar
           className="flex flex-wrap items-center gap-2 self-start lg:self-auto"
           onAddStock={() => setIsAddOpen(true)}
-          onAdjustStock={() => setIsAdjustOpen(true)}
-          onRemoveStock={() => setIsRemoveOpen(true)}
-          onTransferStock={() => setIsTransferOpen(true)}
-          onNavigate={onNavigate}
-          onExportCsv={handleExport}
           onExportExcel={handleExportExcel}
-          onPrint={handlePrintReport}
-          onImport={() => onNavigate?.("purchases")}
+          onExportPdf={handleExportPdf}
           exportDisabled={allStocks.length === 0}
+          exporting={exporting}
         />
       </div>
 
@@ -821,41 +896,49 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label className={STOCK_DLG.label}>Branch</Label>
-            <Select
-              value={addForm.branchId}
-              onValueChange={(v) => {
-                setAddForm({ ...addForm, branchId: v });
-                setAddErrors((e) => ({ ...e, branchId: "" }));
-                refreshLineStock(addLines, v, setAddLines);
-              }}
-            >
-              <SelectTrigger className={`h-9 border text-sm text-black ${addErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
-                <SelectValue placeholder="Select branch" />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} className="text-sm">
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {branchesLoading ? (
+              <StockSelectSkeleton label="Loading branches" />
+            ) : (
+              <Select
+                value={addForm.branchId}
+                onValueChange={(v) => {
+                  setAddForm({ ...addForm, branchId: v });
+                  setAddErrors((e) => ({ ...e, branchId: "" }));
+                  refreshLineStock(addLines, v, setAddLines);
+                }}
+              >
+                <SelectTrigger className={`h-9 border text-sm text-black ${addErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
+                  <SelectValue placeholder="Select branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id} className="text-sm">
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {addErrors.branchId && <p className="text-xs text-red-500">{addErrors.branchId}</p>}
           </div>
           <div className="space-y-2">
             <Label className={STOCK_DLG.label}>Supplier (optional)</Label>
-            <Select value={addForm.supplierId} onValueChange={(v) => setAddForm({ ...addForm, supplierId: v })}>
-              <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
-                <SelectValue placeholder="Select supplier" />
-              </SelectTrigger>
-              <SelectContent>
-                {supplierOptions.map((s) => (
-                  <SelectItem key={s.id} value={s.id} className="text-sm">
-                    {s.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {suppliersLoading ? (
+              <StockSelectSkeleton label="Loading suppliers" />
+            ) : (
+              <Select value={addForm.supplierId} onValueChange={(v) => setAddForm({ ...addForm, supplierId: v })}>
+                <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
+                  <SelectValue placeholder="Select supplier" />
+                </SelectTrigger>
+                <SelectContent>
+                  {supplierOptions.map((s) => (
+                    <SelectItem key={s.id} value={s.id} className="text-sm">
+                      {s.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
           </div>
         </div>
 
@@ -919,25 +1002,29 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label className={STOCK_DLG.label}>Branch</Label>
-            <Select
-              value={adjustForm.branchId}
-              onValueChange={(v) => {
-                setAdjustForm({ ...adjustForm, branchId: v });
-                setAdjustErrors((e) => ({ ...e, branchId: "" }));
-                refreshLineStock(adjustLines, v, setAdjustLines);
-              }}
-            >
-              <SelectTrigger className={`h-9 border text-sm text-black ${adjustErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
-                <SelectValue placeholder="Select branch" />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} className="text-sm">
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {branchesLoading ? (
+              <StockSelectSkeleton label="Loading branches" />
+            ) : (
+              <Select
+                value={adjustForm.branchId}
+                onValueChange={(v) => {
+                  setAdjustForm({ ...adjustForm, branchId: v });
+                  setAdjustErrors((e) => ({ ...e, branchId: "" }));
+                  refreshLineStock(adjustLines, v, setAdjustLines);
+                }}
+              >
+                <SelectTrigger className={`h-9 border text-sm text-black ${adjustErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
+                  <SelectValue placeholder="Select branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id} className="text-sm">
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {adjustErrors.branchId && <p className="text-xs text-red-500">{adjustErrors.branchId}</p>}
           </div>
           <div className="space-y-2">
@@ -1006,25 +1093,29 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label className={STOCK_DLG.label}>Branch</Label>
-            <Select
-              value={removeForm.branchId}
-              onValueChange={(v) => {
-                setRemoveForm({ ...removeForm, branchId: v });
-                setRemoveErrors((e) => ({ ...e, branchId: "" }));
-                refreshLineStock(removeLines, v, setRemoveLines);
-              }}
-            >
-              <SelectTrigger className={`h-9 border text-sm text-black ${removeErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
-                <SelectValue placeholder="Select branch" />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} className="text-sm">
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {branchesLoading ? (
+              <StockSelectSkeleton label="Loading branches" />
+            ) : (
+              <Select
+                value={removeForm.branchId}
+                onValueChange={(v) => {
+                  setRemoveForm({ ...removeForm, branchId: v });
+                  setRemoveErrors((e) => ({ ...e, branchId: "" }));
+                  refreshLineStock(removeLines, v, setRemoveLines);
+                }}
+              >
+                <SelectTrigger className={`h-9 border text-sm text-black ${removeErrors.branchId ? "border-red-400" : "border-gray-200"}`}>
+                  <SelectValue placeholder="Select branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id} className="text-sm">
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {removeErrors.branchId && <p className="text-xs text-red-500">{removeErrors.branchId}</p>}
           </div>
           <div className="space-y-2">
@@ -1091,47 +1182,55 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div className="space-y-2">
             <Label className={STOCK_DLG.label}>From branch</Label>
-            <Select
-              value={transferForm.fromBranchId}
-              onValueChange={(v) => {
-                setTransferForm({ ...transferForm, fromBranchId: v });
-                setTransferErrors((e) => ({ ...e, fromBranchId: "" }));
-                if (v) refreshLineStock(transferLines, v, setTransferLines);
-              }}
-            >
-              <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.fromBranchId ? "border-red-400" : "border-gray-200"}`}>
-                <SelectValue placeholder="Select branch" />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} disabled={b.id === transferForm.toBranchId} className="text-sm">
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {branchesLoading ? (
+              <StockSelectSkeleton label="Loading branches" />
+            ) : (
+              <Select
+                value={transferForm.fromBranchId}
+                onValueChange={(v) => {
+                  setTransferForm({ ...transferForm, fromBranchId: v });
+                  setTransferErrors((e) => ({ ...e, fromBranchId: "" }));
+                  if (v) refreshLineStock(transferLines, v, setTransferLines);
+                }}
+              >
+                <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.fromBranchId ? "border-red-400" : "border-gray-200"}`}>
+                  <SelectValue placeholder="Select branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id} disabled={b.id === transferForm.toBranchId} className="text-sm">
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {transferErrors.fromBranchId && <p className="text-xs text-red-500">{transferErrors.fromBranchId}</p>}
           </div>
           <div className="space-y-2">
             <Label className={STOCK_DLG.label}>To branch</Label>
-            <Select
-              value={transferForm.toBranchId}
-              onValueChange={(v) => {
-                setTransferForm({ ...transferForm, toBranchId: v });
-                setTransferErrors((e) => ({ ...e, toBranchId: "" }));
-              }}
-            >
-              <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.toBranchId ? "border-red-400" : "border-gray-200"}`}>
-                <SelectValue placeholder="Select branch" />
-              </SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} disabled={b.id === transferForm.fromBranchId} className="text-sm">
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {branchesLoading ? (
+              <StockSelectSkeleton label="Loading branches" />
+            ) : (
+              <Select
+                value={transferForm.toBranchId}
+                onValueChange={(v) => {
+                  setTransferForm({ ...transferForm, toBranchId: v });
+                  setTransferErrors((e) => ({ ...e, toBranchId: "" }));
+                }}
+              >
+                <SelectTrigger className={`h-9 border text-sm text-black ${transferErrors.toBranchId ? "border-red-400" : "border-gray-200"}`}>
+                  <SelectValue placeholder="Select branch" />
+                </SelectTrigger>
+                <SelectContent>
+                  {branches.map((b) => (
+                    <SelectItem key={b.id} value={b.id} disabled={b.id === transferForm.fromBranchId} className="text-sm">
+                      {b.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            )}
             {transferErrors.toBranchId && <p className="text-xs text-red-500">{transferErrors.toBranchId}</p>}
           </div>
         </div>
@@ -1170,11 +1269,11 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
 
       <InventoryKpiGrid
         columns={6}
-        loading={dashboardLoading || isLoading}
+        loading={statsLoading}
         items={[
           {
             label: "Total Products",
-            value: dashboardStats.totalSkus.toLocaleString(),
+            value: allStatusCount.toLocaleString(),
             icon: Package,
             onClick: () => {
               setStockStatusFilter(ALL_STOCK_STATUS);
@@ -1183,17 +1282,17 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
           },
           {
             label: "Total Quantity",
-            value: formatQty(dashboardStats.totalStockQuantity),
+            value: formatQty(stockMeta.totalQuantity || 0),
             icon: Boxes,
           },
           {
             label: "Inventory Value",
-            value: formatMoney(dashboardStats.totalInventoryValue),
+            value: formatMoney(stockMeta.totalInventoryValue || 0),
             icon: DollarSign,
           },
           {
             label: "Low Stock",
-            value: dashboardStats.lowStockCount.toLocaleString(),
+            value: (stockMeta.lowStockCount || 0).toLocaleString(),
             icon: AlertTriangle,
             tone: "warning",
             onClick: () => {
@@ -1204,7 +1303,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
           },
           {
             label: "Out of Stock",
-            value: dashboardStats.outOfStockCount.toLocaleString(),
+            value: (stockMeta.outOfStockCount || 0).toLocaleString(),
             icon: MinusCircle,
             tone: "danger",
             onClick: () => {
@@ -1215,7 +1314,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
           },
           {
             label: "Negative Stock",
-            value: dashboardStats.negativeStockCount.toLocaleString(),
+            value: (stockMeta.negativeStockCount || 0).toLocaleString(),
             icon: TrendingDown,
             tone: "danger",
             onClick: () => {
@@ -1232,15 +1331,19 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
           {STOCK_STATUS_OPTIONS.map((opt) => {
             const active = stockStatusFilter === opt.value;
             const count =
-              opt.value === ALL_STOCK_STATUS
-                ? dashboardStats.totalSkus
-                : opt.value === "low"
-                  ? dashboardStats.lowStockCount
-                  : opt.value === "out"
-                    ? dashboardStats.outOfStockCount
-                    : opt.value === "negative"
-                      ? dashboardStats.negativeStockCount
-                      : null;
+              !hasStockMeta
+                ? null
+                : opt.value === ALL_STOCK_STATUS
+                  ? allStatusCount
+                  : opt.value === "in"
+                    ? inStockCount
+                    : opt.value === "low"
+                      ? stockMeta.lowStockCount || 0
+                      : opt.value === "out"
+                        ? stockMeta.outOfStockCount || 0
+                        : opt.value === "negative"
+                          ? stockMeta.negativeStockCount || 0
+                          : null;
             return (
               <button
                 key={opt.value}
@@ -1266,6 +1369,13 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                   >
                     {count}
                   </span>
+                ) : statsLoading ? (
+                  <span
+                    className={cn(
+                      "inline-block h-3 w-6 rounded-full animate-pulse",
+                      active ? "bg-white/25" : "bg-gray-200",
+                    )}
+                  />
                 ) : null}
               </button>
             );
@@ -1426,22 +1536,32 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                 </div>
               </div>
             </CardHeader>
-            <CardContent className="p-0 relative">
-              {isLoading && (
-                <div className="absolute inset-0 z-50 bg-white/60 backdrop-blur-[2px]">
-                  <PageLoader message="Loading..." />
+            <CardContent className="p-0 relative min-h-[280px]">
+              {isLoading && allStocks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center min-h-[280px] py-16 px-6">
+                  <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+                  <p className="text-sm text-gray-500 mt-3">Loading stock...</p>
                 </div>
-              )}
-
-              {allStocks.length === 0 ? (
-                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+              ) : allStocks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center min-h-[280px] py-16 px-6 text-center">
                   <Package className="h-8 w-8 text-gray-300 mb-3" />
                   <p className="text-sm font-medium text-gray-900">No stock found</p>
                   <p className="text-xs text-gray-500 mt-1">
                     Adjust filters or add stock to see records here.
                   </p>
                 </div>
-              ) : viewMode === "table" ? (
+              ) : (
+                <>
+                  {isLoading ? (
+                    <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/70 backdrop-blur-[1px]">
+                      <div className="flex flex-col items-center gap-2 rounded-lg border border-gray-200 bg-white px-5 py-4 shadow-sm">
+                        <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+                        <p className="text-xs text-gray-500">Updating...</p>
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {viewMode === "table" ? (
                 <>
                   <div className="hidden lg:block overflow-x-auto">
                     <Table>
@@ -1580,7 +1700,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
               ) : (
                 <InventoryCardGrid
                   empty={false}
-                  loading={isLoading && allStocks.length === 0}
+                  loading={false}
                 >
                   {allStocks.map((s) => {
                     const qty = Number(s.current_quantity || 0);
@@ -1617,6 +1737,8 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                     );
                   })}
                 </InventoryCardGrid>
+                  )}
+                </>
               )}
 
               {/* Pagination - First / Prev / Page X of Y / Next / Last with

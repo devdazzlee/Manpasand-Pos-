@@ -212,6 +212,52 @@ export class StockOutService {
     };
   }
 
+  async getMonthlyStats(branchId?: string) {
+    const startOfMonth = new Date();
+    startOfMonth.setDate(1);
+    startOfMonth.setHours(0, 0, 0, 0);
+
+    const where: Prisma.StockMovementWhereInput = {
+      quantity_change: { lt: 0 },
+      movement_type: { in: ['SALE', 'DAMAGE', 'LOSS', 'EXPIRED', 'RETURN'] as any },
+      created_at: { gte: startOfMonth },
+    };
+    if (branchId) where.branch_id = branchId;
+
+    const movements = await prisma.stockMovement.findMany({
+      where,
+      select: {
+        quantity_change: true,
+        unit_cost: true,
+        movement_type: true,
+      },
+    });
+
+    const totalDispatches = movements.length;
+    const totalQuantity = movements.reduce(
+      (sum, m) => sum + Math.abs(asNumber(m.quantity_change)),
+      0,
+    );
+    const totalValue = movements.reduce((sum, m) => {
+      const qty = Math.abs(asNumber(m.quantity_change));
+      const rate = asNumber(m.unit_cost);
+      return sum + qty * rate;
+    }, 0);
+
+    const byReason: Record<string, number> = {};
+    for (const m of movements) {
+      const key = String(m.movement_type || 'OTHER');
+      byReason[key] = (byReason[key] || 0) + 1;
+    }
+
+    return {
+      totalDispatches,
+      totalQuantity,
+      totalValue,
+      byReason,
+    };
+  }
+
   async logReturn(data: {
     productId: string;
     branchId: string;

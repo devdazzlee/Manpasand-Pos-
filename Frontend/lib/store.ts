@@ -60,6 +60,7 @@ interface Branch {
   name: string
   location?: string
   is_active?: boolean
+  branch_type?: string | null
 }
 
 interface Category {
@@ -442,7 +443,8 @@ export const useStore = create<StoreState>()(
              id: b.id,
              name: b.name,
              location: b.location,
-             is_active: b.is_active ?? true
+             is_active: b.is_active ?? true,
+             branch_type: b.branch_type ?? null,
           }))
           
           set({ 
@@ -474,7 +476,7 @@ export const useStore = create<StoreState>()(
         set({ suppliersLoading: true })
         
         try {
-          const res = await apiClient.get("/suppliers")
+          const res = await apiClient.get("/suppliers", { params: { fetch_all: true } })
           const suppliers = res.data.data || []
           
           set({ 

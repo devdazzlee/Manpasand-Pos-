@@ -22,6 +22,8 @@ export const listAdjustments = asyncHandler(async (req: Request, res: Response) 
     limit: Number(query.limit) || 20,
     productId: query.productId,
     branchId: query.branchId,
+    adjustmentType: query.adjustmentType,
+    adjustmentCategory: query.adjustmentCategory,
     startDate,
     endDate,
   });

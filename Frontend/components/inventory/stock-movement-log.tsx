@@ -1,155 +1,220 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
+import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { Button } from "@/components/ui/button";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
 } from "@/components/ui/select";
-import { 
-  Table, 
-  TableBody, 
-  TableCell, 
-  TableHead, 
-  TableHeader, 
-  TableRow 
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
 } from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
+  Search,
+  Activity,
+  ArrowUpRight,
+  ArrowDownRight,
+  MapPin,
+  CalendarIcon,
+  History,
+  RefreshCw,
+  X,
+  Loader2,
+  Eye,
+  Package,
+  List,
+  LayoutGrid,
+  ArrowRightLeft,
+  FileText,
+} from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { PageLoader } from "@/components/ui/page-loader";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
-import { 
-  Download, 
-  Search, 
-  Activity, 
-  ArrowUpRight, 
-  ArrowDownRight, 
-  MapPin, 
-  Calendar, 
-  Filter, 
-  RefreshCw,
-  Archive,
-  History,
-  TrendingUp,
-  AlertTriangle,
-  X,
-  Loader2,
-  ChevronLeft,
-  ChevronRight,
-  Eye,
-  Clock,
-  User,
-  FileText,
-  Package2
-} from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { toast } from "sonner";
 import { usePosData } from "@/hooks/use-pos-data";
+import { PageLoader } from "@/components/ui/page-loader";
+import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
+import { TransactionRecordCard } from "@/components/inventory/stock-ops/transaction-record-card";
+import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
+import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
+import {
+  downloadExcel,
+  downloadBrandedPdf,
+  formatQty,
+  yieldForUi,
+} from "@/components/inventory/stock-ops/export-utils";
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change";
+import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
 
-const parseDate = (s: string) => {
-  if (!s) return undefined;
-  const [y, m, d] = s.split('-').map(Number);
-  return new Date(y, m - 1, d);
-};
-const formatDate = (d?: Date) => {
-  if (!d) return "";
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-};
-
+const PAGE_SIZE = 20;
 
 const MOVEMENT_TYPES = [
-  { value: "PURCHASE", label: "Inventory Purchase", icon: Archive },
-  { value: "SALE", label: "Point of Sale", icon: TrendingUp },
-  { value: "ADJUSTMENT", label: "Stock Adjustment", icon: Filter },
-  { value: "TRANSFER_IN", label: "Inbound Transfer", icon: ArrowUpRight },
-  { value: "TRANSFER_OUT", label: "Outbound Transfer", icon: ArrowDownRight },
-  { value: "RETURN", label: "Customer Return", icon: History },
-  { value: "DAMAGE", label: "Damage / Loss", icon: AlertTriangle },
-];
+  { value: "PURCHASE", label: "Purchase" },
+  { value: "SALE", label: "Sale" },
+  { value: "ADJUSTMENT", label: "Adjustment" },
+  { value: "TRANSFER_IN", label: "Transfer in" },
+  { value: "TRANSFER_OUT", label: "Transfer out" },
+  { value: "RETURN", label: "Return" },
+  { value: "DAMAGE", label: "Damage" },
+  { value: "EXPIRED", label: "Expired" },
+  { value: "LOSS", label: "Loss" },
+] as const;
+
+interface MovementRow {
+  id: string;
+  created_at: string;
+  movement_type: string;
+  quantity_change: string | number;
+  previous_qty: string | number;
+  new_qty: string | number;
+  reference_id?: string | null;
+  reference_type?: string | null;
+  notes?: string | null;
+  product?: { id: string; name: string; sku?: string | null } | null;
+  branch?: { id: string; name: string } | null;
+  user?: { email?: string | null } | null;
+}
+
+interface MovementSummary {
+  totalIncrease: number;
+  totalDecrease: number;
+  count: number;
+}
+
+function typeLabel(t: string) {
+  return MOVEMENT_TYPES.find((x) => x.value === t)?.label || t;
+}
+
+function typeTone(t: string) {
+  switch (t) {
+    case "PURCHASE":
+    case "TRANSFER_IN":
+    case "RETURN":
+      return "bg-emerald-50 text-emerald-800 border-emerald-200";
+    case "SALE":
+    case "TRANSFER_OUT":
+    case "DAMAGE":
+    case "EXPIRED":
+    case "LOSS":
+      return "bg-rose-50 text-rose-800 border-rose-200";
+    case "ADJUSTMENT":
+      return "bg-sky-50 text-sky-800 border-sky-200";
+    default:
+      return "bg-gray-50 text-gray-700 border-gray-200";
+  }
+}
+
+function deltaTone(qty: number) {
+  if (qty > 0) return "text-emerald-700";
+  if (qty < 0) return "text-rose-700";
+  return "text-gray-700";
+}
 
 export function StockMovementLog() {
-  const { 
-    products, 
-    branches, 
-    productsLoading, 
+  const logoDataUri = useLogoDataUri();
+  const {
+    products,
+    branches,
+    productsLoading,
     fetchProducts,
-    fetchBranches
+    fetchBranches,
   } = usePosData();
 
-  const [movements, setMovements] = useState<any[]>([]);
-  const [summary, setSummary] = useState<any>(null);
+  const [movements, setMovements] = useState<MovementRow[]>([]);
+  const [summary, setSummary] = useState<MovementSummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [page, setPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
-  const PAGE_SIZE = 20;
+  const [total, setTotal] = useState(0);
+  useScrollToTopOnPageChange(page);
 
-  // View Modal States
-  const [viewModalOpen, setViewModalOpen] = useState(false);
-  const [selectedMovement, setSelectedMovement] = useState<any>(null);
-  const [viewLoading, setViewLoading] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterBranch, setFilterBranch] = useState("all");
+  const [filterType, setFilterType] = useState("all");
+  const [filterDirection, setFilterDirection] = useState<"all" | "in" | "out">(
+    "all",
+  );
+  const [filterProductId, setFilterProductId] = useState("all");
+  const [filterStart, setFilterStart] = useState<Date | undefined>();
+  const [filterEnd, setFilterEnd] = useState<Date | undefined>();
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [exporting, setExporting] = useState(false);
 
-  const handleViewDetails = (m: any) => {
-    setViewLoading(true);
-    setViewModalOpen(true);
-    // Simulate brief loader to satisfy UX expectation for a modal
-    setTimeout(() => {
-      setSelectedMovement(m);
-      setViewLoading(false);
-    }, 400);
-  };
-
-  // Custom Search States
   const [prodSearch, setProdSearch] = useState("");
   const [prodDropdownOpen, setProdDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
 
-  const [filters, setFilters] = useState({
-    branchId: "all",
-    productId: "all",
-    movementType: "all",
-    startDate: "",
-    endDate: "",
-  });
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailRow, setDetailRow] = useState<MovementRow | null>(null);
 
-  const hasActiveFilters = filters.branchId !== "all" || filters.productId !== "all" || filters.movementType !== "all" || !!filters.startDate || !!filters.endDate;
-
-  const clearFilters = () => {
-    setFilters({ branchId: "all", productId: "all", movementType: "all", startDate: "", endDate: "" });
-    setProdSearch("");
-    setPage(1);
-  };
-
-  const fetchMovements = useCallback(async (pg = page) => {
-    try {
+  const fetchMovements = useCallback(
+    async (pg = page) => {
       setLoading(true);
-      const params: any = { page: pg, limit: PAGE_SIZE };
-      if (filters.branchId !== "all") params.branchId = filters.branchId;
-      if (filters.productId !== "all") params.productId = filters.productId;
-      if (filters.movementType !== "all") params.movementType = filters.movementType;
-      if (filters.startDate) params.startDate = filters.startDate;
-      if (filters.endDate) params.endDate = filters.endDate;
+      try {
+        const params: Record<string, string | number> = {
+          page: pg,
+          limit: PAGE_SIZE,
+        };
+        if (filterBranch !== "all") params.branchId = filterBranch;
+        if (filterProductId !== "all") params.productId = filterProductId;
+        if (filterType !== "all") params.movementType = filterType;
+        if (filterDirection !== "all") params.direction = filterDirection;
+        if (filterStart) params.startDate = filterStart.toISOString();
+        if (filterEnd) {
+          const e = new Date(filterEnd);
+          e.setHours(23, 59, 59, 999);
+          params.endDate = e.toISOString();
+        }
 
-      const res = await apiClient.get(`${API_BASE}/inventory/movements`, { params });
-      setMovements(res.data?.data || []);
-      setSummary(res.data?.meta?.summary || null);
-      const total = res.data?.meta?.total || (res.data?.data?.length ?? 0);
-      setTotalPages(Math.max(1, Math.ceil(total / PAGE_SIZE)));
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message || e?.message || "Failed to load stock movements");
-    } finally {
-      setLoading(false);
-    }
-  }, [filters, page]);
+        const res = await apiClient.get(`${API_BASE}/inventory/movements`, {
+          params,
+        });
+        setMovements(res.data?.data || []);
+        const meta = res.data?.meta || {};
+        setSummary(meta.summary || null);
+        setTotal(meta.total ?? res.data?.data?.length ?? 0);
+        setTotalPages(meta.totalPages ?? 1);
+      } catch (e: any) {
+        toast.error(
+          e?.response?.data?.message || e?.message || "Failed to load movements",
+        );
+      } finally {
+        setLoading(false);
+      }
+    },
+    [
+      page,
+      filterBranch,
+      filterProductId,
+      filterType,
+      filterDirection,
+      filterStart,
+      filterEnd,
+    ],
+  );
 
   useEffect(() => {
     fetchProducts();
@@ -160,10 +225,12 @@ export function StockMovementLog() {
     fetchMovements();
   }, [fetchMovements]);
 
-  // Click outside to close dropdown
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
-      if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+      if (
+        dropdownRef.current &&
+        !dropdownRef.current.contains(event.target as Node)
+      ) {
         setProdDropdownOpen(false);
       }
     };
@@ -174,157 +241,287 @@ export function StockMovementLog() {
   const filteredProd = useMemo(() => {
     const term = prodSearch.toLowerCase();
     if (!term) return products.slice(0, 50);
-    return products.filter(p => 
-      p.name.toLowerCase().includes(term) || 
-      (p.sku && p.sku.toLowerCase().includes(term))
-    ).slice(0, 50);
+    return products
+      .filter(
+        (p) =>
+          p.name.toLowerCase().includes(term) ||
+          (p.sku && p.sku.toLowerCase().includes(term)),
+      )
+      .slice(0, 50);
   }, [products, prodSearch]);
 
-  const selectedProdName = products.find(p => p.id === filters.productId)?.name || "";
+  const selectedProdName =
+    products.find((p) => p.id === filterProductId)?.name || "";
 
-  const exportCSV = () => {
-    if (movements.length === 0) return;
-    const headers = ["Timestamp", "Activity", "Product", "Identifier", "Delta", "Prev", "Final", "Location", "Ref", "Operator"];
-    const rows = movements.map((m) => [
-      new Date(m.created_at).toLocaleString(),
-      m.movement_type,
-      m.product?.name || "",
-      m.product?.sku || "",
-      m.quantity_change,
-      m.previous_qty,
-      m.new_qty,
-      m.branch?.name || "",
-      m.reference_id || "",
-      m.user?.email || "System",
-    ]);
-    const csv = [headers.join(","), ...rows.map((r) => r.map((c) => `"${c}"`).join(","))].join("\n");
-    const blob = new Blob([csv], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `enterprise-stock-audit-${new Date().toISOString()}.csv`;
-    a.click();
-    URL.revokeObjectURL(url);
-    toast.success("Audit Exported", { description: "CSV record has been saved safely." });
+  const filteredRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return movements;
+    return movements.filter((m) => {
+      const product = (m.product?.name || "").toLowerCase();
+      const sku = (m.product?.sku || "").toLowerCase();
+      const branch = (m.branch?.name || "").toLowerCase();
+      const notes = (m.notes || "").toLowerCase();
+      const ref = (m.reference_id || "").toLowerCase();
+      const type = typeLabel(m.movement_type).toLowerCase();
+      const user = (m.user?.email || "").toLowerCase();
+      return (
+        product.includes(q) ||
+        sku.includes(q) ||
+        branch.includes(q) ||
+        notes.includes(q) ||
+        ref.includes(q) ||
+        type.includes(q) ||
+        user.includes(q)
+      );
+    });
+  }, [movements, searchQuery]);
+
+  const pageStats = useMemo(() => {
+    let inbound = 0;
+    let outbound = 0;
+    for (const m of filteredRows) {
+      const q = Number(m.quantity_change) || 0;
+      if (q > 0) inbound += q;
+      else if (q < 0) outbound += Math.abs(q);
+    }
+    return { inbound, outbound, net: inbound - outbound };
+  }, [filteredRows]);
+
+  const hasActiveFilters =
+    searchQuery.trim() !== "" ||
+    filterBranch !== "all" ||
+    filterType !== "all" ||
+    filterDirection !== "all" ||
+    filterProductId !== "all" ||
+    !!filterStart ||
+    !!filterEnd;
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setFilterBranch("all");
+    setFilterType("all");
+    setFilterDirection("all");
+    setFilterProductId("all");
+    setFilterStart(undefined);
+    setFilterEnd(undefined);
+    setProdSearch("");
+    setPage(1);
   };
 
-  const getMovementStyle = (type: string, qty: number) => {
-    if (qty > 0) return { color: "text-emerald-600", bg: "bg-emerald-50", icon: <ArrowUpRight className="h-3 w-3" /> };
-    if (qty < 0) return { color: "text-rose-600", bg: "bg-rose-50", icon: <ArrowDownRight className="h-3 w-3" /> };
-    return { color: "text-slate-500", bg: "bg-slate-50", icon: <Activity className="h-3 w-3" /> };
+  const openDetail = (row: MovementRow) => {
+    setDetailRow(row);
+    setDetailOpen(true);
   };
 
-  if (loading && movements.length === 0) return <PageLoader message="Loading movement log..." />;
+  const exportExcel = async () => {
+    if (filteredRows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      downloadExcel(
+        `movement-log-${Date.now()}.xlsx`,
+        "Movements",
+        [
+          "Timestamp",
+          "Type",
+          "Product",
+          "SKU",
+          "Change",
+          "Previous",
+          "New",
+          "Branch",
+          "Reference",
+          "Notes",
+          "Operator",
+        ],
+        filteredRows.map((m) => [
+          m.created_at ? new Date(m.created_at).toLocaleString() : "",
+          typeLabel(m.movement_type),
+          m.product?.name || "",
+          m.product?.sku || "",
+          Number(m.quantity_change) || 0,
+          Number(m.previous_qty) || 0,
+          Number(m.new_qty) || 0,
+          m.branch?.name || "",
+          m.reference_id || "",
+          m.notes || "",
+          m.user?.email || "System",
+        ]),
+      );
+      toast.success("Excel downloaded");
+    } catch {
+      toast.error("Failed to export Excel");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportPdf = async () => {
+    if (filteredRows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      const inbound = summary?.totalIncrease ?? pageStats.inbound;
+      const outbound = summary?.totalDecrease ?? pageStats.outbound;
+      await downloadBrandedPdf({
+        filename: `movement-log-${Date.now()}.pdf`,
+        title: "Stock Movement Log",
+        subtitle: "Inventory activity audit trail",
+        logoDataUri,
+        summary: [
+          { label: "Records", value: filteredRows.length.toLocaleString() },
+          { label: "Inbound", value: `+${formatQty(inbound)}` },
+          { label: "Outbound", value: `-${formatQty(outbound)}` },
+        ],
+        columns: [
+          { header: "Date", width: 1.1 },
+          { header: "Product", width: 2 },
+          { header: "Type", width: 1.2 },
+          { header: "Branch", width: 1.3 },
+          { header: "Change", align: "right", width: 0.9 },
+          { header: "New qty", align: "right", width: 0.9 },
+        ],
+        rows: filteredRows.map((m) => {
+          const qty = Number(m.quantity_change) || 0;
+          return [
+            m.created_at ? new Date(m.created_at).toLocaleDateString() : "",
+            m.product?.name || "",
+            typeLabel(m.movement_type),
+            m.branch?.name || "",
+            `${qty > 0 ? "+" : ""}${formatQty(qty)}`,
+            formatQty(Number(m.new_qty) || 0),
+          ];
+        }),
+      });
+      toast.success("PDF downloaded");
+    } catch {
+      toast.error("Failed to export PDF");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  if (loading && movements.length === 0 && branches.length === 0) {
+    return <PageLoader message="Loading movement log..." />;
+  }
+
+  const kpiInbound = summary?.totalIncrease ?? 0;
+  const kpiOutbound = summary?.totalDecrease ?? 0;
+  const kpiNet = kpiInbound - kpiOutbound;
+  const kpiCount = summary?.count ?? total;
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-8 animate-in fade-in duration-500 text-black">
-      
-      {/* HEADER SECTION */}
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-6">
-        <div className="flex items-center gap-3">
-          <div className="bg-slate-900 p-2.5 rounded-xl">
-            <History className="h-5 w-5 text-white" />
+    <div className="p-4 md:p-6 space-y-5 text-black min-w-0">
+      {/* Header */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between pb-1 border-b border-gray-100">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-slate-600 mb-1">
+            <History className="h-4 w-4" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]">
+              Stock ledger
+            </span>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-black tracking-tight">Stock Movement Log</h1>
-            <p className="text-sm text-slate-500 mt-1 max-w-2xl">View and trace stock activities across locations</p>
-          </div>
+          <h1 className="text-2xl md:text-[1.75rem] font-bold text-gray-900 tracking-tight leading-none">
+            Movement Log
+          </h1>
+          <p className="text-sm text-gray-500 mt-1.5">
+            Trace every stock in, out, transfer, sale, and adjustment
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-9 text-sm text-black"
+            disabled={loading}
+            onClick={() => fetchMovements(page)}
+          >
+            <RefreshCw
+              className={cn("h-4 w-4 mr-1.5", loading && "animate-spin")}
+            />
+            Refresh
+          </Button>
+          <StockOpsActions
+            onExportExcel={exportExcel}
+            onExportPdf={exportPdf}
+            disabled={loading || filteredRows.length === 0}
+            exporting={exporting}
+          />
         </div>
       </div>
 
-      {/* KPI cards — same pattern as Stock Adjustments: white card, small
-          colored icon, label + number. No giant rounded blocks, no full
-          colored backgrounds. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="p-4 border border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="bg-green-100 p-2 rounded-md text-green-600">
-              <ArrowUpRight className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Stock Inbound</p>
-              <h3 className="text-xl font-semibold text-green-600">
-                +{summary?.totalIncrease || 0}
-              </h3>
+      <InventoryKpiGrid
+        columns={4}
+        loading={loading && movements.length === 0}
+        items={[
+          {
+            label: "Activity (filtered)",
+            value: kpiCount.toLocaleString(),
+            icon: Activity,
+          },
+          {
+            label: "Inbound units",
+            value: `+${formatQty(kpiInbound)}`,
+            icon: ArrowUpRight,
+            tone: "success",
+          },
+          {
+            label: "Outbound units",
+            value: `-${formatQty(kpiOutbound)}`,
+            icon: ArrowDownRight,
+            tone: "danger",
+          },
+          {
+            label: "Net flux",
+            value: `${kpiNet > 0 ? "+" : ""}${formatQty(kpiNet)}`,
+            icon: ArrowRightLeft,
+          },
+        ]}
+      />
+
+      {/* Filters */}
+      <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
+          <div className="space-y-1.5 sm:col-span-2 xl:col-span-2">
+            <Label className="text-xs font-medium text-gray-500">Search</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+              <Input
+                placeholder="Product, SKU, branch, ref, notes…"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="pl-9 h-10 text-sm text-black"
+              />
             </div>
           </div>
-        </Card>
 
-        <Card className="p-4 border border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="bg-red-100 p-2 rounded-md text-red-600">
-              <ArrowDownRight className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Stock Outbound</p>
-              <h3 className="text-xl font-semibold text-red-600">
-                -{summary?.totalDecrease || 0}
-              </h3>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-4 border border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-100 p-2 rounded-md text-blue-600">
-              <RefreshCw className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Net Flux</p>
-              <h3 className="text-xl font-semibold text-black">
-                {(summary?.totalIncrease || 0) - (summary?.totalDecrease || 0)}
-              </h3>
-            </div>
-          </div>
-        </Card>
-
-        <Card className="p-4 border border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="bg-gray-100 p-2 rounded-md text-gray-600">
-              <History className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Activity Logged</p>
-              <h3 className="text-xl font-semibold text-black">
-                {summary?.count || movements.length}
-              </h3>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      {/* FILTER BAR */}
-      <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm space-y-5">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 lg:gap-6">
-          
-          <div className="space-y-2 lg:col-span-1">
-            <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider ml-1">Location</Label>
-            <Select value={filters.branchId} onValueChange={(v) => setFilters(f => ({ ...f, branchId: v }))}>
-              <SelectTrigger className="h-10 w-full border-slate-200 bg-white text-sm text-black">
-                <MapPin className="h-4 w-4 mr-2 text-slate-500" />
-                <SelectValue placeholder="All Branches" />
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-gray-500">
+              Activity type
+            </Label>
+            <Select
+              value={filterType}
+              onValueChange={(v) => {
+                setFilterType(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-10 text-sm text-black">
+                <SelectValue placeholder="All types" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all" className="text-sm pl-8 pr-4 py-2 text-black">All Branches</SelectItem>
-                {branches.map(b => (
-                  <SelectItem key={b.id} value={b.id} className="text-sm pl-8 pr-4 py-2 text-black">
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2 lg:col-span-1">
-            <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider ml-1">Activity Type</Label>
-            <Select value={filters.movementType} onValueChange={(v) => setFilters(f => ({...f, movementType: v}))}>
-              <SelectTrigger className="h-10 w-full bg-white border-slate-200 text-sm text-black">
-                <SelectValue placeholder="All Activities" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-sm pl-8 pr-4 py-2 text-black">All Activity Types</SelectItem>
-                {MOVEMENT_TYPES.map(t => (
-                  <SelectItem key={t.value} value={t.value} className="text-sm pl-8 pr-4 py-2 text-black">
+                <SelectItem value="all" className="text-sm">
+                  All types
+                </SelectItem>
+                {MOVEMENT_TYPES.map((t) => (
+                  <SelectItem key={t.value} value={t.value} className="text-sm">
                     {t.label}
                   </SelectItem>
                 ))}
@@ -332,305 +529,657 @@ export function StockMovementLog() {
             </Select>
           </div>
 
-          <div className="space-y-2 md:col-span-2 lg:col-span-1 relative" ref={dropdownRef}>
-            <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider ml-1">Product (SKU/Name)</Label>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-gray-500">Branch</Label>
+            <Select
+              value={filterBranch}
+              onValueChange={(v) => {
+                setFilterBranch(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-10 text-sm text-black">
+                <SelectValue placeholder="All branches" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-sm">
+                  All branches
+                </SelectItem>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id} className="text-sm">
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div
+            className="space-y-1.5 sm:col-span-2 xl:col-span-2 relative"
+            ref={dropdownRef}
+          >
+            <Label className="text-xs font-medium text-gray-500">Product</Label>
             <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-slate-400" />
+              <Package className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400 z-10" />
               <Input
-                placeholder="Search SKU or Name..."
-                className="h-10 w-full pl-9 bg-white border-slate-200 text-sm text-black"
-                value={filters.productId === "all" ? prodSearch : selectedProdName}
+                placeholder="Pick a product to filter…"
+                className="h-10 pl-9 pr-9 text-sm text-black"
+                value={
+                  filterProductId === "all" ? prodSearch : selectedProdName
+                }
                 onFocus={() => {
                   setProdDropdownOpen(true);
-                  if (filters.productId !== "all") {
-                    setFilters(f => ({ ...f, productId: "all" }));
+                  if (filterProductId !== "all") {
+                    setFilterProductId("all");
                     setProdSearch("");
                   }
                 }}
-                onChange={(e) => { setProdSearch(e.target.value); setProdDropdownOpen(true); }}
+                onChange={(e) => {
+                  setProdSearch(e.target.value);
+                  setProdDropdownOpen(true);
+                }}
               />
-              {filters.productId !== "all" && (
-                <button onClick={() => { setFilters(f => ({ ...f, productId: "all" })); setProdSearch(""); }} className="absolute right-3 top-1/2 -translate-y-1/2 p-1 hover:bg-slate-100 rounded-full">
-                  <X className="h-4 w-4 text-slate-400" />
+              {filterProductId !== "all" ? (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterProductId("all");
+                    setProdSearch("");
+                    setPage(1);
+                  }}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded-full hover:bg-gray-100"
+                >
+                  <X className="h-3.5 w-3.5 text-gray-400" />
                 </button>
-              )}
+              ) : null}
             </div>
-            {prodDropdownOpen && (
-              <div className="absolute left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-xl border border-slate-200 bg-white shadow-xl">
-                <button onClick={() => { setFilters(f => ({ ...f, productId: "all" })); setProdDropdownOpen(false); setProdSearch(""); }} className="w-full p-3 text-left text-sm font-medium text-slate-600 hover:bg-slate-50 border-b border-slate-100">
-                  All Products
+            {prodDropdownOpen ? (
+              <div className="absolute left-0 right-0 z-50 mt-1 max-h-64 overflow-y-auto rounded-xl border border-gray-200 bg-white shadow-xl">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setFilterProductId("all");
+                    setProdDropdownOpen(false);
+                    setProdSearch("");
+                    setPage(1);
+                  }}
+                  className="w-full p-3 text-left text-sm font-medium text-gray-600 hover:bg-gray-50 border-b border-gray-100"
+                >
+                  All products
                 </button>
                 {productsLoading ? (
-                  <div className="p-4 text-center"><Loader2 className="h-5 w-5 animate-spin mx-auto text-slate-400" /></div>
+                  <div className="p-4 text-center">
+                    <Loader2 className="h-5 w-5 animate-spin mx-auto text-gray-400" />
+                  </div>
                 ) : filteredProd.length === 0 ? (
-                  <div className="p-4 text-center text-sm font-medium text-slate-500">No matches found</div>
+                  <div className="p-4 text-center text-sm text-gray-500">
+                    No matches found
+                  </div>
                 ) : (
-                  filteredProd.map(p => (
-                    <button key={p.id} onClick={() => { setFilters(f => ({ ...f, productId: p.id })); setProdDropdownOpen(false); setProdSearch(p.name); }} className="w-full p-3 text-left hover:bg-slate-50 border-b border-slate-100 last:border-none transition-colors">
-                      <div className="flex flex-col">
-                        <span className="font-medium text-black text-sm">{p.name}</span>
-                        <span className="text-xs text-slate-500">SKU: {p.sku || "N/A"}</span>
-                      </div>
+                  filteredProd.map((p) => (
+                    <button
+                      key={p.id}
+                      type="button"
+                      onClick={() => {
+                        setFilterProductId(p.id);
+                        setProdDropdownOpen(false);
+                        setProdSearch(p.name);
+                        setPage(1);
+                      }}
+                      className="w-full p-3 text-left hover:bg-gray-50 border-b border-gray-100 last:border-none"
+                    >
+                      <span className="block font-medium text-black text-sm">
+                        {p.name}
+                      </span>
+                      <span className="block text-xs text-gray-500">
+                        SKU: {p.sku || "N/A"}
+                      </span>
                     </button>
                   ))
                 )}
               </div>
-            )}
+            ) : null}
           </div>
 
-          <div className="space-y-2 lg:col-span-1">
-            <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider ml-1">From Date</Label>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-gray-500">
+              From date
+            </Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="h-10 w-full justify-start text-left font-normal text-sm border-slate-200 bg-white text-black hover:bg-slate-50">
-                  <Calendar className="mr-2 h-4 w-4 text-slate-500" />
-                  {filters.startDate ? format(parseDate(filters.startDate)!, "MM/dd/yyyy") : <span className="text-slate-500">Pick a date</span>}
+                <Button
+                  variant="outline"
+                  className="h-10 w-full justify-start text-left text-sm font-normal text-black"
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                  {filterStart ? (
+                    format(filterStart, "dd MMM yyyy")
+                  ) : (
+                    <span className="text-gray-400">Pick date</span>
+                  )}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <CalendarComponent mode="single" selected={parseDate(filters.startDate)} onSelect={(d) => setFilters(f => ({ ...f, startDate: formatDate(d) }))} initialFocus />
+                <CalendarComponent
+                  mode="single"
+                  selected={filterStart}
+                  onSelect={(d) => {
+                    setFilterStart(d);
+                    setPage(1);
+                  }}
+                />
               </PopoverContent>
             </Popover>
           </div>
 
-          <div className="space-y-2 lg:col-span-1">
-            <Label className="text-xs font-semibold text-slate-600 uppercase tracking-wider ml-1">To Date</Label>
+          <div className="space-y-1.5">
+            <Label className="text-xs font-medium text-gray-500">To date</Label>
             <Popover>
               <PopoverTrigger asChild>
-                <Button variant="outline" className="h-10 w-full justify-start text-left font-normal text-sm border-slate-200 bg-white text-black hover:bg-slate-50">
-                  <Calendar className="mr-2 h-4 w-4 text-slate-500" />
-                  {filters.endDate ? format(parseDate(filters.endDate)!, "MM/dd/yyyy") : <span className="text-slate-500">Pick a date</span>}
+                <Button
+                  variant="outline"
+                  className="h-10 w-full justify-start text-left text-sm font-normal text-black"
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                  {filterEnd ? (
+                    format(filterEnd, "dd MMM yyyy")
+                  ) : (
+                    <span className="text-gray-400">Pick date</span>
+                  )}
                 </Button>
               </PopoverTrigger>
               <PopoverContent className="w-auto p-0" align="start">
-                <CalendarComponent mode="single" selected={parseDate(filters.endDate)} onSelect={(d) => setFilters(f => ({ ...f, endDate: formatDate(d) }))} initialFocus />
+                <CalendarComponent
+                  mode="single"
+                  selected={filterEnd}
+                  onSelect={(d) => {
+                    setFilterEnd(d);
+                    setPage(1);
+                  }}
+                />
               </PopoverContent>
             </Popover>
           </div>
-
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-3 pt-3 border-t border-slate-100">
-          {hasActiveFilters && (
+        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 border-t border-gray-100">
+          <p className="text-xs text-gray-500">
+            Showing {filteredRows.length.toLocaleString()} of{" "}
+            {total.toLocaleString()} records
+            {searchQuery.trim() ? " · text search on this page" : ""}
+          </p>
+          {hasActiveFilters ? (
             <Button
-              variant="ghost"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 self-start sm:self-auto"
               onClick={clearFilters}
-              className="h-10 text-sm font-medium text-slate-600 hover:bg-slate-100/80"
             >
-              Clear Filters
+              <X className="h-3.5 w-3.5 mr-1.5" />
+              Clear filters
             </Button>
-          )}
-          <Button
-            onClick={exportCSV}
-            variant="outline"
-            className="h-10 px-5 text-sm gap-2 text-black border-slate-200 bg-white shadow-sm hover:bg-slate-50"
-          >
-            <Download className="h-4 w-4" /> Export CSV
-          </Button>
-          <Button
-            onClick={() => fetchMovements(1)}
-            disabled={loading}
-            className="h-10 bg-slate-900 hover:bg-black text-white px-6 text-sm shadow-sm"
-          >
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
-            Apply Filters
-          </Button>
+          ) : null}
         </div>
       </div>
 
-      {/* AUDIT TABLE */}
-      <Card className="border border-slate-200 shadow-sm bg-white rounded-xl overflow-hidden">
-        <CardContent className="p-0">
-          {loading ? (
-            <div className="p-6 space-y-3">
-              {[...Array(8)].map((_, i) => (
-                <div key={i} className="flex items-center gap-4 py-2">
-                  <Skeleton className="h-4 w-[15%] rounded" />
-                  <Skeleton className="h-4 w-[12%] rounded" />
-                  <Skeleton className="h-4 w-[25%] rounded" />
-                  <Skeleton className="h-4 w-[10%] rounded ml-auto" />
-                  <Skeleton className="h-4 w-[8%] rounded" />
-                  <Skeleton className="h-4 w-[10%] rounded" />
-                  <Skeleton className="h-4 w-[12%] rounded" />
-                </div>
-              ))}
+      {/* Direction tabs */}
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+        <Tabs
+          value={filterDirection}
+          onValueChange={(v) => {
+            setFilterDirection(v as "all" | "in" | "out");
+            setPage(1);
+          }}
+        >
+          <div className="bg-gray-50/60 overflow-x-auto">
+            <TabsList className="h-auto w-full min-w-max justify-start gap-0 rounded-none bg-transparent p-0 inline-flex">
+              {(
+                [
+                  { value: "all", label: "All movements", icon: Activity },
+                  { value: "in", label: "Inbound", icon: ArrowUpRight },
+                  { value: "out", label: "Outbound", icon: ArrowDownRight },
+                ] as const
+              ).map((s) => {
+                const Icon = s.icon;
+                return (
+                  <TabsTrigger
+                    key={s.value}
+                    value={s.value}
+                    className={cn(
+                      "relative h-11 rounded-none border-0 bg-transparent px-4 text-sm font-medium shadow-none gap-2",
+                      "text-gray-500 hover:text-gray-900 hover:bg-white/60",
+                      "data-[state=active]:bg-white data-[state=active]:text-gray-900 data-[state=active]:shadow-none",
+                      "after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-transparent after:content-['']",
+                      "data-[state=active]:after:bg-gray-900",
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    {s.label}
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+          </div>
+        </Tabs>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Activity feed</h2>
+          <p className="text-xs text-gray-500">
+            Chronological stock movements across all operations
+          </p>
+        </div>
+        <div className="inline-flex rounded-lg border border-gray-200 p-0.5 self-start">
+          <button
+            type="button"
+            onClick={() => setViewMode("table")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+              viewMode === "table"
+                ? "bg-gray-900 text-white"
+                : "text-gray-600 hover:bg-gray-50",
+            )}
+          >
+            <List className="h-3.5 w-3.5" />
+            Table
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("grid")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+              viewMode === "grid"
+                ? "bg-gray-900 text-white"
+                : "text-gray-600 hover:bg-gray-50",
+            )}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            Grid
+          </button>
+        </div>
+      </div>
+
+      <Card className="border border-gray-200 overflow-hidden bg-white shadow-sm">
+        <CardContent className="p-0 relative">
+          {loading && movements.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6">
+              <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+              <p className="text-sm text-gray-500 mt-3">Loading movements...</p>
+            </div>
+          ) : filteredRows.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+              <Package className="h-8 w-8 text-gray-300 mb-3" />
+              <p className="text-sm font-medium text-gray-900">
+                No movements found
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {hasActiveFilters
+                  ? "Try clearing filters or adjusting your search."
+                  : "Stock activity will appear here as operations are recorded."}
+              </p>
             </div>
           ) : (
-            <Table>
-              <TableHeader className="bg-slate-50">
-                <TableRow className="border-slate-200 hover:bg-transparent">
-                  <TableHead className="px-6 py-4 text-xs font-semibold uppercase tracking-wider text-slate-600">Date</TableHead>
-                  <TableHead className="py-4 text-xs font-semibold uppercase tracking-wider text-slate-600">Activity</TableHead>
-                  <TableHead className="py-4 text-xs font-semibold uppercase tracking-wider text-slate-600">Product</TableHead>
-                  <TableHead className="py-4 text-xs font-semibold uppercase tracking-wider text-slate-600 text-right">Net Change</TableHead>
-                  <TableHead className="py-4 text-xs font-semibold uppercase tracking-wider text-slate-600 text-right">Prev / New</TableHead>
-                  <TableHead className="py-4 px-6 text-xs font-semibold uppercase tracking-wider text-slate-600 text-right">Location</TableHead>
-                  <TableHead className="py-4 px-6 text-xs font-semibold uppercase tracking-wider text-slate-600 text-right">Actions</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {movements.map((m) => {
-                  const style = getMovementStyle(m.movement_type, Number(m.quantity_change));
-                  return (
-                    <TableRow key={m.id} className="border-slate-100 hover:bg-slate-50 transition-colors">
-                      <TableCell className="px-6 py-4">
-                        <span className="font-medium text-black text-sm">{new Date(m.created_at).toLocaleDateString()}</span>
-                      </TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className={`${style.bg} ${style.color} border-none text-xs font-medium py-1 px-3 rounded-lg flex items-center w-fit gap-1.5`}>
-                          {style.icon} {m.movement_type}
-                        </Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-col">
-                          <span className="font-medium text-black text-sm">{m.product?.name}</span>
-                          <span className="text-xs text-slate-500">Ref: {m.reference_id?.slice(0, 8) || "—"}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <span className={`font-semibold text-sm ${style.color}`}>{Number(m.quantity_change) > 0 ? "+" : ""}{m.quantity_change}</span>
-                      </TableCell>
-                      <TableCell className="text-right">
-                        <div className="flex flex-col items-end">
-                          <span className="text-sm font-medium text-black">{m.new_qty} Units</span>
-                          <span className="text-xs text-slate-500">Was {m.previous_qty}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="px-6 py-4 text-right">
-                        <span className="text-sm font-medium text-black">{m.branch?.name || "Main Warehouse"}</span>
-                      </TableCell>
-                      <TableCell className="px-6 py-4 text-right">
-                        <Button 
-                          variant="ghost" 
-                          size="icon" 
-                          className="h-8 w-8 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
-                          onClick={() => handleViewDetails(m)}
-                        >
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+            <>
+              {loading ? (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/70">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+                </div>
+              ) : null}
+
+              {viewMode === "table" ? (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                        <TableHead className="text-xs font-semibold text-gray-600 pl-3">
+                          Date
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">
+                          Type
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">
+                          Product
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">
+                          Branch
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                          Change
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                          Prev → New
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right pr-3">
+                          Actions
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredRows.map((m) => {
+                        const ts = new Date(m.created_at);
+                        const qty = Number(m.quantity_change) || 0;
+                        return (
+                          <TableRow key={m.id}>
+                            <TableCell className="py-2.5 pl-3 whitespace-nowrap text-sm text-gray-700">
+                              <div>{ts.toLocaleDateString()}</div>
+                              <div className="text-[11px] text-gray-400">
+                                {ts.toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-2.5">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] font-semibold",
+                                  typeTone(m.movement_type),
+                                )}
+                              >
+                                {typeLabel(m.movement_type)}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="py-2.5">
+                              <p className="text-sm font-medium text-gray-900 line-clamp-1">
+                                {m.product?.name || "—"}
+                              </p>
+                              <p className="text-[11px] font-mono text-gray-400">
+                                {m.product?.sku ||
+                                  (m.reference_id
+                                    ? `Ref ${m.reference_id.slice(0, 8)}`
+                                    : "—")}
+                              </p>
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-700">
+                              <span className="inline-flex items-center gap-1">
+                                <MapPin className="h-3 w-3 text-gray-400" />
+                                {m.branch?.name || "—"}
+                              </span>
+                            </TableCell>
+                            <TableCell
+                              className={cn(
+                                "py-2.5 text-sm text-right tabular-nums font-semibold",
+                                deltaTone(qty),
+                              )}
+                            >
+                              {qty > 0 ? "+" : ""}
+                              {formatQty(qty)}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums text-gray-600">
+                              <span className="text-gray-400">
+                                {formatQty(Number(m.previous_qty) || 0)}
+                              </span>
+                              <span className="mx-1 text-gray-300">→</span>
+                              <span className="font-medium text-gray-900">
+                                {formatQty(Number(m.new_qty) || 0)}
+                              </span>
+                            </TableCell>
+                            <TableCell className="py-2.5 pr-3 text-right">
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 text-xs"
+                                onClick={() => openDetail(m)}
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-1" />
+                                View
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <InventoryCardGrid empty={false} loading={false}>
+                  {filteredRows.map((m) => {
+                    const qty = Number(m.quantity_change) || 0;
+                    return (
+                      <TransactionRecordCard
+                        key={m.id}
+                        date={`${new Date(m.created_at).toLocaleDateString()} · ${new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
+                        title={m.product?.name || "Product"}
+                        subtitle={m.product?.sku}
+                        meta={
+                          <span className="inline-flex items-center gap-1">
+                            <MapPin className="h-3 w-3" />
+                            {m.branch?.name || "—"}
+                          </span>
+                        }
+                        badge={
+                          <Badge
+                            variant="outline"
+                            className={cn(
+                              "text-[10px] font-semibold",
+                              typeTone(m.movement_type),
+                            )}
+                          >
+                            {typeLabel(m.movement_type)}
+                          </Badge>
+                        }
+                        highlights={[
+                          {
+                            label: "Change",
+                            value: `${qty > 0 ? "+" : ""}${formatQty(qty)}`,
+                            tone:
+                              qty > 0
+                                ? "success"
+                                : qty < 0
+                                  ? "danger"
+                                  : "default",
+                          },
+                          {
+                            label: "Previous",
+                            value: formatQty(Number(m.previous_qty) || 0),
+                          },
+                          {
+                            label: "New",
+                            value: formatQty(Number(m.new_qty) || 0),
+                          },
+                        ]}
+                        footer={m.user?.email || m.notes || undefined}
+                        actions={
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-8 text-xs"
+                            onClick={() => openDetail(m)}
+                          >
+                            <Eye className="h-3.5 w-3.5 mr-1" />
+                            View
+                          </Button>
+                        }
+                      />
+                    );
+                  })}
+                </InventoryCardGrid>
+              )}
+            </>
           )}
 
-          {movements.length === 0 && !loading && (
-            <div className="p-24 flex flex-col items-center justify-center text-center space-y-4">
-              <div className="h-16 w-16 bg-slate-50 rounded-full flex items-center justify-center">
-                <Archive className="h-8 w-8 text-slate-300" />
-              </div>
-              <div>
-                <h4 className="text-base font-semibold text-black">No movements found</h4>
-                <p className="text-sm text-slate-500 mt-1 max-w-[280px] mx-auto">Adjust your filters or date range to find stock activity records.</p>
+          {total > 0 ? (
+            <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-gray-200">
+              <p className="text-sm text-gray-600">
+                Showing {(page - 1) * PAGE_SIZE + 1}–
+                {Math.min(page * PAGE_SIZE, total)} of {total}
+              </p>
+              <div className="flex items-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage(1)}
+                  disabled={page === 1 || loading}
+                  className="text-sm text-black"
+                >
+                  First
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                  className="text-sm text-black"
+                >
+                  Previous
+                </Button>
+                <span className="text-sm text-black px-3">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page >= totalPages || loading}
+                  className="text-sm text-black"
+                >
+                  Next
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage(totalPages)}
+                  disabled={page >= totalPages || loading}
+                  className="text-sm text-black"
+                >
+                  Last
+                </Button>
               </div>
             </div>
-          )}
+          ) : null}
         </CardContent>
       </Card>
 
-      {/* PAGINATION */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between px-2">
-          <p className="text-xs font-normal text-black/60">
-            Page {page} of {totalPages}
-          </p>
-          <div className="flex items-center gap-1">
-            <Button variant="outline" size="sm" className="h-8 w-8 p-0 border-slate-200 text-black" disabled={page <= 1} onClick={() => { const np = page - 1; setPage(np); fetchMovements(np); }}>
-              <ChevronLeft className="h-4 w-4" />
-            </Button>
-            {Array.from({ length: Math.min(5, totalPages) }, (_, i) => {
-              const pg = Math.max(1, Math.min(totalPages - 4, page - 2)) + i;
-              return (
-                <Button key={pg} variant={pg === page ? "default" : "outline"} size="sm" className={`h-8 w-8 p-0 text-xs font-normal ${pg === page ? "bg-slate-900 text-white" : "border-slate-200 text-black"}`} onClick={() => { setPage(pg); fetchMovements(pg); }}>
-                  {pg}
-                </Button>
-              );
-            })}
-            <Button variant="outline" size="sm" className="h-8 w-8 p-0 border-slate-200 text-black" disabled={page >= totalPages} onClick={() => { const np = page + 1; setPage(np); fetchMovements(np); }}>
-              <ChevronRight className="h-4 w-4" />
-            </Button>
-          </div>
-          <p className="text-xs font-normal text-black/60">{summary?.count || 0} total records</p>
-        </div>
-      )}
+      {/* Detail dialog */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="sm:max-w-[560px] border border-gray-200">
+          <DialogHeader>
+            <DialogTitle className="text-lg font-semibold text-black">
+              Movement detail
+            </DialogTitle>
+            <DialogDescription className="text-sm text-gray-500">
+              Full audit record for this stock activity
+            </DialogDescription>
+          </DialogHeader>
 
-      {/* VIEW DETAILS MODAL */}
-      <Dialog open={viewModalOpen} onOpenChange={setViewModalOpen}>
-        <DialogContent className="max-w-2xl bg-white border border-slate-200 shadow-2xl rounded-2xl p-0 overflow-hidden text-black [&>button]:right-5 [&>button]:top-5 [&>button]:hover:bg-slate-100 [&>button]:rounded-full [&>button]:p-1.5 [&>button]:h-8 [&>button]:w-8 [&>button_svg]:h-4 [&>button_svg]:w-4 [&>button]:text-slate-500 [&>button]:hover:text-black">
-          {viewLoading ? (
-            <div className="p-16 flex flex-col items-center justify-center space-y-4">
-              <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
-              <p className="text-sm font-medium text-slate-600">Retrieving movement details...</p>
-            </div>
-          ) : selectedMovement && (
-            <>
-              <div className="bg-slate-50 border-b border-slate-100 p-6 flex flex-col pr-16">
-                <div className="flex items-center justify-between">
-                  <DialogTitle className="text-xl font-bold text-black flex items-center gap-2.5">
-                    <Activity className="h-5 w-5 text-blue-600" />
-                    Movement Details
-                  </DialogTitle>
-                  <Badge variant="outline" className={`${getMovementStyle(selectedMovement.movement_type, Number(selectedMovement.quantity_change)).bg} ${getMovementStyle(selectedMovement.movement_type, Number(selectedMovement.quantity_change)).color} border-none font-semibold px-3 py-1 text-xs rounded-lg uppercase tracking-wide`}>
-                    {selectedMovement.movement_type}
-                  </Badge>
+          {detailRow ? (
+            <div className="space-y-4 pt-1">
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-base font-semibold text-gray-900 truncate">
+                    {detailRow.product?.name || "Product"}
+                  </p>
+                  <p className="text-xs font-mono text-gray-400 mt-0.5">
+                    {detailRow.product?.sku || "—"}
+                  </p>
                 </div>
-                <p className="text-sm text-slate-500 mt-1 pl-[30px]">Reference: <span className="font-medium text-slate-700">{selectedMovement.reference_id || "N/A"}</span></p>
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[10px] font-semibold shrink-0",
+                    typeTone(detailRow.movement_type),
+                  )}
+                >
+                  {typeLabel(detailRow.movement_type)}
+                </Badge>
               </div>
 
-              <div className="p-6 space-y-6 bg-white">
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-5">
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><Calendar className="h-3 w-3"/> Date</p>
-                    <p className="text-sm font-medium text-black">
-                      {new Date(selectedMovement.created_at).toLocaleDateString()}
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+                  <p className="text-[11px] text-gray-500 uppercase tracking-wide">
+                    Branch
+                  </p>
+                  <p className="font-medium text-gray-900 mt-0.5 inline-flex items-center gap-1">
+                    <MapPin className="h-3.5 w-3.5 text-gray-400" />
+                    {detailRow.branch?.name || "—"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+                  <p className="text-[11px] text-gray-500 uppercase tracking-wide">
+                    Operator
+                  </p>
+                  <p className="font-medium text-gray-900 mt-0.5 truncate">
+                    {detailRow.user?.email || "System"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3 col-span-2">
+                  <p className="text-[11px] text-gray-500 uppercase tracking-wide">
+                    Timestamp
+                  </p>
+                  <p className="font-medium text-gray-900 mt-0.5">
+                    {new Date(detailRow.created_at).toLocaleString()}
+                  </p>
+                </div>
+              </div>
+
+              <div className="rounded-xl border border-gray-200 p-4 space-y-3">
+                <div className="flex items-center gap-2 text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  <ArrowRightLeft className="h-3.5 w-3.5" />
+                  Quantity movement
+                </div>
+                <div className="grid grid-cols-3 gap-2 text-center">
+                  <div>
+                    <p className="text-[11px] text-gray-500">Previous</p>
+                    <p className="text-lg font-semibold tabular-nums">
+                      {formatQty(Number(detailRow.previous_qty) || 0)}
                     </p>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><User className="h-3 w-3"/> Operator</p>
-                    <p className="text-sm font-medium text-black">{selectedMovement.user?.email || "System"}</p>
+                  <div>
+                    <p className="text-[11px] text-gray-500">Change</p>
+                    <p
+                      className={cn(
+                        "text-lg font-semibold tabular-nums",
+                        deltaTone(Number(detailRow.quantity_change) || 0),
+                      )}
+                    >
+                      {(Number(detailRow.quantity_change) || 0) > 0 ? "+" : ""}
+                      {formatQty(Number(detailRow.quantity_change) || 0)}
+                    </p>
                   </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><MapPin className="h-3 w-3"/> Location</p>
-                    <p className="text-sm font-medium text-black">{selectedMovement.branch?.name || "Main Warehouse"}</p>
-                  </div>
-                  <div className="space-y-1">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><Package2 className="h-3 w-3"/> Net Change</p>
-                    <p className={`text-sm font-bold ${getMovementStyle(selectedMovement.movement_type, Number(selectedMovement.quantity_change)).color}`}>
-                      {Number(selectedMovement.quantity_change) > 0 ? "+" : ""}{selectedMovement.quantity_change} Units
+                  <div>
+                    <p className="text-[11px] text-gray-500">New</p>
+                    <p className="text-lg font-semibold tabular-nums">
+                      {formatQty(Number(detailRow.new_qty) || 0)}
                     </p>
                   </div>
                 </div>
+              </div>
 
-                <div className="p-4 bg-slate-50 rounded-xl border border-slate-100 flex items-center gap-4">
-                  <div className="h-12 w-12 bg-white border border-slate-200 rounded-lg flex items-center justify-center text-slate-400 font-bold text-xl shrink-0 shadow-sm">
-                    {selectedMovement.product?.name?.charAt(0) || "P"}
-                  </div>
-                  <div className="flex-1 min-w-0">
-                    <h4 className="text-base font-bold text-black truncate">{selectedMovement.product?.name}</h4>
-                    <p className="text-xs text-slate-500 mt-0.5">SKU: <span className="font-medium text-slate-700">{selectedMovement.product?.sku || "N/A"}</span></p>
-                  </div>
-                  <div className="text-right shrink-0">
-                    <p className="text-sm font-bold text-black">New Stock: {selectedMovement.new_qty}</p>
-                    <p className="text-xs text-slate-500 mt-0.5 font-medium">Was: {selectedMovement.previous_qty}</p>
-                  </div>
-                </div>
-
-                {selectedMovement.notes && (
-                  <div className="space-y-2">
-                    <p className="text-[10px] font-semibold text-slate-500 uppercase tracking-wider flex items-center gap-1.5"><FileText className="h-3 w-3"/> Notes / Details</p>
-                    <div className="p-4 bg-blue-50/50 text-sm text-blue-900 border border-blue-100 rounded-lg leading-relaxed whitespace-pre-wrap">
-                      {selectedMovement.notes}
+              {(detailRow.reference_id || detailRow.notes) && (
+                <div className="space-y-2 text-sm">
+                  {detailRow.reference_id ? (
+                    <p>
+                      <span className="text-gray-500">Reference: </span>
+                      <span className="font-mono text-gray-900">
+                        {detailRow.reference_id}
+                      </span>
+                      {detailRow.reference_type ? (
+                        <span className="text-gray-400">
+                          {" "}
+                          ({detailRow.reference_type})
+                        </span>
+                      ) : null}
+                    </p>
+                  ) : null}
+                  {detailRow.notes ? (
+                    <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3">
+                      <p className="text-[11px] text-gray-500 uppercase tracking-wide inline-flex items-center gap-1 mb-1">
+                        <FileText className="h-3 w-3" />
+                        Notes
+                      </p>
+                      <p className="text-gray-900 whitespace-pre-wrap">
+                        {detailRow.notes}
+                      </p>
                     </div>
-                  </div>
-                )}
-              </div>
-            </>
-          )}
+                  ) : null}
+                </div>
+              )}
+            </div>
+          ) : null}
         </DialogContent>
       </Dialog>
     </div>
   );
 }
-

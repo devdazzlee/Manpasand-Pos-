@@ -7,6 +7,7 @@ export const listMovementsSchema = z.object({
     branchId: z.string().optional(),
     productId: z.string().optional(),
     movementType: z.string().optional(),
+    direction: z.enum(['in', 'out']).optional(),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
   }),

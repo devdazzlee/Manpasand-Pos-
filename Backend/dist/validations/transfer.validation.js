@@ -9,6 +9,11 @@ exports.createTransferSchema = zod_1.z.object({
         fromBranchId: zod_1.z.string().min(1, 'Source branch is required'),
         toBranchId: zod_1.z.string().min(1, 'Destination branch is required'),
         notes: zod_1.z.string().optional(),
+        reason: zod_1.z.string().optional(),
+        carrierName: zod_1.z.string().optional(),
+        vehicleNo: zod_1.z.string().optional(),
+        estimatedArrival: zod_1.z.string().optional(),
+        receiverName: zod_1.z.string().optional(),
     }),
 });
 exports.updateTransferStatusSchema = zod_1.z.object({

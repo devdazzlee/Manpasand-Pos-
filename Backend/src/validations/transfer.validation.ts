@@ -7,6 +7,11 @@ export const createTransferSchema = z.object({
     fromBranchId: z.string().min(1, 'Source branch is required'),
     toBranchId: z.string().min(1, 'Destination branch is required'),
     notes: z.string().optional(),
+    reason: z.string().optional(),
+    carrierName: z.string().optional(),
+    vehicleNo: z.string().optional(),
+    estimatedArrival: z.string().optional(),
+    receiverName: z.string().optional(),
   }),
 });
 

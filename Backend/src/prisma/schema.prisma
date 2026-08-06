@@ -28,6 +28,8 @@ model User {
   purchases        Purchase[]
   transfers        Transfer[]
   stock_adjustments StockAdjustment[]
+  supplier_payments SupplierPayment[]
+  customer_payments CustomerPayment[]
 
   @@index([email])
 }
@@ -202,12 +204,31 @@ model Supplier {
   products        Product[]
   purchase_orders PurchaseOrder[]
   purchases       Purchase[]
+  payments        SupplierPayment[]
   created_at      DateTime        @default(now())
   updated_at      DateTime        @default(now()) @updatedAt
 
   @@index([code])
   @@index([is_active])
   @@index([display_on_pos])
+}
+
+model SupplierPayment {
+  id           String   @id @default(uuid())
+  supplier_id  String
+  supplier     Supplier @relation(fields: [supplier_id], references: [id], onDelete: Cascade)
+  amount       Decimal
+  payment_date DateTime @default(now())
+  method       String   @default("CASH")
+  reference    String?
+  notes        String?
+  created_by   String
+  user         User     @relation(fields: [created_by], references: [id])
+  created_at   DateTime @default(now())
+
+  @@index([supplier_id])
+  @@index([payment_date])
+  @@index([created_by])
 }
 
 model Tax {
@@ -629,12 +650,31 @@ model Customer {
   orders             Order[]
   sales              Sale[] // NEW: Link to sales
   hold_sales         HoldSale[]
+  payments           CustomerPayment[]
   device             DeviceIdentity?
   created_at         DateTime        @default(now())
   updated_at         DateTime        @default(now()) @updatedAt
 
   @@index([area_id])
   @@index([is_active])
+}
+
+model CustomerPayment {
+  id           String   @id @default(uuid())
+  customer_id  String
+  customer     Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  amount       Decimal
+  payment_date DateTime @default(now())
+  method       String   @default("CASH")
+  reference    String?
+  notes        String?
+  created_by   String
+  user         User     @relation(fields: [created_by], references: [id])
+  created_at   DateTime @default(now())
+
+  @@index([customer_id])
+  @@index([payment_date])
+  @@index([created_by])
 }
 
 model Discount {

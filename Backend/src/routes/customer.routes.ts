@@ -1,11 +1,28 @@
 import express, { Request, Response } from 'express';
-import { createCustomer, createShopCustomer, deleteCustomer, getCustomerById, getCustomers, loginCustomer, logoutCustomer, updateCustomer, updateCustomerByAdmin } from '../controllers/customer.controller';
+import {
+  createCustomer,
+  createShopCustomer,
+  deleteCustomer,
+  getCustomerById,
+  getCustomers,
+  loginCustomer,
+  logoutCustomer,
+  updateCustomer,
+  updateCustomerByAdmin,
+  getCustomerPurchases,
+  getCustomerLedger,
+  createCustomerPayment,
+  deleteCustomerPayment,
+} from '../controllers/customer.controller';
 import { validate } from '../middleware/validation.middleware';
 import {
   cusRegisterationSchema,
   customerLoginSchema,
   customerCreateByAdminSchema,
   customerUpdateSchema,
+  getCustomerParamsSchema,
+  createCustomerPaymentSchema,
+  deleteCustomerPaymentSchema,
 } from '../validations/customer.validation';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import { authenticateCustomer } from '../middleware/customerAuth.middleware';
@@ -46,6 +63,10 @@ router.post('/', validate(customerCreateByAdminSchema), createShopCustomer);
 router.get('/', getCustomers);
 router.put('/:customerId', validate(customerUpdateSchema), updateCustomerByAdmin);
 router.delete('/:customerId', deleteCustomer);
+router.get('/:customerId/purchases', validate(getCustomerParamsSchema), getCustomerPurchases);
+router.get('/:customerId/ledger', validate(getCustomerParamsSchema), getCustomerLedger);
+router.post('/:customerId/payments', validate(createCustomerPaymentSchema), createCustomerPayment);
+router.delete('/:customerId/payments/:paymentId', validate(deleteCustomerPaymentSchema), deleteCustomerPayment);
 router.get('/:customerId', getCustomerById);
 
 export default router;

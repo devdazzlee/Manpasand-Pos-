@@ -4,16 +4,12 @@ exports.InventoryService = void 0;
 const client_1 = require("../prisma/client");
 const helpers_1 = require("../utils/helpers");
 class InventoryService {
-    async getDashboardStats(userRole, branchId) {
+    async getDashboardStats(_userRole, branchId) {
         const warehouse = await client_1.prisma.branch.findFirst({
             where: { branch_type: 'WAREHOUSE', is_active: true },
         });
-        const branchFilter = userRole &&
-            userRole !== 'ADMIN' &&
-            userRole !== 'SUPER_ADMIN' &&
-            branchId
-            ? branchId
-            : undefined;
+        // Apply branch filter whenever a branchId is provided (admins can opt into all-branches by omitting it).
+        const branchFilter = branchId || undefined;
         const stockWhere = {};
         if (branchFilter) {
             stockWhere.branch_id = branchFilter;
@@ -21,11 +17,12 @@ class InventoryService {
         const stocks = await client_1.prisma.stock.findMany({
             where: stockWhere,
             include: {
-                product: true,
+                product: { include: { category: true } },
                 branch: true,
             },
         });
         let totalInventoryValue = 0;
+        let positiveInventoryValue = 0;
         let totalStockQuantity = 0;
         let negativeStockCount = 0;
         const branchSummary = {};
@@ -42,12 +39,14 @@ class InventoryService {
                     name: s.branch.name,
                     value: 0,
                     items: 0,
-                    type: s.branch.branch_type
+                    type: s.branch.branch_type,
                 };
             }
             branchSummary[bid].value += value;
             branchSummary[bid].items += 1;
             totalInventoryValue += value;
+            if (qty > 0)
+                positiveInventoryValue += value;
         }
         const startOfMonth = new Date();
         startOfMonth.setDate(1);
@@ -78,92 +77,157 @@ class InventoryService {
             orderBy: { transfer_date: 'desc' },
             include: { product: true, from_branch: true, to_branch: true },
         });
-        const lowStockItems = stocks.filter((s) => {
+        const lowStockItems = stocks
+            .filter((s) => {
             const minQty = (0, helpers_1.asNumber)(s.product.min_qty ?? s.minimum_quantity ?? 0);
             return (0, helpers_1.asNumber)(s.current_quantity) <= minQty && minQty > 0;
-        });
-        const lowStockAlerts = lowStockItems.map((s) => ({
-            product: s.product,
-            branch: s.branch,
+        })
+            .sort((a, b) => (0, helpers_1.asNumber)(a.current_quantity) - (0, helpers_1.asNumber)(b.current_quantity));
+        const lowStockAlerts = lowStockItems.slice(0, 25).map((s) => ({
+            productId: s.product_id,
+            product: {
+                id: s.product.id,
+                name: s.product.name,
+                sku: s.product.sku,
+                code: s.product.code,
+            },
+            branch: {
+                id: s.branch.id,
+                name: s.branch.name,
+            },
             currentQuantity: (0, helpers_1.asNumber)(s.current_quantity),
             minThreshold: (0, helpers_1.asNumber)(s.product.min_qty ?? s.minimum_quantity ?? 0),
         }));
         const outOfStockItems = stocks.filter((s) => (0, helpers_1.asNumber)(s.current_quantity) <= 0);
         const sortedTopValued = Object.entries(branchSummary)
             .map(([id, v]) => ({ branchId: id, ...v }))
-            .sort((a, b) => b.value - a.value);
-        // Get a simple trend for last 7 days (movements count)
+            .sort((a, b) => Math.abs(b.value) - Math.abs(a.value));
         const sevenDaysAgo = new Date();
         sevenDaysAgo.setDate(sevenDaysAgo.getDate() - 7);
-        const movementTrend = await client_1.prisma.stockMovement.groupBy({
+        const movementTrendRaw = await client_1.prisma.stockMovement.groupBy({
             by: ['movement_type'],
             where: {
                 created_at: { gte: sevenDaysAgo },
-                ...(branchFilter ? { branch_id: branchFilter } : {})
+                ...(branchFilter ? { branch_id: branchFilter } : {}),
             },
-            _count: true
+            _count: true,
+            _sum: { quantity_change: true },
         });
+        const movementTrend = movementTrendRaw.map((m) => ({
+            movement_type: m.movement_type,
+            count: m._count,
+            quantity: Math.abs((0, helpers_1.asNumber)(m._sum?.quantity_change || 0)),
+        }));
         const categorySummary = {};
         for (const s of stocks) {
-            const catName = s.product.category?.name || "Uncategorized";
+            const catName = s.product.category?.name || 'Uncategorized';
             const cost = (0, helpers_1.asNumber)(s.product.purchase_rate || 0);
-            const val = (0, helpers_1.asNumber)(s.current_quantity) * cost;
+            const qty = (0, helpers_1.asNumber)(s.current_quantity);
+            // Category valuation uses positive stock only so the chart stays meaningful
+            const val = Math.max(0, qty) * cost;
             if (!categorySummary[catName])
                 categorySummary[catName] = { value: 0, items: 0 };
             categorySummary[catName].value += val;
-            categorySummary[catName].items += 1;
+            if (qty > 0)
+                categorySummary[catName].items += 1;
         }
-        // Top Selling (Velocity) - Last 7 Days
         const topMoving = await client_1.prisma.stockMovement.groupBy({
             by: ['product_id'],
             where: {
                 movement_type: 'SALE',
                 created_at: { gte: sevenDaysAgo },
-                ...(branchFilter ? { branch_id: branchFilter } : {})
+                ...(branchFilter ? { branch_id: branchFilter } : {}),
             },
             _sum: { quantity_change: true },
-            orderBy: { _sum: { quantity_change: 'desc' } },
-            take: 5
+            orderBy: { _sum: { quantity_change: 'asc' } }, // SALE qty is negative
+            take: 8,
         });
-        // Resolve product names for top moving
-        const topMovingWithNames = await Promise.all(topMoving.map(async (m) => {
-            const p = await client_1.prisma.product.findUnique({ where: { id: m.product_id }, select: { name: true } });
+        const productIds = topMoving.map((m) => m.product_id);
+        const products = productIds.length > 0
+            ? await client_1.prisma.product.findMany({
+                where: { id: { in: productIds } },
+                select: { id: true, name: true, sku: true },
+            })
+            : [];
+        const productMap = new Map(products.map((p) => [p.id, p]));
+        const topMovingWithNames = topMoving
+            .map((m) => {
+            const p = productMap.get(m.product_id);
             return {
+                productId: m.product_id,
                 name: p?.name || 'Unknown',
-                quantity: Math.abs((0, helpers_1.asNumber)(m._sum?.quantity_change || 0))
+                sku: p?.sku || '',
+                quantity: Math.abs((0, helpers_1.asNumber)(m._sum?.quantity_change || 0)),
             };
-        }));
-        // Procurement Stats (Manual sum as Prisma aggregate doesn't support product of fields)
+        })
+            .filter((m) => m.quantity > 0)
+            .sort((a, b) => b.quantity - a.quantity)
+            .slice(0, 5);
         const purchasesThisMonth = await client_1.prisma.purchase.findMany({
             where: {
                 created_at: { gte: startOfMonth },
-                ...(branchFilter ? { warehouse_branch_id: branchFilter } : {})
+                ...(branchFilter ? { warehouse_branch_id: branchFilter } : {}),
             },
-            select: { quantity: true, cost_price: true }
+            select: { quantity: true, cost_price: true },
         });
         const poTotalValue = purchasesThisMonth.reduce((acc, p) => acc + (0, helpers_1.asNumber)(p.quantity) * (0, helpers_1.asNumber)(p.cost_price), 0);
-        const activeBranches = await client_1.prisma.branch.count({ where: { is_active: true } });
+        const activeBranches = await client_1.prisma.branch.count({
+            where: { is_active: true },
+        });
+        const sortedCategories = Object.entries(categorySummary)
+            .map(([name, v]) => ({ name, ...v }))
+            .filter((c) => c.value > 0)
+            .sort((a, b) => b.value - a.value);
         return {
             totalInventoryValue,
+            positiveInventoryValue,
             totalStockQuantity,
             negativeStockCount,
             lowStockCount: lowStockItems.length,
             totalSkus: await client_1.prisma.product.count({ where: { is_active: true } }),
             outOfStockCount: outOfStockItems.length,
-            totalLocations: activeBranches,
+            totalLocations: branchFilter ? 1 : activeBranches,
             pendingTransferCount: pendingTransfers.length,
             branchSummary: sortedTopValued,
-            categorySummary: Object.entries(categorySummary).map(([name, v]) => ({ name, ...v })),
+            categorySummary: sortedCategories,
             velocity: topMovingWithNames,
-            recentPurchases,
-            pendingTransfers,
+            recentPurchases: recentPurchases.map((p) => ({
+                id: p.id,
+                quantity: (0, helpers_1.asNumber)(p.quantity),
+                costPrice: (0, helpers_1.asNumber)(p.cost_price),
+                purchaseDate: p.purchase_date,
+                product: p.product
+                    ? { id: p.product.id, name: p.product.name }
+                    : null,
+                supplier: p.supplier
+                    ? { id: p.supplier.id, name: p.supplier.name }
+                    : null,
+            })),
+            pendingTransfers: pendingTransfers.map((t) => ({
+                id: t.id,
+                quantity: (0, helpers_1.asNumber)(t.quantity),
+                status: t.status,
+                transferDate: t.transfer_date,
+                product: t.product
+                    ? { id: t.product.id, name: t.product.name }
+                    : null,
+                from_branch: t.from_branch
+                    ? { id: t.from_branch.id, name: t.from_branch.name }
+                    : null,
+                to_branch: t.to_branch
+                    ? { id: t.to_branch.id, name: t.to_branch.name }
+                    : null,
+            })),
             lowStockAlerts,
             movementTrend,
             procurementHealth: {
                 count: purchasesThisMonth.length,
-                totalValue: poTotalValue
+                totalValue: poTotalValue,
             },
-            warehouse,
+            warehouse: warehouse
+                ? { id: warehouse.id, name: warehouse.name }
+                : null,
+            filteredBranchId: branchFilter || null,
         };
     }
     async getLowStockProducts(branchId) {
@@ -199,6 +263,10 @@ class InventoryService {
             where.product_id = params.productId;
         if (params.movementType)
             where.movement_type = params.movementType;
+        if (params.direction === 'in')
+            where.quantity_change = { gt: 0 };
+        if (params.direction === 'out')
+            where.quantity_change = { lt: 0 };
         if (params.startDate || params.endDate) {
             where.created_at = {};
             if (params.startDate)
@@ -243,17 +311,17 @@ class InventoryService {
             summary,
         };
     }
-    async getStockByLocation(branchId, userRole) {
+    async getStockByLocation(branchId, _userRole) {
         const where = {};
-        if (branchId &&
-            userRole &&
-            userRole !== 'ADMIN' &&
-            userRole !== 'SUPER_ADMIN') {
+        if (branchId) {
             where.branch_id = branchId;
         }
         const stocks = await client_1.prisma.stock.findMany({
             where,
-            include: { product: true, branch: true },
+            include: {
+                product: { include: { category: true } },
+                branch: true,
+            },
             orderBy: [{ branch_id: 'asc' }, { product_id: 'asc' }],
         });
         return stocks;

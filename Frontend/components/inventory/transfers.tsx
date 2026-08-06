@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,6 +13,21 @@ import {
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import {
   Plus,
   Truck,
   Printer,
@@ -21,8 +36,15 @@ import {
   History,
   CheckCircle2,
   Clock,
+  Search,
+  List,
+  LayoutGrid,
+  X,
+  Eye,
+  Loader2,
+  Package,
 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
@@ -34,6 +56,16 @@ import { usePosData } from "@/hooks/use-pos-data";
 import { PageLoader } from "@/components/ui/page-loader";
 import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
 import { TransactionRecordCard } from "@/components/inventory/stock-ops/transaction-record-card";
+import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
+import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
+import {
+  downloadExcel,
+  downloadBrandedPdf,
+  formatQty,
+  yieldForUi,
+} from "@/components/inventory/stock-ops/export-utils";
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change";
 import {
   StockProductPicker,
   type StockLineItem,
@@ -41,7 +73,19 @@ import {
 import {
   StockOperationDialog,
   STOCK_DLG,
+  StockSelectSkeleton,
 } from "@/components/inventory/stock-ops/stock-operation-dialog";
+import { cn } from "@/lib/utils";
+
+const PAGE_SIZE = 20;
+
+const TRANSFER_REASONS = [
+  "Stock Replenishment",
+  "Branch Support",
+  "Damage Return",
+  "Seasonal Redistribution",
+  "Other",
+] as const;
 
 const DEFAULT_TRANSFER_FORM = {
   fromBranchId: "",
@@ -52,6 +96,25 @@ const DEFAULT_TRANSFER_FORM = {
   vehicleNo: "",
   estimatedArrival: "",
 };
+
+type TransferStatus = "PENDING" | "DISPATCHED" | "RECEIVED" | "CANCELLED";
+
+interface TransferRow {
+  id: string;
+  reference_no?: string | null;
+  transfer_date: string;
+  quantity: string | number;
+  status: TransferStatus | string;
+  reason?: string | null;
+  carrier_name?: string | null;
+  vehicle_no?: string | null;
+  estimated_arrival?: string | null;
+  notes?: string | null;
+  product?: { id: string; name: string; sku?: string | null } | null;
+  from_branch?: { id: string; name: string } | null;
+  to_branch?: { id: string; name: string } | null;
+  user?: { email?: string | null } | null;
+}
 
 function validateTransferLines(lines: StockLineItem[]): string | null {
   if (lines.length === 0) return "Add at least one product";
@@ -64,54 +127,118 @@ function validateTransferLines(lines: StockLineItem[]): string | null {
   return null;
 }
 
+function statusTone(s: string) {
+  switch (s) {
+    case "PENDING":
+      return "bg-amber-50 text-amber-800 border-amber-200";
+    case "DISPATCHED":
+      return "bg-sky-50 text-sky-800 border-sky-200";
+    case "RECEIVED":
+      return "bg-emerald-50 text-emerald-800 border-emerald-200";
+    case "CANCELLED":
+      return "bg-rose-50 text-rose-800 border-rose-200";
+    default:
+      return "bg-gray-50 text-gray-700 border-gray-200";
+  }
+}
+
 export function Transfers() {
+  const logoDataUri = useLogoDataUri();
   const {
     products,
     branches,
     categories,
     productsLoading,
+    branchesLoading,
     fetchProducts,
     fetchBranches,
   } = usePosData();
 
-  const [transfers, setTransfers] = useState<any[]>([]);
+  const [transfers, setTransfers] = useState<TransferRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+  useScrollToTopOnPageChange(page);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterFrom, setFilterFrom] = useState("all");
+  const [filterTo, setFilterTo] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterStart, setFilterStart] = useState<Date | undefined>();
+  const [filterEnd, setFilterEnd] = useState<Date | undefined>();
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [exporting, setExporting] = useState(false);
+
   const [submitting, setSubmitting] = useState(false);
+  const [statusBusyId, setStatusBusyId] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [transferLines, setTransferLines] = useState<StockLineItem[]>([]);
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [stocks, setStocks] = useState<Record<string, number>>({});
-
+  const [showMoreDetails, setShowMoreDetails] = useState(false);
   const [form, setForm] = useState(DEFAULT_TRANSFER_FORM);
 
-  // Fetch Transfers
-  const fetchTransfers = useCallback(async () => {
-    try {
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailRow, setDetailRow] = useState<TransferRow | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+
+  const fetchTransfers = useCallback(
+    async (pg = page) => {
       setLoading(true);
-      const res = await apiClient.get(`${API_BASE}/transfers`, {
-        params: { page: 1, limit: 100 },
-      });
-      setTransfers(res.data?.data || []);
-    } catch (e: any) {
-      toast.error(e?.response?.data?.message || "Failed to synchronize transfer records");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+      try {
+        const params: Record<string, string | number> = {
+          page: pg,
+          limit: PAGE_SIZE,
+        };
+        if (filterFrom !== "all") params.fromBranchId = filterFrom;
+        if (filterTo !== "all") params.toBranchId = filterTo;
+        if (filterStatus !== "all") params.status = filterStatus;
+        if (filterStart) params.startDate = filterStart.toISOString();
+        if (filterEnd) {
+          const e = new Date(filterEnd);
+          e.setHours(23, 59, 59, 999);
+          params.endDate = e.toISOString();
+        }
+        const res = await apiClient.get(`${API_BASE}/transfers`, { params });
+        setTransfers(res.data?.data || []);
+        setTotal(res.data?.meta?.total ?? res.data?.data?.length ?? 0);
+        setTotalPages(res.data?.meta?.totalPages ?? 1);
+      } catch (e: any) {
+        toast.error(e?.response?.data?.message || "Failed to load transfers");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [page, filterFrom, filterTo, filterStatus, filterStart, filterEnd],
+  );
 
   const fetchStockLevels = useCallback(async () => {
     try {
-      const res = await apiClient.get(`${API_BASE}/stock`, { params: { limit: 1000 } });
-      const stockList = res.data?.data || [];
+      const res = await apiClient.get(`${API_BASE}/stock`, {
+        params: { limit: 5000 },
+      });
       const map: Record<string, number> = {};
-      stockList.forEach((s: { product_id: string; branch_id: string; current_quantity?: string | number }) => {
-        map[`${s.product_id}-${s.branch_id}`] = Number(s.current_quantity || 0);
+      (res.data?.data || []).forEach((s: any) => {
+        const pid = s.product_id || s.product?.id;
+        const bid = s.branch_id || s.branch?.id;
+        if (pid && bid) map[`${pid}-${bid}`] = Number(s.current_quantity || 0);
       });
       setStocks(map);
-    } catch (e) {
-      console.error("Failed to fetch stock levels", e);
+    } catch {
+      /* ignore */
     }
   }, []);
+
+  useEffect(() => {
+    fetchProducts();
+    fetchBranches();
+    fetchStockLevels();
+  }, [fetchProducts, fetchBranches, fetchStockLevels]);
+
+  useEffect(() => {
+    fetchTransfers();
+  }, [fetchTransfers]);
 
   const getStockQty = useCallback(
     (productId: string) => {
@@ -125,21 +252,67 @@ export function Transfers() {
     setForm(DEFAULT_TRANSFER_FORM);
     setTransferLines([]);
     setFormErrors({});
+    setShowMoreDetails(false);
   }, []);
 
-  // Initial Sync
-  useEffect(() => {
-    fetchTransfers();
-    fetchProducts();
-    fetchBranches();
-    fetchStockLevels();
-  }, [fetchTransfers, fetchProducts, fetchBranches, fetchStockLevels]);
+  const filteredRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return transfers;
+    return transfers.filter((t) => {
+      return (
+        (t.product?.name || "").toLowerCase().includes(q) ||
+        (t.product?.sku || "").toLowerCase().includes(q) ||
+        (t.reference_no || "").toLowerCase().includes(q) ||
+        (t.from_branch?.name || "").toLowerCase().includes(q) ||
+        (t.to_branch?.name || "").toLowerCase().includes(q) ||
+        (t.carrier_name || "").toLowerCase().includes(q)
+      );
+    });
+  }, [transfers, searchQuery]);
+
+  const stats = useMemo(() => {
+    const all = transfers;
+    return {
+      total,
+      pending: all.filter((t) => t.status === "PENDING").length,
+      dispatched: all.filter((t) => t.status === "DISPATCHED").length,
+      received: all.filter((t) => t.status === "RECEIVED").length,
+    };
+  }, [transfers, total]);
+
+  const hasActiveFilters =
+    searchQuery.trim() !== "" ||
+    filterFrom !== "all" ||
+    filterTo !== "all" ||
+    filterStatus !== "all" ||
+    !!filterStart ||
+    !!filterEnd;
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setFilterFrom("all");
+    setFilterTo("all");
+    setFilterStatus("all");
+    setFilterStart(undefined);
+    setFilterEnd(undefined);
+    setPage(1);
+  };
+
+  const detailsReady = Boolean(
+    form.fromBranchId &&
+      form.toBranchId &&
+      form.fromBranchId !== form.toBranchId,
+  );
 
   const handleSubmit = async () => {
     const errors: Record<string, string> = {};
     if (!form.fromBranchId) errors.fromBranchId = "Source branch is required";
     if (!form.toBranchId) errors.toBranchId = "Destination branch is required";
-    if (form.fromBranchId && form.toBranchId && form.fromBranchId === form.toBranchId) {
+    if (
+      form.fromBranchId &&
+      form.toBranchId &&
+      form.fromBranchId === form.toBranchId
+    ) {
       errors.toBranchId = "Source and destination must be different";
     }
 
@@ -190,16 +363,17 @@ export function Transfers() {
       }
 
       if (ok > 0) {
-        toast.success(`Created ${ok} transfer${ok === 1 ? "" : "s"}`, {
-          description: "Inventory movement has been recorded.",
-        });
+        toast.success(`Created ${ok} transfer${ok === 1 ? "" : "s"}`);
         setDialogOpen(false);
         resetTransferForm();
-        fetchTransfers();
+        setPage(1);
+        fetchTransfers(1);
         fetchStockLevels();
       }
       if (fail > 0) {
-        toast.error(lastError || `Failed to create ${fail} transfer${fail === 1 ? "" : "s"}`);
+        toast.error(
+          lastError || `Failed to create ${fail} transfer${fail === 1 ? "" : "s"}`,
+        );
       }
     } finally {
       setSubmitting(false);
@@ -207,250 +381,415 @@ export function Transfers() {
   };
 
   const updateStatus = async (id: string, status: string) => {
+    setStatusBusyId(id);
     try {
       await apiClient.patch(`${API_BASE}/transfers/${id}/status`, { status });
-      toast.success(`Transfer status updated to ${status}`);
+      toast.success(`Marked as ${status.toLowerCase()}`);
       fetchTransfers();
+      if (detailRow?.id === id) {
+        setDetailRow((prev) => (prev ? { ...prev, status } : prev));
+      }
     } catch (e: any) {
       toast.error(e?.response?.data?.message || "Failed to update status");
+    } finally {
+      setStatusBusyId(null);
     }
   };
 
-  const printSlip = (t: any) => {
+  const openDetail = async (row: TransferRow) => {
+    setDetailOpen(true);
+    setDetailRow(row);
+    setDetailLoading(true);
+    try {
+      const res = await apiClient.get(`${API_BASE}/transfers/${row.id}`);
+      if (res.data?.data) setDetailRow(res.data.data);
+    } catch {
+      /* keep list row */
+    } finally {
+      setDetailLoading(false);
+    }
+  };
+
+  const printSlip = (t: TransferRow) => {
     const w = window.open("", "_blank");
-    if (w) {
-      w.document.write(`
-        <html><head><title>Transfer Slip - ${t.reference_no || t.id}</title></head>
-        <body style="font-family: sans-serif; padding: 40px; color: #334155;">
-          <div style="border-bottom: 2px solid #e2e8f0; padding-bottom: 20px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center;">
-            <h1 style="margin: 0; font-size: 24px; font-weight: 800; color: #4f46e5;">MANPASAND POS</h1>
-            <h2 style="margin: 0; font-size: 18px; font-weight: 700; color: #64748b;">STOCK TRANSFER CHALLAN</h2>
+    if (!w) return;
+    w.document.write(`
+      <html><head><title>Transfer ${t.reference_no || t.id}</title></head>
+      <body style="font-family: system-ui,sans-serif; padding: 32px; color: #111;">
+        <h1 style="margin:0 0 4px;font-size:20px;">Manpasand — Transfer slip</h1>
+        <p style="margin:0 0 24px;color:#666;font-size:13px;">${t.reference_no || t.id}</p>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:13px;margin-bottom:24px;">
+          <div>
+            <p><strong>From:</strong> ${t.from_branch?.name || "—"}</p>
+            <p><strong>To:</strong> ${t.to_branch?.name || "—"}</p>
+            <p><strong>Date:</strong> ${new Date(t.transfer_date).toLocaleString()}</p>
           </div>
-          <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 30px; font-size: 14px;">
-            <div>
-              <p style="margin: 5px 0;"><strong>REFERENCE:</strong> ${t.reference_no || t.id}</p>
-              <p style="margin: 5px 0;"><strong>REASON:</strong> ${t.reason || 'N/A'}</p>
-              <p style="margin: 5px 0;"><strong>TIMESTAMP:</strong> ${new Date(t.transfer_date).toLocaleString()}</p>
-              <p style="margin: 5px 0;"><strong>LOGISTICS NODE:</strong> ${t.from_branch?.name}</p>
-            </div>
-            <div style="text-align: right;">
-              <p style="margin: 5px 0;"><strong>TARGET NODE:</strong> ${t.to_branch?.name}</p>
-              <p style="margin: 5px 0;"><strong>CARRIER:</strong> ${t.carrier_name || 'N/A'}</p>
-              <p style="margin: 5px 0;"><strong>VEHICLE:</strong> ${t.vehicle_no || 'N/A'}</p>
-              <p style="margin: 5px 0;"><strong>CURRENT STATUS:</strong> ${t.status}</p>
-            </div>
+          <div>
+            <p><strong>Status:</strong> ${t.status}</p>
+            <p><strong>Reason:</strong> ${t.reason || "—"}</p>
+            <p><strong>Carrier:</strong> ${t.carrier_name || "—"} · ${t.vehicle_no || "—"}</p>
           </div>
-          <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
-            <thead>
-              <tr style="background: #f8fafc; border-bottom: 1px solid #e2e8f0;">
-                <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: 800;">MANAGED ASSET</th>
-                <th style="padding: 12px; text-align: left; font-size: 12px; font-weight: 800;">SKU/ID</th>
-                <th style="padding: 12px; text-align: right; font-size: 12px; font-weight: 800;">TRANSFER VOLUME</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td style="padding: 15px; border-bottom: 1px solid #f1f5f9; font-weight: 600;">${t.product?.name}</td>
-                <td style="padding: 15px; border-bottom: 1px solid #f1f5f9; font-family: monospace;">${t.product?.sku}</td>
-                <td style="padding: 15px; border-bottom: 1px solid #f1f5f9; text-align: right; font-weight: 700; color: #4f46e5;">${t.quantity} UNITS</td>
-              </tr>
-            </tbody>
-          </table>
-          ${t.notes ? `
-            <div style="background: #f1f5f9; padding: 20px; border-radius: 8px;">
-              <p style="margin: 0; font-size: 12px; font-weight: 800; color: #64748b; margin-bottom: 8px;">LOGISTICS REMARKS</p>
-              <p style="margin: 0; font-size: 14px;">${t.notes}</p>
-            </div>
-          ` : ""}
-          <div style="margin-top: 50px; display: grid; grid-template-columns: 1fr 1fr; gap: 40px; text-align: center;">
-            <div>
-              <div style="border-top: 1px solid #cbd5e1; margin-top: 30px; padding-top: 10px; font-size: 12px; font-weight: bold; color: #64748b;">DISPATCH AUTHORIZATION</div>
-            </div>
-            <div>
-              <div style="border-top: 1px solid #cbd5e1; margin-top: 30px; padding-top: 10px; font-size: 12px; font-weight: bold; color: #64748b;">RECIPIENT ACKNOWLEDGMENT</div>
-            </div>
-          </div>
-          <p style="margin-top: 40px; font-size: 10px; color: #94a3b8; text-align: center;">This is a system-generated document. Dynamic ID: ${t.id}</p>
-        </body></html>
-      `);
-      w.document.close();
-      w.print();
+        </div>
+        <table style="width:100%;border-collapse:collapse;font-size:13px;">
+          <thead>
+            <tr style="background:#f8fafc;text-align:left;">
+              <th style="padding:10px;border-bottom:1px solid #e2e8f0;">Product</th>
+              <th style="padding:10px;border-bottom:1px solid #e2e8f0;">SKU</th>
+              <th style="padding:10px;border-bottom:1px solid #e2e8f0;text-align:right;">Qty</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td style="padding:10px;border-bottom:1px solid #f1f5f9;">${t.product?.name || "—"}</td>
+              <td style="padding:10px;border-bottom:1px solid #f1f5f9;font-family:monospace;">${t.product?.sku || "—"}</td>
+              <td style="padding:10px;border-bottom:1px solid #f1f5f9;text-align:right;font-weight:600;">${t.quantity}</td>
+            </tr>
+          </tbody>
+        </table>
+        ${t.notes ? `<p style="margin-top:20px;font-size:13px;"><strong>Notes:</strong> ${t.notes}</p>` : ""}
+        <div style="margin-top:48px;display:grid;grid-template-columns:1fr 1fr;gap:40px;text-align:center;font-size:11px;color:#64748b;">
+          <div style="border-top:1px solid #cbd5e1;padding-top:8px;">Dispatch signature</div>
+          <div style="border-top:1px solid #cbd5e1;padding-top:8px;">Receive signature</div>
+        </div>
+      </body></html>
+    `);
+    w.document.close();
+    w.print();
+  };
+
+  const exportExcel = async () => {
+    if (filteredRows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      downloadExcel(
+        `transfers-${Date.now()}.xlsx`,
+        "Transfers",
+        [
+          "Date",
+          "Reference",
+          "Product",
+          "SKU",
+          "From",
+          "To",
+          "Qty",
+          "Status",
+          "Reason",
+          "Carrier",
+          "Vehicle",
+        ],
+        filteredRows.map((t) => [
+          t.transfer_date ? new Date(t.transfer_date).toLocaleString() : "",
+          t.reference_no || "",
+          t.product?.name || "",
+          t.product?.sku || "",
+          t.from_branch?.name || "",
+          t.to_branch?.name || "",
+          Number(t.quantity) || 0,
+          t.status || "",
+          t.reason || "",
+          t.carrier_name || "",
+          t.vehicle_no || "",
+        ]),
+      );
+      toast.success("Excel downloaded");
+    } catch {
+      toast.error("Failed to export Excel");
+    } finally {
+      setExporting(false);
     }
   };
 
-  const getStatusStyle = (s: string) => {
-    switch (s) {
-      case "PENDING":
-        return "bg-gray-100 text-gray-700 border-gray-200";
-      case "DISPATCHED":
-        return "bg-blue-100 text-blue-700 border-blue-200";
-      case "RECEIVED":
-        return "bg-green-100 text-green-700 border-green-200";
-      case "CANCELLED":
-        return "bg-red-100 text-red-700 border-red-200";
-      default:
-        return "bg-gray-100 text-gray-700 border-gray-200";
+  const exportPdf = async () => {
+    if (filteredRows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      await downloadBrandedPdf({
+        filename: `transfers-${Date.now()}.pdf`,
+        title: "Stock Transfers",
+        subtitle: "Inter-branch inventory movements",
+        logoDataUri,
+        summary: [
+          { label: "Records", value: filteredRows.length.toLocaleString() },
+          { label: "Pending", value: String(stats.pending) },
+          { label: "In transit", value: String(stats.dispatched) },
+        ],
+        columns: [
+          { header: "Date", width: 1.1 },
+          { header: "Product", width: 2 },
+          { header: "From", width: 1.3 },
+          { header: "To", width: 1.3 },
+          { header: "Qty", align: "right", width: 0.7 },
+          { header: "Status", width: 1.1 },
+        ],
+        rows: filteredRows.map((t) => [
+          t.transfer_date
+            ? new Date(t.transfer_date).toLocaleDateString()
+            : "",
+          t.product?.name || "",
+          t.from_branch?.name || "",
+          t.to_branch?.name || "",
+          formatQty(Number(t.quantity) || 0),
+          t.status || "",
+        ]),
+      });
+      toast.success("PDF downloaded");
+    } catch {
+      toast.error("Failed to export PDF");
+    } finally {
+      setExporting(false);
     }
   };
 
-  // KPI Calculations
-  const stats = useMemo(() => {
-    const total = transfers.length;
-    const pending = transfers.filter(t => t.status === 'PENDING').length;
-    const dispatched = transfers.filter(t => t.status === 'DISPATCHED').length;
-    const received = transfers.filter(t => t.status === 'RECEIVED').length;
-    return { total, pending, dispatched, received };
-  }, [transfers]);
+  const arrivalDate = form.estimatedArrival
+    ? new Date(form.estimatedArrival)
+    : undefined;
 
-  if (loading && transfers.length === 0) return <PageLoader message="Loading logistics cycles..." />;
+  const statusActions = (t: TransferRow, compact = false) => (
+    <div className="flex flex-wrap items-center gap-1.5 justify-end">
+      <Button
+        size="sm"
+        variant="ghost"
+        className={cn("h-8", compact ? "px-2" : "text-xs")}
+        onClick={() => openDetail(t)}
+      >
+        <Eye className="h-3.5 w-3.5 mr-1" />
+        {!compact ? "View" : null}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8 w-8 p-0"
+        onClick={() => printSlip(t)}
+        title="Print slip"
+      >
+        <Printer className="h-3.5 w-3.5" />
+      </Button>
+      {t.status === "PENDING" ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          disabled={statusBusyId === t.id}
+          onClick={() => updateStatus(t.id, "DISPATCHED")}
+        >
+          {statusBusyId === t.id ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            "Dispatch"
+          )}
+        </Button>
+      ) : null}
+      {t.status === "DISPATCHED" ? (
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8 text-xs"
+          disabled={statusBusyId === t.id}
+          onClick={() => updateStatus(t.id, "RECEIVED")}
+        >
+          {statusBusyId === t.id ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : (
+            "Receive"
+          )}
+        </Button>
+      ) : null}
+    </div>
+  );
 
-  // estimatedArrival is stored as ISO string; convert to/from Date for the
-  // shadcn date picker. Local time is preserved so the user sees what they pick.
-  const arrivalDate = form.estimatedArrival ? new Date(form.estimatedArrival) : undefined;
+  if (loading && transfers.length === 0 && branches.length === 0) {
+    return <PageLoader message="Loading transfers..." />;
+  }
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-6 text-black">
+    <div className="p-4 md:p-6 space-y-5 text-black min-w-0">
       {/* Header */}
-      <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold text-black">Stock Transfers</h1>
-          <p className="text-sm text-gray-600 mt-1">
-            Move inventory between branches and warehouses
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between pb-1 border-b border-gray-100">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-indigo-600 mb-1">
+            <Truck className="h-4 w-4" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]">
+              Logistics
+            </span>
+          </div>
+          <h1 className="text-2xl md:text-[1.75rem] font-bold text-gray-900 tracking-tight leading-none">
+            Transfers
+          </h1>
+          <p className="text-sm text-gray-500 mt-1.5">
+            Move stock between branches and track dispatch / receive
           </p>
         </div>
 
-        <Button size="sm" className="text-sm" onClick={() => setDialogOpen(true)}>
-          <Plus className="h-4 w-4 mr-2" /> New Transfer
-        </Button>
+        <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+          <Button size="sm" className="h-9 text-sm" onClick={() => setDialogOpen(true)}>
+            <Plus className="h-4 w-4 mr-1.5" />
+            New transfer
+          </Button>
+          <StockOpsActions
+            onExportExcel={exportExcel}
+            onExportPdf={exportPdf}
+            disabled={loading || filteredRows.length === 0}
+            exporting={exporting}
+          />
+        </div>
+      </div>
 
-        <StockOperationDialog
-          open={dialogOpen}
-          onOpenChange={(open) => {
-            setDialogOpen(open);
-            if (!open) resetTransferForm();
-          }}
-          title="New transfer"
-          description="Select multiple products and move stock between branches in one go."
-          onSubmit={handleSubmit}
-          submitting={submitting}
-          submitLabel={
-            transferLines.length > 0
-              ? `Create ${transferLines.length} transfer${transferLines.length === 1 ? "" : "s"}`
-              : "Create transfer"
-          }
-          footerHint={
-            transferLines.length > 0
+      {/* New transfer modal */}
+      <StockOperationDialog
+        open={dialogOpen}
+        onOpenChange={(open) => {
+          setDialogOpen(open);
+          if (!open) resetTransferForm();
+        }}
+        title="New transfer"
+        description="Move products from one branch to another in a single bill."
+        onSubmit={handleSubmit}
+        submitting={submitting}
+        submitDisabled={!detailsReady || transferLines.length === 0}
+        submitLabel={
+          transferLines.length > 0
+            ? `Create ${transferLines.length} transfer${transferLines.length === 1 ? "" : "s"}`
+            : "Create transfer"
+        }
+        footerHint={
+          !detailsReady
+            ? "Select from & to branches first"
+            : transferLines.length > 0
               ? `${transferLines.length} product${transferLines.length === 1 ? "" : "s"} selected`
-              : null
-          }
-        >
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className={STOCK_DLG.label}>From branch</Label>
-              <Select
-                value={form.fromBranchId}
-                onValueChange={(v) => {
-                  setForm((f) => ({ ...f, fromBranchId: v }));
-                  setFormErrors((e) => ({ ...e, fromBranchId: "" }));
-                  setTransferLines((prev) =>
-                    prev.map((l) => ({
-                      ...l,
-                      currentQty: stocks[`${l.productId}-${v}`] ?? 0,
-                    })),
-                  );
-                }}
-              >
-                <SelectTrigger
-                  className={`h-9 text-sm text-black ${formErrors.fromBranchId ? "border-red-400" : "border-gray-200"}`}
+              : "Add products from the catalog"
+        }
+      >
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className={STOCK_DLG.label}>
+                From branch <span className="text-red-500">*</span>
+              </Label>
+              {branchesLoading ? (
+                <StockSelectSkeleton label="Loading branches" />
+              ) : (
+                <Select
+                  value={form.fromBranchId}
+                  onValueChange={(v) => {
+                    setForm((f) => ({ ...f, fromBranchId: v }));
+                    setFormErrors((e) => ({ ...e, fromBranchId: "" }));
+                    setTransferLines((prev) =>
+                      prev.map((l) => ({
+                        ...l,
+                        currentQty: stocks[`${l.productId}-${v}`] ?? 0,
+                      })),
+                    );
+                  }}
                 >
-                  <SelectValue placeholder="Source branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((b) => (
-                    <SelectItem
-                      key={b.id}
-                      value={b.id}
-                      disabled={b.id === form.toBranchId}
-                      className="text-sm"
-                    >
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {formErrors.fromBranchId && (
+                  <SelectTrigger
+                    className={cn(
+                      "h-10 text-sm text-black",
+                      formErrors.fromBranchId && "border-red-400",
+                    )}
+                  >
+                    <SelectValue placeholder="Source branch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branches.map((b) => (
+                      <SelectItem
+                        key={b.id}
+                        value={b.id}
+                        disabled={b.id === form.toBranchId}
+                        className="text-sm"
+                      >
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+              {formErrors.fromBranchId ? (
                 <p className="text-xs text-red-500">{formErrors.fromBranchId}</p>
-              )}
+              ) : null}
             </div>
-            <div className="space-y-2">
-              <Label className={STOCK_DLG.label}>To branch</Label>
-              <Select
-                value={form.toBranchId}
-                onValueChange={(v) => {
-                  setForm((f) => ({ ...f, toBranchId: v }));
-                  setFormErrors((e) => ({ ...e, toBranchId: "" }));
-                }}
-              >
-                <SelectTrigger
-                  className={`h-9 text-sm text-black ${formErrors.toBranchId ? "border-red-400" : "border-gray-200"}`}
+
+            <div className="space-y-1.5">
+              <Label className={STOCK_DLG.label}>
+                To branch <span className="text-red-500">*</span>
+              </Label>
+              {branchesLoading ? (
+                <StockSelectSkeleton label="Loading branches" />
+              ) : (
+                <Select
+                  value={form.toBranchId}
+                  onValueChange={(v) => {
+                    setForm((f) => ({ ...f, toBranchId: v }));
+                    setFormErrors((e) => ({ ...e, toBranchId: "" }));
+                  }}
                 >
-                  <SelectValue placeholder="Destination branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((b) => (
-                    <SelectItem
-                      key={b.id}
-                      value={b.id}
-                      disabled={b.id === form.fromBranchId}
-                      className="text-sm"
-                    >
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {formErrors.toBranchId && (
-                <p className="text-xs text-red-500">{formErrors.toBranchId}</p>
+                  <SelectTrigger
+                    className={cn(
+                      "h-10 text-sm text-black",
+                      formErrors.toBranchId && "border-red-400",
+                    )}
+                  >
+                    <SelectValue placeholder="Destination branch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {branches.map((b) => (
+                      <SelectItem
+                        key={b.id}
+                        value={b.id}
+                        disabled={b.id === form.fromBranchId}
+                        className="text-sm"
+                      >
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               )}
+              {formErrors.toBranchId ? (
+                <p className="text-xs text-red-500">{formErrors.toBranchId}</p>
+              ) : null}
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1.5">
               <Label className={STOCK_DLG.label}>Reason</Label>
               <Select
                 value={form.reason}
                 onValueChange={(v) => setForm((f) => ({ ...f, reason: v }))}
               >
-                <SelectTrigger className="h-9 text-sm text-black">
+                <SelectTrigger className="h-10 text-sm text-black">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="Stock Replenishment" className="text-sm">
-                    Stock Replenishment
-                  </SelectItem>
-                  <SelectItem value="Branch Support" className="text-sm">
-                    Branch Support
-                  </SelectItem>
-                  <SelectItem value="Damage Return" className="text-sm">
-                    Damage Return
-                  </SelectItem>
+                  {TRANSFER_REASONS.map((r) => (
+                    <SelectItem key={r} value={r} className="text-sm">
+                      {r}
+                    </SelectItem>
+                  ))}
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1.5">
               <Label className={STOCK_DLG.label}>Estimated arrival</Label>
               <Popover>
                 <PopoverTrigger asChild>
                   <Button
                     variant="outline"
-                    className="h-9 w-full justify-start text-left text-sm font-normal text-black"
+                    className="h-10 w-full justify-start text-left text-sm font-normal text-black"
                   >
                     <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
                     {arrivalDate ? (
-                      format(arrivalDate, "PPP")
+                      format(arrivalDate, "dd MMM yyyy")
                     ) : (
-                      <span className="text-gray-500">Pick a date</span>
+                      <span className="text-gray-400">Optional</span>
                     )}
                   </Button>
                 </PopoverTrigger>
@@ -471,38 +810,54 @@ export function Transfers() {
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label className={STOCK_DLG.label}>Carrier</Label>
-              <Input
-                placeholder="Courier name"
-                value={form.carrierName}
-                onChange={(e) => setForm((f) => ({ ...f, carrierName: e.target.value }))}
-                className="h-9 text-sm text-black"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className={STOCK_DLG.label}>Vehicle</Label>
-              <Input
-                placeholder="Plate number"
-                value={form.vehicleNo}
-                onChange={(e) => setForm((f) => ({ ...f, vehicleNo: e.target.value }))}
-                className="h-9 text-sm text-black"
-              />
-            </div>
-          </div>
+          <button
+            type="button"
+            onClick={() => setShowMoreDetails((v) => !v)}
+            className="text-xs font-medium text-gray-500 hover:text-gray-800"
+          >
+            {showMoreDetails ? "Hide" : "Show"} carrier & notes
+          </button>
 
-          <div className="space-y-2">
-            <Label className={STOCK_DLG.label}>Notes</Label>
-            <Textarea
-              placeholder="Optional remarks..."
-              value={form.notes}
-              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
-              className="text-sm text-black min-h-[60px] resize-none"
-            />
-          </div>
+          {showMoreDetails ? (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 rounded-xl border border-dashed border-gray-200 bg-gray-50/50 p-3">
+              <div className="space-y-1.5">
+                <Label className={STOCK_DLG.label}>Carrier</Label>
+                <Input
+                  placeholder="Courier name"
+                  value={form.carrierName}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, carrierName: e.target.value }))
+                  }
+                  className="h-9 text-sm text-black bg-white"
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label className={STOCK_DLG.label}>Vehicle</Label>
+                <Input
+                  placeholder="Plate number"
+                  value={form.vehicleNo}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, vehicleNo: e.target.value }))
+                  }
+                  className="h-9 text-sm text-black bg-white"
+                />
+              </div>
+              <div className="space-y-1.5 md:col-span-2">
+                <Label className={STOCK_DLG.label}>Notes</Label>
+                <Textarea
+                  placeholder="Optional remarks…"
+                  value={form.notes}
+                  onChange={(e) =>
+                    setForm((f) => ({ ...f, notes: e.target.value }))
+                  }
+                  className="text-sm text-black min-h-[64px] resize-none bg-white"
+                />
+              </div>
+            </div>
+          ) : null}
 
           <StockProductPicker
+            layout="split"
             products={products}
             categories={categories}
             loading={productsLoading}
@@ -520,128 +875,523 @@ export function Transfers() {
             showCurrentQty
             getCurrentQty={getStockQty}
             disabled={!form.fromBranchId}
+            disabledHint="Select a source branch above to unlock the catalog"
             error={formErrors.lines}
           />
-        </StockOperationDialog>
+        </div>
+      </StockOperationDialog>
+
+      <InventoryKpiGrid
+        columns={4}
+        loading={loading && transfers.length === 0}
+        items={[
+          {
+            label: "Total (filtered)",
+            value: total.toLocaleString(),
+            icon: History,
+          },
+          {
+            label: "Pending (page)",
+            value: stats.pending.toLocaleString(),
+            icon: Clock,
+            tone: "warning",
+          },
+          {
+            label: "In transit (page)",
+            value: stats.dispatched.toLocaleString(),
+            icon: Truck,
+          },
+          {
+            label: "Received (page)",
+            value: stats.received.toLocaleString(),
+            icon: CheckCircle2,
+            tone: "success",
+          },
+        ]}
+      />
+
+      {/* Status chips */}
+      <div className="flex flex-wrap gap-2">
+        {[
+          { value: "all", label: "All" },
+          { value: "PENDING", label: "Pending" },
+          { value: "DISPATCHED", label: "In transit" },
+          { value: "RECEIVED", label: "Received" },
+        ].map((s) => (
+          <button
+            key={s.value}
+            type="button"
+            onClick={() => {
+              setFilterStatus(s.value);
+              setPage(1);
+            }}
+            className={cn(
+              "inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+              filterStatus === s.value
+                ? "border-gray-900 bg-gray-900 text-white"
+                : "border-gray-200 bg-white text-gray-600 hover:bg-gray-50",
+            )}
+          >
+            {s.label}
+          </button>
+        ))}
       </div>
 
-      {/* KPI cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="p-4 border border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-100 p-2 rounded-md text-blue-600">
-              <History className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Total Transfers</p>
-              <h3 className="text-xl font-semibold text-black">{stats.total}</h3>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4 border border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="bg-yellow-100 p-2 rounded-md text-yellow-600">
-              <Clock className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Pending</p>
-              <h3 className="text-xl font-semibold text-black">{stats.pending}</h3>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4 border border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="bg-blue-100 p-2 rounded-md text-blue-600">
-              <Truck className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">In Transit</p>
-              <h3 className="text-xl font-semibold text-black">{stats.dispatched}</h3>
-            </div>
-          </div>
-        </Card>
-        <Card className="p-4 border border-gray-200">
-          <div className="flex items-center gap-3">
-            <div className="bg-green-100 p-2 rounded-md text-green-600">
-              <CheckCircle2 className="h-5 w-5" />
-            </div>
-            <div>
-              <p className="text-sm text-gray-600">Received</p>
-              <h3 className="text-xl font-semibold text-green-600">{stats.received}</h3>
-            </div>
-          </div>
-        </Card>
-      </div>
-
-      <Card className="border border-gray-200 overflow-hidden">
-        <CardHeader className="px-6 py-4 border-b border-gray-200">
-          <CardTitle className="text-base font-semibold text-black">Transfer History</CardTitle>
-        </CardHeader>
-        <InventoryCardGrid
-          empty={transfers.length === 0}
-          emptyTitle="No transfers yet"
-          emptyDescription="Create a transfer to move stock between branches."
-        >
-          {transfers.map((t) => (
-            <TransactionRecordCard
-              key={t.id}
-              date={`${new Date(t.transfer_date).toLocaleDateString()} · ${new Date(t.transfer_date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}`}
-              title={t.product?.name || "Product"}
-              subtitle={`Ref: ${t.reference_no || t.id.slice(0, 8)} · Qty ${t.quantity}`}
-              meta={
-                <span className="inline-flex items-center gap-1.5">
-                  {t.from_branch?.name}
-                  <ArrowRight className="h-3 w-3" />
-                  {t.to_branch?.name}
-                </span>
-              }
-              badge={
-                <Badge variant="outline" className={`text-xs ${getStatusStyle(t.status)}`}>
-                  {t.status}
-                </Badge>
-              }
-              highlights={[
-                { label: "Carrier", value: t.carrier_name || "—" },
-                { label: "Vehicle", value: t.vehicle_no || "—" },
-              ]}
-              footer={t.reason}
-              actions={
-                <div className="flex gap-2">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-8 w-8 p-0"
-                    onClick={() => printSlip(t)}
-                    title="Print slip"
-                  >
-                    <Printer className="h-3.5 w-3.5" />
-                  </Button>
-                  {t.status === "PENDING" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() => updateStatus(t.id, "DISPATCHED")}
-                    >
-                      Dispatch
-                    </Button>
-                  )}
-                  {t.status === "DISPATCHED" && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() => updateStatus(t.id, "RECEIVED")}
-                    >
-                      Receive
-                    </Button>
-                  )}
-                </div>
-              }
+      {/* Filters */}
+      <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+          <div className="relative md:col-span-2 xl:col-span-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search product, ref, branch, carrier…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-10 text-sm text-black"
             />
-          ))}
-        </InventoryCardGrid>
+          </div>
+
+          <Select
+            value={filterFrom}
+            onValueChange={(v) => {
+              setFilterFrom(v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-10 text-sm text-black">
+              <SelectValue placeholder="From branch" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-sm">
+                All source branches
+              </SelectItem>
+              {branches.map((b) => (
+                <SelectItem key={b.id} value={b.id} className="text-sm">
+                  {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Select
+            value={filterTo}
+            onValueChange={(v) => {
+              setFilterTo(v);
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="h-10 text-sm text-black">
+              <SelectValue placeholder="To branch" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-sm">
+                All destinations
+              </SelectItem>
+              {branches.map((b) => (
+                <SelectItem key={b.id} value={b.id} className="text-sm">
+                  {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className="h-10 w-full justify-start text-left text-sm font-normal text-black"
+              >
+                <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                {filterStart ? (
+                  format(filterStart, "dd MMM yyyy")
+                ) : (
+                  <span className="text-gray-400">From date</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <CalendarComponent
+                mode="single"
+                selected={filterStart}
+                onSelect={(d) => {
+                  setFilterStart(d);
+                  setPage(1);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+
+          <Popover>
+            <PopoverTrigger asChild>
+              <Button
+                variant="outline"
+                className="h-10 w-full justify-start text-left text-sm font-normal text-black"
+              >
+                <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                {filterEnd ? (
+                  format(filterEnd, "dd MMM yyyy")
+                ) : (
+                  <span className="text-gray-400">To date</span>
+                )}
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-auto p-0" align="start">
+              <CalendarComponent
+                mode="single"
+                selected={filterEnd}
+                onSelect={(d) => {
+                  setFilterEnd(d);
+                  setPage(1);
+                }}
+              />
+            </PopoverContent>
+          </Popover>
+
+          {hasActiveFilters ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-10 text-sm text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+              onClick={clearFilters}
+            >
+              <X className="h-4 w-4 mr-1.5" />
+              Clear filters
+            </Button>
+          ) : null}
+        </div>
+        <p className="text-xs text-gray-500">
+          Showing {filteredRows.length.toLocaleString()} of {total.toLocaleString()}{" "}
+          records
+          {searchQuery.trim() ? " (client search on this page)" : ""}
+        </p>
+      </div>
+
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h2 className="text-sm font-semibold text-gray-900">Transfer history</h2>
+          <p className="text-xs text-gray-500">
+            Dispatch and receive stock movements between locations
+          </p>
+        </div>
+        <div className="inline-flex rounded-lg border border-gray-200 p-0.5 self-start">
+          <button
+            type="button"
+            onClick={() => setViewMode("table")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+              viewMode === "table"
+                ? "bg-gray-900 text-white"
+                : "text-gray-600 hover:bg-gray-50",
+            )}
+          >
+            <List className="h-3.5 w-3.5" />
+            Table
+          </button>
+          <button
+            type="button"
+            onClick={() => setViewMode("grid")}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+              viewMode === "grid"
+                ? "bg-gray-900 text-white"
+                : "text-gray-600 hover:bg-gray-50",
+            )}
+          >
+            <LayoutGrid className="h-3.5 w-3.5" />
+            Grid
+          </button>
+        </div>
+      </div>
+
+      <Card className="border border-gray-200 overflow-hidden bg-white shadow-sm">
+        <CardContent className="p-0 relative">
+          {loading && transfers.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6">
+              <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+              <p className="text-sm text-gray-500 mt-3">Loading transfers...</p>
+            </div>
+          ) : filteredRows.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+              <Package className="h-8 w-8 text-gray-300 mb-3" />
+              <p className="text-sm font-medium text-gray-900">No transfers found</p>
+              <p className="text-xs text-gray-500 mt-1">
+                {hasActiveFilters
+                  ? "Try clearing filters or adjusting your search."
+                  : "Create a transfer to move stock between branches."}
+              </p>
+            </div>
+          ) : (
+            <>
+              {loading ? (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/70">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+                </div>
+              ) : null}
+
+              {viewMode === "table" ? (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                        <TableHead className="text-xs font-semibold text-gray-600 pl-3">
+                          Date
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">
+                          Product
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">
+                          Route
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                          Qty
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">
+                          Status
+                        </TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right pr-3">
+                          Actions
+                        </TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredRows.map((t) => {
+                        const ts = new Date(t.transfer_date);
+                        return (
+                          <TableRow key={t.id}>
+                            <TableCell className="py-2.5 pl-3 whitespace-nowrap text-sm text-gray-700">
+                              <div>{ts.toLocaleDateString()}</div>
+                              <div className="text-[11px] text-gray-400">
+                                {ts.toLocaleTimeString([], {
+                                  hour: "2-digit",
+                                  minute: "2-digit",
+                                })}
+                              </div>
+                            </TableCell>
+                            <TableCell className="py-2.5">
+                              <p className="text-sm font-medium text-gray-900 line-clamp-1">
+                                {t.product?.name || "—"}
+                              </p>
+                              <p className="text-[11px] font-mono text-gray-400">
+                                {t.reference_no || t.product?.sku || "—"}
+                              </p>
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-700">
+                              <span className="inline-flex items-center gap-1.5">
+                                {t.from_branch?.name || "—"}
+                                <ArrowRight className="h-3 w-3 text-gray-400" />
+                                {t.to_branch?.name || "—"}
+                              </span>
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums font-medium">
+                              {formatQty(Number(t.quantity) || 0)}
+                            </TableCell>
+                            <TableCell className="py-2.5">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] font-semibold",
+                                  statusTone(t.status),
+                                )}
+                              >
+                                {t.status}
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="py-2.5 pr-3">
+                              {statusActions(t)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <InventoryCardGrid empty={false} loading={false}>
+                  {filteredRows.map((t) => {
+                    const ts = new Date(t.transfer_date);
+                    return (
+                      <TransactionRecordCard
+                        key={t.id}
+                        date={`${ts.toLocaleDateString(undefined, {
+                          day: "2-digit",
+                          month: "short",
+                          year: "numeric",
+                        })} · ${ts.toLocaleTimeString([], {
+                          hour: "2-digit",
+                          minute: "2-digit",
+                        })}`}
+                        title={t.product?.name || "Transfer"}
+                        subtitle={
+                          t.reference_no
+                            ? `Ref ${t.reference_no}`
+                            : t.product?.sku
+                              ? `SKU ${t.product.sku}`
+                              : undefined
+                        }
+                        amount={formatQty(Number(t.quantity) || 0)}
+                        amountLabel="Qty"
+                        meta={
+                          <span className="inline-flex items-center gap-1.5">
+                            {t.from_branch?.name || "—"}
+                            <ArrowRight className="h-3 w-3" />
+                            {t.to_branch?.name || "—"}
+                          </span>
+                        }
+                        badge={
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase",
+                              statusTone(t.status),
+                            )}
+                          >
+                            {t.status}
+                          </span>
+                        }
+                        highlights={[
+                          { label: "Reason", value: t.reason || "—" },
+                          { label: "Carrier", value: t.carrier_name || "—" },
+                          { label: "Vehicle", value: t.vehicle_no || "—" },
+                        ]}
+                        actions={statusActions(t, true)}
+                      />
+                    );
+                  })}
+                </InventoryCardGrid>
+              )}
+            </>
+          )}
+        </CardContent>
+
+        {total > 0 ? (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 sm:px-6 py-3 border-t border-gray-200">
+            <p className="text-sm text-black">
+              Showing {(page - 1) * PAGE_SIZE + 1}–
+              {Math.min(page * PAGE_SIZE, total)} of {total}
+            </p>
+            <div className="flex items-center gap-1">
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-sm text-black"
+                onClick={() => setPage(1)}
+                disabled={page === 1 || loading}
+              >
+                First
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-sm text-black"
+                onClick={() => setPage(Math.max(1, page - 1))}
+                disabled={page === 1 || loading}
+              >
+                Previous
+              </Button>
+              <span className="text-sm text-black px-3">
+                Page {page} of {totalPages}
+              </span>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-sm text-black"
+                onClick={() => setPage(Math.min(totalPages, page + 1))}
+                disabled={page >= totalPages || loading}
+              >
+                Next
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                className="text-sm text-black"
+                onClick={() => setPage(totalPages)}
+                disabled={page >= totalPages || loading}
+              >
+                Last
+              </Button>
+            </div>
+          </div>
+        ) : null}
       </Card>
+
+      {/* Detail dialog */}
+      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
+        <DialogContent className="w-[min(96vw,560px)] max-w-[560px] sm:max-w-[560px]">
+          <DialogHeader>
+            <DialogTitle className="text-base">Transfer detail</DialogTitle>
+            <DialogDescription className="text-xs">
+              {detailRow?.reference_no || "Movement record"}
+            </DialogDescription>
+          </DialogHeader>
+          {detailLoading && !detailRow ? (
+            <div className="flex justify-center py-10">
+              <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
+            </div>
+          ) : detailRow ? (
+            <div className="space-y-4 text-sm">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge
+                  variant="outline"
+                  className={cn(
+                    "text-[10px] font-semibold",
+                    statusTone(detailRow.status),
+                  )}
+                >
+                  {detailRow.status}
+                </Badge>
+                <span className="text-xs text-gray-500">
+                  {new Date(detailRow.transfer_date).toLocaleString()}
+                </span>
+              </div>
+
+              <div className="rounded-lg border border-gray-100 bg-gray-50/80 p-3 space-y-2">
+                <p className="font-semibold text-gray-900">
+                  {detailRow.product?.name || "—"}
+                </p>
+                {detailRow.product?.sku ? (
+                  <p className="text-xs font-mono text-gray-500">
+                    {detailRow.product.sku}
+                  </p>
+                ) : null}
+                <div className="flex items-center gap-2 text-sm text-gray-700 pt-1">
+                  <span>{detailRow.from_branch?.name || "—"}</span>
+                  <ArrowRight className="h-3.5 w-3.5 text-gray-400" />
+                  <span>{detailRow.to_branch?.name || "—"}</span>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-3 gap-2 text-center">
+                <div className="rounded-lg border border-gray-100 p-2.5">
+                  <p className="text-[10px] uppercase text-gray-400">Qty</p>
+                  <p className="text-base font-bold tabular-nums mt-0.5">
+                    {formatQty(Number(detailRow.quantity) || 0)}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-100 p-2.5">
+                  <p className="text-[10px] uppercase text-gray-400">Reason</p>
+                  <p className="text-xs font-medium mt-1 line-clamp-2">
+                    {detailRow.reason || "—"}
+                  </p>
+                </div>
+                <div className="rounded-lg border border-gray-100 p-2.5">
+                  <p className="text-[10px] uppercase text-gray-400">Carrier</p>
+                  <p className="text-xs font-medium mt-1 line-clamp-2">
+                    {detailRow.carrier_name || "—"}
+                  </p>
+                </div>
+              </div>
+
+              {detailRow.notes ? (
+                <p className="text-xs text-gray-600 leading-relaxed">
+                  {detailRow.notes}
+                </p>
+              ) : null}
+
+              <div className="flex flex-wrap gap-2 pt-1">
+                {statusActions(detailRow)}
+              </div>
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

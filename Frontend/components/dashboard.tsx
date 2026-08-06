@@ -1,11 +1,12 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { DashboardHome } from "@/components/dashboard-home";
 import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { useDashboardTab } from "@/lib/dashboard-tabs";
+import { scrollMainToTop } from "@/lib/scroll-main";
 
 import { Customers } from "@/components/customers";
 import { Reports } from "@/components/reports";
@@ -68,6 +69,10 @@ interface DashboardProps {
 export function Dashboard({ onLogout }: DashboardProps) {
   const { activeTab, setActiveTab } = useDashboardTab();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  useEffect(() => {
+    scrollMainToTop("auto");
+  }, [activeTab]);
 
   const renderContent = () => {
     switch (activeTab) {
@@ -204,7 +209,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
         </div>
       </header>
 
-      <main className="flex w-full flex-1 flex-col overflow-auto pt-14 sm:pt-16 lg:pt-0">
+      <main
+        id="app-main-scroll"
+        className="flex w-full flex-1 flex-col overflow-auto pt-14 sm:pt-16 lg:pt-0"
+      >
         {renderContent()}
       </main>
     </div>

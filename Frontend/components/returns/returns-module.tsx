@@ -37,6 +37,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { DatePicker } from "@/components/ui/date-picker"
 import apiClient from "@/lib/apiClient"
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri"
+import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change"
 import {
   prepareReturnReceiptDataFromSale,
   downloadReceiptPdf,
@@ -551,6 +552,7 @@ export function ReturnsModule({
   // Pagination state
   const [currentPage, setCurrentPage] = useState(1)
   const [pageSize, setPageSize] = useState<number>(25)
+  useScrollToTopOnPageChange(currentPage)
   const saleSearchInputRef = useRef<HTMLInputElement | null>(null)
   const saleDropdownRef = useRef<HTMLDivElement | null>(null)
   const latestSalesRequestRef = useRef(0)

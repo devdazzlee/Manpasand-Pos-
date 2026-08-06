@@ -5,6 +5,11 @@ import { StockOutService } from '../services/stock-out.service';
 
 const stockOutService = new StockOutService();
 
+export const getMonthlyStats = asyncHandler(async (req: Request, res: Response) => {
+  const stats = await stockOutService.getMonthlyStats(req.query.branchId as string | undefined);
+  new ApiResponse(stats, 'Monthly stock-out stats retrieved').send(res);
+});
+
 export const logStockOut = asyncHandler(async (req: Request, res: Response) => {
   const result = await stockOutService.logStockOut({
     ...req.body,

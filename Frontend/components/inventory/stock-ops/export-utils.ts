@@ -27,6 +27,265 @@ export function downloadExcel(
   XLSX.writeFile(wb, filename);
 }
 
+/** Yield so React can paint loading UI before heavy export work. */
+export function yieldForUi(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 40));
+}
+
+export interface BrandedPdfColumn {
+  header: string;
+  align?: "left" | "right";
+  /** Relative width weight (default 1). */
+  width?: number;
+}
+
+export interface BrandedReportSummaryItem {
+  label: string;
+  value: string;
+}
+
+export interface DownloadBrandedPdfOptions {
+  filename: string;
+  title: string;
+  subtitle?: string;
+  logoDataUri?: string;
+  generatedAt?: Date | string;
+  summary?: BrandedReportSummaryItem[];
+  columns: BrandedPdfColumn[];
+  rows: (string | number)[][];
+  orientation?: "landscape" | "portrait";
+  footerNote?: string;
+}
+
+/**
+ * Builds a branded inventory PDF with jsPDF and triggers a file download
+ * (does not open the browser print dialog).
+ */
+export async function downloadBrandedPdf(
+  options: DownloadBrandedPdfOptions,
+): Promise<void> {
+  const {
+    filename,
+    title,
+    subtitle = "",
+    logoDataUri = "",
+    generatedAt = new Date(),
+    summary = [],
+    columns,
+    rows,
+    orientation = "landscape",
+    footerNote = "Manpasand POS · Confidential inventory report",
+  } = options;
+
+  const { jsPDF } = await import("jspdf");
+  const doc = new jsPDF({
+    unit: "mm",
+    format: "a4",
+    orientation,
+  });
+
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = 12;
+  const usableWidth = pageWidth - margin * 2;
+  const bottomLimit = pageHeight - 14;
+
+  const when =
+    typeof generatedAt === "string"
+      ? generatedAt
+      : generatedAt.toLocaleString(undefined, {
+          dateStyle: "medium",
+          timeStyle: "short",
+        });
+
+  // ----- Header band -----
+  const bandHeight = 26;
+  doc.setFillColor(17, 24, 39);
+  doc.rect(0, 0, pageWidth, bandHeight, "F");
+
+  let textX = margin;
+  if (logoDataUri) {
+    try {
+      const img = await loadImage(logoDataUri);
+      const aspect = img.naturalWidth / img.naturalHeight || 2.5;
+      let imgH = 14;
+      let imgW = imgH * aspect;
+      if (imgW > 32) {
+        imgW = 32;
+        imgH = imgW / aspect;
+      }
+      const format = logoDataUri.includes("image/jpeg") ? "JPEG" : "PNG";
+      doc.addImage(logoDataUri, format, margin, (bandHeight - imgH) / 2, imgW, imgH);
+      textX = margin + imgW + 4;
+    } catch {
+      // continue without logo
+    }
+  }
+
+  doc.setTextColor(255, 255, 255);
+  doc.setFont("helvetica", "bold");
+  doc.setFontSize(14);
+  doc.text("MANPASAND POS", textX, 11);
+  doc.setFont("helvetica", "normal");
+  doc.setFontSize(9);
+  doc.text(title, textX, 17);
+  if (subtitle) {
+    doc.setFontSize(7.5);
+    doc.setTextColor(203, 213, 225);
+    doc.text(subtitle, textX, 22);
+  }
+
+  doc.setTextColor(226, 232, 240);
+  doc.setFontSize(7.5);
+  doc.text(`Generated ${when}`, pageWidth - margin, 11, { align: "right" });
+  doc.text(`${rows.length.toLocaleString()} records`, pageWidth - margin, 16.5, {
+    align: "right",
+  });
+
+  let y = bandHeight + 8;
+
+  // ----- Summary tiles -----
+  if (summary.length > 0) {
+    const gap = 3;
+    const cols = Math.min(summary.length, 4);
+    const boxW = (usableWidth - gap * (cols - 1)) / cols;
+    const boxH = 16;
+    summary.slice(0, 4).forEach((item, i) => {
+      const x = margin + i * (boxW + gap);
+      doc.setDrawColor(226, 232, 240);
+      doc.setFillColor(248, 250, 252);
+      doc.roundedRect(x, y, boxW, boxH, 1.5, 1.5, "FD");
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(6);
+      doc.setTextColor(100, 116, 139);
+      doc.text(item.label.toUpperCase(), x + 2.5, y + 5);
+      doc.setFontSize(9);
+      doc.setTextColor(15, 23, 42);
+      doc.text(String(item.value), x + 2.5, y + 11.5);
+    });
+    y += boxH + 8;
+  }
+
+  // ----- Table -----
+  const totalWeight = columns.reduce((sum, c) => sum + (c.width ?? 1), 0);
+  const colWidths = columns.map((c) => ((c.width ?? 1) / totalWeight) * usableWidth);
+  const rowH = 6.2;
+  const headerH = 7;
+
+  const drawTableHeader = () => {
+    doc.setFillColor(17, 24, 39);
+    doc.rect(margin, y, usableWidth, headerH, "F");
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(7);
+    doc.setTextColor(255, 255, 255);
+    let x = margin;
+    columns.forEach((col, i) => {
+      const w = colWidths[i];
+      const align = col.align === "right" ? "right" : "left";
+      const tx = align === "right" ? x + w - 1.5 : x + 1.5;
+      doc.text(col.header, tx, y + 4.6, {
+        align,
+        maxWidth: w - 3,
+      });
+      x += w;
+    });
+    y += headerH;
+  };
+
+  const ensureSpace = (needed: number) => {
+    if (y + needed > bottomLimit) {
+      doc.addPage();
+      y = margin;
+      drawTableHeader();
+    }
+  };
+
+  drawTableHeader();
+
+  rows.forEach((row, rowIndex) => {
+    ensureSpace(rowH);
+    if (rowIndex % 2 === 1) {
+      doc.setFillColor(248, 250, 252);
+      doc.rect(margin, y, usableWidth, rowH, "F");
+    }
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(31, 41, 55);
+    let x = margin;
+    columns.forEach((col, i) => {
+      const w = colWidths[i];
+      const align = col.align === "right" ? "right" : "left";
+      const tx = align === "right" ? x + w - 1.5 : x + 1.5;
+      const cell = String(row[i] ?? "");
+      doc.text(cell, tx, y + 4.2, {
+        align,
+        maxWidth: w - 3,
+      });
+      x += w;
+    });
+    y += rowH;
+  });
+
+  // ----- Footer on each page -----
+  const pageCount = doc.getNumberOfPages();
+  for (let i = 1; i <= pageCount; i++) {
+    doc.setPage(i);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(7);
+    doc.setTextColor(107, 114, 128);
+    doc.text(footerNote, margin, pageHeight - 7);
+    doc.text(`Page ${i} of ${pageCount}`, pageWidth - margin, pageHeight - 7, {
+      align: "right",
+    });
+  }
+
+  const safeName = filename.endsWith(".pdf") ? filename : `${filename}.pdf`;
+  doc.save(safeName);
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+/** @deprecated Use downloadBrandedPdf — print dialog was confusing users. */
+export async function printBrandedReport(
+  options: Omit<DownloadBrandedPdfOptions, "filename" | "columns" | "rows"> & {
+    tableHtml?: string;
+    filename?: string;
+    columns?: BrandedPdfColumn[];
+    rows?: (string | number)[][];
+  },
+): Promise<void> {
+  if (options.columns && options.rows) {
+    await downloadBrandedPdf({
+      filename: options.filename || `${slugify(options.title)}.pdf`,
+      title: options.title,
+      subtitle: options.subtitle,
+      logoDataUri: options.logoDataUri,
+      generatedAt: options.generatedAt,
+      summary: options.summary,
+      columns: options.columns,
+      rows: options.rows,
+      footerNote: options.footerNote,
+    });
+    return;
+  }
+  throw new Error("downloadBrandedPdf requires columns and rows");
+}
+
+function slugify(value: string) {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)/g, "") || "report";
+}
+
+/** Kept for older call sites that still write HTML into a print window. */
 export function printHtmlDocument(title: string, bodyHtml: string) {
   const win = window.open("", "_blank", "width=900,height=700");
   if (!win) return false;

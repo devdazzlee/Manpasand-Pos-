@@ -110,6 +110,11 @@ class StockAdjustmentService {
             where.product_id = params.productId;
         if (params.branchId)
             where.branch_id = params.branchId;
+        if (params.adjustmentType)
+            where.adjustment_type = params.adjustmentType;
+        if (params.adjustmentCategory) {
+            where.adjustment_category = params.adjustmentCategory;
+        }
         if (params.startDate || params.endDate) {
             where.adjustment_date = {};
             if (params.startDate)

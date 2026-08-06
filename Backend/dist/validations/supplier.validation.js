@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listSuppliersSchema = exports.getSupplierSchema = exports.updateSupplierSchema = exports.createSupplierSchema = void 0;
+exports.deleteSupplierPaymentSchema = exports.createSupplierPaymentSchema = exports.listSuppliersSchema = exports.getSupplierSchema = exports.updateSupplierSchema = exports.createSupplierSchema = void 0;
 const zod_1 = require("zod");
 // Optional contact fields are .nullable() so the Edit form can send `null`
 // explicitly to clear a previously-set value. On create the frontend omits
@@ -52,6 +52,27 @@ exports.listSuppliersSchema = zod_1.z.object({
         is_active: zod_1.z.enum(['true', 'false']).optional(),
         display_on_pos: zod_1.z.enum(['true', 'false']).optional(),
         fetch_all: zod_1.z.enum(['true', 'false']).optional(),
+    }),
+});
+exports.createSupplierPaymentSchema = zod_1.z.object({
+    params: zod_1.z.object({
+        id: zod_1.z.string().min(1, 'Supplier ID is required'),
+    }),
+    body: zod_1.z.object({
+        amount: zod_1.z.coerce.number().positive('Amount must be greater than 0'),
+        paymentDate: zod_1.z.string().optional(),
+        method: zod_1.z
+            .enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'CARD', 'OTHER'])
+            .optional()
+            .default('CASH'),
+        reference: zod_1.z.string().optional(),
+        notes: zod_1.z.string().optional(),
+    }),
+});
+exports.deleteSupplierPaymentSchema = zod_1.z.object({
+    params: zod_1.z.object({
+        id: zod_1.z.string().min(1, 'Supplier ID is required'),
+        paymentId: zod_1.z.string().min(1, 'Payment ID is required'),
     }),
 });
 //# sourceMappingURL=supplier.validation.js.map

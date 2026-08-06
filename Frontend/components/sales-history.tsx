@@ -80,6 +80,7 @@ import { cn } from "@/lib/utils";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change";
 import {
   prepareReceiptDataFromSale,
   generateReceiptHtml,
@@ -337,6 +338,7 @@ export function SalesHistory() {
   const [pageSize, setPageSize] = useState(25);
   const [totalSales, setTotalSales] = useState(0);
   const [totalPages, setTotalPages] = useState(1);
+  useScrollToTopOnPageChange(currentPage);
   const [sortBy, setSortBy] = useState<SortField>("sale_date");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
@@ -1142,27 +1144,34 @@ export function SalesHistory() {
         </Card>
       )}
 
-      {/* Sales Cards */}
-      <Card className="border-gray-200 shadow-sm">
-        <CardHeader className="pb-3">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+      {/* Sales list */}
+      <Card className="border-gray-200 shadow-sm overflow-hidden">
+        <CardHeader className="pb-3 px-4 sm:px-6">
+          <div>
             <CardTitle>
               Sales History {loading ? "" : `(${totalSales})`}
             </CardTitle>
-            <p className="text-sm text-gray-500">
+            <p className="text-sm text-gray-500 mt-0.5">
               {loading
                 ? "Loading sales…"
                 : `Showing ${pageStart}–${pageEnd} of ${totalSales}${
-                    !isAdmin ? " · your branch only" : branchFilter === "all" ? " · all branches" : ""
+                    !isAdmin
+                      ? " · your branch only"
+                      : branchFilter === "all"
+                        ? " · all branches"
+                        : ""
                   }`}
             </p>
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-4 p-0 sm:p-0">
           {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
               {Array.from({ length: 6 }).map((_, index) => (
-                <div key={index} className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4">
+                <div
+                  key={index}
+                  className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
+                >
                   <div className="h-14 rounded-xl bg-gray-100" />
                   <div className="mt-4 h-4 w-2/3 rounded bg-gray-100" />
                   <div className="mt-2 h-3 w-1/2 rounded bg-gray-100" />
@@ -1174,7 +1183,7 @@ export function SalesHistory() {
               ))}
             </div>
           ) : sales.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center">
+            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white mx-4 mb-4 px-6 py-16 text-center">
               <Receipt className="h-12 w-12 text-gray-400" />
               <h3 className="mt-4 text-lg font-semibold text-gray-900">No sales found</h3>
               <p className="mt-1 max-w-sm text-sm text-gray-500">
@@ -1182,7 +1191,7 @@ export function SalesHistory() {
               </p>
             </div>
           ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
               {sales.map((sale) => {
                 const isRefund =
                   sale.status === "REFUNDED" ||
@@ -1216,10 +1225,16 @@ export function SalesHistory() {
                             >
                               {isRefund ? "Refund" : "Sale"}
                             </Badge>
-                            <Badge variant={statusBadgeVariant(sale.status)} className="text-[10px] uppercase">
+                            <Badge
+                              variant={statusBadgeVariant(sale.status)}
+                              className="text-[10px] uppercase"
+                            >
                               {sale.status}
                             </Badge>
-                            <Badge variant={paymentStatusVariant(sale.payment_status)} className="text-[10px] uppercase">
+                            <Badge
+                              variant={paymentStatusVariant(sale.payment_status)}
+                              className="text-[10px] uppercase"
+                            >
                               {sale.payment_status || "PAID"}
                             </Badge>
                           </div>
@@ -1232,7 +1247,9 @@ export function SalesHistory() {
                           </p>
                         </div>
                         <div className="text-right">
-                          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">Total</p>
+                          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
+                            Total
+                          </p>
                           <p
                             className={cn(
                               "text-xl font-bold",
@@ -1250,14 +1267,20 @@ export function SalesHistory() {
                         <div className="flex items-start gap-2 text-gray-700">
                           <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
                           <div className="min-w-0">
-                            <p className="text-[11px] uppercase tracking-wide text-gray-500">Branch</p>
-                            <p className="truncate font-medium">{sale.branch?.name || "—"}</p>
+                            <p className="text-[11px] uppercase tracking-wide text-gray-500">
+                              Branch
+                            </p>
+                            <p className="truncate font-medium">
+                              {sale.branch?.name || "—"}
+                            </p>
                           </div>
                         </div>
                         <div className="flex items-start gap-2 text-gray-700">
                           <User className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
                           <div className="min-w-0">
-                            <p className="text-[11px] uppercase tracking-wide text-gray-500">Customer / Cashier</p>
+                            <p className="text-[11px] uppercase tracking-wide text-gray-500">
+                              Customer / Cashier
+                            </p>
                             <p className="truncate font-medium">
                               {customerLabel(sale)} · {cashierLabel(sale)}
                             </p>
@@ -1266,7 +1289,9 @@ export function SalesHistory() {
                         <div className="flex items-start gap-2 text-gray-700">
                           <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
                           <div className="min-w-0">
-                            <p className="text-[11px] uppercase tracking-wide text-gray-500">Payment</p>
+                            <p className="text-[11px] uppercase tracking-wide text-gray-500">
+                              Payment
+                            </p>
                             <p className="truncate font-medium">
                               {(sale.payment_method || "CASH").replace("_", " ")} ·{" "}
                               {itemCount(sale) > 0
@@ -1278,15 +1303,21 @@ export function SalesHistory() {
                         <div className="grid grid-cols-3 gap-2 rounded-lg bg-gray-50 p-2 text-xs">
                           <div>
                             <p className="text-gray-500">Subtotal</p>
-                            <p className="font-semibold">{formatCurrency(sale.subtotal)}</p>
+                            <p className="font-semibold">
+                              {formatCurrency(sale.subtotal)}
+                            </p>
                           </div>
                           <div>
                             <p className="text-gray-500">Discount</p>
-                            <p className="font-semibold">{formatCurrency(sale.discount_amount)}</p>
+                            <p className="font-semibold">
+                              {formatCurrency(sale.discount_amount)}
+                            </p>
                           </div>
                           <div>
                             <p className="text-gray-500">Tax</p>
-                            <p className="font-semibold">{formatCurrency(sale.tax_amount)}</p>
+                            <p className="font-semibold">
+                              {formatCurrency(sale.tax_amount)}
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -1333,7 +1364,9 @@ export function SalesHistory() {
                               variant="ghost"
                               size="icon"
                               className="h-8 w-8"
-                              disabled={!!actionBusy && actionBusy.saleId === sale.id}
+                              disabled={
+                                !!actionBusy && actionBusy.saleId === sale.id
+                              }
                             >
                               {actionBusy?.saleId === sale.id ? (
                                 <Loader2 className="h-4 w-4 animate-spin" />
@@ -1388,7 +1421,9 @@ export function SalesHistory() {
                             <DropdownMenuSeparator />
                             {canManageSales && (
                               <DropdownMenuItem
-                                disabled={!!sale.original_sale_id || !!actionBusy}
+                                disabled={
+                                  !!sale.original_sale_id || !!actionBusy
+                                }
                                 onSelect={(e) => {
                                   e.preventDefault();
                                   openEditSale(sale);
@@ -1438,7 +1473,7 @@ export function SalesHistory() {
           )}
 
           {/* Professional pagination */}
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between pt-2 border-t">
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between px-4 py-3 border-t">
             <div className="flex flex-wrap items-center gap-3">
               <div className="flex items-center gap-2">
                 <Label htmlFor="page-size" className="text-sm whitespace-nowrap">
@@ -1536,7 +1571,7 @@ export function SalesHistory() {
           }
         }}
       >
-        <DialogContent className="max-w-4xl max-h-[92vh] overflow-y-auto gap-3 p-4 sm:p-5">
+        <DialogContent className="w-[min(96vw,1120px)] max-w-[1120px] sm:max-w-[1120px] max-h-[92vh] overflow-y-auto gap-3 p-4 sm:p-6">
           <DialogHeader className="space-y-1 pr-8">
             <div className="flex flex-wrap items-start justify-between gap-2">
               <div>

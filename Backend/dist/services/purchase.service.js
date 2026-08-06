@@ -90,6 +90,11 @@ class PurchaseService {
     // Multi-line GRN — saves the supplier delivery as N Purchase rows + one
     // stock movement per line, all in a single transaction. Use this for the
     // "Save purchase" flow on the Stock In screen.
+    //
+    // Payment modes (supplier credit / cash):
+    // - CREDIT: full bill stays payable on the supplier ledger
+    // - CASH: auto-records a supplier payment for the full bill total
+    // - MIX: records a partial payment; remainder stays as balance due
     async createBulkPurchase(data) {
         if (!Array.isArray(data.lines) || data.lines.length === 0) {
             throw new apiError_1.AppError(400, 'At least one line is required');
@@ -99,6 +104,27 @@ class PurchaseService {
         });
         if (!branch)
             throw new apiError_1.AppError(404, 'Warehouse branch not found');
+        const supplier = await client_1.prisma.supplier.findUnique({
+            where: { id: data.supplierId },
+        });
+        if (!supplier)
+            throw new apiError_1.AppError(404, 'Supplier not found');
+        const billTotal = data.lines.reduce((sum, line) => sum + line.quantity * line.costPrice, 0);
+        const paymentMode = data.paymentMode || 'CREDIT';
+        let paidNow = 0;
+        if (paymentMode === 'CASH') {
+            paidNow = billTotal;
+        }
+        else if (paymentMode === 'MIX') {
+            paidNow = Number(data.paidAmount) || 0;
+            if (paidNow <= 0) {
+                throw new apiError_1.AppError(400, 'Enter how much was paid now for a mix payment');
+            }
+            if (paidNow >= billTotal && billTotal > 0) {
+                throw new apiError_1.AppError(400, 'Mix paid amount must be less than bill total (use Cash for full pay)');
+            }
+        }
+        const creditRemaining = Math.max(0, billTotal - paidNow);
         return client_1.prisma.$transaction(async (tx) => {
             const purchaseIds = [];
             for (const line of data.lines) {
@@ -110,8 +136,6 @@ class PurchaseService {
                 if (!Number.isFinite(line.costPrice) || line.costPrice < 0) {
                     throw new apiError_1.AppError(400, `Invalid cost price on line for product ${line.productId}`);
                 }
-                // Compose per-line notes that preserve the batch/expiry/notes
-                // metadata next to the row's other fields.
                 const noteParts = [];
                 if (data.batchNo)
                     noteParts.push(`Batch: ${data.batchNo}`);
@@ -119,6 +143,10 @@ class PurchaseService {
                     noteParts.push(`Expiry: ${data.expiryDate.toISOString().slice(0, 10)}`);
                 if (data.notes)
                     noteParts.push(data.notes);
+                noteParts.push(`Pay: ${paymentMode}` +
+                    (paymentMode !== 'CREDIT'
+                        ? ` · paid ${paidNow.toFixed(2)} · credit ${creditRemaining.toFixed(2)}`
+                        : ` · credit ${billTotal.toFixed(2)}`));
                 const noteText = noteParts.length > 0 ? noteParts.join(' | ') : undefined;
                 const purchase = await tx.purchase.create({
                     data: {
@@ -184,7 +212,40 @@ class PurchaseService {
                 });
                 purchaseIds.push(purchase.id);
             }
-            return { count: purchaseIds.length, purchaseIds };
+            let paymentId = null;
+            if (paidNow > 0) {
+                const payNotes = [
+                    data.paymentNotes,
+                    `Stock-in ${paymentMode}`,
+                    data.invoiceRef ? `Invoice ${data.invoiceRef}` : null,
+                    creditRemaining > 0
+                        ? `Remaining on credit ${creditRemaining.toFixed(2)}`
+                        : 'Fully paid at stock-in',
+                ]
+                    .filter(Boolean)
+                    .join(' · ');
+                const payment = await tx.supplierPayment.create({
+                    data: {
+                        supplier_id: data.supplierId,
+                        amount: paidNow,
+                        payment_date: data.purchaseDate || new Date(),
+                        method: data.paymentMethod || 'CASH',
+                        reference: data.paymentReference || data.invoiceRef || null,
+                        notes: payNotes || null,
+                        created_by: data.createdBy,
+                    },
+                });
+                paymentId = payment.id;
+            }
+            return {
+                count: purchaseIds.length,
+                purchaseIds,
+                billTotal,
+                paymentMode,
+                paidAmount: paidNow,
+                creditRemaining,
+                paymentId,
+            };
         });
     }
     async listPurchases(params) {

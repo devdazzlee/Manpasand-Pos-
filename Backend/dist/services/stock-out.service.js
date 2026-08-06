@@ -168,6 +168,44 @@ class StockOutService {
             meta: { total, page, limit, totalPages: Math.ceil(total / limit) || 1 },
         };
     }
+    async getMonthlyStats(branchId) {
+        const startOfMonth = new Date();
+        startOfMonth.setDate(1);
+        startOfMonth.setHours(0, 0, 0, 0);
+        const where = {
+            quantity_change: { lt: 0 },
+            movement_type: { in: ['SALE', 'DAMAGE', 'LOSS', 'EXPIRED', 'RETURN'] },
+            created_at: { gte: startOfMonth },
+        };
+        if (branchId)
+            where.branch_id = branchId;
+        const movements = await client_1.prisma.stockMovement.findMany({
+            where,
+            select: {
+                quantity_change: true,
+                unit_cost: true,
+                movement_type: true,
+            },
+        });
+        const totalDispatches = movements.length;
+        const totalQuantity = movements.reduce((sum, m) => sum + Math.abs((0, helpers_1.asNumber)(m.quantity_change)), 0);
+        const totalValue = movements.reduce((sum, m) => {
+            const qty = Math.abs((0, helpers_1.asNumber)(m.quantity_change));
+            const rate = (0, helpers_1.asNumber)(m.unit_cost);
+            return sum + qty * rate;
+        }, 0);
+        const byReason = {};
+        for (const m of movements) {
+            const key = String(m.movement_type || 'OTHER');
+            byReason[key] = (byReason[key] || 0) + 1;
+        }
+        return {
+            totalDispatches,
+            totalQuantity,
+            totalValue,
+            byReason,
+        };
+    }
     async logReturn(data) {
         if (data.quantity <= 0) {
             throw new apiError_1.AppError(400, 'Quantity must be greater than 0');

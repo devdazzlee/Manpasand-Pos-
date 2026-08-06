@@ -58,5 +58,31 @@ export const listSuppliersSchema = z.object({
     }),
 });
 
+export const createSupplierPaymentSchema = z.object({
+    params: z.object({
+        id: z.string().min(1, 'Supplier ID is required'),
+    }),
+    body: z.object({
+        amount: z.coerce.number().positive('Amount must be greater than 0'),
+        paymentDate: z.string().optional(),
+        method: z
+            .enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'CARD', 'OTHER'])
+            .optional()
+            .default('CASH'),
+        reference: z.string().optional(),
+        notes: z.string().optional(),
+    }),
+});
+
+export const deleteSupplierPaymentSchema = z.object({
+    params: z.object({
+        id: z.string().min(1, 'Supplier ID is required'),
+        paymentId: z.string().min(1, 'Payment ID is required'),
+    }),
+});
+
 export type CreateSupplierInput = z.infer<typeof createSupplierSchema>['body'];
 export type UpdateSupplierInput = z.infer<typeof updateSupplierSchema>['body'];
+export type CreateSupplierPaymentInput = z.infer<
+    typeof createSupplierPaymentSchema
+>['body'];

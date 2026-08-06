@@ -24,6 +24,7 @@ exports.getStockMovements = (0, asyncHandler_1.default)(async (req, res) => {
         branchId: query.branchId,
         productId: query.productId,
         movementType: query.movementType,
+        direction: query.direction,
         startDate,
         endDate,
         page: Number(query.page) || 1,

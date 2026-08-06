@@ -50,3 +50,30 @@ export const logoutCustomer = asyncHandler(async (req: Request, res: Response) =
     const customers = await customerService.logoutCustomer(req.customer?.id);
     new ApiResponse(customers, 'Customers logout').send(res);
 });
+
+export const getCustomerPurchases = asyncHandler(async (req: Request, res: Response) => {
+    const data = await customerService.getCustomerPurchases(req.params.customerId);
+    new ApiResponse(data, 'Customer purchases retrieved').send(res);
+});
+
+export const getCustomerLedger = asyncHandler(async (req: Request, res: Response) => {
+    const data = await customerService.getCustomerLedger(req.params.customerId);
+    new ApiResponse(data, 'Customer ledger retrieved').send(res);
+});
+
+export const createCustomerPayment = asyncHandler(async (req: Request, res: Response) => {
+    const payment = await customerService.createCustomerPayment(
+        req.params.customerId,
+        req.body,
+        req.user!.id,
+    );
+    new ApiResponse(payment, 'Payment recorded successfully', 201).send(res);
+});
+
+export const deleteCustomerPayment = asyncHandler(async (req: Request, res: Response) => {
+    await customerService.deleteCustomerPayment(
+        req.params.customerId,
+        req.params.paymentId,
+    );
+    new ApiResponse(null, 'Payment deleted successfully').send(res);
+});

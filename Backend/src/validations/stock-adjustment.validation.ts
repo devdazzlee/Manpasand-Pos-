@@ -20,6 +20,19 @@ export const listAdjustmentsSchema = z.object({
     limit: z.string().optional().default('20'),
     productId: z.string().optional(),
     branchId: z.string().optional(),
+    adjustmentType: z
+      .enum(['ADDITION', 'SUBTRACTION', 'RECONCILIATION'])
+      .optional(),
+    adjustmentCategory: z
+      .enum([
+        'CORRECTION',
+        'DAMAGE',
+        'EXPIRED',
+        'THEFT',
+        'RETURN_TO_SUPPLIER',
+        'ADMINISTRATIVE',
+      ])
+      .optional(),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
   }),

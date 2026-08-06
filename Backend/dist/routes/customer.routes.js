@@ -41,6 +41,10 @@ router.post('/', (0, validation_middleware_1.validate)(customer_validation_1.cus
 router.get('/', customer_controller_1.getCustomers);
 router.put('/:customerId', (0, validation_middleware_1.validate)(customer_validation_1.customerUpdateSchema), customer_controller_1.updateCustomerByAdmin);
 router.delete('/:customerId', customer_controller_1.deleteCustomer);
+router.get('/:customerId/purchases', (0, validation_middleware_1.validate)(customer_validation_1.getCustomerParamsSchema), customer_controller_1.getCustomerPurchases);
+router.get('/:customerId/ledger', (0, validation_middleware_1.validate)(customer_validation_1.getCustomerParamsSchema), customer_controller_1.getCustomerLedger);
+router.post('/:customerId/payments', (0, validation_middleware_1.validate)(customer_validation_1.createCustomerPaymentSchema), customer_controller_1.createCustomerPayment);
+router.delete('/:customerId/payments/:paymentId', (0, validation_middleware_1.validate)(customer_validation_1.deleteCustomerPaymentSchema), customer_controller_1.deleteCustomerPayment);
 router.get('/:customerId', customer_controller_1.getCustomerById);
 exports.default = router;
 //# sourceMappingURL=customer.routes.js.map

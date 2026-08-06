@@ -83,9 +83,45 @@ const customerUpdateSchema = z.object({
     }),
 });
 
+const getCustomerParamsSchema = z.object({
+    params: z.object({
+        customerId: z.string().min(1, 'Customer ID is required'),
+    }),
+});
+
+const createCustomerPaymentSchema = z.object({
+    params: z.object({
+        customerId: z.string().min(1, 'Customer ID is required'),
+    }),
+    body: z.object({
+        amount: z.coerce.number().positive('Amount must be greater than 0'),
+        paymentDate: z.string().optional(),
+        method: z
+            .enum(['CASH', 'CARD', 'BANK_TRANSFER', 'MOBILE_MONEY', 'OTHER'])
+            .optional()
+            .default('CASH'),
+        reference: z.string().optional(),
+        notes: z.string().optional(),
+    }),
+});
+
+const deleteCustomerPaymentSchema = z.object({
+    params: z.object({
+        customerId: z.string().min(1, 'Customer ID is required'),
+        paymentId: z.string().min(1, 'Payment ID is required'),
+    }),
+});
+
 export {
     cusRegisterationSchema,
     customerLoginSchema,
     customerCreateByAdminSchema,
     customerUpdateSchema,
+    createCustomerPaymentSchema,
+    deleteCustomerPaymentSchema,
+    getCustomerParamsSchema,
 };
+
+export type CreateCustomerPaymentInput = z.infer<
+    typeof createCustomerPaymentSchema
+>['body'];

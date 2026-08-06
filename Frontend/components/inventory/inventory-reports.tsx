@@ -1,732 +1,152 @@
 "use client";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import React, { useState, useEffect, useCallback, useMemo } from "react";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { 
-  Download, 
-  FileText, 
-  Search, 
-  Filter, 
-  TrendingUp, 
-  Package, 
-  AlertTriangle, 
-  ArrowRightLeft, 
-  Calendar,
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Search,
+  TrendingUp,
+  AlertTriangle,
+  ArrowRightLeft,
   History,
   Clock,
-  LayoutDashboard,
   Box,
   Truck,
-  RefreshCw
+  X,
+  Loader2,
+  Package,
+  FileBarChart2,
+  MapPin,
+  CalendarIcon,
+  DollarSign,
 } from "lucide-react";
-import apiClient from "@/lib/apiClient";
-import { API_BASE } from "@/config/constants";
-import { useToast } from "@/hooks/use-toast";
-import { Skeleton } from "@/components/ui/skeleton";
+import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { format } from "date-fns";
+import apiClient from "@/lib/apiClient";
+import { toast } from "sonner";
+import { usePosData } from "@/hooks/use-pos-data";
+import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
+import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change";
 import { PageLoader } from "@/components/ui/page-loader";
+import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
+import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
+import {
+  downloadExcel,
+  downloadBrandedPdf,
+  formatMoney,
+  formatQty,
+  yieldForUi,
+} from "@/components/inventory/stock-ops/export-utils";
+import { cn } from "@/lib/utils";
 
-const REPORT_TYPES = [
-  { value: "valuation", label: "Stock Valuation", icon: Box, desc: "Current inventory worth and quantities across locations." },
-  { value: "purchase", label: "Procurement History", icon: Truck, desc: "Log of all incoming stock and purchase orders." },
-  { value: "transfer", label: "Inter-Branch Logistics", icon: ArrowRightLeft, desc: "Stock movement between branches and warehouses." },
-  { value: "stockout", label: "Outflow Analytics", icon: TrendingUp, desc: "Sales, damages, and losses tracking." },
-  { value: "lowstock", label: "Critical Alerts", icon: AlertTriangle, desc: "Items below minimum threshold levels." },
-  { value: "aging", label: "Stock Aging", icon: Clock, desc: "Identify slow-moving and dead stock items." },
-  { value: "movement_summary", label: "Movement Summary", icon: History, desc: "Aggregated flow analysis of all stock activities." },
+const PAGE_SIZE = 20;
+
+type ReportType =
+  | "valuation"
+  | "purchase"
+  | "transfer"
+  | "stockout"
+  | "lowstock"
+  | "aging"
+  | "movement_summary";
+
+const REPORT_TYPES: {
+  value: ReportType;
+  label: string;
+  short: string;
+  icon: React.ComponentType<{ className?: string }>;
+  desc: string;
+}[] = [
+  {
+    value: "valuation",
+    label: "Stock Valuation",
+    short: "Valuation",
+    icon: Box,
+    desc: "On-hand inventory worth by location",
+  },
+  {
+    value: "purchase",
+    label: "Procurement",
+    short: "Purchases",
+    icon: Truck,
+    desc: "Incoming stock and purchase history",
+  },
+  {
+    value: "transfer",
+    label: "Transfers",
+    short: "Transfers",
+    icon: ArrowRightLeft,
+    desc: "Inter-branch stock movements",
+  },
+  {
+    value: "stockout",
+    label: "Outflow",
+    short: "Outflow",
+    icon: TrendingUp,
+    desc: "Sales, damage, loss, and expiry",
+  },
+  {
+    value: "lowstock",
+    label: "Critical Alerts",
+    short: "Low stock",
+    icon: AlertTriangle,
+    desc: "Items at or below minimum levels",
+  },
+  {
+    value: "aging",
+    label: "Stock Aging",
+    short: "Aging",
+    icon: Clock,
+    desc: "Slow-moving and dead stock",
+  },
+  {
+    value: "movement_summary",
+    label: "Movement Summary",
+    short: "Summary",
+    icon: History,
+    desc: "Aggregated activity by movement type",
+  },
 ];
 
-export function InventoryReports() {
-  const { toast } = useToast();
-  const parseDate = (dStr: string) => {
-    if (!dStr) return undefined;
-    const [year, month, day] = dStr.split('-').map(Number);
-    return new Date(year, month - 1, day);
-  };
-
-  const formatDate = (date?: Date) => {
-    if (!date) return "";
-    const year = date.getFullYear();
-    const month = String(date.getMonth() + 1).padStart(2, '0');
-    const day = String(date.getDate()).padStart(2, '0');
-    return `${year}-${month}-${day}`;
-  };
-  const [reportType, setReportType] = useState("valuation");
-  const [data, setData] = useState<any>(null);
-  const [branches, setBranches] = useState<any[]>([]);
-  const [suppliers, setSuppliers] = useState<any[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [filters, setFilters] = useState({
-    branchId: "",
-    supplierId: "",
-    startDate: "",
-    endDate: "",
-  });
-  // Pagination — `page` is the current page for the non-valuation table
-  // (data.data). Valuation uses one paginator per branch card via
-  // `branchPages` so each branch's items list pages independently.
-  const PAGE_SIZE = 20;
-  const [page, setPage] = useState(1);
-  const [branchPages, setBranchPages] = useState<Record<string, number>>({});
-  const setBranchPage = (bid: string, p: number) =>
-    setBranchPages((prev) => ({ ...prev, [bid]: p }));
-  // Reset pagination whenever the data set or the report type changes so the
-  // user never lands on an empty page after a refetch.
-  useEffect(() => {
-    setPage(1);
-    setBranchPages({});
-  }, [data, reportType]);
-
-  const hasActiveFilters = filters.branchId !== "" || filters.startDate !== "" || filters.endDate !== "";
-
-  const clearFilters = () => {
-    const cleared = {
-      branchId: "",
-      supplierId: "",
-      startDate: "",
-      endDate: "",
-    };
-    setFilters(cleared);
-    fetchReport(cleared);
-  };
-
-  // Guard: auto-swap start/end dates if user picks end before start
-  const handleStartDate = (d: Date | undefined) => {
-    const newStart = formatDate(d);
-    if (filters.endDate && newStart && newStart > filters.endDate) {
-      setFilters(f => ({ ...f, startDate: newStart, endDate: "" }));
-    } else {
-      setFilters(f => ({ ...f, startDate: newStart }));
-    }
-  };
-
-  const handleEndDate = (d: Date | undefined) => {
-    const newEnd = formatDate(d);
-    if (filters.startDate && newEnd && newEnd < filters.startDate) {
-      setFilters(f => ({ ...f, startDate: "", endDate: newEnd }));
-    } else {
-      setFilters(f => ({ ...f, endDate: newEnd }));
-    }
-  };
-  const [userRole, setUserRole] = useState<string | null>(null);
-  const [userBranchId, setUserBranchId] = useState<string | null>(null);
-
-  const fetchReport = useCallback(async (overrideFilters?: typeof filters) => {
-    setLoading(true);
-    const activeFilters = overrideFilters || filters;
-    try {
-      const params: any = { type: reportType };
-      if (activeFilters.branchId) params.branchId = activeFilters.branchId;
-      if (activeFilters.supplierId) params.supplierId = activeFilters.supplierId;
-      if (activeFilters.startDate) params.startDate = activeFilters.startDate;
-      if (activeFilters.endDate) params.endDate = activeFilters.endDate;
-      const res = await apiClient.get("/inventory/reports", { params });
-      setData(res.data?.data || res.data);
-    } catch (e: any) {
-      toast({
-        title: "Error",
-        description: e?.response?.data?.message || "Failed to load report",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-    }
-    // `filters` MUST be in the deps — otherwise the callback closes over
-    // a stale `filters` (the value when reportType last changed), and
-    // clicking Apply after picking a branch sends the old empty filters.
-  }, [reportType, filters, toast]);
-
-  const fetchMeta = useCallback(async () => {
-    try {
-      const [bRes, sRes] = await Promise.all([
-        apiClient.get("/branches", { params: { fetch_all: true } }),
-        apiClient.get("/suppliers"),
-      ]);
-      setBranches(bRes.data?.data || bRes.data || []);
-      setSuppliers(sRes.data?.data || []);
-    } catch (e: any) {
-      console.error(e);
-    }
-  }, []);
-
-  // Only auto-fetch when report TYPE changes — not on every filter change
-  useEffect(() => {
-    fetchReport();
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [reportType]);
-
-  useEffect(() => {
-    const role = localStorage.getItem("role");
-    setUserRole(role);
-    const b = localStorage.getItem("branch");
-    if (b && b !== "Not Found") {
-      let bId = "";
-      try {
-        const obj = JSON.parse(b);
-        bId = obj.id || b;
-      } catch {
-        bId = b;
-      }
-      setUserBranchId(bId);
-    }
-    fetchMeta();
-  }, [fetchMeta]);
-
-  const exportCSV = () => {
-    if (!data) return;
-    let headers: string[] = [];
-    let rows: any[] = [];
-    const ts = new Date().toISOString().split('T')[0];
-
-    if (reportType === "valuation" && data.byLocation) {
-      headers = ["Product", "SKU", "Branch", "Qty", "Value"];
-      Object.entries(data.byLocation).forEach(([bid, loc]: [string, any]) => {
-        const branchName = branches.find(b => b.id === bid)?.name || bid;
-        (loc.items || []).forEach((item: any) => {
-          rows.push([item.product?.name, item.product?.sku, branchName, item.quantity, item.value]);
-        });
-      });
-    } else if (data.data) {
-      const list = data.data;
-      if (reportType === "purchase") {
-        headers = ["Date", "Product", "Supplier", "Qty", "Cost", "Warehouse"];
-        rows = list.map((d: any) => [new Date(d.purchase_date).toLocaleDateString(), d.product?.name, d.supplier?.name, d.quantity, d.cost_price, d.warehouse_branch?.name]);
-      } else if (reportType === "transfer") {
-        headers = ["Date", "Product", "From", "To", "Qty", "Status"];
-        rows = list.map((d: any) => [new Date(d.transfer_date).toLocaleDateString(), d.product?.name, d.from_branch?.name, d.to_branch?.name, d.quantity, d.status]);
-      } else if (reportType === "stockout") {
-        headers = ["Date", "Product", "Branch", "Qty", "Type"];
-        rows = list.map((d: any) => [new Date(d.created_at).toLocaleDateString(), d.product?.name, d.branch?.name, d.quantity_change, d.movement_type]);
-      } else if (reportType === "lowstock") {
-        headers = ["Product", "SKU", "Branch", "Qty", "Min"];
-        rows = list.map((d: any) => [d.product?.name, d.product?.sku, d.branch?.name, d.current_quantity, d.product?.min_qty ?? d.minimum_quantity]);
-      } else if (reportType === "aging") {
-        headers = ["Product", "Branch", "Qty", "Days Old", "Last Action"];
-        rows = list.map((d: any) => [d.product?.name, d.branch?.name, d.currentQuantity, d.daysOld, new Date(d.lastAction).toLocaleDateString()]);
-      } else if (reportType === "movement_summary") {
-        headers = ["Activity Type", "Occurrences", "Net Qty Change"];
-        rows = list.map((d: any) => [d.movement_type, d._count, d._sum?.quantity_change || 0]);
-      }
-    }
-
-    if (headers.length && rows.length) {
-      const csv = [headers.join(","), ...rows.map((r) => r.map((c: any) => `"${c}"`).join(","))].join("\n");
-      const blob = new Blob([csv], { type: "text/csv" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `inventory-${reportType}-${ts}.csv`;
-      a.click();
-      URL.revokeObjectURL(url);
-      toast({ title: "Success", description: "Report exported to CSV" });
-    }
-  };
-
-  const formatCurrency = (n: number) => `Rs ${Number(n).toLocaleString(undefined, { minimumFractionDigits: 0 })}`;
-
-  const summary = data?.summary || {};
-
-  return (
-    <div className="flex flex-col lg:flex-row h-full min-h-[calc(100vh-100px)] bg-slate-50/50">
-      
-      {/* SIDEBAR NAVIGATION */}
-      <div className="w-full lg:w-72 bg-white border-r border-slate-200 p-6 space-y-8 shrink-0">
-        <div>
-          <h2 className="text-xs font-normal text-black/60 uppercase tracking-widest mb-4">Report Categories</h2>
-          <nav className="space-y-1">
-            {REPORT_TYPES.map((r) => (
-              <button
-                key={r.value}
-                onClick={() => setReportType(r.value)}
-                className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-normal transition-all ${
-                  reportType === r.value 
-                  ? "bg-slate-100 text-black shadow-sm" 
-                  : "text-black/80 hover:bg-slate-50 hover:text-black"
-                }`}
-              >
-                <r.icon className={`h-4 w-4 ${reportType === r.value ? "text-black" : "text-black/60"}`} />
-                {r.label}
-              </button>
-            ))}
-          </nav>
-        </div>
-
-        <div className="pt-8 border-t border-slate-100">
-           <h2 className="text-xs font-normal text-black/60 uppercase tracking-widest mb-4">Operations</h2>
-           <Button 
-             variant="outline" 
-             className="w-full justify-start gap-2 border-slate-200 text-black font-normal text-xs h-10 shadow-sm"
-             onClick={exportCSV}
-             disabled={!data || loading}
-           >
-             <Download className="h-3.5 w-3.5 text-black" />
-             EXPORT CURRENT VIEW
-           </Button>
-        </div>
-      </div>
-
-      {/* MAIN CONTENT AREA */}
-      <div className="flex-1 p-6 space-y-6 overflow-y-auto">
-        
-        {/* HEADER & FILTERS */}
-        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-6">
-          <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
-            <div>
-              <h1 className="text-xl font-bold text-black tracking-tight">
-                {REPORT_TYPES.find(r => r.value === reportType)?.label}
-              </h1>
-              <p className="text-xs font-normal text-black/80 mt-0.5">
-                {REPORT_TYPES.find(r => r.value === reportType)?.desc}
-              </p>
-            </div>
-            
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 text-[10px] font-normal text-black uppercase tracking-wider bg-slate-50 px-3 py-1 rounded-full border">
-                <Calendar className="h-3 w-3 text-black" />
-                Live Feed
-              </div>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-end gap-3 pt-4 border-t border-slate-100">
-            <div className="space-y-1.5 flex-1 min-w-[160px]">
-              <label className="text-[10px] font-normal text-black uppercase tracking-wider ml-1">Location</label>
-              <Select
-                value={filters.branchId || "all"}
-                onValueChange={(v) => setFilters({ ...filters, branchId: v === "all" ? "" : v })}
-              >
-                <SelectTrigger className="h-9 border-slate-200 bg-slate-50/50 font-normal text-xs text-black">
-                  <SelectValue placeholder="All Branches" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all" className="font-normal text-xs py-2 pl-8 pr-4 text-black">All Branches</SelectItem>
-                  {branches.map((b) => <SelectItem key={b.id} value={b.id} className="font-normal text-xs py-2 pl-8 pr-4 text-black">{b.name}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-1.5 flex-1 min-w-[120px]">
-              <label className="text-[10px] font-normal text-black uppercase tracking-wider ml-1">From Date</label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="w-full h-9 justify-start text-left font-normal text-xs border-slate-200 bg-slate-50/50 text-black hover:bg-slate-100/50"
-                  >
-                    <Calendar className="mr-2 h-3.5 w-3.5 text-black" />
-                    {filters.startDate ? format(parseDate(filters.startDate)!, "MM/dd/yyyy") : <span className="text-black/60">Pick a date</span>}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <CalendarComponent 
-                    mode="single" 
-                    selected={parseDate(filters.startDate)} 
-                    onSelect={handleStartDate}
-                    initialFocus 
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="space-y-1.5 flex-1 min-w-[120px]">
-              <label className="text-[10px] font-normal text-black uppercase tracking-wider ml-1">To Date</label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
-                    className="w-full h-9 justify-start text-left font-normal text-xs border-slate-200 bg-slate-50/50 text-black hover:bg-slate-100/50"
-                  >
-                    <Calendar className="mr-2 h-3.5 w-3.5 text-black" />
-                    {filters.endDate ? format(parseDate(filters.endDate)!, "MM/dd/yyyy") : <span className="text-black/60">Pick a date</span>}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <CalendarComponent 
-                    mode="single" 
-                    selected={parseDate(filters.endDate)} 
-                    onSelect={handleEndDate}
-                    initialFocus 
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <Button
-                onClick={() => fetchReport()}
-                disabled={loading}
-                className="h-9 bg-slate-900 hover:bg-black text-white font-normal px-6 text-xs shadow-md shadow-slate-200"
-            >
-              {loading ? "Generating..." : "Apply Filters"}
-            </Button>
-            {hasActiveFilters && (
-              <Button
-                variant="ghost"
-                onClick={clearFilters}
-                className="h-9 text-xs font-normal text-black hover:bg-slate-100/50"
-              >
-                Clear Filters
-              </Button>
-            )}
-          </div>
-        </div>
-
-        {/* KPI SUMMARY CARDS */}
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          {loading ? (
-            /* Skeleton cards while loading */
-            <>
-              <Card className="border-none shadow-sm bg-white border border-slate-100">
-                <CardContent className="p-5 space-y-2">
-                  <Skeleton className="h-3 w-24 rounded" />
-                  <Skeleton className="h-7 w-40 rounded" />
-                </CardContent>
-              </Card>
-              <Card className="border-none shadow-sm bg-white border border-slate-100">
-                <CardContent className="p-5 space-y-2">
-                  <Skeleton className="h-3 w-24 rounded" />
-                  <Skeleton className="h-7 w-32 rounded" />
-                </CardContent>
-              </Card>
-              <Card className="border-none shadow-sm bg-white border border-slate-100">
-                <CardContent className="p-5 space-y-2">
-                  <Skeleton className="h-3 w-24 rounded" />
-                  <Skeleton className="h-7 w-28 rounded" />
-                </CardContent>
-              </Card>
-            </>
-          ) : !data ? null : reportType === "valuation" ? (
-             <>
-               <Card className="border-none shadow-sm bg-white border border-slate-100">
-                  <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Total Value</p>
-                     <h3 className="text-xl font-bold text-black mt-1">{formatCurrency(summary.totalValue || 0)}</h3>
-                  </CardContent>
-               </Card>
-               <Card className="border-none shadow-sm bg-white border border-slate-100">
-                  <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">SKUs Tracked</p>
-                     <h3 className="text-xl font-bold text-black mt-1">{summary.totalItems || 0} Products</h3>
-                  </CardContent>
-               </Card>
-               <Card className="border-none shadow-sm bg-white border border-slate-100">
-                  <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Locations</p>
-                     <h3 className="text-xl font-bold text-black mt-1">{summary.locationsCount || 0} Branches</h3>
-                  </CardContent>
-               </Card>
-             </>
-          ) : reportType === "purchase" ? (
-             <>
-                <Card className="border-none shadow-sm bg-white border border-slate-100">
-                  <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Total Spend</p>
-                     <h3 className="text-xl font-bold text-black mt-1">{formatCurrency(summary.totalCost || 0)}</h3>
-                  </CardContent>
-               </Card>
-               <Card className="border-none shadow-sm bg-white border border-slate-100">
-                  <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">PO Count</p>
-                     <h3 className="text-xl font-bold text-black mt-1">{summary.count || 0} Records</h3>
-                  </CardContent>
-               </Card>
-               <Card className="border-none shadow-sm bg-white border border-slate-100">
-                  <CardContent className="p-5">
-                     <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Avg PO Value</p>
-                     <h3 className="text-xl font-bold text-black mt-1">{formatCurrency(summary.avgPrice || 0)}</h3>
-                  </CardContent>
-               </Card>
-             </>
-          ) : (
-            <Card className="md:col-span-3 border-none shadow-sm bg-white border border-slate-100 h-20 flex items-center px-6">
-               <div>
-                 <p className="text-[10px] font-bold text-black/60 uppercase tracking-wider">Report Volume</p>
-                 <h3 className="text-lg font-bold text-black">{summary.count || data?.data?.length || 0} Matching Entries Found</h3>
-               </div>
-            </Card>
-          )}
-        </div>
-
-        {/* REPORT TABLE AREA */}
-        <Card className="border-none shadow-sm bg-white rounded-2xl overflow-hidden min-h-[400px]">
-           <CardContent className="p-0">
-             {loading ? (
-               <div className="p-6 space-y-3">
-                 {[...Array(7)].map((_, i) => (
-                   <div key={i} className="flex items-center gap-4 py-2">
-                     <Skeleton className="h-4 w-[30%] rounded" />
-                     <Skeleton className="h-4 w-[20%] rounded" />
-                     <Skeleton className="h-4 w-[15%] rounded ml-auto" />
-                     <Skeleton className="h-4 w-[15%] rounded" />
-                     <Skeleton className="h-4 w-[12%] rounded" />
-                   </div>
-                 ))}
-               </div>
-             ) : reportType === "valuation" && data?.byLocation ? (
-                <div className="divide-y divide-slate-100">
-                  {Object.entries(data.byLocation).map(([bid, loc]: [string, any]) => {
-                    const branchName = branches.find(b => b.id === bid)?.name || "Main Site";
-                    const allItems = loc.items || [];
-                    const branchPage = branchPages[bid] || 1;
-                    const branchTotalPages = Math.max(1, Math.ceil(allItems.length / PAGE_SIZE));
-                    const paginatedItems = allItems.slice(
-                      (branchPage - 1) * PAGE_SIZE,
-                      branchPage * PAGE_SIZE,
-                    );
-                    return (
-                      <div key={bid} className="p-8">
-                        <div className="flex items-center justify-between mb-4">
-                           <div className="flex items-center gap-2">
-                             <Box className="h-4 w-4 text-black" />
-                             <h4 className="font-bold text-black">{branchName}</h4>
-                           </div>
-                           <Badge variant="outline" className="text-black bg-slate-50 border-slate-200 font-bold">
-                             Value: {formatCurrency(loc.value || 0)}
-                           </Badge>
-                        </div>
-                        <Table>
-                          <TableHeader className="bg-slate-50/50 font-normal uppercase text-[9px] tracking-widest text-black border-none">
-                            <TableRow>
-                              <TableHead className="text-black font-normal">Product Name</TableHead>
-                              <TableHead className="text-black font-normal">SKU</TableHead>
-                              <TableHead className="text-right text-black font-normal">Quantity</TableHead>
-                              <TableHead className="text-right text-black font-normal">Unit Value</TableHead>
-                              <TableHead className="text-right text-black font-normal">Total Value</TableHead>
-                            </TableRow>
-                          </TableHeader>
-                          <TableBody>
-                            {paginatedItems.map((item: any, i: number) => {
-                              // Prefer the product's purchase_rate as the unit
-                              // value; fall back to value/quantity only when
-                              // we have a non-zero quantity. Avoids the 0/0
-                              // = NaN that showed "Rs NaN" for zero-stock rows.
-                              const unitValueRaw =
-                                item.product?.purchase_rate != null
-                                  ? Number(item.product.purchase_rate)
-                                  : Number.isFinite(item.value / item.quantity) && item.quantity > 0
-                                    ? item.value / item.quantity
-                                    : 0;
-                              return (
-                                <TableRow key={i} className="hover:bg-slate-50/30">
-                                  <TableCell className="font-normal text-black text-xs">{item.product?.name}</TableCell>
-                                  <TableCell className="text-xs text-black/60 font-normal">{item.product?.sku}</TableCell>
-                                  <TableCell className="text-right font-normal text-black text-xs">{item.quantity}</TableCell>
-                                  <TableCell className="text-right text-xs text-black/60">{formatCurrency(unitValueRaw)}</TableCell>
-                                  <TableCell className="text-right font-normal text-black text-xs">{formatCurrency(item.value)}</TableCell>
-                                </TableRow>
-                              );
-                            })}
-                          </TableBody>
-                        </Table>
-                        {allItems.length > PAGE_SIZE && (
-                          <PaginationBar
-                            page={branchPage}
-                            totalPages={branchTotalPages}
-                            total={allItems.length}
-                            pageSize={PAGE_SIZE}
-                            onPage={(p) => setBranchPage(bid, p)}
-                            disabled={loading}
-                          />
-                        )}
-                      </div>
-                    )
-                  })}
-                </div>
-             ) : Array.isArray(data?.data) && data.data.length > 0 ? (
-               <div className="overflow-x-auto">
-                 {(() => {
-                   const total = data.data.length;
-                   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
-                   const currentPage = Math.min(page, totalPages);
-                   const sliced = data.data.slice(
-                     (currentPage - 1) * PAGE_SIZE,
-                     currentPage * PAGE_SIZE,
-                   );
-                   return (
-                 <>
-                 <Table>
-                   <TableHeader className="bg-slate-50/50 font-normal uppercase text-[9px] tracking-widest text-black border-none">
-                     <TableRow>
-                       {reportType === "purchase" && (
-                         <>
-                           <TableHead>Date</TableHead>
-                           <TableHead>Product</TableHead>
-                           <TableHead>Supplier</TableHead>
-                           <TableHead className="text-right">Qty</TableHead>
-                           <TableHead className="text-right">Unit Cost</TableHead>
-                           <TableHead className="text-right">Line Total</TableHead>
-                         </>
-                       )}
-                       {reportType === "transfer" && (
-                         <>
-                           <TableHead>Date</TableHead>
-                           <TableHead>Product</TableHead>
-                           <TableHead>Route</TableHead>
-                           <TableHead className="text-right">Qty</TableHead>
-                           <TableHead className="text-right">Status</TableHead>
-                         </>
-                       )}
-                       {reportType === "stockout" && (
-                         <>
-                           <TableHead>Date</TableHead>
-                           <TableHead>Product</TableHead>
-                           <TableHead>Branch</TableHead>
-                           <TableHead className="text-right">Qty</TableHead>
-                           <TableHead className="text-right">Reason</TableHead>
-                         </>
-                       )}
-                       {reportType === "lowstock" && (
-                         <>
-                           <TableHead>Product</TableHead>
-                           <TableHead>SKU</TableHead>
-                           <TableHead className="text-right">In Stock</TableHead>
-                           <TableHead className="text-right">Threshold</TableHead>
-                           <TableHead className="text-right">Status</TableHead>
-                         </>
-                       )}
-                       {reportType === "aging" && (
-                         <>
-                           <TableHead>Product</TableHead>
-                           <TableHead>Branch</TableHead>
-                           <TableHead className="text-right">Qty</TableHead>
-                           <TableHead className="text-right">Days Old</TableHead>
-                           <TableHead className="text-right">Last Movement</TableHead>
-                         </>
-                       )}
-                       {reportType === "movement_summary" && (
-                         <>
-                           <TableHead>Activity Type</TableHead>
-                           <TableHead className="text-right">Occurrences</TableHead>
-                           <TableHead className="text-right">Net Qty Change</TableHead>
-                         </>
-                       )}
-                     </TableRow>
-                   </TableHeader>
-                   <TableBody>
-                     {sliced.map((d: any, i: number) => (
-                       <TableRow key={i} className="hover:bg-slate-50/30">
-                         {reportType === "purchase" && (
-                           <>
-                             <TableCell className="text-xs font-normal text-black">{new Date(d.purchase_date).toLocaleDateString()}</TableCell>
-                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs text-black/60 font-normal">{d.supplier?.name}</TableCell>
-                             <TableCell className="text-right font-normal text-xs text-black">{d.quantity}</TableCell>
-                             <TableCell className="text-right text-xs text-black/60">{formatCurrency(Number(d.cost_price))}</TableCell>
-                             <TableCell className="text-right font-normal text-black text-xs">{formatCurrency(d.quantity * d.cost_price)}</TableCell>
-                           </>
-                         )}
-                         {reportType === "transfer" && (
-                           <>
-                             <TableCell className="text-xs font-normal text-black">{new Date(d.transfer_date).toLocaleDateString()}</TableCell>
-                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs font-medium text-black/60">
-                                {d.from_branch?.name} → {d.to_branch?.name}
-                             </TableCell>
-                             <TableCell className="text-right font-normal text-xs text-black">{d.quantity}</TableCell>
-                             <TableCell className="text-right">
-                               <Badge variant="outline" className={`text-[9px] font-normal ${d.status === 'COMPLETED' ? 'text-black bg-slate-50' : 'text-black bg-slate-50'}`}>
-                                 {d.status}
-                               </Badge>
-                             </TableCell>
-                           </>
-                         )}
-                         {reportType === "stockout" && (
-                           <>
-                             <TableCell className="text-xs font-normal text-black">{new Date(d.created_at).toLocaleDateString()}</TableCell>
-                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs text-black/60">{d.branch?.name}</TableCell>
-                             <TableCell className="text-right font-normal text-xs text-rose-600">{Math.abs(d.quantity_change)}</TableCell>
-                             <TableCell className="text-right">
-                                <Badge className="text-[9px] font-normal uppercase bg-slate-50 text-black border border-slate-200">{d.movement_type}</Badge>
-                             </TableCell>
-                           </>
-                         )}
-                         {reportType === "lowstock" && (
-                           <>
-                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs text-black/60">{d.product?.sku}</TableCell>
-                             <TableCell className="text-right font-normal text-xs text-rose-700">{Number(d.current_quantity)}</TableCell>
-                             <TableCell className="text-right text-xs text-black/60">{Number(d.product?.min_qty ?? d.minimum_quantity ?? 0)}</TableCell>
-                             <TableCell className="text-right">
-                                <Badge variant="outline" className="text-[9px] font-normal text-rose-600 bg-rose-50 border-rose-100">{Number(d.current_quantity) <= 0 ? 'OUT OF STOCK' : 'LOW'}</Badge>
-                             </TableCell>
-                           </>
-                         )}
-                         {reportType === "aging" && (
-                            <>
-                             <TableCell className="text-xs font-normal text-black">{d.product?.name}</TableCell>
-                             <TableCell className="text-xs text-black/60">{d.branch?.name}</TableCell>
-                             <TableCell className="text-right font-normal text-xs text-black">{d.currentQuantity}</TableCell>
-                             <TableCell className="text-right">
-                                <Badge className={`text-[10px] font-normal border-slate-200 ${d.daysOld > 90 ? 'bg-slate-50 text-black' : d.daysOld > 30 ? 'bg-slate-50 text-black' : 'bg-slate-50 text-black'}`}>
-                                  {d.daysOld} Days
-                                </Badge>
-                             </TableCell>
-                             <TableCell className="text-right text-xs text-black/60">{new Date(d.lastAction).toLocaleDateString()}</TableCell>
-                            </>
-                         )}
-                         {reportType === "movement_summary" && (
-                            <>
-                             <TableCell className="text-xs font-normal text-black">
-                                <div className="flex items-center gap-2">
-                                  <div className={`h-2 w-2 rounded-full ${d.movement_type === 'SALE' ? 'bg-emerald-500' : d.movement_type === 'PURCHASE' ? 'bg-blue-500' : 'bg-slate-300'}`} />
-                                  {d.movement_type}
-                                </div>
-                             </TableCell>
-                             <TableCell className="text-right font-normal text-xs text-black">
-                                {/* Prisma groupBy returns _count as a plain number */}
-                                {(typeof d._count === 'number' ? d._count : d._count?._all ?? 0)} events
-                              </TableCell>
-                             <TableCell className="text-right font-normal text-xs text-black">
-                               {Number(d._sum?.quantity_change || 0) > 0 ? '+' : ''}
-                               {Number(d._sum?.quantity_change || 0).toFixed(2)}
-                             </TableCell>
-                            </>
-                         )}
-                       </TableRow>
-                     ))}
-                   </TableBody>
-                 </Table>
-                 {total > PAGE_SIZE && (
-                   <PaginationBar
-                     page={currentPage}
-                     totalPages={totalPages}
-                     total={total}
-                     pageSize={PAGE_SIZE}
-                     onPage={setPage}
-                     disabled={loading}
-                   />
-                 )}
-                 </>
-                 );
-                 })()}
-               </div>
-             ) : (
-               <div className="p-32 flex flex-col items-center justify-center text-center space-y-4">
-                  <div className="h-16 w-16 bg-slate-50 rounded-full flex items-center justify-center">
-                    <History className="h-8 w-8 text-slate-200" />
-                  </div>
-                  <div>
-                    <h3 className="text-sm font-bold text-black">No report data found</h3>
-                    <p className="text-xs text-black/60 mt-1 max-w-[240px]">Adjust your filters or date range to discover broader inventory insights.</p>
-                  </div>
-               </div>
-             )}
-           </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
+function money(n: unknown) {
+  return formatMoney(Number(n) || 0);
 }
 
-// Reusable pagination footer — same look across every report category, and
-// across the per-branch slices inside Stock Valuation.
+function statusTone(status?: string) {
+  switch ((status || "").toUpperCase()) {
+    case "RECEIVED":
+    case "COMPLETED":
+      return "bg-emerald-50 text-emerald-800 border-emerald-200";
+    case "DISPATCHED":
+      return "bg-sky-50 text-sky-800 border-sky-200";
+    case "PENDING":
+      return "bg-amber-50 text-amber-800 border-amber-200";
+    case "CANCELLED":
+      return "bg-rose-50 text-rose-800 border-rose-200";
+    default:
+      return "bg-gray-50 text-gray-700 border-gray-200";
+  }
+}
+
 function PaginationBar({
   page,
   totalPages,
@@ -742,16 +162,18 @@ function PaginationBar({
   onPage: (p: number) => void;
   disabled?: boolean;
 }) {
+  if (total <= 0) return null;
   return (
-    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-slate-100">
-      <p className="text-xs text-black">
-        Showing {(page - 1) * pageSize + 1}–{Math.min(page * pageSize, total)} of {total}
+    <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-gray-200">
+      <p className="text-sm text-gray-600">
+        Showing {(page - 1) * pageSize + 1}–
+        {Math.min(page * pageSize, total)} of {total}
       </p>
       <div className="flex items-center gap-1">
         <Button
           variant="outline"
           size="sm"
-          className="h-8 text-xs text-black"
+          className="text-sm text-black"
           onClick={() => onPage(1)}
           disabled={page === 1 || disabled}
         >
@@ -760,19 +182,19 @@ function PaginationBar({
         <Button
           variant="outline"
           size="sm"
-          className="h-8 text-xs text-black"
+          className="text-sm text-black"
           onClick={() => onPage(Math.max(1, page - 1))}
           disabled={page === 1 || disabled}
         >
           Previous
         </Button>
-        <span className="text-xs text-black px-3">
+        <span className="text-sm text-black px-3">
           Page {page} of {totalPages}
         </span>
         <Button
           variant="outline"
           size="sm"
-          className="h-8 text-xs text-black"
+          className="text-sm text-black"
           onClick={() => onPage(Math.min(totalPages, page + 1))}
           disabled={page >= totalPages || disabled}
         >
@@ -781,13 +203,1270 @@ function PaginationBar({
         <Button
           variant="outline"
           size="sm"
-          className="h-8 text-xs text-black"
+          className="text-sm text-black"
           onClick={() => onPage(totalPages)}
           disabled={page >= totalPages || disabled}
         >
           Last
         </Button>
       </div>
+    </div>
+  );
+}
+
+export function InventoryReports() {
+  const logoDataUri = useLogoDataUri();
+  const { branches, suppliers, fetchBranches, fetchSuppliers } = usePosData();
+
+  const [reportType, setReportType] = useState<ReportType>("valuation");
+  const [data, setData] = useState<any>(null);
+  const [loadedType, setLoadedType] = useState<ReportType | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+
+  const [searchQuery, setSearchQuery] = useState("");
+  const [filterBranch, setFilterBranch] = useState("all");
+  const [filterSupplier, setFilterSupplier] = useState("all");
+  const [filterStart, setFilterStart] = useState<Date | undefined>();
+  const [filterEnd, setFilterEnd] = useState<Date | undefined>();
+  const [locationFocus, setLocationFocus] = useState("all");
+
+  const [page, setPage] = useState(1);
+  useScrollToTopOnPageChange(page);
+
+  const activeReport = REPORT_TYPES.find((r) => r.value === reportType)!;
+
+  const fetchReport = useCallback(async () => {
+    const requestedType = reportType;
+    setLoading(true);
+    try {
+      const params: Record<string, string> = { type: requestedType };
+      if (filterBranch !== "all") params.branchId = filterBranch;
+      if (requestedType === "purchase" && filterSupplier !== "all") {
+        params.supplierId = filterSupplier;
+      }
+      if (filterStart) params.startDate = filterStart.toISOString();
+      if (filterEnd) {
+        const e = new Date(filterEnd);
+        e.setHours(23, 59, 59, 999);
+        params.endDate = e.toISOString();
+      }
+      const res = await apiClient.get("/inventory/reports", { params });
+      setData(res.data?.data || res.data);
+      setLoadedType(requestedType);
+    } catch (e: any) {
+      toast.error(e?.response?.data?.message || "Failed to load report");
+      setData(null);
+      setLoadedType(requestedType);
+    } finally {
+      setLoading(false);
+    }
+  }, [reportType, filterBranch, filterSupplier, filterStart, filterEnd]);
+
+  useEffect(() => {
+    fetchBranches();
+    fetchSuppliers();
+  }, [fetchBranches, fetchSuppliers]);
+
+  useEffect(() => {
+    setPage(1);
+    setLocationFocus("all");
+    setSearchQuery("");
+    fetchReport();
+  }, [fetchReport]);
+
+  // Only treat data as ready when it matches the active tab — avoids
+  // flashing "0" / empty rows from the previous report's shape.
+  const dataReady = loadedType === reportType && data != null;
+  const awaitingReport = loading || !dataReady;
+  const summary = dataReady ? data?.summary || {} : {};
+
+  const valuationLocations = useMemo(() => {
+    if (!dataReady || reportType !== "valuation" || !data?.byLocation) return [];
+    return Object.entries(data.byLocation).map(([bid, loc]: [string, any]) => ({
+      id: bid,
+      name: branches.find((b) => b.id === bid)?.name || "Unknown location",
+      value: Number(loc.value) || 0,
+      items: (loc.items || []) as any[],
+    }));
+  }, [dataReady, reportType, data, branches]);
+
+  const flatValuationRows = useMemo(() => {
+    if (!dataReady || reportType !== "valuation") return [];
+    const locs =
+      locationFocus === "all"
+        ? valuationLocations
+        : valuationLocations.filter((l) => l.id === locationFocus);
+    const rows: any[] = [];
+    for (const loc of locs) {
+      for (const item of loc.items) {
+        rows.push({
+          ...item,
+          branchId: loc.id,
+          branchName: loc.name,
+        });
+      }
+    }
+    return rows;
+  }, [dataReady, reportType, valuationLocations, locationFocus]);
+
+  const listRows = useMemo(() => {
+    if (!dataReady) return [];
+    if (reportType === "valuation") return flatValuationRows;
+    return Array.isArray(data?.data) ? data.data : [];
+  }, [dataReady, reportType, flatValuationRows, data]);
+
+  const filteredRows = useMemo(() => {
+    const q = searchQuery.trim().toLowerCase();
+    if (!q) return listRows;
+    return listRows.filter((d: any) => {
+      const hay = [
+        d.product?.name,
+        d.product?.sku,
+        d.branch?.name,
+        d.branchName,
+        d.supplier?.name,
+        d.from_branch?.name,
+        d.to_branch?.name,
+        d.warehouse_branch?.name,
+        d.movement_type,
+        d.status,
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase();
+      return hay.includes(q);
+    });
+  }, [listRows, searchQuery]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredRows.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const pagedRows = filteredRows.slice(
+    (currentPage - 1) * PAGE_SIZE,
+    currentPage * PAGE_SIZE,
+  );
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchQuery, locationFocus, reportType]);
+
+  const showDateFilters = ![
+    "valuation",
+    "lowstock",
+  ].includes(reportType);
+  const showSupplierFilter = reportType === "purchase";
+
+  const hasActiveFilters =
+    searchQuery.trim() !== "" ||
+    filterBranch !== "all" ||
+    filterSupplier !== "all" ||
+    !!filterStart ||
+    !!filterEnd ||
+    locationFocus !== "all";
+
+  const clearFilters = () => {
+    setSearchQuery("");
+    setFilterBranch("all");
+    setFilterSupplier("all");
+    setFilterStart(undefined);
+    setFilterEnd(undefined);
+    setLocationFocus("all");
+    setPage(1);
+  };
+
+  const kpiItems = useMemo(() => {
+    switch (reportType) {
+      case "valuation":
+        return [
+          {
+            label: "Total value",
+            value: money(summary.totalValue || data?.totalValue || 0),
+            icon: DollarSign,
+          },
+          {
+            label: "SKUs tracked",
+            value: (summary.totalItems || 0).toLocaleString(),
+            icon: Package,
+          },
+          {
+            label: "Locations",
+            value: (summary.locationsCount || 0).toLocaleString(),
+            icon: MapPin,
+          },
+          {
+            label: "Rows (view)",
+            value: filteredRows.length.toLocaleString(),
+            icon: Box,
+          },
+        ];
+      case "purchase":
+        return [
+          {
+            label: "Total spend",
+            value: money(summary.totalCost || 0),
+            icon: DollarSign,
+          },
+          {
+            label: "Records",
+            value: (summary.count || 0).toLocaleString(),
+            icon: Truck,
+          },
+          {
+            label: "Avg line value",
+            value: money(summary.avgPrice || 0),
+            icon: TrendingUp,
+          },
+          {
+            label: "Filtered rows",
+            value: filteredRows.length.toLocaleString(),
+            icon: Search,
+          },
+        ];
+      case "transfer":
+        return [
+          {
+            label: "Transfers",
+            value: (summary.count || filteredRows.length).toLocaleString(),
+            icon: ArrowRightLeft,
+          },
+          {
+            label: "Received",
+            value: (summary.completed || 0).toLocaleString(),
+            icon: Package,
+            tone: "success" as const,
+          },
+          {
+            label: "Filtered rows",
+            value: filteredRows.length.toLocaleString(),
+            icon: Search,
+          },
+        ];
+      case "stockout":
+        return [
+          {
+            label: "Events",
+            value: (summary.count || 0).toLocaleString(),
+            icon: TrendingUp,
+          },
+          {
+            label: "Units out",
+            value: formatQty(summary.totalQty || 0),
+            icon: Package,
+            tone: "danger" as const,
+          },
+          {
+            label: "Damage events",
+            value: (summary.damageCount || 0).toLocaleString(),
+            icon: AlertTriangle,
+            tone: "warning" as const,
+          },
+          {
+            label: "Filtered rows",
+            value: filteredRows.length.toLocaleString(),
+            icon: Search,
+          },
+        ];
+      case "lowstock":
+        return [
+          {
+            label: "Alerts",
+            value: (summary.warningCount || filteredRows.length).toLocaleString(),
+            icon: AlertTriangle,
+            tone: "warning" as const,
+          },
+          {
+            label: "Out of stock",
+            value: (summary.criticalCount || 0).toLocaleString(),
+            icon: Package,
+            tone: "danger" as const,
+          },
+          {
+            label: "Filtered rows",
+            value: filteredRows.length.toLocaleString(),
+            icon: Search,
+          },
+        ];
+      case "aging":
+        return [
+          {
+            label: "Avg age (days)",
+            value: Math.round(summary.avgAge || 0).toLocaleString(),
+            icon: Clock,
+          },
+          {
+            label: "Dead stock (>90d)",
+            value: (summary.deadStockCount || 0).toLocaleString(),
+            icon: AlertTriangle,
+            tone: "danger" as const,
+          },
+          {
+            label: "Filtered rows",
+            value: filteredRows.length.toLocaleString(),
+            icon: Search,
+          },
+        ];
+      case "movement_summary":
+        return [
+          {
+            label: "Total movements",
+            value: (summary.totalMovements || 0).toLocaleString(),
+            icon: History,
+          },
+          {
+            label: "Activity types",
+            value: filteredRows.length.toLocaleString(),
+            icon: Box,
+          },
+        ];
+      default:
+        return [
+          {
+            label: "Records",
+            value: filteredRows.length.toLocaleString(),
+            icon: FileBarChart2,
+          },
+        ];
+    }
+  }, [reportType, summary, data, filteredRows.length]);
+
+  const buildExportPayload = () => {
+    if (reportType === "valuation") {
+      return {
+        headers: ["Product", "SKU", "Branch", "Qty", "Unit value", "Total value"],
+        rows: filteredRows.map((item: any) => {
+          const qty = Number(item.quantity) || 0;
+          const unit =
+            item.product?.purchase_rate != null
+              ? Number(item.product.purchase_rate)
+              : qty !== 0
+                ? (Number(item.value) || 0) / qty
+                : 0;
+          return [
+            item.product?.name || "",
+            item.product?.sku || "",
+            item.branchName || "",
+            qty,
+            unit,
+            Number(item.value) || 0,
+          ];
+        }),
+        pdfColumns: [
+          { header: "Product", width: 2 },
+          { header: "Branch", width: 1.3 },
+          { header: "Qty", align: "right" as const, width: 0.8 },
+          { header: "Value", align: "right" as const, width: 1.1 },
+        ],
+        pdfRows: filteredRows.map((item: any) => [
+          item.product?.name || "",
+          item.branchName || "",
+          formatQty(item.quantity),
+          money(item.value),
+        ]),
+      };
+    }
+    if (reportType === "purchase") {
+      return {
+        headers: ["Date", "Product", "Supplier", "Qty", "Cost", "Warehouse", "Line total"],
+        rows: filteredRows.map((d: any) => {
+          const qty = Number(d.quantity) || 0;
+          const cost = Number(d.cost_price) || 0;
+          return [
+            d.purchase_date ? new Date(d.purchase_date).toLocaleString() : "",
+            d.product?.name || "",
+            d.supplier?.name || "",
+            qty,
+            cost,
+            d.warehouse_branch?.name || "",
+            qty * cost,
+          ];
+        }),
+        pdfColumns: [
+          { header: "Date", width: 1.1 },
+          { header: "Product", width: 2 },
+          { header: "Supplier", width: 1.4 },
+          { header: "Qty", align: "right" as const, width: 0.7 },
+          { header: "Total", align: "right" as const, width: 1 },
+        ],
+        pdfRows: filteredRows.map((d: any) => {
+          const qty = Number(d.quantity) || 0;
+          const cost = Number(d.cost_price) || 0;
+          return [
+            d.purchase_date
+              ? new Date(d.purchase_date).toLocaleDateString()
+              : "",
+            d.product?.name || "",
+            d.supplier?.name || "",
+            formatQty(qty),
+            money(qty * cost),
+          ];
+        }),
+      };
+    }
+    if (reportType === "transfer") {
+      return {
+        headers: ["Date", "Product", "From", "To", "Qty", "Status"],
+        rows: filteredRows.map((d: any) => [
+          d.transfer_date ? new Date(d.transfer_date).toLocaleString() : "",
+          d.product?.name || "",
+          d.from_branch?.name || "",
+          d.to_branch?.name || "",
+          Number(d.quantity) || 0,
+          d.status || "",
+        ]),
+        pdfColumns: [
+          { header: "Date", width: 1.1 },
+          { header: "Product", width: 2 },
+          { header: "From", width: 1.2 },
+          { header: "To", width: 1.2 },
+          { header: "Qty", align: "right" as const, width: 0.7 },
+          { header: "Status", width: 1 },
+        ],
+        pdfRows: filteredRows.map((d: any) => [
+          d.transfer_date
+            ? new Date(d.transfer_date).toLocaleDateString()
+            : "",
+          d.product?.name || "",
+          d.from_branch?.name || "",
+          d.to_branch?.name || "",
+          formatQty(d.quantity),
+          d.status || "",
+        ]),
+      };
+    }
+    if (reportType === "stockout") {
+      return {
+        headers: ["Date", "Product", "Branch", "Qty", "Type"],
+        rows: filteredRows.map((d: any) => [
+          d.created_at ? new Date(d.created_at).toLocaleString() : "",
+          d.product?.name || "",
+          d.branch?.name || "",
+          Math.abs(Number(d.quantity_change) || 0),
+          d.movement_type || "",
+        ]),
+        pdfColumns: [
+          { header: "Date", width: 1.1 },
+          { header: "Product", width: 2 },
+          { header: "Branch", width: 1.3 },
+          { header: "Qty", align: "right" as const, width: 0.8 },
+          { header: "Type", width: 1.1 },
+        ],
+        pdfRows: filteredRows.map((d: any) => [
+          d.created_at ? new Date(d.created_at).toLocaleDateString() : "",
+          d.product?.name || "",
+          d.branch?.name || "",
+          formatQty(Math.abs(Number(d.quantity_change) || 0)),
+          d.movement_type || "",
+        ]),
+      };
+    }
+    if (reportType === "lowstock") {
+      return {
+        headers: ["Product", "SKU", "Branch", "Qty", "Min", "Status"],
+        rows: filteredRows.map((d: any) => {
+          const qty = Number(d.current_quantity) || 0;
+          return [
+            d.product?.name || "",
+            d.product?.sku || "",
+            d.branch?.name || "",
+            qty,
+            Number(d.product?.min_qty ?? d.minimum_quantity ?? 0),
+            qty <= 0 ? "OUT OF STOCK" : "LOW",
+          ];
+        }),
+        pdfColumns: [
+          { header: "Product", width: 2 },
+          { header: "Branch", width: 1.3 },
+          { header: "Qty", align: "right" as const, width: 0.8 },
+          { header: "Min", align: "right" as const, width: 0.8 },
+          { header: "Status", width: 1.1 },
+        ],
+        pdfRows: filteredRows.map((d: any) => {
+          const qty = Number(d.current_quantity) || 0;
+          return [
+            d.product?.name || "",
+            d.branch?.name || "",
+            formatQty(qty),
+            formatQty(d.product?.min_qty ?? d.minimum_quantity ?? 0),
+            qty <= 0 ? "OUT" : "LOW",
+          ];
+        }),
+      };
+    }
+    if (reportType === "aging") {
+      return {
+        headers: ["Product", "Branch", "Qty", "Days old", "Last action"],
+        rows: filteredRows.map((d: any) => [
+          d.product?.name || "",
+          d.branch?.name || "",
+          Number(d.currentQuantity) || 0,
+          Number(d.daysOld) || 0,
+          d.lastAction ? new Date(d.lastAction).toLocaleDateString() : "",
+        ]),
+        pdfColumns: [
+          { header: "Product", width: 2 },
+          { header: "Branch", width: 1.3 },
+          { header: "Qty", align: "right" as const, width: 0.8 },
+          { header: "Days", align: "right" as const, width: 0.8 },
+          { header: "Last", width: 1.1 },
+        ],
+        pdfRows: filteredRows.map((d: any) => [
+          d.product?.name || "",
+          d.branch?.name || "",
+          formatQty(d.currentQuantity),
+          String(d.daysOld ?? 0),
+          d.lastAction ? new Date(d.lastAction).toLocaleDateString() : "",
+        ]),
+      };
+    }
+    // movement_summary
+    return {
+      headers: ["Activity type", "Occurrences", "Net qty change"],
+      rows: filteredRows.map((d: any) => [
+        d.movement_type || "",
+        typeof d._count === "number" ? d._count : d._count?._all ?? 0,
+        Number(d._sum?.quantity_change || 0),
+      ]),
+      pdfColumns: [
+        { header: "Type", width: 2 },
+        { header: "Events", align: "right" as const, width: 1 },
+        { header: "Net qty", align: "right" as const, width: 1.2 },
+      ],
+      pdfRows: filteredRows.map((d: any) => {
+        const net = Number(d._sum?.quantity_change || 0);
+        return [
+          d.movement_type || "",
+          String(typeof d._count === "number" ? d._count : d._count?._all ?? 0),
+          `${net > 0 ? "+" : ""}${formatQty(net)}`,
+        ];
+      }),
+    };
+  };
+
+  const exportExcel = async () => {
+    if (filteredRows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      const payload = buildExportPayload();
+      downloadExcel(
+        `inventory-${reportType}-${Date.now()}.xlsx`,
+        activeReport.short,
+        payload.headers,
+        payload.rows,
+      );
+      toast.success("Excel downloaded");
+    } catch {
+      toast.error("Failed to export Excel");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const exportPdf = async () => {
+    if (filteredRows.length === 0) {
+      toast.error("Nothing to export");
+      return;
+    }
+    setExporting(true);
+    await yieldForUi();
+    try {
+      const payload = buildExportPayload();
+      await downloadBrandedPdf({
+        filename: `inventory-${reportType}-${Date.now()}.pdf`,
+        title: activeReport.label,
+        subtitle: activeReport.desc,
+        logoDataUri,
+        summary: kpiItems.slice(0, 3).map((k) => ({
+          label: k.label,
+          value: String(k.value),
+        })),
+        columns: payload.pdfColumns,
+        rows: payload.pdfRows,
+      });
+      toast.success("PDF downloaded");
+    } catch {
+      toast.error("Failed to export PDF");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  if (awaitingReport && !data && branches.length === 0) {
+    return <PageLoader message="Loading inventory reports..." />;
+  }
+
+  return (
+    <div className="p-4 md:p-6 space-y-5 text-black min-w-0">
+      {/* Header */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between pb-1 border-b border-gray-100">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-slate-600 mb-1">
+            <FileBarChart2 className="h-4 w-4" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]">
+              Analytics
+            </span>
+          </div>
+          <h1 className="text-2xl md:text-[1.75rem] font-bold text-gray-900 tracking-tight leading-none">
+            Inventory Reports
+          </h1>
+          <p className="text-sm text-gray-500 mt-1.5">
+            Valuation, procurement, transfers, alerts, and movement insights
+          </p>
+        </div>
+
+        <div className="flex flex-wrap items-center gap-2 self-start lg:self-auto">
+          <StockOpsActions
+            onExportExcel={exportExcel}
+            onExportPdf={exportPdf}
+            disabled={awaitingReport || filteredRows.length === 0}
+            exporting={exporting}
+          />
+        </div>
+      </div>
+
+      {/* Report type tabs */}
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm overflow-hidden">
+        <Tabs
+          value={reportType}
+          onValueChange={(v) => setReportType(v as ReportType)}
+          className="w-full"
+        >
+          <div className="border-b border-gray-200 bg-gray-50/60 overflow-x-auto">
+            <TabsList
+              className={cn(
+                "h-auto w-full min-w-max justify-start gap-0 rounded-none bg-transparent p-0",
+                "inline-flex",
+              )}
+            >
+              {REPORT_TYPES.map((r) => {
+                const Icon = r.icon;
+                return (
+                  <TabsTrigger
+                    key={r.value}
+                    value={r.value}
+                    className={cn(
+                      "relative h-11 rounded-none border-0 bg-transparent px-4 text-sm font-medium shadow-none",
+                      "text-gray-500 hover:text-gray-900 hover:bg-white/60",
+                      "data-[state=active]:bg-white data-[state=active]:text-gray-900 data-[state=active]:shadow-none",
+                      "after:absolute after:inset-x-0 after:bottom-0 after:h-0.5 after:bg-transparent after:content-['']",
+                      "data-[state=active]:after:bg-gray-900",
+                      "gap-2",
+                    )}
+                  >
+                    <Icon className="h-4 w-4 shrink-0" />
+                    <span className="hidden sm:inline">{r.short}</span>
+                    <span className="sm:hidden">{r.short.split(" ")[0]}</span>
+                  </TabsTrigger>
+                );
+              })}
+            </TabsList>
+          </div>
+        </Tabs>
+
+        <div className="px-4 py-3 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 border-b border-gray-100">
+          <div className="min-w-0">
+            <h2 className="text-sm font-semibold text-gray-900">
+              {activeReport.label}
+            </h2>
+            <p className="text-xs text-gray-500 mt-0.5">{activeReport.desc}</p>
+          </div>
+          {reportType === "valuation" && valuationLocations.length > 0 ? (
+            <div className="inline-flex rounded-lg border border-gray-200 bg-gray-50 p-0.5 self-start overflow-x-auto max-w-full">
+              <button
+                type="button"
+                onClick={() => setLocationFocus("all")}
+                className={cn(
+                  "h-8 px-2.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors",
+                  locationFocus === "all"
+                    ? "bg-white text-gray-900 shadow-sm"
+                    : "text-gray-600 hover:text-gray-900",
+                )}
+              >
+                All locations
+              </button>
+              {valuationLocations.map((loc) => (
+                <button
+                  key={loc.id}
+                  type="button"
+                  onClick={() => setLocationFocus(loc.id)}
+                  className={cn(
+                    "h-8 px-2.5 rounded-md text-xs font-medium whitespace-nowrap transition-colors inline-flex items-center gap-1.5",
+                    locationFocus === loc.id
+                      ? "bg-white text-gray-900 shadow-sm"
+                      : "text-gray-600 hover:text-gray-900",
+                  )}
+                >
+                  <MapPin className="h-3 w-3 text-gray-400" />
+                  {loc.name}
+                </button>
+              ))}
+            </div>
+          ) : null}
+        </div>
+      </div>
+
+      <InventoryKpiGrid
+        columns={kpiItems.length >= 4 ? 4 : 3}
+        loading={awaitingReport}
+        items={kpiItems}
+      />
+
+      {/* Filters */}
+      <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2.5">
+          <div className="relative md:col-span-2 xl:col-span-1">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+            <Input
+              placeholder="Search product, SKU, branch, supplier…"
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-10 text-sm text-black"
+            />
+          </div>
+
+          <Select
+            value={filterBranch}
+            onValueChange={(v) => setFilterBranch(v)}
+          >
+            <SelectTrigger className="h-10 text-sm text-black">
+              <SelectValue placeholder="Branch" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all" className="text-sm">
+                All branches
+              </SelectItem>
+              {branches.map((b) => (
+                <SelectItem key={b.id} value={b.id} className="text-sm">
+                  {b.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+
+          {showSupplierFilter ? (
+            <Select
+              value={filterSupplier}
+              onValueChange={(v) => setFilterSupplier(v)}
+            >
+              <SelectTrigger className="h-10 text-sm text-black">
+                <SelectValue placeholder="Supplier" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all" className="text-sm">
+                  All suppliers
+                </SelectItem>
+                {suppliers.map((s) => (
+                  <SelectItem key={s.id} value={s.id} className="text-sm">
+                    {s.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : null}
+
+          {showDateFilters ? (
+            <>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-10 w-full justify-start text-left text-sm font-normal text-black"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                    {filterStart ? (
+                      format(filterStart, "dd MMM yyyy")
+                    ) : (
+                      <span className="text-gray-400">From date</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={filterStart}
+                    onSelect={setFilterStart}
+                  />
+                </PopoverContent>
+              </Popover>
+
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    className="h-10 w-full justify-start text-left text-sm font-normal text-black"
+                  >
+                    <CalendarIcon className="mr-2 h-4 w-4 text-gray-500" />
+                    {filterEnd ? (
+                      format(filterEnd, "dd MMM yyyy")
+                    ) : (
+                      <span className="text-gray-400">To date</span>
+                    )}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <CalendarComponent
+                    mode="single"
+                    selected={filterEnd}
+                    onSelect={setFilterEnd}
+                  />
+                </PopoverContent>
+              </Popover>
+            </>
+          ) : null}
+
+          {hasActiveFilters ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-10 text-sm text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
+              onClick={clearFilters}
+            >
+              <X className="h-4 w-4 mr-1.5" />
+              Clear filters
+            </Button>
+          ) : null}
+        </div>
+        <p className="text-xs text-gray-500">
+          Showing {pagedRows.length.toLocaleString()} of{" "}
+          {filteredRows.length.toLocaleString()} rows
+          {searchQuery.trim() ? " (search applied)" : ""}
+        </p>
+      </div>
+
+      {/* Results */}
+      <Card className="border border-gray-200 overflow-hidden bg-white shadow-sm">
+        <CardContent className="p-0 relative">
+          {awaitingReport ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6">
+              <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+              <p className="text-sm text-gray-500 mt-3">Generating report...</p>
+            </div>
+          ) : filteredRows.length === 0 ? (
+            <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+              <Package className="h-8 w-8 text-gray-300 mb-3" />
+              <p className="text-sm font-medium text-gray-900">
+                No report data found
+              </p>
+              <p className="text-xs text-gray-500 mt-1">
+                {hasActiveFilters
+                  ? "Try clearing filters or adjusting your search."
+                  : "No records match this report yet."}
+              </p>
+            </div>
+          ) : (
+            <>
+              {loading ? (
+                <div className="absolute inset-0 z-50 flex items-center justify-center bg-white/70">
+                  <Loader2 className="h-6 w-6 animate-spin text-gray-500" />
+                </div>
+              ) : null}
+
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                      {reportType === "valuation" && (
+                        <>
+                          <TableHead className="text-xs font-semibold text-gray-600 pl-3">
+                            Product
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">
+                            Branch
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Qty
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Unit value
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right pr-3">
+                            Total value
+                          </TableHead>
+                        </>
+                      )}
+                      {reportType === "purchase" && (
+                        <>
+                          <TableHead className="text-xs font-semibold text-gray-600 pl-3">
+                            Date
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">
+                            Product
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">
+                            Supplier
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Qty
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Unit cost
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right pr-3">
+                            Line total
+                          </TableHead>
+                        </>
+                      )}
+                      {reportType === "transfer" && (
+                        <>
+                          <TableHead className="text-xs font-semibold text-gray-600 pl-3">
+                            Date
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">
+                            Product
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">
+                            Route
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Qty
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right pr-3">
+                            Status
+                          </TableHead>
+                        </>
+                      )}
+                      {reportType === "stockout" && (
+                        <>
+                          <TableHead className="text-xs font-semibold text-gray-600 pl-3">
+                            Date
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">
+                            Product
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">
+                            Branch
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Qty
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right pr-3">
+                            Reason
+                          </TableHead>
+                        </>
+                      )}
+                      {reportType === "lowstock" && (
+                        <>
+                          <TableHead className="text-xs font-semibold text-gray-600 pl-3">
+                            Product
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">
+                            Branch
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            In stock
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Min
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right pr-3">
+                            Status
+                          </TableHead>
+                        </>
+                      )}
+                      {reportType === "aging" && (
+                        <>
+                          <TableHead className="text-xs font-semibold text-gray-600 pl-3">
+                            Product
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">
+                            Branch
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Qty
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Days old
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right pr-3">
+                            Last movement
+                          </TableHead>
+                        </>
+                      )}
+                      {reportType === "movement_summary" && (
+                        <>
+                          <TableHead className="text-xs font-semibold text-gray-600 pl-3">
+                            Activity type
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">
+                            Occurrences
+                          </TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right pr-3">
+                            Net qty change
+                          </TableHead>
+                        </>
+                      )}
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pagedRows.map((d: any, i: number) => {
+                      if (reportType === "valuation") {
+                        const qty = Number(d.quantity) || 0;
+                        const unit =
+                          d.product?.purchase_rate != null
+                            ? Number(d.product.purchase_rate)
+                            : qty !== 0
+                              ? (Number(d.value) || 0) / qty
+                              : 0;
+                        const val = Number(d.value) || 0;
+                        return (
+                          <TableRow key={`${d.branchId}-${d.product?.id || i}`}>
+                            <TableCell className="py-2.5 pl-3">
+                              <p className="text-sm font-medium text-gray-900 line-clamp-1">
+                                {d.product?.name || "—"}
+                              </p>
+                              <p className="text-[11px] font-mono text-gray-400">
+                                {d.product?.sku || "—"}
+                              </p>
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-700">
+                              <span className="inline-flex items-center gap-1">
+                                <MapPin className="h-3 w-3 text-gray-400" />
+                                {d.branchName}
+                              </span>
+                            </TableCell>
+                            <TableCell
+                              className={cn(
+                                "py-2.5 text-sm text-right tabular-nums font-medium",
+                                qty < 0 && "text-rose-700",
+                              )}
+                            >
+                              {formatQty(qty)}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums text-gray-600">
+                              {money(unit)}
+                            </TableCell>
+                            <TableCell
+                              className={cn(
+                                "py-2.5 pr-3 text-sm text-right tabular-nums font-semibold",
+                                val < 0 && "text-rose-700",
+                              )}
+                            >
+                              {money(val)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      if (reportType === "purchase") {
+                        const qty = Number(d.quantity) || 0;
+                        const cost = Number(d.cost_price) || 0;
+                        return (
+                          <TableRow key={d.id || i}>
+                            <TableCell className="py-2.5 pl-3 text-sm text-gray-700 whitespace-nowrap">
+                              {d.purchase_date
+                                ? new Date(d.purchase_date).toLocaleDateString()
+                                : "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm font-medium text-gray-900">
+                              {d.product?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-600">
+                              {d.supplier?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums">
+                              {formatQty(qty)}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums text-gray-600">
+                              {money(cost)}
+                            </TableCell>
+                            <TableCell className="py-2.5 pr-3 text-sm text-right tabular-nums font-semibold">
+                              {money(qty * cost)}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      if (reportType === "transfer") {
+                        return (
+                          <TableRow key={d.id || i}>
+                            <TableCell className="py-2.5 pl-3 text-sm text-gray-700 whitespace-nowrap">
+                              {d.transfer_date
+                                ? new Date(d.transfer_date).toLocaleDateString()
+                                : "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm font-medium text-gray-900">
+                              {d.product?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-700">
+                              {d.from_branch?.name || "—"} →{" "}
+                              {d.to_branch?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums font-medium">
+                              {formatQty(d.quantity)}
+                            </TableCell>
+                            <TableCell className="py-2.5 pr-3 text-right">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] font-semibold",
+                                  statusTone(d.status),
+                                )}
+                              >
+                                {d.status || "—"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      if (reportType === "stockout") {
+                        return (
+                          <TableRow key={d.id || i}>
+                            <TableCell className="py-2.5 pl-3 text-sm text-gray-700 whitespace-nowrap">
+                              {d.created_at
+                                ? new Date(d.created_at).toLocaleDateString()
+                                : "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm font-medium text-gray-900">
+                              {d.product?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-600">
+                              {d.branch?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums font-semibold text-rose-700">
+                              {formatQty(
+                                Math.abs(Number(d.quantity_change) || 0),
+                              )}
+                            </TableCell>
+                            <TableCell className="py-2.5 pr-3 text-right">
+                              <Badge
+                                variant="outline"
+                                className="text-[10px] font-semibold"
+                              >
+                                {d.movement_type || "—"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      if (reportType === "lowstock") {
+                        const qty = Number(d.current_quantity) || 0;
+                        const out = qty <= 0;
+                        return (
+                          <TableRow key={d.id || i}>
+                            <TableCell className="py-2.5 pl-3">
+                              <p className="text-sm font-medium text-gray-900">
+                                {d.product?.name || "—"}
+                              </p>
+                              <p className="text-[11px] font-mono text-gray-400">
+                                {d.product?.sku || "—"}
+                              </p>
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-600">
+                              {d.branch?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums font-semibold text-rose-700">
+                              {formatQty(qty)}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums text-gray-600">
+                              {formatQty(
+                                d.product?.min_qty ?? d.minimum_quantity ?? 0,
+                              )}
+                            </TableCell>
+                            <TableCell className="py-2.5 pr-3 text-right">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] font-semibold",
+                                  out
+                                    ? "bg-rose-50 text-rose-800 border-rose-200"
+                                    : "bg-amber-50 text-amber-800 border-amber-200",
+                                )}
+                              >
+                                {out ? "Out of stock" : "Low"}
+                              </Badge>
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      if (reportType === "aging") {
+                        const days = Number(d.daysOld) || 0;
+                        return (
+                          <TableRow key={`${d.product?.id}-${d.branch?.id}-${i}`}>
+                            <TableCell className="py-2.5 pl-3 text-sm font-medium text-gray-900">
+                              {d.product?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-600">
+                              {d.branch?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-right tabular-nums">
+                              {formatQty(d.currentQuantity)}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-right">
+                              <Badge
+                                variant="outline"
+                                className={cn(
+                                  "text-[10px] font-semibold",
+                                  days > 90
+                                    ? "bg-rose-50 text-rose-800 border-rose-200"
+                                    : days > 30
+                                      ? "bg-amber-50 text-amber-800 border-amber-200"
+                                      : "bg-gray-50 text-gray-700 border-gray-200",
+                                )}
+                              >
+                                {days} days
+                              </Badge>
+                            </TableCell>
+                            <TableCell className="py-2.5 pr-3 text-sm text-right text-gray-600">
+                              {d.lastAction
+                                ? new Date(d.lastAction).toLocaleDateString()
+                                : "—"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      }
+
+                      // movement_summary
+                      const count =
+                        typeof d._count === "number"
+                          ? d._count
+                          : d._count?._all ?? 0;
+                      const net = Number(d._sum?.quantity_change || 0);
+                      return (
+                        <TableRow key={d.movement_type || i}>
+                          <TableCell className="py-2.5 pl-3 text-sm font-medium text-gray-900">
+                            {d.movement_type || "—"}
+                          </TableCell>
+                          <TableCell className="py-2.5 text-sm text-right tabular-nums">
+                            {count.toLocaleString()}
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "py-2.5 pr-3 text-sm text-right tabular-nums font-semibold",
+                              net > 0
+                                ? "text-emerald-700"
+                                : net < 0
+                                  ? "text-rose-700"
+                                  : "text-gray-700",
+                            )}
+                          >
+                            {net > 0 ? "+" : ""}
+                            {formatQty(net)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+
+              <PaginationBar
+                page={currentPage}
+                totalPages={totalPages}
+                total={filteredRows.length}
+                pageSize={PAGE_SIZE}
+                onPage={setPage}
+                disabled={loading}
+              />
+            </>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

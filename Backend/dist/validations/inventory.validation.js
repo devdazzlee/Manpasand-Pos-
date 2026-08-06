@@ -9,6 +9,7 @@ exports.listMovementsSchema = zod_1.z.object({
         branchId: zod_1.z.string().optional(),
         productId: zod_1.z.string().optional(),
         movementType: zod_1.z.string().optional(),
+        direction: zod_1.z.enum(['in', 'out']).optional(),
         startDate: zod_1.z.string().optional(),
         endDate: zod_1.z.string().optional(),
     }),

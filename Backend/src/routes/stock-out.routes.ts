@@ -1,7 +1,13 @@
 import { Router } from 'express';
 import { validate } from '../middleware/validation.middleware';
 import { authenticate, authorize } from '../middleware/auth.middleware';
-import { logStockOut, logBulkStockOut, listStockOut, logReturn } from '../controllers/stock-out.controller';
+import {
+  logStockOut,
+  logBulkStockOut,
+  listStockOut,
+  logReturn,
+  getMonthlyStats,
+} from '../controllers/stock-out.controller';
 import {
   logStockOutSchema,
   logBulkStockOutSchema,
@@ -16,6 +22,7 @@ router.use(
   authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER'])
 );
 
+router.get('/stats', getMonthlyStats);
 router.get('/', validate(listStockOutSchema), listStockOut);
 router.post('/out', validate(logStockOutSchema), logStockOut);
 router.post('/bulk', validate(logBulkStockOutSchema), logBulkStockOut);
