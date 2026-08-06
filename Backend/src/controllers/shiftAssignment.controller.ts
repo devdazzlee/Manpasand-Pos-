@@ -6,14 +6,7 @@ import { ApiResponse } from '../utils/apiResponse';
 const shiftAssignmentService = new ShiftAssignmentService();
 
 export const assignShift = asyncHandler(async (req: Request, res: Response) => {
-  const { employee_id, shift_time, start_date, end_date, break_time } = req.body;
-  const assignment = await shiftAssignmentService.assignShift({
-    employee_id,
-    shift_time,
-    start_date: new Date(start_date),
-    end_date: end_date ? new Date(end_date) : null,
-    break_time,
-  });
+  const assignment = await shiftAssignmentService.assignShift(req.body);
   new ApiResponse(assignment, 'Shift assigned successfully', 201).send(res);
 });
 
@@ -31,31 +24,64 @@ export const getShiftHistory = asyncHandler(async (req: Request, res: Response) 
 
 export const endCurrentShift = asyncHandler(async (req: Request, res: Response) => {
   const { employee_id } = req.params;
-  const { sales } = req.body;
-  await shiftAssignmentService.endCurrentShift(employee_id, new Date(), sales !== undefined ? parseFloat(sales) : undefined);
-  new ApiResponse(null, 'Current shift ended successfully', 200).send(res);
+  const sales =
+    req.body?.sales !== undefined && req.body?.sales !== null
+      ? Number(req.body.sales)
+      : undefined;
+  const updated = await shiftAssignmentService.endCurrentShift(
+    employee_id,
+    new Date(),
+    sales,
+  );
+  new ApiResponse(updated, 'Current shift ended successfully', 200).send(res);
+});
+
+export const endShiftById = asyncHandler(async (req: Request, res: Response) => {
+  const { id } = req.params;
+  const sales =
+    req.body?.sales !== undefined && req.body?.sales !== null
+      ? Number(req.body.sales)
+      : undefined;
+  const updated = await shiftAssignmentService.endShiftById(id, sales);
+  new ApiResponse(updated, 'Shift ended successfully', 200).send(res);
 });
 
 export const getAllShifts = asyncHandler(async (req: Request, res: Response) => {
-  const shifts = await shiftAssignmentService.getAllShifts();
-  new ApiResponse(shifts, 'All shifts fetched successfully', 200).send(res);
+  const q = req.query as Record<string, unknown>;
+  const fetchAllRaw = q.fetch_all;
+  const fetch_all =
+    fetchAllRaw === true ||
+    fetchAllRaw === 'true' ||
+    (!q.page && !q.limit);
+
+  const result = await shiftAssignmentService.listShifts({
+    page: q.page ? Number(q.page) : undefined,
+    limit: q.limit ? Number(q.limit) : undefined,
+    fetch_all,
+    search: typeof q.search === 'string' ? q.search : undefined,
+    employee_id: typeof q.employee_id === 'string' ? q.employee_id : undefined,
+    status: q.status as any,
+    date_from: typeof q.date_from === 'string' ? q.date_from : undefined,
+    date_to: typeof q.date_to === 'string' ? q.date_to : undefined,
+    period: q.period as any,
+  });
+  new ApiResponse(
+    result.data,
+    'All shifts fetched successfully',
+    200,
+    true,
+    result.meta,
+  ).send(res);
 });
 
 export const updateShift = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  const { shift_time, start_date, end_date, sales, break_time } = req.body;
-  const updated = await shiftAssignmentService.updateShift(id, {
-    shift_time,
-    start_date: start_date ? new Date(start_date) : undefined,
-    end_date: end_date === null ? null : (end_date ? new Date(end_date) : undefined),
-    sales: sales !== undefined ? parseFloat(sales) : undefined,
-    break_time,
-  });
+  const updated = await shiftAssignmentService.updateShift(id, req.body);
   new ApiResponse(updated, 'Shift updated successfully', 200).send(res);
 });
 
 export const deleteShift = asyncHandler(async (req: Request, res: Response) => {
   const { id } = req.params;
-  await shiftAssignmentService.deleteShift(id);
-  new ApiResponse(null, 'Shift deleted successfully', 200).send(res);
+  const result = await shiftAssignmentService.deleteShift(id);
+  new ApiResponse(result, 'Shift deleted successfully', 200).send(res);
 });

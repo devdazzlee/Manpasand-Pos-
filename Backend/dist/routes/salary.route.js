@@ -12,7 +12,10 @@ const router = express_1.default.Router();
 router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']));
 router.post('/', (0, validation_middleware_1.validate)(salary_validation_1.createSalarySchema), salary_controller_1.createSalary);
 router.get('/', (0, validation_middleware_1.validate)(salary_validation_1.listSalariesSchema), salary_controller_1.listSalaries);
-router.put('/:id', (0, validation_middleware_1.validate)(salary_validation_1.salaryIdParamSchema), salary_controller_1.updateSalary);
+router.get('/:id', (0, validation_middleware_1.validate)(salary_validation_1.salaryIdParamSchema), salary_controller_1.getSalaryById);
+router.put('/:id', (0, validation_middleware_1.validate)(salary_validation_1.updateSalarySchema), salary_controller_1.updateSalary);
+router.patch('/:id/mark-paid', (0, validation_middleware_1.validate)(salary_validation_1.markSalaryPaidSchema), salary_controller_1.markSalaryPaid);
+router.patch('/:id/mark-unpaid', (0, validation_middleware_1.validate)(salary_validation_1.salaryIdParamSchema), salary_controller_1.markSalaryUnpaid);
 router.delete('/:id', (0, validation_middleware_1.validate)(salary_validation_1.salaryIdParamSchema), salary_controller_1.deleteSalary);
 exports.default = router;
 //# sourceMappingURL=salary.route.js.map

@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteEmployeeType = exports.updateEmployeeType = exports.getEmployeeTypeById = exports.getEmployeeTypes = exports.createEmployeeType = exports.listExpenses = exports.createExpense = void 0;
+exports.deleteEmployeeType = exports.toggleEmployeeType = exports.updateEmployeeType = exports.getEmployeeTypeById = exports.getEmployeeTypes = exports.createEmployeeType = exports.listExpenses = exports.createExpense = void 0;
 const expense_service_1 = require("../services/expense.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -24,8 +24,11 @@ exports.createEmployeeType = (0, asyncHandler_1.default)(async (req, res) => {
     const data = await expenseService.create(req.body);
     new apiResponse_1.ApiResponse(data, 'Employee type created successfully', 201).send(res);
 });
-exports.getEmployeeTypes = (0, asyncHandler_1.default)(async (_req, res) => {
-    const data = await expenseService.getAll();
+exports.getEmployeeTypes = (0, asyncHandler_1.default)(async (req, res) => {
+    const search = req.query.search;
+    const isActiveRaw = req.query.is_active;
+    const is_active = isActiveRaw === 'true' ? true : isActiveRaw === 'false' ? false : undefined;
+    const data = await expenseService.getAll({ search, is_active });
     new apiResponse_1.ApiResponse(data, 'Employee types retrieved successfully').send(res);
 });
 exports.getEmployeeTypeById = (0, asyncHandler_1.default)(async (req, res) => {
@@ -35,6 +38,10 @@ exports.getEmployeeTypeById = (0, asyncHandler_1.default)(async (req, res) => {
 exports.updateEmployeeType = (0, asyncHandler_1.default)(async (req, res) => {
     const data = await expenseService.update(req.params.id, req.body);
     new apiResponse_1.ApiResponse(data, 'Employee type updated successfully').send(res);
+});
+exports.toggleEmployeeType = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await expenseService.toggleActive(req.params.id);
+    new apiResponse_1.ApiResponse(data, 'Designation status updated successfully').send(res);
 });
 exports.deleteEmployeeType = (0, asyncHandler_1.default)(async (req, res) => {
     const data = await expenseService.delete(req.params.id);

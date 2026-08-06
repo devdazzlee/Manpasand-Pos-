@@ -864,22 +864,63 @@ enum CashFlowStatus {
 }
 
 // Staff Management
+enum EmploymentType {
+  FULL_TIME
+  PART_TIME
+  CONTRACT
+  INTERN
+}
+
+enum EmployeeStatus {
+  ACTIVE
+  INACTIVE
+  ON_LEAVE
+  TERMINATED
+}
+
+model Department {
+  id         String     @id @default(uuid())
+  name       String     @unique
+  is_active  Boolean    @default(true)
+  employees  Employee[]
+  created_at DateTime   @default(now())
+  updated_at DateTime   @default(now()) @updatedAt
+}
+
 model Employee {
   id           String   @id @default(uuid())
+  employee_code String? @unique
   name         String
   email        String?  @unique
   phone_number String?
   cnic         String?  @unique
   gender       String?
   join_date    DateTime
-  is_active    Boolean  @default(true)
+  is_active    Boolean  @default(true) // keep for backward compat; sync with status
+  status       EmployeeStatus @default(ACTIVE)
+  employment_type EmploymentType @default(FULL_TIME)
+  date_of_birth DateTime?
+  address      String?
+  personal_email String?
+  emergency_name String?
+  emergency_phone String?
+  photo_url    String?
+  deactivated_at DateTime?
+  deactivated_reason String?
 
-  // Relations
   branch_id String?
   branch    Branch? @relation(fields: [branch_id], references: [id])
 
+  department_id String?
+  department    Department? @relation(fields: [department_id], references: [id])
+
   employee_type_id  String
   employee_type     EmployeeType      @relation(fields: [employee_type_id], references: [id])
+
+  reporting_manager_id String?
+  reporting_manager    Employee?  @relation("EmployeeManager", fields: [reporting_manager_id], references: [id])
+  direct_reports       Employee[] @relation("EmployeeManager")
+
   shift_assignments ShiftAssignment[]
   salaries          Salary[]
 
@@ -888,13 +929,15 @@ model Employee {
 
   @@index([branch_id])
   @@index([employee_type_id])
+  @@index([department_id])
+  @@index([status])
+  @@index([employee_code])
 }
 
 model EmployeeType {
   id        String  @id @default(uuid())
   name      String  @unique
   is_active Boolean @default(true)
-
   employees Employee[]
 }
 
@@ -914,26 +957,21 @@ model ShiftAssignment {
   end_date    DateTime?
   sales       Float     @default(0)
   break_time  String?   @default("1 hour")
-
   employee Employee @relation(fields: [employee_id], references: [id])
-
   @@unique([employee_id,start_date])
 }
 
 model Salary {
   id          String    @id @default(uuid())
   employee_id String
-  month       Int // 1 - 12
+  month       Int
   year        Int
   amount      Decimal
   is_paid     Boolean   @default(false)
   paid_date   DateTime?
   notes       String?
-
   employee Employee @relation(fields: [employee_id], references: [id])
-
   created_at DateTime @default(now())
-
   @@unique([employee_id, month, year])
   @@index([employee_id])
 }

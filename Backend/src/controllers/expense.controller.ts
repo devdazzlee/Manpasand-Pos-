@@ -24,8 +24,12 @@ export const createEmployeeType = asyncHandler(async (req: Request, res: Respons
   new ApiResponse(data, 'Employee type created successfully', 201).send(res);
 });
 
-export const getEmployeeTypes = asyncHandler(async (_req: Request, res: Response) => {
-  const data = await expenseService.getAll();
+export const getEmployeeTypes = asyncHandler(async (req: Request, res: Response) => {
+  const search = req.query.search as string | undefined;
+  const isActiveRaw = req.query.is_active as string | undefined;
+  const is_active =
+    isActiveRaw === 'true' ? true : isActiveRaw === 'false' ? false : undefined;
+  const data = await expenseService.getAll({ search, is_active });
   new ApiResponse(data, 'Employee types retrieved successfully').send(res);
 });
 
@@ -37,6 +41,11 @@ export const getEmployeeTypeById = asyncHandler(async (req: Request, res: Respon
 export const updateEmployeeType = asyncHandler(async (req: Request, res: Response) => {
   const data = await expenseService.update(req.params.id, req.body);
   new ApiResponse(data, 'Employee type updated successfully').send(res);
+});
+
+export const toggleEmployeeType = asyncHandler(async (req: Request, res: Response) => {
+  const data = await expenseService.toggleActive(req.params.id);
+  new ApiResponse(data, 'Designation status updated successfully').send(res);
 });
 
 export const deleteEmployeeType = asyncHandler(async (req: Request, res: Response) => {
