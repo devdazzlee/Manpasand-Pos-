@@ -24,14 +24,34 @@ import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
-import { Search, Plus, Edit, Package, AlertTriangle, Upload, X, ImageIcon, RefreshCw, Loader2, Trash2, Tag } from "lucide-react"
+import {
+  Search,
+  Plus,
+  Edit,
+  Package,
+  AlertTriangle,
+  Upload,
+  X,
+  ImageIcon,
+  RefreshCw,
+  Loader2,
+  Trash2,
+  Tag,
+  Star,
+  LayoutGrid,
+  List,
+  PackageCheck,
+  PackageX,
+} from "lucide-react"
 import apiClient from "@/lib/apiClient"
 import { usePosData } from "@/hooks/use-pos-data"
 import { usePosBranch } from "@/hooks/use-pos-branch"
 import { cn } from "@/lib/utils"
+import { formatMoneyDisplay } from "@/lib/money"
 
 // Image compression utility
 const compressImage = (file: File, quality = 0.7, maxWidth = 800, maxHeight = 600): Promise<File> => {
@@ -137,12 +157,12 @@ const mapStoreProductToCard = (product: any): Product => ({
   code: product.code || "",
   pct_or_hs_code: product.pct_or_hs_code,
   description: product.description,
-  purchase_rate: product.purchase_rate || 0,
-  sales_rate_exc_dis_and_tax: product.sales_rate_exc_dis_and_tax || 0,
-  sales_rate_inc_dis_and_tax: product.sales_rate_inc_dis_and_tax || 0,
-  discount_amount: product.discount_amount,
-  min_qty: product.min_qty,
-  max_qty: product.max_qty,
+  purchase_rate: Number(product.purchase_rate) || 0,
+  sales_rate_exc_dis_and_tax: Number(product.sales_rate_exc_dis_and_tax) || 0,
+  sales_rate_inc_dis_and_tax: Number(product.sales_rate_inc_dis_and_tax) || 0,
+  discount_amount: product.discount_amount != null ? Number(product.discount_amount) : undefined,
+  min_qty: product.min_qty != null ? Number(product.min_qty) : undefined,
+  max_qty: product.max_qty != null ? Number(product.max_qty) : undefined,
   is_active: product.is_active ?? true,
   display_on_pos: product.display_on_pos ?? true,
   is_batch: product.is_batch ?? false,
@@ -158,29 +178,83 @@ const mapStoreProductToCard = (product: any): Product => ({
   brand: { id: product.brandId, name: product.brandName },
   color: { id: product.colorId, name: product.colorName },
   size: { id: product.sizeId, name: product.sizeName },
-  available_stock: product.available_stock ?? product.stock ?? 0,
-  current_stock: product.current_stock ?? product.stock ?? 0,
-  reserved_stock: product.reserved_stock ?? 0,
-  minimum_stock: product.minimum_stock ?? 0,
-  maximum_stock: product.maximum_stock ?? 0,
+  available_stock: Number(product.available_stock ?? product.current_stock ?? product.stock ?? 0),
+  current_stock: Number(product.current_stock ?? product.stock ?? 0),
+  reserved_stock: Number(product.reserved_stock ?? 0),
+  minimum_stock: Number(product.minimum_stock ?? product.min_qty ?? 0),
+  maximum_stock: Number(product.maximum_stock ?? 0),
   created_at: product.created_at || new Date().toISOString(),
   updated_at: product.updated_at || new Date().toISOString(),
   images: product.images || [],
 })
 
 const getProductStock = (product: Product) =>
-  product.available_stock ?? product.current_stock ?? 0
+  Number(product.available_stock ?? product.current_stock ?? 0)
+
+const formatRs = (amount: number | string | undefined) =>
+  `Rs ${formatMoneyDisplay(Number(amount) || 0)}`
+
+const formatStockQty = (n: number) => {
+  const value = Number(n) || 0
+  if (Number.isInteger(value)) return value.toLocaleString()
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  })
+}
 
 const getProductImageUrl = (product: Product) => {
   const url = product.images?.[0]?.image
-  if (!url) return null
+  if (!url || typeof url !== "string") return null
   const version = encodeURIComponent(product.updated_at || product.id)
   return `${url}${url.includes("?") ? "&" : "?"}v=${version}`
+}
+
+function ProductThumb({
+  product,
+  className,
+  iconClassName,
+}: {
+  product: Product
+  className?: string
+  iconClassName?: string
+}) {
+  const [failed, setFailed] = useState(false)
+  const imageUrl = getProductImageUrl(product)
+
+  if (!imageUrl || failed) {
+    return (
+      <div
+        className={cn(
+          "flex h-full w-full flex-col items-center justify-center bg-slate-100 text-gray-400",
+          className,
+        )}
+      >
+        <ImageIcon className={cn("h-8 w-8", iconClassName)} />
+      </div>
+    )
+  }
+
+  return (
+    <img
+      src={imageUrl}
+      alt={product.name}
+      className={cn("h-full w-full object-cover", className)}
+      onError={() => setFailed(true)}
+    />
+  )
 }
 
 const getStockTone = (product: Product) => {
   const stock = getProductStock(product)
   const minStock = product.minimum_stock ?? product.min_qty ?? 0
+  if (stock < 0) {
+    return {
+      label: "Negative",
+      className: "text-red-700 bg-red-50 border-red-200",
+      valueClassName: "text-red-700",
+    }
+  }
   if (stock <= 0) {
     return {
       label: "Out of stock",
@@ -940,6 +1014,11 @@ export default function Inventory() {
   // as selected at once ("All CategoriesAll" in the trigger).
   const [selectedCategory, setSelectedCategory] = useState("__all__")
   const [selectedSubcategory, setSelectedSubcategory] = useState("__all__")
+  // Catalog quick filters: status / stock health / featured
+  const [statusFilter, setStatusFilter] = useState<
+    "ALL" | "ACTIVE" | "INACTIVE" | "OUT" | "LOW" | "FEATURED"
+  >("ALL")
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table")
 
   // State for dropdown options (these will be loaded from global store)
   const [units, setUnits] = useState<DropdownOption[]>([])
@@ -1207,11 +1286,20 @@ export default function Inventory() {
 
     if (searchTerm) {
       const term = searchTerm.toLowerCase()
-      filtered = filtered.filter(
-        (product) =>
-          product.name.toLowerCase().includes(term) ||
-          (product.sku && product.sku.toLowerCase().includes(term)),
-      )
+      filtered = filtered.filter((product) => {
+        const haystack = [
+          product.name,
+          product.sku,
+          product.code,
+          product.pct_or_hs_code,
+          product.category,
+          product.brandName,
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+        return haystack.includes(term)
+      })
     }
 
     if (selectedCategory !== "__all__") {
@@ -1222,6 +1310,25 @@ export default function Inventory() {
       filtered = filtered.filter(
         (product) => product.subcategoryId && product.subcategoryId === selectedSubcategory,
       )
+    }
+
+    if (statusFilter === "ACTIVE") {
+      filtered = filtered.filter((product) => product.is_active)
+    } else if (statusFilter === "INACTIVE") {
+      filtered = filtered.filter((product) => !product.is_active)
+    } else if (statusFilter === "FEATURED") {
+      filtered = filtered.filter((product) => product.is_featured)
+    } else if (statusFilter === "OUT") {
+      filtered = filtered.filter((product) => {
+        const stock = Number(product.available_stock ?? product.current_stock ?? product.stock ?? 0)
+        return stock <= 0
+      })
+    } else if (statusFilter === "LOW") {
+      filtered = filtered.filter((product) => {
+        const stock = Number(product.available_stock ?? product.current_stock ?? product.stock ?? 0)
+        const min = Number(product.minimum_stock ?? product.min_qty ?? 0)
+        return stock > 0 && min > 0 && stock <= min
+      })
     }
 
     const nameOf = (p: any) => String(p?.name || "").toLowerCase()
@@ -1257,23 +1364,61 @@ export default function Inventory() {
     }
 
     return filtered
-  }, [globalProducts, searchTerm, selectedCategory, selectedSubcategory, sortBy])
+  }, [globalProducts, searchTerm, selectedCategory, selectedSubcategory, sortBy, statusFilter])
 
   const hasActiveFilters =
     searchTerm.trim() !== "" ||
     selectedCategory !== "__all__" ||
-    selectedSubcategory !== "__all__"
+    selectedSubcategory !== "__all__" ||
+    statusFilter !== "ALL"
 
   const isCatalogLoading = productsLoading && globalProducts.length === 0
 
-  const catalogStats = useMemo(
-    () => ({
+  const catalogStats = useMemo(() => {
+    let active = 0
+    let featured = 0
+    let inactive = 0
+    let outOfStock = 0
+    let lowStock = 0
+
+    for (const product of globalProducts) {
+      if (product.is_active) active += 1
+      else inactive += 1
+      if (product.is_featured) featured += 1
+      const stock = Number(
+        product.available_stock ?? product.current_stock ?? product.stock ?? 0,
+      )
+      const min = Number(product.minimum_stock ?? product.min_qty ?? 0)
+      if (stock <= 0) outOfStock += 1
+      else if (min > 0 && stock <= min) lowStock += 1
+    }
+
+    return {
       total: globalProducts.length,
-      active: globalProducts.filter((product) => product.is_active).length,
-      featured: globalProducts.filter((product) => product.is_featured).length,
-    }),
-    [globalProducts],
-  )
+      active,
+      inactive,
+      featured,
+      outOfStock,
+      lowStock,
+    }
+  }, [globalProducts])
+
+  const subcategoryFilterOptions = useMemo(() => {
+    const map = new Map<string, string>()
+    for (const product of globalProducts) {
+      if (!product.subcategoryId || !product.subcategory) continue
+      if (
+        selectedCategory !== "__all__" &&
+        product.categoryId !== selectedCategory
+      ) {
+        continue
+      }
+      map.set(product.subcategoryId, product.subcategory)
+    }
+    return Array.from(map.entries())
+      .map(([id, name]) => ({ id, name }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [globalProducts, selectedCategory])
 
   const filteredProductCount = filteredProductsAll.length
 
@@ -1679,170 +1824,329 @@ export default function Inventory() {
 
   const totalPages = Math.ceil(filteredProductCount / pageSize)
 
+  const clearCatalogFilters = () => {
+    setSearchTerm("")
+    setSelectedCategory("__all__")
+    setSelectedSubcategory("__all__")
+    setStatusFilter("ALL")
+    setCurrentPage(1)
+  }
+
+  const statusChips: {
+    key: "ALL" | "ACTIVE" | "INACTIVE" | "OUT" | "LOW" | "FEATURED"
+    label: string
+    count: number
+  }[] = [
+    { key: "ALL", label: "All", count: catalogStats.total },
+    { key: "ACTIVE", label: "Active", count: catalogStats.active },
+    { key: "INACTIVE", label: "Inactive", count: catalogStats.inactive },
+    { key: "OUT", label: "Out of stock", count: catalogStats.outOfStock },
+    { key: "LOW", label: "Low stock", count: catalogStats.lowStock },
+    { key: "FEATURED", label: "Featured", count: catalogStats.featured },
+  ]
+
+  const renderProductActions = (product: Product) => (
+    <div className="flex items-center gap-1.5">
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8 text-xs"
+        onClick={() => openEditDialog(product)}
+      >
+        <Edit className="mr-1.5 h-3.5 w-3.5" />
+        Edit
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        className={cn(
+          "h-8 text-xs min-w-[72px]",
+          product.is_active
+            ? "text-amber-700 hover:bg-amber-50 hover:text-amber-800"
+            : "text-green-700 hover:bg-green-50 hover:text-green-800",
+        )}
+        onClick={() => handleToggleStatus(product)}
+        disabled={toggleStatusProductId === product.id}
+      >
+        {toggleStatusProductId === product.id ? (
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+        ) : product.is_active ? (
+          "Disable"
+        ) : (
+          "Enable"
+        )}
+      </Button>
+      <Button
+        size="sm"
+        variant="outline"
+        className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700"
+        onClick={() => setProductToDelete(product)}
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </Button>
+    </div>
+  )
+
+  const ProductTableSkeleton = () => (
+    <div className="space-y-2 p-4">
+      {Array.from({ length: 8 }).map((_, index) => (
+        <div key={index} className="h-14 rounded-lg bg-gray-100 animate-pulse" />
+      ))}
+    </div>
+  )
+
   const ProductGridSkeleton = () => (
-    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+    <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 p-4">
       {Array.from({ length: 8 }).map((_, index) => (
         <div
           key={index}
-          className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
+          className="animate-pulse rounded-xl border border-gray-200 bg-white p-4"
         >
-          <div className="aspect-[4/3] rounded-xl bg-gray-100" />
+          <div className="aspect-[4/3] rounded-lg bg-gray-100" />
           <div className="mt-4 h-4 rounded bg-gray-100" />
           <div className="mt-2 h-3 w-2/3 rounded bg-gray-100" />
-          <div className="mt-4 grid grid-cols-2 gap-2">
-            <div className="h-10 rounded-lg bg-gray-100" />
-            <div className="h-10 rounded-lg bg-gray-100" />
-          </div>
+          <div className="mt-4 h-16 rounded-lg bg-gray-100" />
         </div>
       ))}
     </div>
   )
 
   return (
-    <div className="min-h-screen bg-gray-50">
-      <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-        <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-          <div>
-            <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Product Management</h1>
-            <p className="text-sm md:text-base text-gray-600">Manage your products and inventory</p>
-            {productsLoading && (
-              <p className="text-xs md:text-sm text-muted-foreground mt-1 flex items-center gap-1.5">
-                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                Syncing product catalog...
-              </p>
-            )}
+    <div className="p-4 md:p-6 space-y-5 min-w-0">
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between pb-1 border-b border-gray-100">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-blue-600 mb-1">
+            <Package className="h-4 w-4" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]">
+              Catalog
+            </span>
           </div>
-          <Dialog
-            open={isAddDialogOpen}
-            onOpenChange={(open) => {
-              if (open) {
-                // Always start the Add form from a clean slate so values left
-                // behind from a previous Edit can't leak across dialogs.
+          <h1 className="text-2xl md:text-[1.75rem] font-bold text-gray-900 tracking-tight leading-none">
+            Product Management
+          </h1>
+          <p className="text-sm text-gray-500 mt-1.5">
+            Browse, edit, and manage your product catalog
+            {productsLoading ? (
+              <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-400">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                Syncing...
+              </span>
+            ) : null}
+          </p>
+        </div>
+
+        <Dialog
+          open={isAddDialogOpen}
+          onOpenChange={(open) => {
+            if (open) {
+              resetForm()
+              setEditingProduct(null)
+              loadDropdownData()
+            }
+            setIsAddDialogOpen(open)
+          }}
+        >
+          <DialogTrigger asChild>
+            <Button
+              className="self-start sm:self-auto bg-gray-900 hover:bg-gray-800"
+              onClick={() => {
                 resetForm()
                 setEditingProduct(null)
-                loadDropdownData()
-              }
-              setIsAddDialogOpen(open)
-            }}
-          >
-            <DialogTrigger asChild>
-              <Button
-                onClick={() => {
-                  resetForm()
-                  setEditingProduct(null)
-                }}
-              >
-                <Plus className="h-4 w-4 mr-2" />
-                Add Product
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Add New Product</DialogTitle>
-              </DialogHeader>
-              {isFormDropdownsLoading ? (
-                <ProductFormSkeleton />
-              ) : dropdownsLoadError ? (
-                <div className="py-8">
-                  <Alert variant="destructive">
-                    <AlertTriangle className="h-4 w-4" />
-                    <AlertTitle>Could not load form options</AlertTitle>
-                    <AlertDescription className="mt-3 flex flex-col items-start gap-3">
-                      <span>{dropdownsLoadError}</span>
-                      <Button type="button" variant="outline" size="sm" onClick={loadDropdownData}>
-                        <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                        Try again
-                      </Button>
-                    </AlertDescription>
-                  </Alert>
-                </div>
-              ) : (
-                <ProductForm
-                  onSubmit={handleCreateProduct}
-                  loading={formLoading}
-                  submitText="Create Product"
-                  formData={formData}
-                  formErrors={formErrors}
-                  updateFormData={updateFormData}
-                  units={units}
-                  categories={categoryOptions}
-                  subcategories={subcategories}
-                  taxes={taxes}
-                  suppliers={suppliers}
-                  brands={brands}
-                  colors={colors}
-                  sizes={sizes}
-                  imagePreviews={imagePreviews}
-                  handleRemoveImage={handleRemoveImage}
-                  fileInputRef={fileInputRef}
-                  handleImageSelect={handleImageSelect}
-                  stockToAdd={stockToAdd}
-                  setStockToAdd={setStockToAdd}
-                  stockBranchIds={stockBranchIds}
-                  setStockBranchIds={setStockBranchIds}
-                  branchOptions={posBranches}
-                  stockLabel="Initial Stock"
-                  currentBranchStocks={currentBranchStocks}
-                />
+              }}
+            >
+              <Plus className="h-4 w-4 mr-2" />
+              Add Product
+            </Button>
+          </DialogTrigger>
+          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle>Add New Product</DialogTitle>
+            </DialogHeader>
+            {isFormDropdownsLoading ? (
+              <ProductFormSkeleton />
+            ) : dropdownsLoadError ? (
+              <div className="py-8">
+                <Alert variant="destructive">
+                  <AlertTriangle className="h-4 w-4" />
+                  <AlertTitle>Could not load form options</AlertTitle>
+                  <AlertDescription className="mt-3 flex flex-col items-start gap-3">
+                    <span>{dropdownsLoadError}</span>
+                    <Button type="button" variant="outline" size="sm" onClick={loadDropdownData}>
+                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                      Try again
+                    </Button>
+                  </AlertDescription>
+                </Alert>
+              </div>
+            ) : (
+              <ProductForm
+                onSubmit={handleCreateProduct}
+                loading={formLoading}
+                submitText="Create Product"
+                formData={formData}
+                formErrors={formErrors}
+                updateFormData={updateFormData}
+                units={units}
+                categories={categoryOptions}
+                subcategories={subcategories}
+                taxes={taxes}
+                suppliers={suppliers}
+                brands={brands}
+                colors={colors}
+                sizes={sizes}
+                imagePreviews={imagePreviews}
+                handleRemoveImage={handleRemoveImage}
+                fileInputRef={fileInputRef}
+                handleImageSelect={handleImageSelect}
+                stockToAdd={stockToAdd}
+                setStockToAdd={setStockToAdd}
+                stockBranchIds={stockBranchIds}
+                setStockBranchIds={setStockBranchIds}
+                branchOptions={posBranches}
+                stockLabel="Initial Stock"
+                currentBranchStocks={currentBranchStocks}
+              />
+            )}
+          </DialogContent>
+        </Dialog>
+      </div>
+
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+        {isCatalogLoading ? (
+          <>
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+            <StatCardSkeleton />
+          </>
+        ) : (
+          <>
+            <button
+              type="button"
+              onClick={() => { setStatusFilter("ALL"); setCurrentPage(1) }}
+              className={cn(
+                "rounded-xl border bg-white p-3.5 text-left shadow-sm transition-colors hover:border-blue-300",
+                statusFilter === "ALL" ? "border-blue-300 ring-1 ring-blue-100" : "border-gray-200",
               )}
-            </DialogContent>
-          </Dialog>
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-gray-600">Total Products</p>
+                <Package className="h-3.5 w-3.5 text-gray-400" />
+              </div>
+              <p className="text-2xl font-semibold text-gray-900 mt-1 tabular-nums">{catalogStats.total}</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStatusFilter("ACTIVE"); setCurrentPage(1) }}
+              className={cn(
+                "rounded-xl border p-3.5 text-left shadow-sm transition-colors hover:border-emerald-300",
+                statusFilter === "ACTIVE"
+                  ? "border-emerald-300 bg-emerald-50/50 ring-1 ring-emerald-100"
+                  : "border-emerald-200/80 bg-emerald-50/30",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-gray-600">Active</p>
+                <PackageCheck className="h-3.5 w-3.5 text-emerald-500" />
+              </div>
+              <p className="text-2xl font-semibold text-emerald-700 mt-1 tabular-nums">{catalogStats.active}</p>
+              <p className="text-[10px] text-gray-500 mt-1">{catalogStats.inactive} inactive</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStatusFilter("OUT"); setCurrentPage(1) }}
+              className={cn(
+                "rounded-xl border p-3.5 text-left shadow-sm transition-colors hover:border-red-300",
+                statusFilter === "OUT"
+                  ? "border-red-300 bg-red-50/50 ring-1 ring-red-100"
+                  : "border-red-200/80 bg-red-50/30",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-gray-600">Out of Stock</p>
+                <PackageX className="h-3.5 w-3.5 text-red-500" />
+              </div>
+              <p className="text-2xl font-semibold text-red-700 mt-1 tabular-nums">{catalogStats.outOfStock}</p>
+              <p className="text-[10px] text-gray-500 mt-1">{catalogStats.lowStock} low stock</p>
+            </button>
+            <button
+              type="button"
+              onClick={() => { setStatusFilter("FEATURED"); setCurrentPage(1) }}
+              className={cn(
+                "rounded-xl border p-3.5 text-left shadow-sm transition-colors hover:border-blue-300",
+                statusFilter === "FEATURED"
+                  ? "border-blue-300 bg-blue-50/50 ring-1 ring-blue-100"
+                  : "border-blue-200/80 bg-blue-50/30",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-gray-600">Featured</p>
+                <Star className="h-3.5 w-3.5 text-blue-500" />
+              </div>
+              <p className="text-2xl font-semibold text-blue-700 mt-1 tabular-nums">{catalogStats.featured}</p>
+            </button>
+          </>
+        )}
+      </div>
+
+      {/* Filters */}
+      <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
+        <div className="flex flex-wrap gap-1.5">
+          {statusChips.map((chip) => {
+            const active = statusFilter === chip.key
+            return (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => {
+                  setStatusFilter(chip.key)
+                  setCurrentPage(1)
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-semibold transition-colors",
+                  active
+                    ? "bg-gray-900 text-white border-gray-900"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
+                )}
+              >
+                {chip.label}
+                <span
+                  className={cn(
+                    "inline-flex min-w-[1.25rem] justify-center rounded-full px-1 text-[10px] tabular-nums",
+                    active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500",
+                  )}
+                >
+                  {chip.count}
+                </span>
+              </button>
+            )
+          })}
         </div>
 
-        {/* Stats Cards */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-          {isCatalogLoading ? (
-            <>
-              <StatCardSkeleton />
-              <StatCardSkeleton />
-              <StatCardSkeleton />
-            </>
-          ) : (
-            <>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Total Products</CardTitle>
-                  <Package className="h-4 w-4 text-muted-foreground" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold">{catalogStats.total}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Active Products</CardTitle>
-                  <Package className="h-4 w-4 text-green-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-green-600">{catalogStats.active}</div>
-                </CardContent>
-              </Card>
-              <Card>
-                <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                  <CardTitle className="text-sm font-medium">Featured Products</CardTitle>
-                  <AlertTriangle className="h-4 w-4 text-blue-600" />
-                </CardHeader>
-                <CardContent>
-                  <div className="text-2xl font-bold text-blue-600">{catalogStats.featured}</div>
-                </CardContent>
-              </Card>
-            </>
-          )}
-        </div>
-
-        {/* Filters */}
-        <div className="flex flex-col lg:flex-row gap-3">
-          <div className="relative flex-1 min-w-[200px]">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2.5">
+          <div className="relative min-w-0 sm:col-span-2">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
             <Input
-              placeholder="Search products..."
+              placeholder="Search name, SKU, code, category..."
               value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
+              onChange={(e) => {
+                setSearchTerm(e.target.value)
+                setCurrentPage(1)
+              }}
               className="h-10 pl-10"
             />
           </div>
-          <Select value={selectedCategory} onValueChange={(v) => { setSelectedCategory(v); setCurrentPage(1); }}>
-            <SelectTrigger className="h-10 flex-1 min-w-[160px]">
+          <Select
+            value={selectedCategory}
+            onValueChange={(v) => {
+              setSelectedCategory(v)
+              setSelectedSubcategory("__all__")
+              setCurrentPage(1)
+            }}
+          >
+            <SelectTrigger className="h-10 w-full">
               <SelectValue placeholder="All Categories" />
             </SelectTrigger>
             <SelectContent>
@@ -1854,8 +2158,33 @@ export default function Inventory() {
               ))}
             </SelectContent>
           </Select>
-          <Select value={sortBy} onValueChange={(v) => { setSortBy(v); setCurrentPage(1); }}>
-            <SelectTrigger className="h-10 flex-1 min-w-[160px]">
+          <Select
+            value={selectedSubcategory}
+            onValueChange={(v) => {
+              setSelectedSubcategory(v)
+              setCurrentPage(1)
+            }}
+          >
+            <SelectTrigger className="h-10 w-full">
+              <SelectValue placeholder="All Subcategories" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">All Subcategories</SelectItem>
+              {subcategoryFilterOptions.map((sub) => (
+                <SelectItem key={sub.id} value={sub.id}>
+                  {sub.name}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={sortBy}
+            onValueChange={(v) => {
+              setSortBy(v)
+              setCurrentPage(1)
+            }}
+          >
+            <SelectTrigger className="h-10 w-full">
               <SelectValue placeholder="Sort by" />
             </SelectTrigger>
             <SelectContent>
@@ -1869,9 +2198,15 @@ export default function Inventory() {
               <SelectItem value="oldest">Oldest first</SelectItem>
             </SelectContent>
           </Select>
-          <Select value={String(pageSize)} onValueChange={value => { setPageSize(Number(value)); setCurrentPage(1); }}>
-            <SelectTrigger className="h-10 flex-1 min-w-[140px]">
-              <SelectValue placeholder="Items per page" />
+          <Select
+            value={String(pageSize)}
+            onValueChange={(value) => {
+              setPageSize(Number(value))
+              setCurrentPage(1)
+            }}
+          >
+            <SelectTrigger className="h-10 w-full">
+              <SelectValue placeholder="Per page" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="10">10 per page</SelectItem>
@@ -1879,100 +2214,257 @@ export default function Inventory() {
               <SelectItem value="50">50 per page</SelectItem>
               <SelectItem value="100">100 per page</SelectItem>
               <SelectItem value="200">200 per page</SelectItem>
-              <SelectItem value="500">500 per page</SelectItem>
               <SelectItem value="0">Show all</SelectItem>
             </SelectContent>
           </Select>
         </div>
 
-        {/* Products Grid */}
-        <Card className="border-gray-200 shadow-sm">
-          <CardHeader className="pb-4">
-            <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
-              <CardTitle>
-                {isCatalogLoading
-                  ? "Products"
-                  : `Products (${filteredProductCount})`}
+        {hasActiveFilters && (
+          <div className="flex justify-end">
+            <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={clearCatalogFilters}>
+              Clear filters
+            </Button>
+          </div>
+        )}
+      </div>
+
+      {/* Products */}
+      <Card className="border border-gray-200 shadow-sm overflow-hidden">
+        <CardHeader className="py-3 px-4 sm:px-5 border-b border-gray-100">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <CardTitle className="text-sm font-semibold text-gray-900">
+                {isCatalogLoading ? "Products" : `Products (${filteredProductCount})`}
               </CardTitle>
-              <p className="text-sm text-gray-500">
+              <p className="text-xs text-gray-500 mt-0.5">
                 {isCatalogLoading
                   ? "Loading catalog..."
                   : hasActiveFilters
                     ? `Showing ${filteredProductCount} of ${catalogStats.total}`
-                    : "Browse, edit, and manage your catalog"}
+                    : "Edit, enable/disable, or delete products"}
               </p>
             </div>
-          </CardHeader>
-          <CardContent>
-            {isCatalogLoading ? (
-              <ProductGridSkeleton />
-            ) : filteredProductCount === 0 ? (
-              <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center">
-                <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-100">
-                  <Package className="h-7 w-7 text-gray-400" />
-                </div>
-                {hasActiveFilters ? (
-                  <>
-                    <h3 className="mt-4 text-lg font-semibold text-gray-900">No matching products</h3>
-                    <p className="mt-1 max-w-sm text-sm text-gray-500">
-                      Nothing matches your current search or filters. Try different keywords or clear the filters.
-                    </p>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="mt-4"
-                      onClick={() => {
-                        setSearchTerm("")
-                        setSelectedCategory("__all__")
-                        setSelectedSubcategory("__all__")
-                        setCurrentPage(1)
-                      }}
-                    >
-                      Clear filters
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <h3 className="mt-4 text-lg font-semibold text-gray-900">No products yet</h3>
-                    <p className="mt-1 max-w-sm text-sm text-gray-500">
-                      Your catalog is empty. Add your first product to get started.
-                    </p>
-                  </>
+            <div className="inline-flex rounded-lg border border-gray-200 p-0.5 self-start">
+              <button
+                type="button"
+                onClick={() => setViewMode("table")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+                  viewMode === "table" ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-50",
                 )}
+              >
+                <List className="h-3.5 w-3.5" />
+                Table
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewMode("grid")}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+                  viewMode === "grid" ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-50",
+                )}
+              >
+                <LayoutGrid className="h-3.5 w-3.5" />
+                Grid
+              </button>
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {isCatalogLoading ? (
+            viewMode === "table" ? <ProductTableSkeleton /> : <ProductGridSkeleton />
+          ) : filteredProductCount === 0 ? (
+            <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+              <div className="flex h-14 w-14 items-center justify-center rounded-full bg-gray-100">
+                <Package className="h-7 w-7 text-gray-400" />
               </div>
-            ) : (
-              <>
-                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4">
+              {hasActiveFilters ? (
+                <>
+                  <h3 className="mt-4 text-lg font-semibold text-gray-900">No matching products</h3>
+                  <p className="mt-1 max-w-sm text-sm text-gray-500">
+                    Nothing matches your current search or filters.
+                  </p>
+                  <Button type="button" variant="outline" size="sm" className="mt-4" onClick={clearCatalogFilters}>
+                    Clear filters
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <h3 className="mt-4 text-lg font-semibold text-gray-900">No products yet</h3>
+                  <p className="mt-1 max-w-sm text-sm text-gray-500">
+                    Your catalog is empty. Add your first product to get started.
+                  </p>
+                </>
+              )}
+            </div>
+          ) : (
+            <>
+              {viewMode === "table" ? (
+                <>
+                  <div className="hidden lg:block overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                          <TableHead className="text-xs font-semibold text-gray-600 w-[42%]">Product</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">Category</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">Stock</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">Purchase</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">Sales</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600">Status</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right">Actions</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {products.map((product) => {
+                          const stock = getProductStock(product)
+                          const stockTone = getStockTone(product)
+                          return (
+                            <TableRow key={`${product.id}-${product.updated_at}`}>
+                              <TableCell className="py-3">
+                                <div className="flex items-center gap-3 min-w-0">
+                                  <div className="h-12 w-12 rounded-lg overflow-hidden border border-gray-100 shrink-0 bg-slate-50">
+                                    <ProductThumb product={product} iconClassName="h-5 w-5" />
+                                  </div>
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">{product.name}</p>
+                                    <p className="text-[11px] text-gray-500 font-mono mt-0.5 truncate">
+                                      SKU {product.sku || "—"}
+                                      {product.code ? ` · ${product.code}` : ""}
+                                    </p>
+                                    <div className="flex flex-wrap gap-1 mt-1">
+                                      {product.is_featured ? (
+                                        <Badge className="h-5 text-[10px] bg-blue-600 hover:bg-blue-600">Featured</Badge>
+                                      ) : null}
+                                      <Badge variant="outline" className="h-5 text-[10px] text-gray-600">
+                                        {product.unit?.name || "No unit"}
+                                      </Badge>
+                                    </div>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-3">
+                                <p className="text-sm text-gray-800 truncate max-w-[140px]">
+                                  {product.category?.name || "Uncategorized"}
+                                </p>
+                                {product.subcategory?.name ? (
+                                  <p className="text-[11px] text-gray-500 truncate max-w-[140px]">
+                                    {product.subcategory.name}
+                                  </p>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="py-3 text-right">
+                                <p className={cn("text-sm font-semibold tabular-nums", stockTone.valueClassName)}>
+                                  {formatStockQty(stock)}
+                                </p>
+                                <p className="text-[10px] text-gray-400">{stockTone.label}</p>
+                              </TableCell>
+                              <TableCell className="py-3 text-right text-sm tabular-nums text-gray-800">
+                                {formatRs(product.purchase_rate)}
+                              </TableCell>
+                              <TableCell className="py-3 text-right text-sm font-semibold tabular-nums text-blue-700">
+                                {formatRs(product.sales_rate_exc_dis_and_tax)}
+                              </TableCell>
+                              <TableCell className="py-3">
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "text-[10px] font-semibold",
+                                    product.is_active
+                                      ? "bg-green-50 text-green-800 border-green-200"
+                                      : "bg-red-50 text-red-800 border-red-200",
+                                  )}
+                                >
+                                  {product.is_active ? "Active" : "Inactive"}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="py-3 text-right">
+                                {renderProductActions(product)}
+                              </TableCell>
+                            </TableRow>
+                          )
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="lg:hidden divide-y divide-gray-100">
+                    {products.map((product) => {
+                      const stock = getProductStock(product)
+                      const stockTone = getStockTone(product)
+                      return (
+                        <div key={`${product.id}-${product.updated_at}`} className="p-4 space-y-3">
+                          <div className="flex items-start gap-3">
+                            <div className="h-14 w-14 rounded-lg overflow-hidden border border-gray-100 shrink-0 bg-slate-50">
+                              <ProductThumb product={product} iconClassName="h-5 w-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-start justify-between gap-2">
+                                <p className="text-sm font-semibold text-gray-900 line-clamp-2">{product.name}</p>
+                                <Badge
+                                  variant="outline"
+                                  className={cn(
+                                    "shrink-0 text-[10px]",
+                                    product.is_active
+                                      ? "bg-green-50 text-green-800 border-green-200"
+                                      : "bg-red-50 text-red-800 border-red-200",
+                                  )}
+                                >
+                                  {product.is_active ? "Active" : "Inactive"}
+                                </Badge>
+                              </div>
+                              <p className="text-[11px] text-gray-500 font-mono mt-0.5">
+                                SKU {product.sku || "—"}
+                              </p>
+                              <p className="text-[11px] text-gray-500 mt-0.5">
+                                {product.category?.name || "Uncategorized"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-50 border border-slate-100 p-2.5">
+                            <div>
+                              <p className="text-[10px] uppercase text-gray-500 font-medium">Stock</p>
+                              <p className={cn("text-sm font-bold tabular-nums", stockTone.valueClassName)}>
+                                {formatStockQty(stock)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase text-gray-500 font-medium">Purchase</p>
+                              <p className="text-sm font-semibold tabular-nums">{formatRs(product.purchase_rate)}</p>
+                            </div>
+                            <div>
+                              <p className="text-[10px] uppercase text-gray-500 font-medium">Sales</p>
+                              <p className="text-sm font-semibold tabular-nums text-blue-700">
+                                {formatRs(product.sales_rate_exc_dis_and_tax)}
+                              </p>
+                            </div>
+                          </div>
+                          {renderProductActions(product)}
+                        </div>
+                      )
+                    })}
+                  </div>
+                </>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 p-4">
                   {products.map((product) => {
-                    const imageUrl = getProductImageUrl(product)
                     const stock = getProductStock(product)
                     const stockTone = getStockTone(product)
-
                     return (
                       <div
                         key={`${product.id}-${product.updated_at}`}
-                        className="group flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md"
+                        className="group flex flex-col overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm hover:border-gray-300 hover:shadow-md transition-all"
                       >
-                        <div className="relative aspect-[4/3] overflow-hidden bg-gradient-to-br from-slate-50 to-slate-100">
-                          {imageUrl ? (
-                            <img
-                              src={imageUrl}
-                              alt={product.name}
-                              className="h-full w-full object-cover transition-transform duration-300 group-hover:scale-105"
-                            />
-                          ) : (
-                            <div className="flex h-full w-full flex-col items-center justify-center text-gray-400">
-                              <ImageIcon className="h-10 w-10" />
-                              <span className="mt-2 text-xs font-medium">No image</span>
-                            </div>
-                          )}
-
-                          <div className="absolute left-3 top-3 flex flex-wrap gap-2">
+                        <div className="relative aspect-[16/10] overflow-hidden bg-slate-100">
+                          <ProductThumb
+                            product={product}
+                            className="transition-transform duration-300 group-hover:scale-105"
+                            iconClassName="h-10 w-10"
+                          />
+                          <div className="absolute left-2 top-2 flex flex-wrap gap-1.5">
                             <Badge
                               variant="outline"
                               className={cn(
-                                "border backdrop-blur-sm",
+                                "border backdrop-blur-sm text-[10px]",
                                 product.is_active
                                   ? "bg-green-100/95 text-green-800 border-green-200"
                                   : "bg-red-100/95 text-red-800 border-red-200",
@@ -1980,180 +2472,108 @@ export default function Inventory() {
                             >
                               {product.is_active ? "Active" : "Inactive"}
                             </Badge>
-                            {product.is_featured && (
-                              <Badge className="bg-blue-600 text-white hover:bg-blue-600">
+                            {product.is_featured ? (
+                              <Badge className="bg-blue-600 text-white hover:bg-blue-600 text-[10px]">
                                 Featured
                               </Badge>
-                            )}
+                            ) : null}
                           </div>
-
-                          <div className="absolute right-3 top-3">
-                            <Badge
-                              variant="outline"
-                              className={cn("border backdrop-blur-sm", stockTone.className)}
-                            >
+                          <div className="absolute right-2 top-2">
+                            <Badge variant="outline" className={cn("border backdrop-blur-sm text-[10px]", stockTone.className)}>
                               {stockTone.label}
                             </Badge>
                           </div>
                         </div>
 
-                        <div className="flex flex-1 flex-col p-4">
-                          <div className="space-y-2">
-                            <h3 className="line-clamp-2 min-h-[2.5rem] text-base font-semibold leading-snug text-gray-900">
-                              {product.name}
-                            </h3>
-                            <p className="font-mono text-xs text-gray-500">
-                              SKU {product.sku || "—"}
-                            </p>
-                            <div className="flex flex-wrap gap-2">
-                              <Badge variant="secondary" className="gap-1 bg-slate-100 text-slate-700">
-                                <Tag className="h-3 w-3" />
-                                {product.category?.name || "Uncategorized"}
-                              </Badge>
-                              <Badge variant="outline" className="text-gray-600">
-                                {product.unit?.name || "No unit"}
-                              </Badge>
-                            </div>
+                        <div className="flex flex-1 flex-col p-3.5">
+                          <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-snug text-gray-900">
+                            {product.name}
+                          </h3>
+                          <p className="font-mono text-[11px] text-gray-500 mt-1">
+                            SKU {product.sku || "—"}
+                          </p>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            <Badge variant="secondary" className="gap-1 bg-slate-100 text-slate-700 text-[10px]">
+                              <Tag className="h-3 w-3" />
+                              {product.category?.name || "Uncategorized"}
+                            </Badge>
+                            <Badge variant="outline" className="text-gray-600 text-[10px]">
+                              {product.unit?.name || "No unit"}
+                            </Badge>
                           </div>
 
-                          <div className="mt-4 grid grid-cols-3 gap-2 rounded-xl bg-slate-50 p-3">
+                          <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 border border-slate-100 p-2.5">
                             <div>
-                              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                                Stock
-                              </p>
-                              <p className={cn("mt-1 text-sm font-bold", stockTone.valueClassName)}>
-                                {stock}
-                              </p>
-                              {(product.reserved_stock ?? 0) > 0 && (
-                                <p className="mt-0.5 text-[11px] text-gray-500">
-                                  {product.reserved_stock} reserved
-                                </p>
-                              )}
-                            </div>
-                            <div>
-                              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                                Purchase
-                              </p>
-                              <p className="mt-1 text-sm font-semibold text-gray-900">
-                                {product.purchase_rate.toFixed(2)}
+                              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Stock</p>
+                              <p className={cn("mt-0.5 text-sm font-bold tabular-nums", stockTone.valueClassName)}>
+                                {formatStockQty(stock)}
                               </p>
                             </div>
                             <div>
-                              <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                                Sales
+                              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Purchase</p>
+                              <p className="mt-0.5 text-sm font-semibold tabular-nums text-gray-900">
+                                {formatRs(product.purchase_rate)}
                               </p>
-                              <p className="mt-1 text-sm font-semibold text-blue-700">
-                                {product.sales_rate_exc_dis_and_tax.toFixed(2)}
+                            </div>
+                            <div>
+                              <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Sales</p>
+                              <p className="mt-0.5 text-sm font-semibold tabular-nums text-blue-700">
+                                {formatRs(product.sales_rate_exc_dis_and_tax)}
                               </p>
                             </div>
                           </div>
 
-                          <div className="mt-4 flex gap-2">
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="flex-1"
-                              onClick={() => openEditDialog(product)}
-                            >
-                              <Edit className="mr-2 h-3.5 w-3.5" />
-                              Edit
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className={
-                                product.is_active
-                                  ? "text-amber-700 hover:bg-amber-50 hover:text-amber-800"
-                                  : "text-green-700 hover:bg-green-50 hover:text-green-800"
-                              }
-                              onClick={() => handleToggleStatus(product)}
-                              disabled={toggleStatusProductId === product.id}
-                            >
-                              {toggleStatusProductId === product.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : product.is_active ? (
-                                "Disable"
-                              ) : (
-                                "Enable"
-                              )}
-                            </Button>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                              onClick={() => setProductToDelete(product)}
-                            >
-                              <Trash2 className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
+                          <div className="mt-3">{renderProductActions(product)}</div>
                         </div>
                       </div>
                     )
                   })}
                 </div>
+              )}
 
-                {/* Pagination */}
-                {filteredProductCount > 0 && (
-                  <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-2 py-3 border-t mt-2">
-                    <p className="text-sm text-black">
-                      {pageSize === 0 ? (
-                        <>Showing all {filteredProductCount} products</>
-                      ) : (
-                        <>
-                          Showing {(currentPage - 1) * pageSize + 1}–
-                          {Math.min(currentPage * pageSize, filteredProductCount)} of {filteredProductCount}
-                        </>
-                      )}
-                    </p>
-                    {pageSize !== 0 && totalPages > 1 && (
-                      <div className="flex items-center gap-1">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-sm text-black"
-                          onClick={() => setCurrentPage(1)}
-                          disabled={currentPage === 1 || productsLoading}
-                        >
-                          First
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-sm text-black"
-                          onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
-                          disabled={currentPage === 1 || productsLoading}
-                        >
-                          Previous
-                        </Button>
-                        <span className="text-sm text-black px-3">
-                          Page {currentPage} of {totalPages}
-                        </span>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-sm text-black"
-                          onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
-                          disabled={currentPage >= totalPages || productsLoading}
-                        >
-                          Next
-                        </Button>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="text-sm text-black"
-                          onClick={() => setCurrentPage(totalPages)}
-                          disabled={currentPage >= totalPages || productsLoading}
-                        >
-                          Last
-                        </Button>
-                      </div>
+              {filteredProductCount > 0 && (
+                <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
+                  <p className="text-sm text-gray-600">
+                    {pageSize === 0 ? (
+                      <>Showing all {filteredProductCount} products</>
+                    ) : (
+                      <>
+                        Showing {(currentPage - 1) * pageSize + 1}–
+                        {Math.min(currentPage * pageSize, filteredProductCount)} of {filteredProductCount}
+                      </>
                     )}
-                  </div>
-                )}
-              </>
-            )}
-          </CardContent>
-        </Card>
+                  </p>
+                  {pageSize !== 0 && totalPages > 1 && (
+                    <div className="flex items-center gap-1.5">
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-sm"
+                        onClick={() => setCurrentPage((prev) => Math.max(1, prev - 1))}
+                        disabled={currentPage === 1 || productsLoading}
+                      >
+                        Previous
+                      </Button>
+                      <span className="text-sm text-gray-700 px-2">
+                        {currentPage} / {totalPages}
+                      </span>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="text-sm"
+                        onClick={() => setCurrentPage((prev) => Math.min(totalPages, prev + 1))}
+                        disabled={currentPage >= totalPages || productsLoading}
+                      >
+                        Next
+                      </Button>
+                    </div>
+                  )}
+                </div>
+              )}
+            </>
+          )}
+        </CardContent>
+      </Card>
 
         {/* Edit Product Dialog */}
         <Dialog
@@ -2273,7 +2693,6 @@ export default function Inventory() {
             </AlertDialogFooter>
           </AlertDialogContent>
         </AlertDialog>
-      </div>
     </div>
   )
 }
