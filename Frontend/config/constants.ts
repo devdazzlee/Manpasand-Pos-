@@ -1,5 +1,5 @@
 // For Production
-export const API_BASE = "https://manpasand-pos-beta.verxcel.app/api/v1";
+export const API_BASE = "https://manpasand-pos-beta.vercel.app/api/v1";
 
 // For Development
 // export const API_BASE = "http://localhost:5000/api/v1";

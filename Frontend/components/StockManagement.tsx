@@ -36,6 +36,8 @@ import {
   Boxes,
   DollarSign,
   MinusCircle,
+  LayoutGrid,
+  List,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { toast } from "sonner";
@@ -288,6 +290,8 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
   // Pagination for stock table
   const [stockPage, setStockPage] = useState(1);
   const [stockPageSize, setStockPageSize] = useState(20);
+  const [viewMode, setViewMode] = useState<"table" | "grid">("table");
+  const [activeTab, setActiveTab] = useState("stock");
 
   // Dialog state
   const [isTransferOpen, setIsTransferOpen] = useState(false);
@@ -765,31 +769,38 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
   }
 
   return (
-    <div className="p-6 max-w-[1600px] mx-auto space-y-6 text-black min-h-screen">
-      <div className="flex items-start gap-3">
-        <div className="bg-gray-900 text-white p-2.5 rounded-lg shrink-0">
-          <Package className="h-5 w-5" />
-        </div>
-        <div>
-          <h1 className="text-2xl font-bold text-black tracking-tight">Stock Management</h1>
-          <p className="text-sm text-gray-600 mt-1 max-w-2xl">
-            Central inventory dashboard - stock levels, valuation, adjustments, and movement history.
+    <div className="p-4 md:p-6 space-y-5 text-black min-w-0">
+      {/* Header */}
+      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between pb-1 border-b border-gray-100">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-blue-600 mb-1">
+            <Package className="h-4 w-4" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]">
+              Inventory
+            </span>
+          </div>
+          <h1 className="text-2xl md:text-[1.75rem] font-bold text-gray-900 tracking-tight leading-none">
+            Stock Management
+          </h1>
+          <p className="text-sm text-gray-500 mt-1.5">
+            Stock levels, valuation, adjustments, and movement history
           </p>
         </div>
-      </div>
 
-      <StockManagementToolbar
-        onAddStock={() => setIsAddOpen(true)}
-        onAdjustStock={() => setIsAdjustOpen(true)}
-        onRemoveStock={() => setIsRemoveOpen(true)}
-        onTransferStock={() => setIsTransferOpen(true)}
-        onNavigate={onNavigate}
-        onExportCsv={handleExport}
-        onExportExcel={handleExportExcel}
-        onPrint={handlePrintReport}
-        onImport={() => onNavigate?.("purchases")}
-        exportDisabled={allStocks.length === 0}
-      />
+        <StockManagementToolbar
+          className="flex flex-wrap items-center gap-2 self-start lg:self-auto"
+          onAddStock={() => setIsAddOpen(true)}
+          onAdjustStock={() => setIsAdjustOpen(true)}
+          onRemoveStock={() => setIsRemoveOpen(true)}
+          onTransferStock={() => setIsTransferOpen(true)}
+          onNavigate={onNavigate}
+          onExportCsv={handleExport}
+          onExportExcel={handleExportExcel}
+          onPrint={handlePrintReport}
+          onImport={() => onNavigate?.("purchases")}
+          exportDisabled={allStocks.length === 0}
+        />
+      </div>
 
       <StockOperationDialog
         open={isAddOpen}
@@ -1161,9 +1172,17 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         columns={6}
         loading={dashboardLoading || isLoading}
         items={[
-          { label: "Total Products", value: dashboardStats.totalSkus.toLocaleString(), icon: Package },
           {
-            label: "Total Stock Quantity",
+            label: "Total Products",
+            value: dashboardStats.totalSkus.toLocaleString(),
+            icon: Package,
+            onClick: () => {
+              setStockStatusFilter(ALL_STOCK_STATUS);
+              setActiveTab("stock");
+            },
+          },
+          {
+            label: "Total Quantity",
             value: formatQty(dashboardStats.totalStockQuantity),
             icon: Boxes,
           },
@@ -1173,65 +1192,110 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
             icon: DollarSign,
           },
           {
-            label: "Low Stock Products",
+            label: "Low Stock",
             value: dashboardStats.lowStockCount.toLocaleString(),
             icon: AlertTriangle,
             tone: "warning",
+            onClick: () => {
+              setStockStatusFilter("low");
+              setActiveTab("stock");
+              setStockPage(1);
+            },
           },
           {
             label: "Out of Stock",
             value: dashboardStats.outOfStockCount.toLocaleString(),
             icon: MinusCircle,
             tone: "danger",
+            onClick: () => {
+              setStockStatusFilter("out");
+              setActiveTab("stock");
+              setStockPage(1);
+            },
           },
           {
             label: "Negative Stock",
             value: dashboardStats.negativeStockCount.toLocaleString(),
             icon: TrendingDown,
             tone: "danger",
+            onClick: () => {
+              setStockStatusFilter("negative");
+              setActiveTab("stock");
+              setStockPage(1);
+            },
           },
         ]}
       />
 
-      <Card className="p-4 border border-gray-200">
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+      <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
+        <div className="flex flex-wrap gap-1.5">
+          {STOCK_STATUS_OPTIONS.map((opt) => {
+            const active = stockStatusFilter === opt.value;
+            const count =
+              opt.value === ALL_STOCK_STATUS
+                ? dashboardStats.totalSkus
+                : opt.value === "low"
+                  ? dashboardStats.lowStockCount
+                  : opt.value === "out"
+                    ? dashboardStats.outOfStockCount
+                    : opt.value === "negative"
+                      ? dashboardStats.negativeStockCount
+                      : null;
+            return (
+              <button
+                key={opt.value}
+                type="button"
+                onClick={() => {
+                  setStockStatusFilter(opt.value);
+                  setStockPage(1);
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-semibold transition-colors",
+                  active
+                    ? "bg-gray-900 text-white border-gray-900"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
+                )}
+              >
+                {opt.label}
+                {count != null ? (
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.25rem] justify-center rounded-full px-1 text-[10px] tabular-nums",
+                      active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500",
+                    )}
+                  >
+                    {count}
+                  </span>
+                ) : null}
+              </button>
+            );
+          })}
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-2.5">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
             <Input
               placeholder="Product name..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="pl-9 h-9 text-sm text-black"
+              className="pl-9 h-10 text-sm text-black"
             />
           </div>
           <Input
             placeholder="SKU..."
             value={skuSearch}
             onChange={(e) => setSkuSearch(e.target.value)}
-            className="h-9 text-sm text-black"
+            className="h-10 text-sm text-black"
           />
           <Input
             placeholder="Barcode / code..."
             value={barcodeSearch}
             onChange={(e) => setBarcodeSearch(e.target.value)}
-            className="h-9 text-sm text-black"
+            className="h-10 text-sm text-black"
           />
-          <Select value={stockStatusFilter} onValueChange={setStockStatusFilter}>
-            <SelectTrigger className="h-9 text-sm text-black">
-              <SelectValue placeholder="Stock status" />
-            </SelectTrigger>
-            <SelectContent>
-              {STOCK_STATUS_OPTIONS.map((opt) => (
-                <SelectItem key={opt.value} value={opt.value} className="text-sm">
-                  {opt.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3 mt-3">
           <Select value={branchFilter} onValueChange={setBranchFilter}>
-            <SelectTrigger className="h-9 text-sm text-black">
+            <SelectTrigger className="h-10 text-sm text-black">
               <SelectValue placeholder="All branches" />
             </SelectTrigger>
             <SelectContent>
@@ -1242,7 +1306,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
             </SelectContent>
           </Select>
           <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-            <SelectTrigger className="h-9 text-sm text-black">
+            <SelectTrigger className="h-10 text-sm text-black">
               <SelectValue placeholder="All categories" />
             </SelectTrigger>
             <SelectContent>
@@ -1253,7 +1317,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
             </SelectContent>
           </Select>
           <Select value={brandFilter} onValueChange={setBrandFilter}>
-            <SelectTrigger className="h-9 text-sm text-black">
+            <SelectTrigger className="h-10 text-sm text-black">
               <SelectValue placeholder="All brands" />
             </SelectTrigger>
             <SelectContent>
@@ -1264,7 +1328,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
             </SelectContent>
           </Select>
           <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-            <SelectTrigger className="h-9 text-sm text-black">
+            <SelectTrigger className="h-10 text-sm text-black">
               <SelectValue placeholder="All suppliers" />
             </SelectTrigger>
             <SelectContent>
@@ -1274,20 +1338,18 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
               ))}
             </SelectContent>
           </Select>
-        </div>
-        {(searchTerm ||
-          skuSearch ||
-          barcodeSearch ||
-          branchFilter !== ALL_BRANCHES ||
-          categoryFilter !== ALL_CATEGORIES ||
-          brandFilter !== ALL_BRANDS ||
-          supplierFilter !== ALL_SUPPLIERS ||
-          stockStatusFilter !== ALL_STOCK_STATUS) && (
-          <div className="mt-3">
+          {(searchTerm ||
+            skuSearch ||
+            barcodeSearch ||
+            branchFilter !== ALL_BRANCHES ||
+            categoryFilter !== ALL_CATEGORIES ||
+            brandFilter !== ALL_BRANDS ||
+            supplierFilter !== ALL_SUPPLIERS ||
+            stockStatusFilter !== ALL_STOCK_STATUS) && (
             <Button
               variant="outline"
               size="sm"
-              className="h-9 text-sm text-black"
+              className="h-10 text-sm text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700 hover:border-red-300"
               onClick={() => {
                 setSearchTerm("");
                 setSkuSearch("");
@@ -1297,41 +1359,72 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                 setBrandFilter(ALL_BRANDS);
                 setSupplierFilter(ALL_SUPPLIERS);
                 setStockStatusFilter(ALL_STOCK_STATUS);
+                setStockPage(1);
               }}
             >
               <X className="h-4 w-4 mr-1.5" />
-              Clear all filters
+              Clear filters
             </Button>
-          </div>
-        )}
-      </Card>
-
-      <p className="text-xs text-gray-500 px-1">
-        Filtered view: {totalStocks.toLocaleString()} rows |{" "}
-        {formatQty(stockMeta.totalQuantity || 0)} units | value{" "}
-        {formatMoney(stockMeta.totalInventoryValue || 0)}
-      </p>
-
-      {/* Tabs for Stock and History */}
-      <Tabs defaultValue="stock" className="space-y-6">
-        <div className="flex px-1">
-          <TabsList className="bg-white p-1 rounded-xl border border-slate-200 shadow-sm h-11 shrink-0 w-full max-w-md grid grid-cols-3">
-            <TabsTrigger value="stock" className="rounded-lg h-9 text-sm data-[state=active]:bg-black data-[state=active]:text-white transition-all">Stock List</TabsTrigger>
-            <TabsTrigger value="history" className="rounded-lg h-9 text-sm data-[state=active]:bg-black data-[state=active]:text-white transition-all">Movement Log</TabsTrigger>
-            <TabsTrigger value="today" className="rounded-lg h-9 text-sm data-[state=active]:bg-black data-[state=active]:text-white transition-all">Today</TabsTrigger>
-          </TabsList>
+          )}
         </div>
 
-        {/* Current Stock Tab Content */}
-        <TabsContent value="stock" className="mt-0 outline-none animate-in fade-in duration-500">
-          <Card className="border border-gray-200 overflow-hidden bg-white">
-            <CardHeader className="px-6 py-4 border-b border-gray-200">
-               <div className="flex items-center justify-between">
-                 <div>
-                   <CardTitle className="text-base font-bold text-black">Inventory List</CardTitle>
-                   <p className="text-sm text-gray-600 mt-0.5">{totalStocks.toLocaleString()} stock records</p>
-                 </div>
-               </div>
+        <p className="text-xs text-gray-500">
+          Showing {totalStocks.toLocaleString()} rows · {formatQty(stockMeta.totalQuantity || 0)} units · value{" "}
+          {formatMoney(stockMeta.totalInventoryValue || 0)}
+        </p>
+      </div>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-4">
+        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <TabsList className="bg-white p-1 rounded-xl border border-slate-200 shadow-sm h-10 shrink-0 w-full max-w-md grid grid-cols-3">
+            <TabsTrigger value="stock" className="rounded-lg h-8 text-xs sm:text-sm data-[state=active]:bg-gray-900 data-[state=active]:text-white">
+              Stock List
+            </TabsTrigger>
+            <TabsTrigger value="history" className="rounded-lg h-8 text-xs sm:text-sm data-[state=active]:bg-gray-900 data-[state=active]:text-white">
+              Movement Log
+            </TabsTrigger>
+            <TabsTrigger value="today" className="rounded-lg h-8 text-xs sm:text-sm data-[state=active]:bg-gray-900 data-[state=active]:text-white">
+              Today
+            </TabsTrigger>
+          </TabsList>
+
+          <div className="inline-flex rounded-lg border border-gray-200 p-0.5 self-start">
+            <button
+              type="button"
+              onClick={() => setViewMode("table")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+                viewMode === "table" ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-50",
+              )}
+            >
+              <List className="h-3.5 w-3.5" />
+              Table
+            </button>
+            <button
+              type="button"
+              onClick={() => setViewMode("grid")}
+              className={cn(
+                "inline-flex items-center gap-1.5 rounded-md px-2.5 h-8 text-xs font-medium transition-colors",
+                viewMode === "grid" ? "bg-gray-900 text-white" : "text-gray-600 hover:bg-gray-50",
+              )}
+            >
+              <LayoutGrid className="h-3.5 w-3.5" />
+              Grid
+            </button>
+          </div>
+        </div>
+
+        <TabsContent value="stock" className="mt-0 outline-none">
+          <Card className="border border-gray-200 overflow-hidden bg-white shadow-sm">
+            <CardHeader className="px-4 py-3 border-b border-gray-100">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-sm font-semibold text-gray-900">Inventory List</CardTitle>
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {totalStocks.toLocaleString()} stock records
+                  </p>
+                </div>
+              </div>
             </CardHeader>
             <CardContent className="p-0 relative">
               {isLoading && (
@@ -1339,49 +1432,193 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                   <PageLoader message="Loading..." />
                 </div>
               )}
-              
-              <InventoryCardGrid
-                empty={allStocks.length === 0}
-                emptyTitle="No stock found"
-                emptyDescription="Adjust filters or add stock to see records here."
-                loading={isLoading && allStocks.length === 0}
-              >
-                {allStocks.map((s) => {
-                  const qty = Number(s.current_quantity || 0);
-                  const reserved = Number(s.reserved_quantity || 0);
-                  const available = qty - reserved;
-                  const cost = Number(s.product?.purchase_rate || 0);
-                  const sell = Number(s.product?.sales_rate_inc_dis_and_tax || 0);
-                  const minQty = Number(
-                    (s.product as { min_qty?: number }).min_qty ?? 10,
-                  );
-                  const imageUrl = getStockRowImage(s.product);
-                  return (
-                    <StockRecordCard
-                      key={s.id}
-                      productName={s.product.name}
-                      sku={s.product.sku}
-                      barcode={getProductBarcode(s.product)}
-                      category={
-                        s.product.category?.name ||
-                        categories.find((c) => c.id === s.product.category_id)?.name
-                      }
-                      brand={s.product.brand?.name}
-                      branch={s.branch?.name}
-                      imageUrl={imageUrl}
-                      cost={cost}
-                      sell={sell}
-                      quantity={qty}
-                      reserved={reserved}
-                      available={available}
-                      value={qty * cost}
-                      minQty={minQty}
-                      onView={() => openStockView(s)}
-                    />
-                  );
-                })}
-              </InventoryCardGrid>
-              
+
+              {allStocks.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                  <Package className="h-8 w-8 text-gray-300 mb-3" />
+                  <p className="text-sm font-medium text-gray-900">No stock found</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Adjust filters or add stock to see records here.
+                  </p>
+                </div>
+              ) : viewMode === "table" ? (
+                <>
+                  <div className="hidden lg:block overflow-x-auto">
+                    <Table>
+                      <TableHeader>
+                        <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                          <TableHead className="text-xs font-semibold text-gray-600 pl-3 pr-2">Product</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 px-2">Branch</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 px-2">Category</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2 whitespace-nowrap">Stock</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">Cost</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">Sell</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">Value</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 px-2">Status</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right pl-2 pr-3">Action</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {allStocks.map((s) => {
+                          const qty = Number(s.current_quantity || 0);
+                          const reserved = Number(s.reserved_quantity || 0);
+                          const available = qty - reserved;
+                          const cost = Number(s.product?.purchase_rate || 0);
+                          const sell = Number(s.product?.sales_rate_inc_dis_and_tax || 0);
+                          const minQty = Number((s.product as { min_qty?: number }).min_qty ?? 10);
+                          const status = getStockStatusDisplay(qty, minQty);
+                          const imageUrl = getStockRowImage(s.product);
+                          const categoryName =
+                            s.product.category?.name ||
+                            categories.find((c) => c.id === s.product.category_id)?.name ||
+                            "Uncategorized";
+                          return (
+                            <TableRow key={s.id}>
+                              <TableCell className="py-2.5 pl-3 pr-2">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  {imageUrl ? (
+                                    <img
+                                      src={imageUrl}
+                                      alt=""
+                                      className="h-10 w-10 rounded-lg object-cover border border-gray-100 shrink-0"
+                                    />
+                                  ) : (
+                                    <div className="h-10 w-10 rounded-lg bg-slate-100 border border-gray-100 flex items-center justify-center shrink-0">
+                                      <Package className="h-4 w-4 text-gray-400" />
+                                    </div>
+                                  )}
+                                  <div className="min-w-0">
+                                    <p className="text-sm font-semibold text-gray-900 truncate">{s.product.name}</p>
+                                    <p className="text-[11px] text-gray-500 font-mono mt-0.5 truncate">
+                                      {s.product.sku || getProductBarcode(s.product) || "—"}
+                                    </p>
+                                  </div>
+                                </div>
+                              </TableCell>
+                              <TableCell className="py-2.5 px-2 text-sm text-gray-700 whitespace-nowrap">
+                                {s.branch?.name || "—"}
+                              </TableCell>
+                              <TableCell className="py-2.5 px-2 text-sm text-gray-700 truncate max-w-[140px]">
+                                {categoryName === "Unknown" ? "Uncategorized" : categoryName}
+                              </TableCell>
+                              <TableCell className="py-2.5 px-2 text-right whitespace-nowrap">
+                                <p className={cn("text-sm font-semibold tabular-nums", qty < 0 || available < 0 ? "text-red-600" : "text-gray-900")}>
+                                  {formatQty(available)}
+                                </p>
+                                {reserved > 0 ? (
+                                  <p className="text-[10px] text-gray-400">{formatQty(reserved)} reserved</p>
+                                ) : null}
+                              </TableCell>
+                              <TableCell className="py-2.5 px-2 text-right text-sm tabular-nums text-gray-800 whitespace-nowrap">
+                                {formatMoney(cost)}
+                              </TableCell>
+                              <TableCell className="py-2.5 px-2 text-right text-sm font-semibold tabular-nums text-blue-700 whitespace-nowrap">
+                                {formatMoney(sell)}
+                              </TableCell>
+                              <TableCell className="py-2.5 px-2 text-right text-sm tabular-nums text-gray-800 whitespace-nowrap">
+                                {formatMoney(qty * cost)}
+                              </TableCell>
+                              <TableCell className="py-2.5 px-2">
+                                <Badge variant="outline" className={cn("text-[10px] font-semibold whitespace-nowrap", status.className)}>
+                                  {status.label}
+                                </Badge>
+                              </TableCell>
+                              <TableCell className="py-2.5 pl-2 pr-3 text-right">
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  className="h-8 text-xs"
+                                  onClick={() => openStockView(s)}
+                                >
+                                  <Eye className="h-3.5 w-3.5 mr-1" />
+                                  View
+                                </Button>
+                              </TableCell>
+                            </TableRow>
+                          );
+                        })}
+                      </TableBody>
+                    </Table>
+                  </div>
+
+                  <div className="lg:hidden divide-y divide-gray-100">
+                    {allStocks.map((s) => {
+                      const qty = Number(s.current_quantity || 0);
+                      const reserved = Number(s.reserved_quantity || 0);
+                      const available = qty - reserved;
+                      const cost = Number(s.product?.purchase_rate || 0);
+                      const sell = Number(s.product?.sales_rate_inc_dis_and_tax || 0);
+                      const minQty = Number((s.product as { min_qty?: number }).min_qty ?? 10);
+                      const imageUrl = getStockRowImage(s.product);
+                      return (
+                        <StockRecordCard
+                          key={s.id}
+                          productName={s.product.name}
+                          sku={s.product.sku}
+                          barcode={getProductBarcode(s.product)}
+                          category={
+                            s.product.category?.name ||
+                            categories.find((c) => c.id === s.product.category_id)?.name
+                          }
+                          brand={s.product.brand?.name}
+                          branch={s.branch?.name}
+                          imageUrl={imageUrl}
+                          cost={cost}
+                          sell={sell}
+                          quantity={qty}
+                          reserved={reserved}
+                          available={available}
+                          value={qty * cost}
+                          minQty={minQty}
+                          onView={() => openStockView(s)}
+                          className="rounded-none border-0 border-b shadow-none"
+                        />
+                      );
+                    })}
+                  </div>
+                </>
+              ) : (
+                <InventoryCardGrid
+                  empty={false}
+                  loading={isLoading && allStocks.length === 0}
+                >
+                  {allStocks.map((s) => {
+                    const qty = Number(s.current_quantity || 0);
+                    const reserved = Number(s.reserved_quantity || 0);
+                    const available = qty - reserved;
+                    const cost = Number(s.product?.purchase_rate || 0);
+                    const sell = Number(s.product?.sales_rate_inc_dis_and_tax || 0);
+                    const minQty = Number(
+                      (s.product as { min_qty?: number }).min_qty ?? 10,
+                    );
+                    const imageUrl = getStockRowImage(s.product);
+                    return (
+                      <StockRecordCard
+                        key={s.id}
+                        productName={s.product.name}
+                        sku={s.product.sku}
+                        barcode={getProductBarcode(s.product)}
+                        category={
+                          s.product.category?.name ||
+                          categories.find((c) => c.id === s.product.category_id)?.name
+                        }
+                        brand={s.product.brand?.name}
+                        branch={s.branch?.name}
+                        imageUrl={imageUrl}
+                        cost={cost}
+                        sell={sell}
+                        quantity={qty}
+                        reserved={reserved}
+                        available={available}
+                        value={qty * cost}
+                        minQty={minQty}
+                        onView={() => openStockView(s)}
+                      />
+                    );
+                  })}
+                </InventoryCardGrid>
+              )}
+
               {/* Pagination - First / Prev / Page X of Y / Next / Last with
                   an inline rows-per-page selector and a "Showing 1-20 of N"
                   caption. Same pattern as the other inventory tables. */}
@@ -1466,58 +1703,196 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         </TabsContent>
 
         {/* Movement History Tab Content */}
-        <TabsContent value="history" className="mt-0 outline-none animate-in fade-in duration-500">
-           <Card className="border border-slate-200 shadow-sm rounded-xl overflow-hidden bg-white">
-              <InventoryCardGrid
-                empty={filteredHistory.length === 0}
-                emptyTitle="No movement history"
-                emptyDescription="Stock changes will appear here once recorded."
-              >
-                {filteredHistory.map((m) => (
-                  <MovementRecordCard
-                    key={m.id}
-                    date={new Date(m.created_at).toLocaleString([], {
-                      dateStyle: "short",
-                      timeStyle: "short",
-                    })}
-                    productName={m.product.name}
-                    branch={m.branch?.name}
-                    movementType={getMovementBadge(m.movement_type)}
-                    quantityChange={Number(m.quantity_change)}
-                    previousQty={Number(m.previous_qty)}
-                    newQty={Number(m.new_qty)}
-                    user={m.user?.email?.split("@")[0] || "System"}
-                  />
-                ))}
-              </InventoryCardGrid>
-           </Card>
+        <TabsContent value="history" className="mt-0 outline-none">
+          <Card className="border border-slate-200 shadow-sm rounded-xl overflow-hidden bg-white">
+            <CardHeader className="px-4 py-3 border-b border-gray-100">
+              <CardTitle className="text-sm font-semibold text-gray-900">Movement Log</CardTitle>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {filteredHistory.length.toLocaleString()} movements
+              </p>
+            </CardHeader>
+            <CardContent className="p-0">
+              {filteredHistory.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                  <Package className="h-8 w-8 text-gray-300 mb-3" />
+                  <p className="text-sm font-medium text-gray-900">No movement history</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Stock changes will appear here once recorded.
+                  </p>
+                </div>
+              ) : viewMode === "table" ? (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                        <TableHead className="text-xs font-semibold text-gray-600 pl-3">Date</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">Product</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">Branch</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">Type</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right">Change</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right">Before</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right">After</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 pr-3">User</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredHistory.map((m) => {
+                        const change = Number(m.quantity_change);
+                        return (
+                          <TableRow key={m.id}>
+                            <TableCell className="py-2.5 pl-3 text-xs text-gray-600 whitespace-nowrap">
+                              {new Date(m.created_at).toLocaleString([], {
+                                dateStyle: "short",
+                                timeStyle: "short",
+                              })}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm font-medium text-gray-900 max-w-[200px] truncate">
+                              {m.product.name}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-700 whitespace-nowrap">
+                              {m.branch?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5">{getMovementBadge(m.movement_type)}</TableCell>
+                            <TableCell
+                              className={cn(
+                                "py-2.5 text-right text-sm font-semibold tabular-nums whitespace-nowrap",
+                                change > 0 ? "text-emerald-600" : "text-rose-600",
+                              )}
+                            >
+                              {change > 0 ? "+" : ""}
+                              {formatQty(change)}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-right text-sm tabular-nums text-gray-700 whitespace-nowrap">
+                              {formatQty(Number(m.previous_qty))}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-right text-sm tabular-nums text-gray-900 whitespace-nowrap">
+                              {formatQty(Number(m.new_qty))}
+                            </TableCell>
+                            <TableCell className="py-2.5 pr-3 text-xs text-gray-500">
+                              {m.user?.email?.split("@")[0] || "System"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <InventoryCardGrid empty={false}>
+                  {filteredHistory.map((m) => (
+                    <MovementRecordCard
+                      key={m.id}
+                      date={new Date(m.created_at).toLocaleString([], {
+                        dateStyle: "short",
+                        timeStyle: "short",
+                      })}
+                      productName={m.product.name}
+                      branch={m.branch?.name}
+                      movementType={getMovementBadge(m.movement_type)}
+                      quantityChange={Number(m.quantity_change)}
+                      previousQty={Number(m.previous_qty)}
+                      newQty={Number(m.new_qty)}
+                      user={m.user?.email?.split("@")[0] || "System"}
+                    />
+                  ))}
+                </InventoryCardGrid>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
 
         {/* Today's Movement Tab */}
-        <TabsContent value="today" className="mt-0 outline-none animate-in fade-in duration-500">
-           <Card className="border border-slate-200 shadow-sm rounded-xl overflow-hidden bg-white">
-              <InventoryCardGrid
-                empty={filteredTodayMovements.length === 0}
-                emptyTitle="No events today"
-                emptyDescription="Today's stock movements will show up here."
-              >
-                {filteredTodayMovements.map((m) => (
-                  <MovementRecordCard
-                    key={m.id}
-                    date={new Date(m.created_at).toLocaleTimeString([], {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                    })}
-                    productName={m.product.name}
-                    branch={m.branch?.name}
-                    movementType={getMovementBadge(m.movement_type)}
-                    quantityChange={Number(m.quantity_change)}
-                    newQty={Number(m.new_qty)}
-                    notes={m.notes || undefined}
-                  />
-                ))}
-              </InventoryCardGrid>
-           </Card>
+        <TabsContent value="today" className="mt-0 outline-none">
+          <Card className="border border-slate-200 shadow-sm rounded-xl overflow-hidden bg-white">
+            <CardHeader className="px-4 py-3 border-b border-gray-100">
+              <CardTitle className="text-sm font-semibold text-gray-900">Today</CardTitle>
+              <p className="text-xs text-gray-500 mt-0.5">
+                {filteredTodayMovements.length.toLocaleString()} events today
+              </p>
+            </CardHeader>
+            <CardContent className="p-0">
+              {filteredTodayMovements.length === 0 ? (
+                <div className="flex flex-col items-center justify-center py-16 px-6 text-center">
+                  <Package className="h-8 w-8 text-gray-300 mb-3" />
+                  <p className="text-sm font-medium text-gray-900">No events today</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    Today&apos;s stock movements will show up here.
+                  </p>
+                </div>
+              ) : viewMode === "table" ? (
+                <div className="overflow-x-auto">
+                  <Table>
+                    <TableHeader>
+                      <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                        <TableHead className="text-xs font-semibold text-gray-600 pl-3">Time</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">Product</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">Branch</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600">Type</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right">Change</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 text-right">After</TableHead>
+                        <TableHead className="text-xs font-semibold text-gray-600 pr-3">Notes</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {filteredTodayMovements.map((m) => {
+                        const change = Number(m.quantity_change);
+                        return (
+                          <TableRow key={m.id}>
+                            <TableCell className="py-2.5 pl-3 text-xs text-gray-600 whitespace-nowrap">
+                              {new Date(m.created_at).toLocaleTimeString([], {
+                                hour: "2-digit",
+                                minute: "2-digit",
+                              })}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm font-medium text-gray-900 max-w-[200px] truncate">
+                              {m.product.name}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-sm text-gray-700 whitespace-nowrap">
+                              {m.branch?.name || "—"}
+                            </TableCell>
+                            <TableCell className="py-2.5">{getMovementBadge(m.movement_type)}</TableCell>
+                            <TableCell
+                              className={cn(
+                                "py-2.5 text-right text-sm font-semibold tabular-nums whitespace-nowrap",
+                                change > 0 ? "text-emerald-600" : "text-rose-600",
+                              )}
+                            >
+                              {change > 0 ? "+" : ""}
+                              {formatQty(change)}
+                            </TableCell>
+                            <TableCell className="py-2.5 text-right text-sm tabular-nums text-gray-900 whitespace-nowrap">
+                              {formatQty(Number(m.new_qty))}
+                            </TableCell>
+                            <TableCell className="py-2.5 pr-3 text-xs text-gray-500 max-w-[180px] truncate">
+                              {m.notes || "—"}
+                            </TableCell>
+                          </TableRow>
+                        );
+                      })}
+                    </TableBody>
+                  </Table>
+                </div>
+              ) : (
+                <InventoryCardGrid empty={false}>
+                  {filteredTodayMovements.map((m) => (
+                    <MovementRecordCard
+                      key={m.id}
+                      date={new Date(m.created_at).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                      productName={m.product.name}
+                      branch={m.branch?.name}
+                      movementType={getMovementBadge(m.movement_type)}
+                      quantityChange={Number(m.quantity_change)}
+                      newQty={Number(m.new_qty)}
+                      notes={m.notes || undefined}
+                    />
+                  ))}
+                </InventoryCardGrid>
+              )}
+            </CardContent>
+          </Card>
         </TabsContent>
       </Tabs>
 

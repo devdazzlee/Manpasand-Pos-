@@ -9,6 +9,8 @@ export interface KpiItem {
   value: string | number;
   icon?: LucideIcon;
   tone?: "default" | "warning" | "danger" | "success";
+  hint?: string;
+  onClick?: () => void;
 }
 
 function toneClass(tone: KpiItem["tone"]) {
@@ -43,25 +45,50 @@ export function InventoryKpiGrid({
           : "grid-cols-1 sm:grid-cols-2 lg:grid-cols-3";
 
   return (
-    <div className={cn("grid gap-4", gridClass)}>
+    <div className={cn("grid gap-3", gridClass)}>
       {items.map((item) => {
         const Icon = item.icon;
-        return (
-          <Card
-            key={item.label}
-            className={cn("p-4 border", toneClass(item.tone))}
-          >
+        const className = cn(
+          "p-3.5 border shadow-sm text-left transition-colors",
+          toneClass(item.tone),
+          item.onClick && "hover:border-blue-300 cursor-pointer",
+        );
+
+        const body = (
+          <>
             <div className="flex items-start justify-between gap-2">
-              <p className="text-sm font-medium text-gray-700">{item.label}</p>
-              {Icon ? <Icon className="h-4 w-4 text-gray-400 shrink-0" /> : null}
+              <p className="text-xs font-medium text-gray-600">{item.label}</p>
+              {Icon ? <Icon className="h-3.5 w-3.5 text-gray-400 shrink-0" /> : null}
             </div>
             {loading ? (
-              <div className="h-8 w-24 bg-gray-100 animate-pulse rounded mt-2" />
+              <div className="h-7 w-20 bg-gray-100 animate-pulse rounded mt-1.5" />
             ) : (
-              <p className="text-2xl font-semibold text-black mt-1 tabular-nums">
+              <p className="text-xl font-semibold text-gray-900 mt-1 tabular-nums leading-tight">
                 {item.value}
               </p>
             )}
+            {item.hint ? (
+              <p className="text-[10px] text-gray-500 mt-1 truncate">{item.hint}</p>
+            ) : null}
+          </>
+        );
+
+        if (item.onClick) {
+          return (
+            <button
+              key={item.label}
+              type="button"
+              onClick={item.onClick}
+              className={cn(className, "rounded-xl")}
+            >
+              {body}
+            </button>
+          );
+        }
+
+        return (
+          <Card key={item.label} className={cn(className, "rounded-xl")}>
+            {body}
           </Card>
         );
       })}

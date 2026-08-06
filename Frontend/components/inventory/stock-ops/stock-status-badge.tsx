@@ -25,14 +25,14 @@ export function getStockStatusDisplay(
   }
   if (qty <= 0) {
     return {
-      label: "Out of stock",
+      label: "Out",
       tone: "out",
       className: "bg-gray-100 text-gray-700 border-gray-300",
     };
   }
   if (minQty > 0 && qty <= minQty) {
     return {
-      label: "Low stock",
+      label: "Low",
       tone: "low",
       className: "bg-amber-50 text-amber-800 border-amber-200",
     };

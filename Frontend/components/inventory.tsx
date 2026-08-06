@@ -192,7 +192,7 @@ const getProductStock = (product: Product) =>
   Number(product.available_stock ?? product.current_stock ?? 0)
 
 const formatRs = (amount: number | string | undefined) =>
-  `Rs ${formatMoneyDisplay(Number(amount) || 0)}`
+  formatMoneyDisplay(Number(amount) || 0)
 
 const formatStockQty = (n: number) => {
   const value = Number(n) || 0
@@ -257,14 +257,14 @@ const getStockTone = (product: Product) => {
   }
   if (stock <= 0) {
     return {
-      label: "Out of stock",
+      label: "Out",
       className: "text-red-700 bg-red-50 border-red-200",
       valueClassName: "text-red-700",
     }
   }
   if (minStock > 0 && stock <= minStock) {
     return {
-      label: "Low stock",
+      label: "Low",
       className: "text-amber-700 bg-amber-50 border-amber-200",
       valueClassName: "text-amber-700",
     }
@@ -1407,6 +1407,7 @@ export default function Inventory() {
     const map = new Map<string, string>()
     for (const product of globalProducts) {
       if (!product.subcategoryId || !product.subcategory) continue
+      if (String(product.subcategory).trim().toLowerCase() === "unknown") continue
       if (
         selectedCategory !== "__all__" &&
         product.categoryId !== selectedCategory
@@ -2305,13 +2306,13 @@ export default function Inventory() {
                     <Table>
                       <TableHeader>
                         <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
-                          <TableHead className="text-xs font-semibold text-gray-600 w-[42%]">Product</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600">Category</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 text-right">Stock</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 text-right">Purchase</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 text-right">Sales</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600">Status</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 text-right">Actions</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 pl-3 pr-2">Product</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 px-2">Category</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2 whitespace-nowrap">Stock</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">Purchase</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">Sales</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 px-2">Status</TableHead>
+                          <TableHead className="text-xs font-semibold text-gray-600 text-right pl-2 pr-3">Actions</TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2320,10 +2321,10 @@ export default function Inventory() {
                           const stockTone = getStockTone(product)
                           return (
                             <TableRow key={`${product.id}-${product.updated_at}`}>
-                              <TableCell className="py-3">
-                                <div className="flex items-center gap-3 min-w-0">
-                                  <div className="h-12 w-12 rounded-lg overflow-hidden border border-gray-100 shrink-0 bg-slate-50">
-                                    <ProductThumb product={product} iconClassName="h-5 w-5" />
+                              <TableCell className="py-2.5 pl-3 pr-2">
+                                <div className="flex items-center gap-2.5 min-w-0">
+                                  <div className="h-10 w-10 rounded-lg overflow-hidden border border-gray-100 shrink-0 bg-slate-50">
+                                    <ProductThumb product={product} iconClassName="h-4 w-4" />
                                   </div>
                                   <div className="min-w-0">
                                     <p className="text-sm font-semibold text-gray-900 truncate">{product.name}</p>
@@ -2342,29 +2343,32 @@ export default function Inventory() {
                                   </div>
                                 </div>
                               </TableCell>
-                              <TableCell className="py-3">
-                                <p className="text-sm text-gray-800 truncate max-w-[140px]">
+                              <TableCell className="py-2.5 px-2">
+                                <p className="text-sm text-gray-800 truncate max-w-[160px]">
                                   {product.category?.name || "Uncategorized"}
                                 </p>
-                                {product.subcategory?.name ? (
-                                  <p className="text-[11px] text-gray-500 truncate max-w-[140px]">
+                                {product.subcategory?.name &&
+                                product.subcategory.name.trim().toLowerCase() !== "unknown" ? (
+                                  <p className="text-[11px] text-gray-500 truncate max-w-[160px]">
                                     {product.subcategory.name}
                                   </p>
                                 ) : null}
                               </TableCell>
-                              <TableCell className="py-3 text-right">
+                              <TableCell className="py-2.5 px-2 text-right whitespace-nowrap">
                                 <p className={cn("text-sm font-semibold tabular-nums", stockTone.valueClassName)}>
                                   {formatStockQty(stock)}
                                 </p>
-                                <p className="text-[10px] text-gray-400">{stockTone.label}</p>
+                                <p className={cn("text-[11px] whitespace-nowrap", stockTone.valueClassName === "text-red-700" ? "text-red-500" : "text-gray-400")}>
+                                  {stockTone.label}
+                                </p>
                               </TableCell>
-                              <TableCell className="py-3 text-right text-sm tabular-nums text-gray-800">
+                              <TableCell className="py-2.5 px-2 text-right text-sm tabular-nums text-gray-800 whitespace-nowrap">
                                 {formatRs(product.purchase_rate)}
                               </TableCell>
-                              <TableCell className="py-3 text-right text-sm font-semibold tabular-nums text-blue-700">
+                              <TableCell className="py-2.5 px-2 text-right text-sm font-semibold tabular-nums text-blue-700 whitespace-nowrap">
                                 {formatRs(product.sales_rate_exc_dis_and_tax)}
                               </TableCell>
-                              <TableCell className="py-3">
+                              <TableCell className="py-2.5 px-2">
                                 <Badge
                                   variant="outline"
                                   className={cn(
@@ -2377,7 +2381,7 @@ export default function Inventory() {
                                   {product.is_active ? "Active" : "Inactive"}
                                 </Badge>
                               </TableCell>
-                              <TableCell className="py-3 text-right">
+                              <TableCell className="py-2.5 pl-2 pr-3 text-right">
                                 {renderProductActions(product)}
                               </TableCell>
                             </TableRow>

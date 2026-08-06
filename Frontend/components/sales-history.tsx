@@ -214,6 +214,15 @@ const EMPTY_SUMMARY: SalesSummary = {
   totalDiscounts: 0,
 };
 
+const formatQty = (value: string | number | undefined | null): string => {
+  const n = Number(value) || 0;
+  if (Number.isInteger(n)) return String(n);
+  return n.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 3,
+  });
+};
+
 const formatCurrency = (value: string | number | undefined | null): string => {
   if (value === undefined || value === null || value === "") return "Rs 0.00";
   const numValue = typeof value === "string" ? parseFloat(value) : value;
@@ -240,8 +249,14 @@ const cashierLabel = (sale: Sale): string =>
 
 const itemCount = (sale: Sale): number => sale.sale_items?.length || 0;
 
-const totalQuantity = (sale: Sale): number =>
-  (sale.sale_items || []).reduce((sum, item) => sum + Math.abs(Number(item.quantity) || 0), 0);
+const totalQuantity = (sale: Sale): number => {
+  const sum = (sale.sale_items || []).reduce(
+    (acc, item) => acc + Math.abs(Number(item.quantity) || 0),
+    0,
+  );
+  // Avoid float noise (e.g. 0.1 + 0.05 → 0.15000000000000002)
+  return Math.round(sum * 1000) / 1000;
+};
 
 const getDateRange = (preset: DatePreset): { start?: Date; end?: Date } => {
   const now = new Date();
@@ -1255,7 +1270,7 @@ export function SalesHistory() {
                             <p className="truncate font-medium">
                               {(sale.payment_method || "CASH").replace("_", " ")} ·{" "}
                               {itemCount(sale) > 0
-                                ? `${itemCount(sale)} items · Qty ${totalQuantity(sale)}`
+                                ? `${itemCount(sale)} items · Qty ${formatQty(totalQuantity(sale))}`
                                 : "No line items saved"}
                             </p>
                           </div>
@@ -1704,7 +1719,7 @@ export function SalesHistory() {
                         (viewSale.sale_items || []).map((item) => (
                           <TableRow key={item.id}>
                             <TableCell className="py-2">{item.product?.name || "Item"}</TableCell>
-                            <TableCell className="py-2 text-right">{item.quantity}</TableCell>
+                            <TableCell className="py-2 text-right">{formatQty(item.quantity)}</TableCell>
                             <TableCell className="py-2 text-right">
                               {formatCurrency(item.line_total)}
                             </TableCell>
