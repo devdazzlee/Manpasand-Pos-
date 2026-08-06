@@ -1,10 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import apiClient from "@/lib/apiClient";
-import { API_BASE } from "@/config/constants";
+import {
+  fetchInventoryDashboard,
+  type InventoryDashboardStats,
+} from "@/lib/inventory-api";
 
-export interface InventoryDashboardStats {
+export type { InventoryDashboardStats };
+
+export interface InventoryDashboardKpis {
   totalInventoryValue: number;
   totalStockQuantity: number;
   negativeStockCount: number;
@@ -15,7 +19,7 @@ export interface InventoryDashboardStats {
   pendingTransferCount: number;
 }
 
-const EMPTY: InventoryDashboardStats = {
+const EMPTY: InventoryDashboardKpis = {
   totalInventoryValue: 0,
   totalStockQuantity: 0,
   negativeStockCount: 0,
@@ -26,35 +30,34 @@ const EMPTY: InventoryDashboardStats = {
   pendingTransferCount: 0,
 };
 
-export function useInventoryDashboard() {
-  const [stats, setStats] = useState<InventoryDashboardStats>(EMPTY);
+function toKpis(data: InventoryDashboardStats): InventoryDashboardKpis {
+  return {
+    totalInventoryValue: data.totalInventoryValue,
+    totalStockQuantity: data.totalStockQuantity,
+    negativeStockCount: data.negativeStockCount,
+    lowStockCount: data.lowStockCount,
+    totalSkus: data.totalSkus,
+    outOfStockCount: data.outOfStockCount,
+    totalLocations: data.totalLocations,
+    pendingTransferCount: data.pendingTransferCount,
+  };
+}
+
+export function useInventoryDashboard(branchId?: string) {
+  const [stats, setStats] = useState<InventoryDashboardKpis>(EMPTY);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get(`${API_BASE}/inventory/dashboard`);
-      const data = res.data?.data ?? res.data ?? {};
-      setStats({
-        totalInventoryValue: Number(data.totalInventoryValue || 0),
-        totalStockQuantity: Number(data.totalStockQuantity || 0),
-        negativeStockCount: Number(data.negativeStockCount || 0),
-        lowStockCount: Number(
-          data.lowStockCount ?? data.lowStockAlerts?.length ?? 0,
-        ),
-        totalSkus: Number(data.totalSkus || 0),
-        outOfStockCount: Number(data.outOfStockCount || 0),
-        totalLocations: Number(data.totalLocations || 0),
-        pendingTransferCount: Number(
-          data.pendingTransferCount ?? data.pendingTransfers?.length ?? 0,
-        ),
-      });
+      const data = await fetchInventoryDashboard(branchId);
+      setStats(toKpis(data));
     } catch {
       setStats(EMPTY);
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [branchId]);
 
   useEffect(() => {
     refresh();

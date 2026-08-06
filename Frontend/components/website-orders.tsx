@@ -18,12 +18,13 @@ import {
 import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Loader2, Eye, RefreshCcw, Search, ShoppingBag, DollarSign, Clock, Globe, Download, Printer, CheckCircle2, Filter, Trash2 } from "lucide-react";
+import { Loader2, Eye, Search, ShoppingBag, Clock, Globe, Download, Printer, CheckCircle2, Trash2, Phone, Mail, MapPin, Package, Wallet, User, Ban, Loader } from "lucide-react";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { useToast } from "@/hooks/use-toast";
 import { PageLoader } from "@/components/ui/page-loader";
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
+import { Badge } from "@/components/ui/badge";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
@@ -33,6 +34,7 @@ import {
   receiptPageWrapper,
 } from "@/lib/receipt";
 import { cn } from "@/lib/utils";
+import { formatMoneyDisplay } from "@/lib/money";
 
 interface OrderItem { 
   productId?: string;
@@ -216,6 +218,31 @@ const getAllowedStatusOptions = (status: string): OrderStatusOption[] => {
       return [...ORDER_STATUS_OPTIONS];
   }
 };
+
+function formatRs(amount: number | string) {
+  return `Rs ${formatMoneyDisplay(Number(amount) || 0)}`;
+}
+
+function formatPaymentMethod(method?: string) {
+  switch ((method || "CASH").toUpperCase()) {
+    case "CASH":
+      return "Cash on Delivery";
+    case "CARD":
+      return "Card";
+    case "MOBILE_MONEY":
+      return "Mobile Money";
+    case "BANK_TRANSFER":
+      return "Bank Transfer";
+    case "CREDIT":
+      return "Credit";
+    default:
+      return method || "Cash";
+  }
+}
+
+function formatStatusLabel(status: string) {
+  return status.charAt(0) + status.slice(1).toLowerCase();
+}
 
 const WebsiteOrders: React.FC = () => {
   const { toast } = useToast();
@@ -480,7 +507,7 @@ const WebsiteOrders: React.FC = () => {
         params.status = statusFilter;
       }
       params.page = '1';
-      params.pageSize = '100'; // Get more orders for website orders
+      params.pageSize = '500';
       
       const res = await apiClient.get(`${API_BASE}/guest/order`, { params });
       const rawOrders = res.data?.data?.data || [];
@@ -663,7 +690,15 @@ const WebsiteOrders: React.FC = () => {
     const rangeStart = getRangeStart();
 
     const list = orders.filter((o) => {
-      const matchesSearch = o.order_number.toLowerCase().includes(searchTerm.toLowerCase());
+      const q = searchTerm.trim().toLowerCase();
+      const matchesSearch =
+        !q ||
+        o.order_number.toLowerCase().includes(q) ||
+        (o.customer_name || "").toLowerCase().includes(q) ||
+        (o.customer_phone || "").toLowerCase().includes(q) ||
+        (o.customer_email || "").toLowerCase().includes(q) ||
+        (o.delivery_city || "").toLowerCase().includes(q) ||
+        (o.delivery_address || "").toLowerCase().includes(q);
       const matchesPayment =
         paymentFilter === "ALL" ? true : (o.payment_method || "CASH").toUpperCase() === paymentFilter;
       const matchesDate = rangeStart ? new Date(o.created_at) >= rangeStart : true;
@@ -696,28 +731,48 @@ const WebsiteOrders: React.FC = () => {
   // Calculate stats
   const totalOrders = orders.length;
   const totalRevenue = orders.reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0);
-  const pendingOrders = orders.filter(order => order.status === 'PENDING').length;
-  const completedOrders = orders.filter(order => order.status === 'COMPLETED').length;
+  const pendingOrders = orders.filter((order) => order.status === "PENDING").length;
+  const processingOrders = orders.filter((order) => order.status === "PROCESSING").length;
+  const completedOrders = orders.filter((order) => order.status === "COMPLETED").length;
+  const cancelledOrders = orders.filter((order) => order.status === "CANCELLED").length;
   const avgOrderValue = totalOrders > 0 ? totalRevenue / totalOrders : 0;
 
+  const statusCounts: Record<string, number> = {
+    "": totalOrders,
+    PENDING: pendingOrders,
+    PROCESSING: processingOrders,
+    COMPLETED: completedOrders,
+    CANCELLED: cancelledOrders,
+  };
+
   if (isInitialLoading) {
-    return <PageLoader message="Loading website orders..." />
+    return <PageLoader message="Loading website orders..." />;
   }
 
   return (
-    <div className="p-3 sm:p-4 md:p-6 space-y-4 md:space-y-6 min-w-0 overflow-x-hidden">
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div className="min-w-0">
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 flex items-center gap-2">
-            <Globe className="h-6 w-6 md:h-8 md:w-8 text-blue-600 shrink-0" />
-            <span className="truncate">Website Orders</span>
-          </h1>
-          <p className="text-sm md:text-base text-gray-600">View & manage orders from website</p>
+    <div className="p-4 md:p-6 space-y-5 min-w-0 overflow-x-hidden">
+      {/* Header */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+        <div className="flex items-start gap-3 min-w-0">
+          <div className="bg-blue-600 text-white p-2.5 rounded-lg shrink-0">
+            <Globe className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="text-xl md:text-2xl font-bold text-gray-900 tracking-tight">
+              Website Orders
+            </h1>
+            <p className="text-sm text-gray-500 mt-0.5">
+              Online checkout orders, delivery, and fulfillment
+            </p>
+          </div>
         </div>
+        <Badge variant="outline" className="self-start text-xs font-medium border-gray-200 text-gray-600">
+          {filtered.length} shown
+        </Badge>
       </div>
 
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 md:gap-6">
+      {/* KPI cards */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {isLoading ? (
           <>
             <StatCardSkeleton />
@@ -727,111 +782,133 @@ const WebsiteOrders: React.FC = () => {
           </>
         ) : (
           <>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Website Orders</CardTitle>
-                <ShoppingBag className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{totalOrders}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                <DollarSign className="h-4 w-4 text-green-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">Rs. {(Number(totalRevenue) || 0).toFixed(2)}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
-                <Clock className="h-4 w-4 text-orange-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-orange-600">{pendingOrders}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Completed / Avg</CardTitle>
-                <CheckCircle2 className="h-4 w-4 text-blue-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-lg font-bold text-blue-600">{completedOrders} done</div>
-                <p className="text-sm text-gray-500 mt-1">Avg Rs. {(Number(avgOrderValue) || 0).toFixed(2)}</p>
-              </CardContent>
-            </Card>
+            <button
+              type="button"
+              onClick={() => setStatusFilter("")}
+              className={cn(
+                "rounded-xl border bg-white p-3.5 text-left shadow-sm transition-colors hover:border-blue-300",
+                statusFilter === "" ? "border-blue-300 ring-1 ring-blue-100" : "border-gray-200",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-gray-600">Total Orders</p>
+                <ShoppingBag className="h-3.5 w-3.5 text-gray-400" />
+              </div>
+              <p className="text-2xl font-semibold text-gray-900 mt-1 tabular-nums">{totalOrders}</p>
+            </button>
+
+            <div className="rounded-xl border border-gray-200 bg-white p-3.5 shadow-sm">
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-gray-600">Revenue</p>
+                <Wallet className="h-3.5 w-3.5 text-emerald-500" />
+              </div>
+              <p className="text-xl font-semibold text-emerald-700 mt-1 tabular-nums leading-tight">
+                {formatRs(totalRevenue)}
+              </p>
+              <p className="text-[10px] text-gray-500 mt-1">Avg {formatRs(avgOrderValue)}</p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter("PENDING")}
+              className={cn(
+                "rounded-xl border p-3.5 text-left shadow-sm transition-colors hover:border-amber-300",
+                statusFilter === "PENDING"
+                  ? "border-amber-300 bg-amber-50/50 ring-1 ring-amber-100"
+                  : "border-amber-200/80 bg-amber-50/30",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-gray-600">Pending</p>
+                <Clock className="h-3.5 w-3.5 text-amber-500" />
+              </div>
+              <p className="text-2xl font-semibold text-amber-700 mt-1 tabular-nums">{pendingOrders}</p>
+              <p className="text-[10px] text-gray-500 mt-1">{processingOrders} processing</p>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setStatusFilter("COMPLETED")}
+              className={cn(
+                "rounded-xl border p-3.5 text-left shadow-sm transition-colors hover:border-blue-300",
+                statusFilter === "COMPLETED"
+                  ? "border-blue-300 bg-blue-50/50 ring-1 ring-blue-100"
+                  : "border-blue-200/80 bg-blue-50/30",
+              )}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <p className="text-xs font-medium text-gray-600">Completed</p>
+                <CheckCircle2 className="h-3.5 w-3.5 text-blue-500" />
+              </div>
+              <p className="text-2xl font-semibold text-blue-700 mt-1 tabular-nums">{completedOrders}</p>
+              <p className="text-[10px] text-gray-500 mt-1">{cancelledOrders} cancelled</p>
+            </button>
           </>
         )}
       </div>
 
       {/* Filters */}
-      <div className="rounded-xl border bg-white p-3 sm:p-4 space-y-3 min-w-0 overflow-hidden">
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 text-sm font-medium text-gray-700 min-w-0">
-            <Filter className="h-4 w-4 shrink-0" />
-            <span className="truncate">Filters & Options</span>
-          </div>
-          <Button
-            onClick={fetchOrders}
-            variant="outline"
-            size="sm"
-            className="h-9 text-sm text-black shrink-0"
-          >
-            <RefreshCcw className="w-4 h-4 sm:mr-2" />
-            <span className="hidden sm:inline">Refresh</span>
-          </Button>
-        </div>
-
-        {/* Status chip row */}
-        <div className="flex flex-wrap gap-2">
+      <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
+        <div className="flex flex-wrap gap-1.5">
           {[
             { v: "", label: "All" },
             { v: "PENDING", label: "Pending" },
             { v: "PROCESSING", label: "Processing" },
             { v: "COMPLETED", label: "Completed" },
             { v: "CANCELLED", label: "Cancelled" },
-          ].map((s) => (
-            <Button
-              key={s.v || "ALL"}
-              size="sm"
-              variant={statusFilter === s.v ? "default" : "outline"}
-              className="h-8 text-xs sm:text-sm px-2.5 sm:px-3"
-              onClick={() => setStatusFilter(s.v)}
-            >
-              {s.label}
-            </Button>
-          ))}
+          ].map((s) => {
+            const active = statusFilter === s.v;
+            const count = statusCounts[s.v] ?? 0;
+            return (
+              <button
+                key={s.v || "ALL"}
+                type="button"
+                onClick={() => setStatusFilter(s.v)}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-semibold transition-colors",
+                  active
+                    ? "bg-gray-900 text-white border-gray-900"
+                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
+                )}
+              >
+                {s.label}
+                <span
+                  className={cn(
+                    "inline-flex min-w-[1.25rem] justify-center rounded-full px-1 text-[10px] tabular-nums",
+                    active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500",
+                  )}
+                >
+                  {count}
+                </span>
+              </button>
+            );
+          })}
         </div>
 
-        {/* Search + dropdowns — stack on mobile */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 min-w-0">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
           <div className="relative min-w-0 sm:col-span-2 lg:col-span-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
             <Input
-              placeholder="Search Order #"
+              placeholder="Search order, customer, phone…"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
               className="h-10 pl-10 w-full"
             />
           </div>
           <Select value={paymentFilter} onValueChange={setPaymentFilter}>
-            <SelectTrigger className="h-10 w-full min-w-0">
+            <SelectTrigger className="h-10 w-full">
               <SelectValue placeholder="All Payments" />
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="ALL">All Payments</SelectItem>
-              <SelectItem value="CASH">Cash</SelectItem>
+              <SelectItem value="CASH">Cash on Delivery</SelectItem>
               <SelectItem value="CARD">Card</SelectItem>
               <SelectItem value="MOBILE_MONEY">Mobile Money</SelectItem>
               <SelectItem value="BANK_TRANSFER">Bank Transfer</SelectItem>
             </SelectContent>
           </Select>
           <Select value={dateRangeFilter} onValueChange={setDateRangeFilter}>
-            <SelectTrigger className="h-10 w-full min-w-0">
+            <SelectTrigger className="h-10 w-full">
               <SelectValue placeholder="All Dates" />
             </SelectTrigger>
             <SelectContent>
@@ -842,7 +919,7 @@ const WebsiteOrders: React.FC = () => {
             </SelectContent>
           </Select>
           <Select value={sortBy} onValueChange={setSortBy}>
-            <SelectTrigger className="h-10 w-full min-w-0">
+            <SelectTrigger className="h-10 w-full">
               <SelectValue placeholder="Sort" />
             </SelectTrigger>
             <SelectContent>
@@ -855,131 +932,128 @@ const WebsiteOrders: React.FC = () => {
         </div>
       </div>
 
-      {/* Orders Grid */}
-      <Card className="border-gray-200 shadow-sm min-w-0 overflow-hidden">
-        <CardHeader className="pb-4 px-4 sm:px-6">
-          <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between min-w-0">
-            <CardTitle className="text-base sm:text-lg">Website Orders ({filtered.length})</CardTitle>
-            <p className="text-xs sm:text-sm text-gray-500">
-              Online checkout orders and delivery requests
+      {/* Orders list */}
+      <Card className="border border-gray-200 shadow-sm min-w-0 overflow-hidden">
+        <CardHeader className="py-3 px-4 sm:px-5 border-b border-gray-100">
+          <div className="flex items-center justify-between gap-2">
+            <CardTitle className="text-sm font-semibold text-gray-900">
+              Orders
+            </CardTitle>
+            <p className="text-xs text-gray-500">
+              {filtered.length} result{filtered.length === 1 ? "" : "s"}
             </p>
           </div>
         </CardHeader>
-        <CardContent className="px-3 sm:px-6">
+        <CardContent className="p-0">
           {isLoading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-              {Array.from({ length: 6 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
-                >
-                  <div className="h-16 rounded-xl bg-gray-100" />
-                  <div className="mt-4 h-4 w-2/3 rounded bg-gray-100" />
-                  <div className="mt-2 h-3 w-1/2 rounded bg-gray-100" />
-                  <div className="mt-4 grid grid-cols-3 gap-2">
-                    <div className="h-12 rounded-lg bg-gray-100" />
-                    <div className="h-12 rounded-lg bg-gray-100" />
-                    <div className="h-12 rounded-lg bg-gray-100" />
-                  </div>
-                </div>
+            <div className="p-4 space-y-3">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-16 rounded-lg bg-gray-100 animate-pulse" />
               ))}
             </div>
           ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white px-6 py-16 text-center">
-              <Globe className="h-12 w-12 text-gray-400" />
-              <h3 className="mt-4 text-lg font-semibold text-gray-900">No website orders found</h3>
+            <div className="flex flex-col items-center justify-center px-6 py-16 text-center">
+              <div className="h-12 w-12 rounded-full bg-slate-100 flex items-center justify-center mb-3">
+                <Globe className="h-6 w-6 text-gray-400" />
+              </div>
+              <h3 className="text-base font-semibold text-gray-900">No orders found</h3>
               <p className="mt-1 max-w-sm text-sm text-gray-500">
-                Try changing your filters or check back when new online orders arrive.
+                Try clearing filters or search, or wait for new website checkouts.
               </p>
             </div>
           ) : (
             <>
-              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
-                {paged.map((o) => {
-                  const allowedStatusOptions = getAllowedStatusOptions(o.status);
-                  const isTerminal = isTerminalOrderStatus(o.status);
-                  const statusStyle = getOrderStatusStyle(o.status);
-                  const ts = new Date(o.created_at);
+              {/* Desktop table */}
+              <div className="hidden lg:block overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
+                      <TableHead className="text-xs font-semibold text-gray-600">Order</TableHead>
+                      <TableHead className="text-xs font-semibold text-gray-600">Customer</TableHead>
+                      <TableHead className="text-xs font-semibold text-gray-600">Delivery</TableHead>
+                      <TableHead className="text-xs font-semibold text-gray-600">Payment</TableHead>
+                      <TableHead className="text-xs font-semibold text-gray-600 text-right">Amount</TableHead>
+                      <TableHead className="text-xs font-semibold text-gray-600">Status</TableHead>
+                      <TableHead className="text-xs font-semibold text-gray-600 text-right">Actions</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {paged.map((o) => {
+                      const allowedStatusOptions = getAllowedStatusOptions(o.status);
+                      const isTerminal = isTerminalOrderStatus(o.status);
+                      const statusStyle = getOrderStatusStyle(o.status);
+                      const ts = new Date(o.created_at);
+                      const itemCount = o.items?.length || 0;
 
-                  return (
-                    <div
-                      key={o.id}
-                      className="group flex flex-col overflow-hidden rounded-2xl border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-gray-300 hover:shadow-md"
-                    >
-                      <div className="border-b border-gray-100 bg-gradient-to-r from-slate-50 to-blue-50/40 px-3 sm:px-4 py-3 sm:py-4">
-                        <div className="flex items-start justify-between gap-2 sm:gap-3">
-                          <div className="min-w-0 flex-1">
-                            <div className="flex items-center gap-2 text-blue-700">
-                              <Globe className="h-4 w-4 shrink-0" />
-                              <span className="text-[11px] font-semibold uppercase tracking-wide">
-                                Website Order
-                              </span>
-                            </div>
-                            <p className="mt-1 truncate font-mono text-sm font-semibold text-gray-900">
+                      return (
+                        <TableRow key={o.id} className="align-top">
+                          <TableCell className="py-3">
+                            <p className="font-mono text-sm font-semibold text-gray-900">
                               {o.order_number}
                             </p>
-                            <p className="mt-1 truncate text-sm text-gray-600">
-                              {o.customer_name?.trim() || "Guest Customer"}
+                            <p className="text-[11px] text-gray-500 mt-0.5">
+                              {ts.toLocaleDateString()} ·{" "}
+                              {ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
                             </p>
-                          </div>
-                          <div className="text-right shrink-0">
-                            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                              Total
+                            <p className="text-[11px] text-gray-400 mt-0.5 flex items-center gap-1">
+                              <Package className="h-3 w-3" />
+                              {itemCount} item{itemCount === 1 ? "" : "s"}
                             </p>
-                            <p className="text-lg sm:text-xl font-bold text-green-700">
-                              Rs. {(Number(o.total_amount) || 0).toFixed(2)}
+                          </TableCell>
+                          <TableCell className="py-3 max-w-[200px]">
+                            <p className="text-sm font-medium text-gray-900 truncate flex items-center gap-1.5">
+                              <User className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+                              {o.customer_name?.trim() || "Guest"}
                             </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="flex flex-1 flex-col p-3 sm:p-4">
-                        <div className="grid grid-cols-3 gap-1.5 sm:gap-2 rounded-xl bg-slate-50 p-2.5 sm:p-3">
-                          <div className="min-w-0">
-                            <p className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                              Payment
-                            </p>
-                            <p className="mt-1 text-xs sm:text-sm font-semibold text-gray-900 truncate">
-                              {o.payment_method || "CASH"}
-                            </p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                              Items
-                            </p>
-                            <p className="mt-1 text-xs sm:text-sm font-semibold text-gray-900">
-                              {o.items?.length || 0}
-                            </p>
-                          </div>
-                          <div className="min-w-0">
-                            <p className="text-[10px] sm:text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                              Date
-                            </p>
-                            <p className="mt-1 text-xs sm:text-sm font-semibold text-gray-900 truncate">
-                              {ts.toLocaleDateString()}
-                            </p>
-                            <p className="text-[10px] sm:text-[11px] text-gray-500">
-                              {ts.toLocaleTimeString([], {
-                                hour: "2-digit",
-                                minute: "2-digit",
-                              })}
-                            </p>
-                          </div>
-                        </div>
-
-                        <div className="mt-4">
-                          <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                            Status
-                          </p>
-                          <div className="flex items-center gap-2">
+                            {o.customer_phone ? (
+                              <p className="text-[11px] text-gray-500 mt-1 truncate flex items-center gap-1">
+                                <Phone className="h-3 w-3 shrink-0" />
+                                {o.customer_phone}
+                              </p>
+                            ) : null}
+                            {o.customer_email ? (
+                              <p className="text-[11px] text-gray-400 mt-0.5 truncate flex items-center gap-1">
+                                <Mail className="h-3 w-3 shrink-0" />
+                                {o.customer_email}
+                              </p>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="py-3 max-w-[180px]">
+                            {o.delivery_city || o.delivery_address ? (
+                              <div className="text-[11px] text-gray-600">
+                                <p className="font-medium text-gray-800 flex items-center gap-1">
+                                  <MapPin className="h-3 w-3 shrink-0 text-gray-400" />
+                                  {o.delivery_city || "Address"}
+                                </p>
+                                {o.delivery_address ? (
+                                  <p className="mt-0.5 line-clamp-2 text-gray-500 pl-4">
+                                    {o.delivery_address}
+                                  </p>
+                                ) : null}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-gray-400">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell className="py-3">
+                            <span className="text-xs font-medium text-gray-700">
+                              {formatPaymentMethod(o.payment_method)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="py-3 text-right">
+                            <span className="text-sm font-semibold tabular-nums text-gray-900">
+                              {formatRs(o.total_amount)}
+                            </span>
+                          </TableCell>
+                          <TableCell className="py-3 min-w-[140px]">
                             {isTerminal ? (
                               <span
                                 className={cn(
-                                  "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium",
+                                  "inline-flex items-center rounded-md border px-2 py-1 text-[11px] font-semibold",
                                   statusStyle,
                                 )}
                               >
-                                {o.status}
+                                {formatStatusLabel(o.status)}
                               </span>
                             ) : (
                               <Select
@@ -988,54 +1062,155 @@ const WebsiteOrders: React.FC = () => {
                                 disabled={!!statusUpdatingIds[o.id]}
                               >
                                 <SelectTrigger
-                                  className={cn(
-                                    "h-9 w-full text-xs font-medium",
-                                    statusStyle,
-                                  )}
+                                  className={cn("h-8 w-full text-[11px] font-semibold", statusStyle)}
                                 >
                                   <SelectValue />
                                 </SelectTrigger>
                                 <SelectContent>
                                   {allowedStatusOptions.map((status) => (
                                     <SelectItem key={status} value={status}>
-                                      {status}
+                                      {formatStatusLabel(status)}
                                     </SelectItem>
                                   ))}
                                 </SelectContent>
                               </Select>
                             )}
-                            {isTerminal && (
-                              <span className="inline-flex items-center rounded border border-amber-200 bg-amber-100 px-2 py-1 text-[10px] font-bold uppercase text-amber-800">
-                                Terminal
+                            {statusUpdatingIds[o.id] ? (
+                              <span className="mt-1 inline-flex items-center text-[10px] text-blue-600">
+                                <Loader2 className="mr-1 h-3 w-3 animate-spin" />
+                                Updating
                               </span>
-                            )}
-                          </div>
-                          {statusUpdatingIds[o.id] && (
-                            <span className="mt-2 inline-flex items-center text-xs text-blue-600">
-                              <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
-                              Updating...
-                            </span>
-                          )}
-                        </div>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="py-3 text-right">
+                            <div className="inline-flex items-center gap-1.5">
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 text-xs"
+                                onClick={() => viewOrderDetail(o.id)}
+                              >
+                                <Eye className="h-3.5 w-3.5 mr-1" />
+                                View
+                              </Button>
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-8 w-8 p-0 text-red-600 hover:bg-red-50"
+                                onClick={() => confirmDelete(o.id)}
+                                disabled={!!statusUpdatingIds[o.id]}
+                              >
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
 
-                        <div className="mt-4 flex gap-2">
-                          <Button
-                            variant="outline"
-                            className="flex-1"
-                            onClick={() => viewOrderDetail(o.id)}
+              {/* Mobile / tablet cards */}
+              <div className="lg:hidden divide-y divide-gray-100">
+                {paged.map((o) => {
+                  const allowedStatusOptions = getAllowedStatusOptions(o.status);
+                  const isTerminal = isTerminalOrderStatus(o.status);
+                  const statusStyle = getOrderStatusStyle(o.status);
+                  const ts = new Date(o.created_at);
+                  const itemCount = o.items?.length || 0;
+
+                  return (
+                    <div key={o.id} className="p-4 space-y-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="font-mono text-sm font-semibold text-gray-900 truncate">
+                            {o.order_number}
+                          </p>
+                          <p className="text-xs text-gray-500 mt-0.5">
+                            {ts.toLocaleDateString()} ·{" "}
+                            {ts.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                          </p>
+                        </div>
+                        <p className="text-base font-bold text-emerald-700 tabular-nums shrink-0">
+                          {formatRs(o.total_amount)}
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg bg-slate-50 border border-slate-100 p-2.5 space-y-1.5">
+                        <p className="text-sm font-medium text-gray-900 flex items-center gap-1.5">
+                          <User className="h-3.5 w-3.5 text-gray-400" />
+                          {o.customer_name?.trim() || "Guest"}
+                        </p>
+                        {o.customer_phone ? (
+                          <p className="text-xs text-gray-600 flex items-center gap-1.5 pl-5">
+                            <Phone className="h-3 w-3 text-gray-400" />
+                            {o.customer_phone}
+                          </p>
+                        ) : null}
+                        {(o.delivery_city || o.delivery_address) && (
+                          <p className="text-xs text-gray-600 flex items-start gap-1.5 pl-5">
+                            <MapPin className="h-3 w-3 text-gray-400 mt-0.5 shrink-0" />
+                            <span className="line-clamp-2">
+                              {[o.delivery_address, o.delivery_city].filter(Boolean).join(", ")}
+                            </span>
+                          </p>
+                        )}
+                        <div className="flex items-center gap-3 pl-5 text-xs text-gray-500 pt-0.5">
+                          <span className="flex items-center gap-1">
+                            <Wallet className="h-3 w-3" />
+                            {formatPaymentMethod(o.payment_method)}
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Package className="h-3 w-3" />
+                            {itemCount} items
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="flex items-center gap-2">
+                        {isTerminal ? (
+                          <span
+                            className={cn(
+                              "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-medium",
+                              statusStyle,
+                            )}
                           >
-                            <Eye className="mr-2 h-4 w-4" />
-                            View
-                          </Button>
-                          <Button
-                            variant="outline"
-                            className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                            onClick={() => confirmDelete(o.id)}
+                            {formatStatusLabel(o.status)}
+                          </span>
+                        ) : (
+                          <Select
+                            value={o.status}
+                            onValueChange={(value) => handleStatusUpdate(o.id, value)}
                             disabled={!!statusUpdatingIds[o.id]}
                           >
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
+                            <SelectTrigger className={cn("h-9 flex-1 text-xs font-medium", statusStyle)}>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {allowedStatusOptions.map((status) => (
+                                <SelectItem key={status} value={status}>
+                                  {formatStatusLabel(status)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        )}
+                        <Button
+                          variant="outline"
+                          className="h-9"
+                          onClick={() => viewOrderDetail(o.id)}
+                        >
+                          <Eye className="h-4 w-4 mr-1.5" />
+                          View
+                        </Button>
+                        <Button
+                          variant="outline"
+                          className="h-9 w-9 p-0 text-red-600"
+                          onClick={() => confirmDelete(o.id)}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
                       </div>
                     </div>
                   );
@@ -1043,8 +1218,8 @@ const WebsiteOrders: React.FC = () => {
               </div>
 
               {/* Pagination */}
-              <div className="flex flex-col gap-3 mt-4 pt-4 border-t">
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-black">
+              <div className="flex flex-col gap-3 p-4 border-t border-gray-100">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 text-sm text-gray-600">
                   <span className="text-xs sm:text-sm text-center sm:text-left">
                     Showing {(safePage - 1) * pageSize + 1}–
                     {Math.min(safePage * pageSize, filtered.length)} of {filtered.length}
@@ -1068,41 +1243,23 @@ const WebsiteOrders: React.FC = () => {
                   <Button
                     variant="outline"
                     size="sm"
-                    className="hidden sm:inline-flex text-sm text-black"
-                    onClick={() => setCurrentPage(1)}
-                    disabled={safePage === 1}
-                  >
-                    First
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="text-sm text-black"
+                    className="text-sm"
                     onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
                     disabled={safePage === 1}
                   >
                     Previous
                   </Button>
-                  <span className="text-xs sm:text-sm text-black px-2 sm:px-3">
+                  <span className="text-xs sm:text-sm text-gray-700 px-2 sm:px-3">
                     {safePage} / {totalPages}
                   </span>
                   <Button
                     variant="outline"
                     size="sm"
-                    className="text-sm text-black"
+                    className="text-sm"
                     onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
                     disabled={safePage >= totalPages}
                   >
                     Next
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="hidden sm:inline-flex text-sm text-black"
-                    onClick={() => setCurrentPage(totalPages)}
-                    disabled={safePage >= totalPages}
-                  >
-                    Last
                   </Button>
                 </div>
               </div>
@@ -1122,212 +1279,262 @@ const WebsiteOrders: React.FC = () => {
           }
         }}
       >
-        <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-4xl max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 rounded-xl p-4 sm:p-6">
-          <DialogHeader className="pr-6 min-w-0">
-            <DialogTitle className="text-lg sm:text-xl font-bold flex items-center gap-2 break-words">
+        <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-3xl max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 rounded-xl p-0">
+          <DialogHeader className="px-4 sm:px-6 pt-4 sm:pt-5 pb-3 border-b border-gray-100 pr-12">
+            <DialogTitle className="text-lg font-bold flex items-center gap-2">
               <Globe className="h-5 w-5 text-blue-600 shrink-0" />
-              Website Order Details
+              Order Details
             </DialogTitle>
           </DialogHeader>
+
           {isDetailLoading ? (
-            <div className="min-h-[40vh] sm:min-h-[420px] flex flex-col justify-center min-w-0">
+            <div className="min-h-[280px] flex flex-col justify-center p-6">
               <PageLoader message="Loading order details..." />
-              <div className="mt-6 space-y-3 animate-pulse">
-                <div className="h-16 bg-gray-100 rounded-lg" />
-                <div className="h-16 bg-gray-100 rounded-lg" />
-                <div className="h-24 bg-gray-100 rounded-lg" />
-              </div>
             </div>
           ) : selectedOrder ? (
-            <div className="space-y-4 sm:space-y-6 min-w-0 overflow-x-hidden">
-              {/* Order Information Card */}
-              <Card className="min-w-0 overflow-hidden">
-                <CardHeader className="px-4 py-3 sm:p-6">
-                  <CardTitle className="text-base sm:text-lg">Order Information</CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4 sm:p-6 sm:pt-0">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                    <div className="min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Order Number</Label>
-                      <p className="text-base font-semibold mt-1 break-all">{selectedOrder.order_number}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Order Status</Label>
-                      <div className="mt-1">
-                        {(() => {
-                          const allowedStatusOptions = getAllowedStatusOptions(selectedOrder.status);
-                          const isTerminal = isTerminalOrderStatus(selectedOrder.status);
-
-                          return (
-                            <div className="flex flex-col gap-2">
-                              <Select
-                                value={selectedOrder.status} 
-                                onValueChange={(value) => handleStatusUpdate(selectedOrder.id, value)}
-                                disabled={!!statusUpdatingIds[selectedOrder.id] || isTerminal}
-                              >
-                                <SelectTrigger className="w-full text-sm font-semibold">
-                                  <SelectValue />
-                                </SelectTrigger>
-                                <SelectContent>
-                                  {allowedStatusOptions.map((status) => (
-                                    <SelectItem key={status} value={status}>
-                                      {status}
-                                    </SelectItem>
-                                  ))}
-                                </SelectContent>
-                              </Select>
-                              
-                              {isTerminal && (
-                                <div className="mt-2 flex items-start gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
-                                  <CheckCircle2 className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
-                                  <div className="flex flex-col min-w-0">
-                                    <span className="text-[10px] font-bold text-amber-800 uppercase tracking-wider">Terminal State</span>
-                                    <p className="text-[11px] text-amber-700 font-medium">
-                                      This order is {selectedOrder.status} and cannot be modified.
-                                    </p>
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Order Date</Label>
-                      <p className="text-sm sm:text-base mt-1 break-words">{new Date(selectedOrder.created_at).toLocaleString()}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Payment Method</Label>
-                      <p className="text-base mt-1 font-semibold">{selectedOrder.payment_method || 'CASH'}</p>
-                    </div>
-                    <div className="sm:col-span-2 min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Total Amount</Label>
-                      <p className="text-xl sm:text-2xl font-bold text-green-600 mt-1">Rs. {(Number(selectedOrder.total_amount) || 0).toFixed(2)}</p>
-                    </div>
+            <div className="space-y-4 p-4 sm:p-6">
+              {/* Summary strip */}
+              <div className="rounded-xl border border-gray-200 bg-gradient-to-r from-slate-50 to-blue-50/40 p-4">
+                <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="font-mono text-base font-bold text-gray-900 break-all">
+                      {selectedOrder.order_number}
+                    </p>
+                    <p className="text-xs text-gray-500 mt-1">
+                      {new Date(selectedOrder.created_at).toLocaleString()}
+                    </p>
                   </div>
-                </CardContent>
-              </Card>
-
-              <Card className="min-w-0 overflow-hidden">
-                <CardHeader className="px-4 py-3 sm:p-6">
-                  <CardTitle className="text-base sm:text-lg">Delivery Details</CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4 sm:p-6 sm:pt-0">
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
-                    <div className="min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Customer Name</Label>
-                      <p className="text-base mt-1 break-words">{selectedOrder.customer_name || "N/A"}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Phone</Label>
-                      <p className="text-base mt-1 break-all">{selectedOrder.customer_phone || "N/A"}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Email</Label>
-                      <p className="text-base mt-1 break-all">{selectedOrder.customer_email || "N/A"}</p>
-                    </div>
-                    <div className="min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Postal Code</Label>
-                      <p className="text-base mt-1">{selectedOrder.delivery_postal_code || "N/A"}</p>
-                    </div>
-                    <div className="sm:col-span-2 min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Delivery Address</Label>
-                      <p className="text-base mt-1 break-words">
-                        {selectedOrder.delivery_address
-                          ? `${selectedOrder.delivery_address}${selectedOrder.delivery_city ? `, ${selectedOrder.delivery_city}` : ""}`
-                          : "N/A"}
-                      </p>
-                    </div>
-                    <div className="sm:col-span-2 min-w-0">
-                      <Label className="text-sm font-medium text-gray-500">Order Notes</Label>
-                      <p className="text-base mt-1 break-words">{selectedOrder.order_notes || "N/A"}</p>
-                    </div>
+                  <div className="text-left sm:text-right shrink-0">
+                    <p className="text-xs text-gray-500 uppercase tracking-wide font-medium">Total</p>
+                    <p className="text-2xl font-bold text-emerald-700 tabular-nums">
+                      {formatRs(selectedOrder.total_amount)}
+                    </p>
                   </div>
-                </CardContent>
-              </Card>
+                </div>
 
-              {/* Order Items Card */}
-              <Card className="min-w-0 overflow-hidden">
-                <CardHeader className="px-4 py-3 sm:p-6">
-                  <CardTitle className="text-base sm:text-lg">Order Items ({selectedOrder.items.length})</CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4 sm:p-6 sm:pt-0">
-                  {selectedOrder.items.length === 0 ? (
-                    <div className="text-center text-gray-500 py-6">
-                      Product details are not available for this order.
-                    </div>
-                  ) : (
-                    <>
-                      {/* Mobile cards */}
-                      <div className="space-y-3 md:hidden">
-                        {selectedOrder.items.map((item, idx) => (
-                          <div key={`${item.productId || item.product_id || idx}-${idx}`} className="rounded-lg border p-3 bg-gray-50">
-                            <p className="font-semibold text-base mb-2">{getOrderItemLabel(item)}</p>
-                            <div className="grid grid-cols-2 gap-2 text-sm">
-                              <div>
-                                <p className="text-gray-500">Quantity</p>
-                                <p className="font-medium">{formatOrderItemQuantity(item)}</p>
-                              </div>
-                              <div className="text-right">
-                                <p className="text-gray-500">Unit Price</p>
-                                <p className="font-medium">Rs. {parseOrderQuantity(item.price).toFixed(2)}</p>
-                              </div>
-                              <div className="col-span-2 text-right pt-1 border-t mt-1">
-                                <p className="text-gray-500">Total</p>
-                                <p className="font-semibold">Rs. {parseOrderQuantity(item.total_price).toFixed(2)}</p>
-                              </div>
-                            </div>
-                          </div>
-                        ))}
-                        <div className="rounded-lg border p-3 bg-green-50">
-                          <p className="text-right text-sm text-gray-600">Grand Total</p>
-                          <p className="text-right font-bold text-lg text-green-700">
-                            Rs. {(Number(selectedOrder.total_amount) || 0).toFixed(2)}
+                <div className="mt-3 flex flex-wrap items-center gap-2">
+                  <span
+                    className={cn(
+                      "inline-flex items-center rounded-md border px-2.5 py-1 text-xs font-semibold",
+                      getOrderStatusStyle(selectedOrder.status),
+                    )}
+                  >
+                    {formatStatusLabel(selectedOrder.status)}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700">
+                    <Wallet className="h-3 w-3" />
+                    {formatPaymentMethod(selectedOrder.payment_method)}
+                  </span>
+                  <span className="inline-flex items-center gap-1 rounded-md border border-gray-200 bg-white px-2.5 py-1 text-xs font-medium text-gray-700">
+                    <Package className="h-3 w-3" />
+                    {selectedOrder.items.length} items
+                  </span>
+                </div>
+              </div>
+
+              {/* Status update */}
+              <div className="rounded-xl border border-gray-200 bg-white p-4">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                  Update Status
+                </Label>
+                {(() => {
+                  const allowedStatusOptions = getAllowedStatusOptions(selectedOrder.status);
+                  const isTerminal = isTerminalOrderStatus(selectedOrder.status);
+                  return (
+                    <div className="mt-2 space-y-2">
+                      <Select
+                        value={selectedOrder.status}
+                        onValueChange={(value) => handleStatusUpdate(selectedOrder.id, value)}
+                        disabled={!!statusUpdatingIds[selectedOrder.id] || isTerminal}
+                      >
+                        <SelectTrigger className="w-full sm:w-64 text-sm font-semibold">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {allowedStatusOptions.map((status) => (
+                            <SelectItem key={status} value={status}>
+                              {formatStatusLabel(status)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      {isTerminal && (
+                        <div className="flex items-start gap-2 bg-amber-50 border border-amber-200 p-2.5 rounded-lg">
+                          {selectedOrder.status === "CANCELLED" ? (
+                            <Ban className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                          ) : (
+                            <CheckCircle2 className="h-4 w-4 text-amber-600 shrink-0 mt-0.5" />
+                          )}
+                          <p className="text-[11px] text-amber-800 font-medium">
+                            This order is {formatStatusLabel(selectedOrder.status).toLowerCase()} and
+                            locked. Status cannot be changed from here.
                           </p>
                         </div>
+                      )}
+                      {selectedOrder.status === "CANCELLED" && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs"
+                          disabled={!!statusUpdatingIds[selectedOrder.id]}
+                          onClick={() => handleReopenOrder(selectedOrder.id)}
+                        >
+                          {statusUpdatingIds[selectedOrder.id] ? (
+                            <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                          ) : (
+                            <Loader className="h-3.5 w-3.5 mr-1.5" />
+                          )}
+                          Re-open order
+                        </Button>
+                      )}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Customer & delivery */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Customer
+                  </p>
+                  <div className="space-y-2 text-sm">
+                    <p className="font-semibold text-gray-900 flex items-center gap-2">
+                      <User className="h-4 w-4 text-gray-400" />
+                      {selectedOrder.customer_name || "N/A"}
+                    </p>
+                    <p className="text-gray-600 flex items-center gap-2 break-all">
+                      <Phone className="h-4 w-4 text-gray-400 shrink-0" />
+                      {selectedOrder.customer_phone || "N/A"}
+                    </p>
+                    <p className="text-gray-600 flex items-center gap-2 break-all">
+                      <Mail className="h-4 w-4 text-gray-400 shrink-0" />
+                      {selectedOrder.customer_email || "N/A"}
+                    </p>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border border-gray-200 bg-white p-4 space-y-3">
+                  <p className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    Delivery
+                  </p>
+                  <div className="space-y-2 text-sm">
+                    <p className="text-gray-800 flex items-start gap-2">
+                      <MapPin className="h-4 w-4 text-gray-400 shrink-0 mt-0.5" />
+                      <span>
+                        {selectedOrder.delivery_address
+                          ? `${selectedOrder.delivery_address}${
+                              selectedOrder.delivery_city
+                                ? `, ${selectedOrder.delivery_city}`
+                                : ""
+                            }${
+                              selectedOrder.delivery_postal_code
+                                ? ` (${selectedOrder.delivery_postal_code})`
+                                : ""
+                            }`
+                          : "N/A"}
+                      </span>
+                    </p>
+                    {selectedOrder.order_notes ? (
+                      <div className="rounded-lg bg-amber-50 border border-amber-100 p-2.5">
+                        <p className="text-[10px] font-semibold uppercase text-amber-700">Notes</p>
+                        <p className="text-xs text-amber-900 mt-0.5">{selectedOrder.order_notes}</p>
                       </div>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
 
-                      {/* Desktop table */}
-                      <div className="hidden md:block overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="font-semibold">Product Name</TableHead>
-                          <TableHead className="font-semibold text-center">Quantity</TableHead>
-                          <TableHead className="font-semibold text-right">Unit Price</TableHead>
-                          <TableHead className="font-semibold text-right">Total Price</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {selectedOrder.items.map((item, idx) => (
-                              <TableRow key={`${item.productId || item.product_id || idx}-${idx}`}>
-                                <TableCell className="font-medium">{getOrderItemLabel(item)}</TableCell>
-                            <TableCell className="text-center">{formatOrderItemQuantity(item)}</TableCell>
-                            <TableCell className="text-right">Rs. {parseOrderQuantity(item.price).toFixed(2)}</TableCell>
-                            <TableCell className="text-right font-semibold">Rs. {parseOrderQuantity(item.total_price).toFixed(2)}</TableCell>
+              {/* Items */}
+              <div className="rounded-xl border border-gray-200 bg-white overflow-hidden">
+                <div className="px-4 py-3 border-b border-gray-100">
+                  <p className="text-sm font-semibold text-gray-900">
+                    Items ({selectedOrder.items.length})
+                  </p>
+                </div>
+                {selectedOrder.items.length === 0 ? (
+                  <div className="text-center text-gray-500 py-8 text-sm">
+                    Product details are not available for this order.
+                  </div>
+                ) : (
+                  <>
+                    <div className="space-y-2 p-3 md:hidden">
+                      {selectedOrder.items.map((item, idx) => (
+                        <div
+                          key={`${item.productId || item.product_id || idx}-${idx}`}
+                          className="rounded-lg border border-gray-100 bg-slate-50 p-3"
+                        >
+                          <p className="font-semibold text-sm text-gray-900">
+                            {getOrderItemLabel(item)}
+                          </p>
+                          <div className="mt-2 grid grid-cols-3 gap-2 text-xs">
+                            <div>
+                              <p className="text-gray-500">Qty</p>
+                              <p className="font-medium">{formatOrderItemQuantity(item)}</p>
+                            </div>
+                            <div>
+                              <p className="text-gray-500">Price</p>
+                              <p className="font-medium">{formatRs(parseOrderQuantity(item.price))}</p>
+                            </div>
+                            <div className="text-right">
+                              <p className="text-gray-500">Total</p>
+                              <p className="font-semibold">
+                                {formatRs(parseOrderQuantity(item.total_price))}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="hidden md:block overflow-x-auto">
+                      <Table>
+                        <TableHeader>
+                          <TableRow className="bg-slate-50/80">
+                            <TableHead className="font-semibold text-xs">Product</TableHead>
+                            <TableHead className="font-semibold text-xs text-center">Qty</TableHead>
+                            <TableHead className="font-semibold text-xs text-right">Unit</TableHead>
+                            <TableHead className="font-semibold text-xs text-right">Total</TableHead>
                           </TableRow>
-                        ))}
-                        <TableRow className="bg-gray-50">
-                          <TableCell colSpan={3} className="text-right font-bold">Grand Total:</TableCell>
-                          <TableCell className="text-right font-bold text-lg text-green-600">
-                            Rs. {(Number(selectedOrder.total_amount) || 0).toFixed(2)}
-                          </TableCell>
-                        </TableRow>
-                      </TableBody>
-                    </Table>
-                  </div>
-                    </>
-                  )}
-                </CardContent>
-              </Card>
+                        </TableHeader>
+                        <TableBody>
+                          {selectedOrder.items.map((item, idx) => (
+                            <TableRow key={`${item.productId || item.product_id || idx}-${idx}`}>
+                              <TableCell className="font-medium text-sm">
+                                {getOrderItemLabel(item)}
+                              </TableCell>
+                              <TableCell className="text-center text-sm">
+                                {formatOrderItemQuantity(item)}
+                              </TableCell>
+                              <TableCell className="text-right text-sm">
+                                {formatRs(parseOrderQuantity(item.price))}
+                              </TableCell>
+                              <TableCell className="text-right font-semibold text-sm">
+                                {formatRs(parseOrderQuantity(item.total_price))}
+                              </TableCell>
+                            </TableRow>
+                          ))}
+                          <TableRow className="bg-emerald-50/50">
+                            <TableCell colSpan={3} className="text-right font-bold text-sm">
+                              Grand Total
+                            </TableCell>
+                            <TableCell className="text-right font-bold text-base text-emerald-700">
+                              {formatRs(selectedOrder.total_amount)}
+                            </TableCell>
+                          </TableRow>
+                        </TableBody>
+                      </Table>
+                    </div>
+                  </>
+                )}
+              </div>
 
-              {/* Action Buttons */}
-              <div className="flex flex-col gap-3 pt-4 border-t">
+              {/* Actions */}
+              <div className="flex flex-col gap-2 pt-2 border-t border-gray-100">
                 {receiptPrinter && (
-                  <div className="flex items-center gap-2 text-xs text-blue-700 bg-blue-50 rounded-lg px-3 py-1.5">
-                    🖨️ <span className="font-medium">{receiptPrinter}</span>
-                  </div>
+                  <p className="text-xs text-blue-700 bg-blue-50 rounded-lg px-3 py-1.5">
+                    Printer: <span className="font-medium">{receiptPrinter}</span>
+                  </p>
                 )}
                 <div className="flex flex-wrap gap-2 sm:justify-end">
                   <Button
@@ -1364,47 +1571,42 @@ const WebsiteOrders: React.FC = () => {
                     )}
                     Print to Printer
                   </Button>
-                <Button 
+                  <Button
                     className="w-full sm:w-auto"
-                  variant="outline" 
-                  onClick={() => setIsDetailOpen(false)}
-                >
-                  Close
-                </Button>
-                <Button 
-                    className="w-full sm:w-auto"
-                  onClick={() => {
-                    fetchOrders();
-                    setIsDetailOpen(false);
-                  }}
-                >
-                  Refresh
-                </Button>
+                    onClick={() => setIsDetailOpen(false)}
+                  >
+                    Close
+                  </Button>
+                </div>
               </div>
             </div>
-            </div>
           ) : (
-            <p className="text-sm text-gray-500 py-6">Order details are not available.</p>
+            <p className="text-sm text-gray-500 py-10 text-center">Order details are not available.</p>
           )}
         </DialogContent>
       </Dialog>
 
-      {/* Delete Confirmation Alert Dialog */}
-      <AlertDialog open={!!orderToDelete} onOpenChange={(open) => !open && !isDeleting && setOrderToDelete(null)}>
-        <AlertDialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-md rounded-xl p-4 sm:p-6 overflow-x-hidden min-w-0">
+      {/* Delete Confirmation */}
+      <AlertDialog
+        open={!!orderToDelete}
+        onOpenChange={(open) => !open && !isDeleting && setOrderToDelete(null)}
+      >
+        <AlertDialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-md rounded-xl p-4 sm:p-6">
           <AlertDialogHeader>
-            <AlertDialogTitle>Are you absolutely sure?</AlertDialogTitle>
+            <AlertDialogTitle>Delete this order?</AlertDialogTitle>
             <AlertDialogDescription>
-              This action cannot be undone. This will permanently delete the order and remove its data from our servers.
+              This cannot be undone. The order and its data will be permanently removed.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter className="flex-col-reverse sm:flex-row gap-2 sm:gap-0">
-            <AlertDialogCancel disabled={isDeleting} className="w-full sm:w-auto mt-0">Cancel</AlertDialogCancel>
-            <AlertDialogAction 
+            <AlertDialogCancel disabled={isDeleting} className="w-full sm:w-auto mt-0">
+              Cancel
+            </AlertDialogCancel>
+            <AlertDialogAction
               onClick={(e) => {
                 e.preventDefault();
                 executeDelete();
-              }} 
+              }}
               disabled={isDeleting}
               className="bg-red-600 hover:bg-red-700 w-full sm:w-auto"
             >

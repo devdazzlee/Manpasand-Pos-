@@ -1,29 +1,49 @@
 "use client";
 
-import { useState, useEffect, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PageLoader } from "@/components/ui/page-loader";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
+import { formatMoneyDisplay } from "@/lib/money";
+import {
+  fetchInventoryDashboard,
+  fetchBranchesForFilter,
+  type InventoryDashboardStats,
+  type BranchOption,
+} from "@/lib/inventory-api";
 import {
   Package,
-  RefreshCw,
   DollarSign,
   MapPin,
   ChevronRight,
-  Boxes,
   CheckCircle2,
-  BarChart3,
-  PieChart as PieIcon,
+  AlertTriangle,
   ShoppingBag,
-  Gauge,
-  Zap,
   ArrowRightLeft,
   Loader2,
+  Truck,
+  PackageMinus,
+  ClipboardList,
+  TrendingUp,
+  Warehouse,
+  LayoutDashboard,
 } from "lucide-react";
 import {
   PieChart,
@@ -35,163 +55,279 @@ import {
   CartesianGrid,
   Tooltip,
   ResponsiveContainer,
-  ComposedChart,
+  BarChart,
 } from "recharts";
-import apiClient from "@/lib/apiClient";
-import { API_BASE } from "@/config/constants";
 
-interface DashboardStats {
-  totalInventoryValue: number;
-  totalSkus: number;
-  outOfStockCount: number;
-  branchSummary: { branchId: string; name: string; value: number; items: number }[];
-  categorySummary: { name: string; value: number; items: number }[];
-  velocity: { name: string; quantity: number }[];
-  recentPurchases: any[];
-  pendingTransfers: any[];
-  lowStockAlerts: {
-    product: any;
-    branch: any;
-    currentQuantity: number;
-    minThreshold: number;
-  }[];
-  procurementHealth: { count: number; totalValue: number };
-  movementTrend: { movement_type: string; _count: number }[];
-  warehouse: any;
+const CHART_COLORS = [
+  "#2563eb",
+  "#059669",
+  "#d97706",
+  "#dc2626",
+  "#7c3aed",
+  "#0891b2",
+  "#be185d",
+];
+
+const BRANCH_FILTER_ROLES = new Set([
+  "SUPER_ADMIN",
+  "ADMIN",
+  "WAREHOUSE_MANAGER",
+  "PURCHASE_MANAGER",
+]);
+
+function formatRs(n: number) {
+  const value = Number(n) || 0;
+  const sign = value < 0 ? "-" : "";
+  return `${sign}Rs ${formatMoneyDisplay(Math.abs(value))}`;
 }
 
-const COLORS = ["#3b82f6", "#10b981", "#f59e0b", "#ef4444", "#8b5cf6", "#ec4899", "#14b8a6"];
+function formatQty(n: number) {
+  const value = Number(n) || 0;
+  if (Number.isInteger(value)) return value.toLocaleString();
+  return value.toLocaleString(undefined, {
+    minimumFractionDigits: 0,
+    maximumFractionDigits: 2,
+  });
+}
 
+function truncateLabel(label: string, max = 18) {
+  if (!label) return "";
+  return label.length > max ? `${label.slice(0, max - 1)}…` : label;
+}
 
-export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) => void | any }) {
-  const [stats, setStats] = useState<DashboardStats | null>(null);
+function movementLabel(type: string) {
+  return type
+    .replace(/_/g, " ")
+    .toLowerCase()
+    .replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
+type QuickAction = {
+  label: string;
+  description: string;
+  tab: string;
+  icon: typeof Package;
+  roles?: string[];
+};
+
+const QUICK_ACTIONS: QuickAction[] = [
+  {
+    label: "Stock In",
+    description: "Receive purchases",
+    tab: "purchases",
+    icon: ShoppingBag,
+    roles: ["SUPER_ADMIN", "ADMIN", "PURCHASE_MANAGER"],
+  },
+  {
+    label: "Transfers",
+    description: "Move between branches",
+    tab: "transfers",
+    icon: Truck,
+  },
+  {
+    label: "Stock Out",
+    description: "Damage, loss, return",
+    tab: "stock-out",
+    icon: PackageMinus,
+    roles: ["SUPER_ADMIN", "ADMIN"],
+  },
+  {
+    label: "Adjustments",
+    description: "Correct stock levels",
+    tab: "stock-adjustment",
+    icon: ClipboardList,
+  },
+  {
+    label: "By Location",
+    description: "View stock per branch",
+    tab: "stock-view",
+    icon: Warehouse,
+  },
+  {
+    label: "Stock Mgmt",
+    description: "Full stock tools",
+    tab: "stock-management",
+    icon: ArrowRightLeft,
+  },
+];
+
+export function InventoryDashboard({
+  onNavigate,
+}: {
+  onNavigate?: (tab: string) => void;
+}) {
+  const [stats, setStats] = useState<InventoryDashboardStats | null>(null);
   const [loading, setLoading] = useState(true);
-  const [switchingBranch, setSwitchingBranch] = useState(false);
-  const [branches, setBranches] = useState<any[]>([]);
-  const [selectedBranchId, setSelectedBranchId] = useState<string>("");
+  const [refreshing, setRefreshing] = useState(false);
+  const [branches, setBranches] = useState<BranchOption[]>([]);
+  const [selectedBranchId, setSelectedBranchId] = useState("");
   const [userRole, setUserRole] = useState<string | null>(null);
   const { toast } = useToast();
 
-  const handleNavigate = (tab: string, label: string) => {
-    toast({
-      title: "Action Initialized",
-      description: `Switching to ${label} module...`,
-      duration: 1500,
-    });
-    onNavigate?.(tab);
-  };
+  const canFilterBranches = userRole ? BRANCH_FILTER_ROLES.has(userRole) : false;
 
-  const fetchStats = async (bid?: string, isInternal = false) => {
-    if (isInternal) setSwitchingBranch(true);
-    else setLoading(true);
-    
-    try {
-      const res = await apiClient.get(`${API_BASE}/inventory/dashboard`, {
-        params: bid ? { branchId: bid } : {},
-      });
-      setStats(res.data?.data || null);
-    } catch (e: any) {
-      toast({
-        title: "Sync Error",
-        description: e?.response?.data?.message || "Failed to load neural inventory data",
-        variant: "destructive",
-      });
-    } finally {
-      setLoading(false);
-      setSwitchingBranch(false);
-    }
-  };
+  const visibleActions = useMemo(
+    () =>
+      QUICK_ACTIONS.filter(
+        (a) => !a.roles || (userRole ? a.roles.includes(userRole) : false),
+      ),
+    [userRole],
+  );
 
-  const fetchBranches = async () => {
-    try {
-      const res = await apiClient.get(`${API_BASE}/branches`, { params: { fetch_all: true } });
-      setBranches(res.data?.data || res.data || []);
-    } catch (e) {
-      console.error("Failed to load branches", e);
-    }
-  };
+  const loadStats = useCallback(
+    async (branchId?: string, soft = false) => {
+      if (soft) setRefreshing(true);
+      else setLoading(true);
+      try {
+        const data = await fetchInventoryDashboard(branchId || undefined);
+        setStats(data);
+      } catch (e: any) {
+        toast({
+          title: "Failed to load inventory",
+          description:
+            e?.response?.data?.message || "Could not fetch dashboard data",
+          variant: "destructive",
+        });
+      } finally {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    },
+    [toast],
+  );
 
   useEffect(() => {
     const role = localStorage.getItem("role");
     setUserRole(role);
-    const b = localStorage.getItem("branch");
-    let initialBranchId = "";
 
-    if (b && b !== "Not Found") {
+    let initialBranchId = "";
+    const raw = localStorage.getItem("branch");
+    if (raw && raw !== "Not Found") {
       try {
-        const obj = JSON.parse(b);
-        initialBranchId = obj.id || b;
+        const obj = JSON.parse(raw);
+        initialBranchId = obj.id || raw;
       } catch {
-        initialBranchId = b;
+        initialBranchId = raw;
       }
     }
 
     if (role === "BRANCH_MANAGER" && initialBranchId) {
       setSelectedBranchId(initialBranchId);
-      fetchStats(initialBranchId);
+      loadStats(initialBranchId);
     } else {
       setSelectedBranchId("");
-      fetchStats();
+      loadStats();
     }
-    
-    fetchBranches();
-  }, []);
 
-  const formatCurrency = (n: number) => {
-    const value = Number(n) || 0;
-    const sign = value < 0 ? "-" : "";
-    return `${sign}Rs ${Math.abs(value).toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 0 })}`;
+    fetchBranchesForFilter()
+      .then(setBranches)
+      .catch(() => setBranches([]));
+  }, [loadStats]);
+
+  const goTo = (tab: string) => {
+    onNavigate?.(tab);
   };
 
-  const totalValue = stats?.totalInventoryValue ?? 0;
+  const onBranchChange = (value: string) => {
+    const bid = value === "all" ? "" : value;
+    setSelectedBranchId(bid);
+    loadStats(bid, true);
+  };
+
   const healthScore = useMemo(() => {
-    if (!stats) return 0;
-    const items = stats.totalSkus;
-    const out = stats.outOfStockCount;
-    if (items === 0) return 0;
-    return Math.round(((items - out) / items) * 100);
+    if (!stats || stats.totalSkus === 0) return 100;
+    const problem =
+      (stats.outOfStockCount || 0) + (stats.negativeStockCount || 0);
+    const score = Math.round(
+      ((stats.totalSkus - Math.min(problem, stats.totalSkus)) /
+        stats.totalSkus) *
+        100,
+    );
+    return Math.max(0, Math.min(100, score));
   }, [stats]);
 
-  if (loading && !stats) return <PageLoader message="Loading inventory data..." />;
+  const categoryChartData = useMemo(() => {
+    if (!stats?.categorySummary?.length) return [];
+    return stats.categorySummary.slice(0, 7).map((c) => ({
+      name: c.name,
+      value: Math.max(0, Number(c.value) || 0),
+      items: c.items,
+    }));
+  }, [stats]);
+
+  const velocityData = useMemo(() => {
+    if (!stats?.velocity?.length) return [];
+    return [...stats.velocity]
+      .sort((a, b) => a.quantity - b.quantity)
+      .map((v) => ({
+        name: truncateLabel(v.name, 22),
+        fullName: v.name,
+        quantity: Number(v.quantity) || 0,
+      }));
+  }, [stats]);
+
+  const movementData = useMemo(() => {
+    if (!stats?.movementTrend?.length) return [];
+    return stats.movementTrend.map((m) => ({
+      name: movementLabel(m.movement_type),
+      count: Number(m.count ?? m._count ?? 0),
+    }));
+  }, [stats]);
+
+  const absTotalValue = useMemo(() => {
+    if (!stats?.branchSummary?.length) return 0;
+    return stats.branchSummary.reduce(
+      (sum, b) => sum + Math.abs(Number(b.value) || 0),
+      0,
+    );
+  }, [stats]);
+
+  if (loading && !stats) {
+    return <PageLoader message="Loading inventory data..." />;
+  }
+
+  const displayValue =
+    stats?.positiveInventoryValue ?? stats?.totalInventoryValue ?? 0;
+  const hasNegativeStock = (stats?.negativeStockCount ?? 0) > 0;
 
   return (
-    <div className="p-4 md:p-6 space-y-6">
-
-      {/* HEADER */}
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-        <div className="flex items-start gap-3">
-          <div className="bg-gray-900 text-white p-2.5 rounded-lg shrink-0">
-            <Boxes className="h-5 w-5" />
+    <div className="p-4 md:p-6 space-y-5">
+      {/* Header */}
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between pb-1 border-b border-gray-100">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2 text-blue-600 mb-1">
+            <LayoutDashboard className="h-4 w-4" />
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em]">
+              Overview
+            </span>
           </div>
-          <div>
-            <h1 className="text-2xl font-bold text-black tracking-tight">Inventory Operations</h1>
-            <p className="text-sm text-gray-600 mt-1">Stock valuation, movement, and procurement overview.</p>
-          </div>
+          <h1 className="text-2xl md:text-[1.75rem] font-bold text-gray-900 tracking-tight leading-none">
+            Inventory Dashboard
+          </h1>
+          <p className="text-sm text-gray-500 mt-1.5">
+            Stock health, valuation, and quick operations
+          </p>
         </div>
 
-        {(userRole === "SUPER_ADMIN" || userRole === "ADMIN" || userRole === "WAREHOUSE_MANAGER" || userRole === "PURCHASE_MANAGER") && (
-          <div className="flex items-center gap-2 rounded-xl border border-gray-200 bg-white shadow-sm px-3 h-11 self-start">
-            {switchingBranch ? (
-              <Loader2 className="h-4 w-4 text-gray-500 shrink-0 animate-spin" />
+        {canFilterBranches && (
+          <div className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white px-2.5 h-10 self-start sm:self-auto shrink-0">
+            {refreshing ? (
+              <Loader2 className="h-4 w-4 text-gray-400 animate-spin" />
             ) : (
-              <MapPin className="h-4 w-4 text-gray-500 shrink-0" />
+              <MapPin className="h-4 w-4 text-gray-400" />
             )}
             <Select
               value={selectedBranchId || "all"}
-              disabled={switchingBranch}
-              onValueChange={(v) => {
-                const bid = v === "all" ? "" : v;
-                setSelectedBranchId(bid);
-                fetchStats(bid, true);
-              }}
+              disabled={refreshing}
+              onValueChange={onBranchChange}
             >
-              <SelectTrigger className="w-[180px] border-none focus:ring-0 shadow-none h-9 font-medium text-black text-sm px-1 disabled:opacity-100">
+              <SelectTrigger className="w-[170px] border-none shadow-none h-8 focus:ring-0 text-sm">
                 <SelectValue placeholder="All Branches" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all" className="text-sm py-2 pl-8 pr-4 text-black">All Branches</SelectItem>
+                <SelectItem value="all">All Branches</SelectItem>
                 {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} className="text-sm py-2 pl-8 pr-4 text-black">
+                  <SelectItem key={b.id} value={b.id}>
                     {b.name}
                   </SelectItem>
                 ))}
@@ -201,83 +337,168 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
         )}
       </div>
 
-      {/* TOP METRICS */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-        <Card className="p-4 border border-gray-200 bg-white shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium text-gray-700">Inventory Value</p>
-            <DollarSign className="h-4 w-4 text-gray-400 shrink-0" />
-          </div>
-          {switchingBranch ? <Skeleton className="h-8 w-32 mt-1.5" /> : (
-            <p className="text-2xl font-semibold text-black mt-1 tabular-nums">{formatCurrency(totalValue)}</p>
-          )}
-        </Card>
-
-        <Card className="p-4 border border-red-200 bg-red-50/40 shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium text-gray-700">Out of Stock</p>
-            <Zap className="h-4 w-4 text-red-500 shrink-0" />
-          </div>
-          {switchingBranch ? <Skeleton className="h-8 w-16 mt-1.5" /> : (
-            <p className="text-2xl font-semibold text-black mt-1 tabular-nums">{stats?.outOfStockCount ?? 0}</p>
-          )}
-          <p className="text-xs text-red-600 mt-1">Needs restock</p>
-        </Card>
-
-        <Card className="p-4 border border-amber-200 bg-amber-50/40 shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium text-gray-700">Inventory Health</p>
-            <Gauge className="h-4 w-4 text-amber-500 shrink-0" />
-          </div>
-          {switchingBranch ? <Skeleton className="h-8 w-24 mt-1.5" /> : (
-            <p className="text-2xl font-semibold text-black mt-1 tabular-nums">
-              {healthScore}% <span className="text-sm font-normal text-gray-500">({stats?.lowStockAlerts?.length ?? 0} alerts)</span>
-            </p>
-          )}
-        </Card>
-
-        <Card className="p-4 border border-gray-200 bg-white shadow-sm">
-          <div className="flex items-start justify-between gap-2">
-            <p className="text-sm font-medium text-gray-700">Catalog Size</p>
-            <Package className="h-4 w-4 text-gray-400 shrink-0" />
-          </div>
-          {switchingBranch ? <Skeleton className="h-8 w-20 mt-1.5" /> : (
-            <p className="text-2xl font-semibold text-black mt-1 tabular-nums">{stats?.totalSkus ?? 0} <span className="text-sm font-normal text-gray-500">SKUs</span></p>
-          )}
-        </Card>
+      {/* KPI row */}
+      <div className="grid grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3">
+        <KpiCard
+          label="Stock Value"
+          loading={refreshing}
+          value={formatRs(displayValue)}
+          icon={DollarSign}
+          hint={
+            hasNegativeStock
+              ? `Ledger: ${formatRs(stats?.totalInventoryValue ?? 0)}`
+              : undefined
+          }
+        />
+        <KpiCard
+          label="Out of Stock"
+          loading={refreshing}
+          value={stats?.outOfStockCount ?? 0}
+          icon={AlertTriangle}
+          tone={(stats?.outOfStockCount ?? 0) > 0 ? "danger" : "default"}
+          onClick={() => goTo("stock-view")}
+        />
+        <KpiCard
+          label="Low Stock"
+          loading={refreshing}
+          value={stats?.lowStockCount ?? 0}
+          icon={Package}
+          tone={(stats?.lowStockCount ?? 0) > 0 ? "warning" : "default"}
+          onClick={() => goTo("stock-view")}
+        />
+        <KpiCard
+          label="Negative Stock"
+          loading={refreshing}
+          value={stats?.negativeStockCount ?? 0}
+          icon={AlertTriangle}
+          tone={hasNegativeStock ? "danger" : "success"}
+          onClick={() => goTo("stock-adjustment")}
+        />
+        <KpiCard
+          label="Pending Transfers"
+          loading={refreshing}
+          value={stats?.pendingTransferCount ?? 0}
+          icon={Truck}
+          onClick={() => goTo("transfers")}
+        />
+        <KpiCard
+          label="Health"
+          loading={refreshing}
+          value={`${healthScore}%`}
+          icon={TrendingUp}
+          tone={
+            healthScore >= 80
+              ? "success"
+              : healthScore >= 50
+                ? "warning"
+                : "danger"
+          }
+          hint={`${stats?.totalSkus ?? 0} active SKUs`}
+        />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+      {/* Quick actions */}
+      <Card className="border border-gray-200 shadow-sm">
+        <CardHeader className="py-3 px-4 border-b border-gray-100">
+          <CardTitle className="text-sm font-semibold text-gray-900">
+            Quick Actions
+          </CardTitle>
+          <CardDescription className="text-xs">
+            Jump to the operation you need
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="p-3">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
+            {visibleActions.map((action) => {
+              const Icon = action.icon;
+              return (
+                <button
+                  key={action.tab}
+                  type="button"
+                  onClick={() => goTo(action.tab)}
+                  className="flex flex-col items-start gap-1 rounded-lg border border-gray-200 bg-white p-3 text-left hover:border-blue-300 hover:bg-blue-50/50 transition-colors"
+                >
+                  <Icon className="h-4 w-4 text-blue-600" />
+                  <span className="text-sm font-semibold text-gray-900">
+                    {action.label}
+                  </span>
+                  <span className="text-[11px] text-gray-500 leading-tight">
+                    {action.description}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </CardContent>
+      </Card>
 
-        {/* ANALYTICS */}
-        <div className="lg:col-span-2 space-y-4">
-
-          <Card className="border border-gray-200 rounded-xl bg-white shadow-sm">
-            <CardHeader className="p-4 pb-0">
-              <CardTitle className="text-base font-semibold text-black">Sales Velocity</CardTitle>
-              <CardDescription className="text-xs text-gray-500">Top moving items (last 7 days)</CardDescription>
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        {/* Left: charts */}
+        <div className="xl:col-span-2 space-y-4">
+          <Card className="border border-gray-200 shadow-sm">
+            <CardHeader className="p-4 pb-2">
+              <CardTitle className="text-base font-semibold text-gray-900">
+                Sales Velocity
+              </CardTitle>
+              <CardDescription className="text-xs">
+                Top sold items in the last 7 days
+              </CardDescription>
             </CardHeader>
-            <CardContent className="p-4">
-              <div className="h-[260px] w-full mt-2">
-                {switchingBranch ? (
+            <CardContent className="p-4 pt-0">
+              <div className="h-[280px] w-full">
+                {refreshing ? (
                   <Skeleton className="h-full w-full" />
+                ) : velocityData.length === 0 ? (
+                  <EmptyBlock message="No sales movements in the last 7 days" />
                 ) : (
                   <ResponsiveContainer width="100%" height="100%">
-                    <ComposedChart data={stats?.velocity || []}>
+                    <BarChart
+                      data={velocityData}
+                      layout="vertical"
+                      margin={{ top: 8, right: 16, left: 8, bottom: 8 }}
+                    >
+                      <CartesianGrid
+                        strokeDasharray="3 3"
+                        horizontal={false}
+                        stroke="#f1f5f9"
+                      />
                       <XAxis
-                         dataKey="name"
-                         axisLine={false}
-                         tickLine={false}
-                         fontSize={10}
-                         tick={{fill: '#6b7280'}}
+                        type="number"
+                        axisLine={false}
+                        tickLine={false}
+                        fontSize={11}
+                        tick={{ fill: "#6b7280" }}
                       />
-                      <YAxis axisLine={false} tickLine={false} fontSize={10} tick={{fill: '#6b7280'}} />
+                      <YAxis
+                        type="category"
+                        dataKey="name"
+                        width={120}
+                        axisLine={false}
+                        tickLine={false}
+                        fontSize={11}
+                        tick={{ fill: "#374151" }}
+                      />
                       <Tooltip
-                         contentStyle={{ borderRadius: '8px', border: '1px solid #e5e7eb', fontSize: '12px' }}
+                        formatter={(value: number) => [
+                          formatQty(value),
+                          "Sold",
+                        ]}
+                        labelFormatter={(_, payload) =>
+                          payload?.[0]?.payload?.fullName || ""
+                        }
+                        contentStyle={{
+                          borderRadius: 8,
+                          border: "1px solid #e5e7eb",
+                          fontSize: 12,
+                        }}
                       />
-                      <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#f1f5f9" />
-                      <Bar dataKey="quantity" fill="#3b82f6" radius={[4, 4, 0, 0]} barSize={32} />
-                    </ComposedChart>
+                      <Bar
+                        dataKey="quantity"
+                        fill="#2563eb"
+                        radius={[0, 4, 4, 0]}
+                        barSize={18}
+                      />
+                    </BarChart>
                   </ResponsiveContainer>
                 )}
               </div>
@@ -285,210 +506,549 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
           </Card>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-             <Card className="border border-gray-200 rounded-xl bg-white shadow-sm">
-                <CardHeader className="p-4 border-b border-gray-100">
-                   <CardTitle className="text-sm font-semibold text-black flex items-center gap-2">
-                     <PieIcon className="h-4 w-4 text-gray-500" />
-                     Valuation by Category
-                   </CardTitle>
-                </CardHeader>
-                <CardContent className="p-3 h-[240px]">
-                  {switchingBranch ? (
-                    <div className="h-full w-full flex items-center justify-center">
-                      <Skeleton className="h-32 w-32 rounded-full" />
+            <Card className="border border-gray-200 shadow-sm">
+              <CardHeader className="p-4 pb-2 border-b border-gray-100">
+                <CardTitle className="text-sm font-semibold text-gray-900">
+                  Valuation by Category
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-3 h-[260px]">
+                {refreshing ? (
+                  <div className="h-full flex items-center justify-center">
+                    <Skeleton className="h-32 w-32 rounded-full" />
+                  </div>
+                ) : categoryChartData.length === 0 ? (
+                  <EmptyBlock message="No positive stock value by category" />
+                ) : (
+                  <div className="h-full flex gap-2">
+                    <div className="flex-1 min-w-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <PieChart>
+                          <Pie
+                            data={categoryChartData}
+                            dataKey="value"
+                            nameKey="name"
+                            innerRadius={48}
+                            outerRadius={72}
+                            paddingAngle={3}
+                          >
+                            {categoryChartData.map((_, i) => (
+                              <Cell
+                                key={i}
+                                fill={CHART_COLORS[i % CHART_COLORS.length]}
+                              />
+                            ))}
+                          </Pie>
+                          <Tooltip
+                            formatter={(value: number) => formatRs(value)}
+                            contentStyle={{
+                              borderRadius: 8,
+                              border: "1px solid #e5e7eb",
+                              fontSize: 12,
+                            }}
+                          />
+                        </PieChart>
+                      </ResponsiveContainer>
                     </div>
-                  ) : (
-                    <ResponsiveContainer width="100%" height="100%">
-                      <PieChart>
-                        <Pie
-                          data={stats?.categorySummary || []}
-                          innerRadius={50}
-                          outerRadius={75}
-                          paddingAngle={4}
-                          dataKey="value"
+                    <div className="w-[42%] overflow-y-auto space-y-1.5 py-2 pr-1">
+                      {categoryChartData.map((c, i) => (
+                        <div
+                          key={c.name}
+                          className="flex items-start gap-2 text-xs"
                         >
-                          {stats?.categorySummary?.map((_, index) => (
-                            <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                          ))}
-                        </Pie>
-                        <Tooltip />
-                      </PieChart>
-                    </ResponsiveContainer>
-                  )}
-                </CardContent>
-             </Card>
-
-             <Card className="border border-gray-200 rounded-xl bg-white shadow-sm">
-                <CardHeader className="p-4 border-b border-gray-100">
-                   <CardTitle className="text-sm font-semibold text-black flex items-center gap-2">
-                     <BarChart3 className="h-4 w-4 text-gray-500" />
-                     Location Allocation
-                   </CardTitle>
-                </CardHeader>
-                <CardContent className="p-0">
-                   <div className="divide-y max-h-[240px] overflow-y-auto">
-                     {switchingBranch ? (
-                       Array.from({ length: 4 }).map((_, i) => (
-                         <div key={i} className="p-3 flex items-center gap-3">
-                           <Skeleton className="h-7 w-7 rounded-lg shrink-0" />
-                           <div className="flex-1 space-y-1.5">
-                             <Skeleton className="h-3 w-24" />
-                             <Skeleton className="h-3 w-16" />
-                           </div>
-                           <Skeleton className="h-3 w-16" />
-                         </div>
-                       ))
-                     ) : stats?.branchSummary.map((b, i) => (
-                       <div key={b.branchId} className="p-3 flex items-center justify-between hover:bg-gray-50 transition-colors">
-                          <div className="flex items-center gap-3">
-                             <div className="h-7 w-7 rounded-lg bg-gray-100 flex items-center justify-center font-semibold text-gray-500 text-xs shrink-0">
-                               {i + 1}
-                             </div>
-                             <div>
-                               <p className="text-xs font-semibold text-black">{b.name}</p>
-                               <p className="text-xs text-gray-500">{totalValue ? (b.value / totalValue * 100).toFixed(1) : 0}% weight</p>
-                             </div>
+                          <span
+                            className="mt-1 h-2.5 w-2.5 rounded-sm shrink-0"
+                            style={{
+                              background:
+                                CHART_COLORS[i % CHART_COLORS.length],
+                            }}
+                          />
+                          <div className="min-w-0">
+                            <p className="font-medium text-gray-800 truncate">
+                              {c.name}
+                            </p>
+                            <p className="text-gray-500">
+                              {formatRs(c.value)}
+                            </p>
                           </div>
-                          <p className="text-xs font-semibold text-black">{formatCurrency(b.value)}</p>
-                       </div>
-                     ))}
-                   </div>
-                </CardContent>
-             </Card>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            <Card className="border border-gray-200 shadow-sm">
+              <CardHeader className="p-4 pb-2 border-b border-gray-100">
+                <CardTitle className="text-sm font-semibold text-gray-900">
+                  Location Allocation
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="p-0">
+                <div className="divide-y max-h-[260px] overflow-y-auto">
+                  {refreshing ? (
+                    Array.from({ length: 4 }).map((_, i) => (
+                      <div key={i} className="p-3 flex gap-3">
+                        <Skeleton className="h-7 w-7 rounded-lg" />
+                        <div className="flex-1 space-y-1.5">
+                          <Skeleton className="h-3 w-28" />
+                          <Skeleton className="h-3 w-16" />
+                        </div>
+                      </div>
+                    ))
+                  ) : stats?.branchSummary?.length ? (
+                    stats.branchSummary.map((b, i) => {
+                      const weight = absTotalValue
+                        ? (
+                            (Math.abs(b.value) / absTotalValue) *
+                            100
+                          ).toFixed(1)
+                        : "0";
+                      return (
+                        <div
+                          key={b.branchId}
+                          className="p-3 flex items-center justify-between gap-2"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="h-7 w-7 rounded-lg bg-gray-100 flex items-center justify-center text-xs font-semibold text-gray-600 shrink-0">
+                              {i + 1}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-xs font-semibold text-gray-900 truncate">
+                                {b.name}
+                              </p>
+                              <p className="text-[11px] text-gray-500">
+                                {weight}% · {b.items} SKUs
+                              </p>
+                            </div>
+                          </div>
+                          <p
+                            className={`text-xs font-semibold tabular-nums shrink-0 ${
+                              b.value < 0 ? "text-red-600" : "text-gray-900"
+                            }`}
+                          >
+                            {formatRs(b.value)}
+                          </p>
+                        </div>
+                      );
+                    })
+                  ) : (
+                    <EmptyBlock message="No location stock data" />
+                  )}
+                </div>
+              </CardContent>
+            </Card>
           </div>
-        </div>
 
-        {/* SIDEBAR */}
-        <div className="space-y-4">
-
-           <Card className="border border-gray-200 rounded-xl bg-white shadow-sm">
+          {movementData.length > 0 && (
+            <Card className="border border-gray-200 shadow-sm">
               <CardHeader className="p-4 pb-2">
-                <CardTitle className="text-xs font-semibold uppercase tracking-wide text-gray-500">Procurement Performance</CardTitle>
+                <CardTitle className="text-sm font-semibold text-gray-900">
+                  Movement Activity (7 days)
+                </CardTitle>
               </CardHeader>
               <CardContent className="p-4 pt-0">
-                 <div className="flex items-end justify-between">
-                    {switchingBranch ? (
-                      <div className="space-y-1.5">
-                        <Skeleton className="h-6 w-28" />
-                        <Skeleton className="h-3 w-24" />
-                      </div>
-                    ) : (
-                      <div>
-                        <h4 className="text-xl font-semibold text-black">{formatCurrency(stats?.procurementHealth?.totalValue || 0)}</h4>
-                        <p className="text-xs text-gray-500 mt-1">{stats?.procurementHealth?.count || 0} purchase records</p>
-                      </div>
-                    )}
-                    <div className="h-10 w-10 bg-gray-100 rounded-lg flex items-center justify-center shrink-0">
-                       <ShoppingBag className="h-5 w-5 text-gray-500" />
-                    </div>
-                 </div>
-                 <div className="mt-4">
-                    <Button
-                      onClick={() => handleNavigate('stock-management', 'Stock Management')}
-                      className="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium rounded-lg h-9 text-sm"
-                    >
-                      Manage Stock
-                      <ArrowRightLeft className="ml-2 h-3.5 w-3.5" />
-                    </Button>
-                 </div>
-              </CardContent>
-           </Card>
-
-           <Card className="border border-gray-200 rounded-xl bg-white shadow-sm overflow-hidden p-0">
-              <Tabs defaultValue="low" className="w-full">
-                <div className="p-3 pb-0">
-                  <TabsList className="bg-gray-100 p-1 rounded-lg h-9 w-full grid grid-cols-2">
-                    <TabsTrigger value="low" className="text-xs font-medium">Low Levels</TabsTrigger>
-                    <TabsTrigger value="pending" className="text-xs font-medium">Active Transfers</TabsTrigger>
-                  </TabsList>
+                <div className="h-[180px]">
+                  {refreshing ? (
+                    <Skeleton className="h-full w-full" />
+                  ) : (
+                    <ResponsiveContainer width="100%" height="100%">
+                      <BarChart data={movementData}>
+                        <CartesianGrid
+                          strokeDasharray="3 3"
+                          vertical={false}
+                          stroke="#f1f5f9"
+                        />
+                        <XAxis
+                          dataKey="name"
+                          axisLine={false}
+                          tickLine={false}
+                          fontSize={10}
+                          tick={{ fill: "#6b7280" }}
+                          interval={0}
+                          angle={-20}
+                          textAnchor="end"
+                          height={50}
+                        />
+                        <YAxis
+                          axisLine={false}
+                          tickLine={false}
+                          fontSize={10}
+                          tick={{ fill: "#6b7280" }}
+                          allowDecimals={false}
+                        />
+                        <Tooltip
+                          contentStyle={{
+                            borderRadius: 8,
+                            border: "1px solid #e5e7eb",
+                            fontSize: 12,
+                          }}
+                        />
+                        <Bar
+                          dataKey="count"
+                          fill="#059669"
+                          radius={[4, 4, 0, 0]}
+                          barSize={28}
+                        />
+                      </BarChart>
+                    </ResponsiveContainer>
+                  )}
                 </div>
-                <TabsContent value="low" className="p-0 m-0 mt-2">
-                   <div className="divide-y max-h-[380px] overflow-y-auto">
-                     {switchingBranch ? (
-                       Array.from({ length: 4 }).map((_, i) => (
-                         <div key={i} className="p-3 space-y-2">
-                           <div className="flex justify-between">
-                             <Skeleton className="h-3 w-24" />
-                             <Skeleton className="h-3 w-16" />
-                           </div>
-                           <Skeleton className="h-3 w-32" />
-                         </div>
-                       ))
-                     ) : stats?.lowStockAlerts?.length ? stats.lowStockAlerts.map((a, i) => (
-                       <div key={i} className="p-3 hover:bg-gray-50 transition-colors">
-                         <div className="flex justify-between items-start mb-1">
-                           <span className="font-semibold text-black text-xs truncate max-w-[140px]">{a.product?.name}</span>
-                           <span className="text-amber-600 font-semibold text-xs">Level: {a.currentQuantity}</span>
-                         </div>
-                         <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-1.5 text-xs text-gray-500">
-                              <MapPin className="h-3 w-3" />
-                              {a.branch?.name}
-                            </div>
-                            <div className="text-xs text-gray-400">Min: {a.minThreshold}</div>
-                         </div>
-                       </div>
-                     )) : (
-                       <div className="p-8 text-center">
-                         <CheckCircle2 className="h-8 w-8 text-green-500 mx-auto mb-2 opacity-40" />
-                         <p className="text-gray-500 font-medium text-xs">All levels stable</p>
-                       </div>
-                     )}
-                   </div>
-                   <div className="p-2 border-t border-gray-100">
-                       <Button
-                         onClick={() => handleNavigate('stock-view', 'Full System Audit')}
-                         variant="ghost"
-                         className="w-full text-gray-600 font-medium text-xs h-8"
-                       >
-                         Full audit <ChevronRight className="h-3 w-3 ml-1" />
-                       </Button>
-                   </div>
-                </TabsContent>
-                <TabsContent value="pending" className="p-0 m-0 mt-2">
-                   <div className="divide-y max-h-[380px] overflow-y-auto">
-                     {switchingBranch ? (
-                       Array.from({ length: 4 }).map((_, i) => (
-                         <div key={i} className="p-3 flex items-center gap-3">
-                           <Skeleton className="h-8 w-8 rounded-lg shrink-0" />
-                           <div className="flex-1 space-y-1.5">
-                             <Skeleton className="h-3 w-28" />
-                             <Skeleton className="h-3 w-20" />
-                           </div>
-                         </div>
-                       ))
-                     ) : stats?.pendingTransfers?.length ? stats.pendingTransfers.map((t) => (
-                       <div key={t.id} className="p-3 hover:bg-gray-50 transition-colors">
-                          <div className="flex items-start gap-3">
-                             <div className="h-8 w-8 bg-blue-50 rounded-lg flex items-center justify-center shrink-0">
-                               <RefreshCw className="h-4 w-4 text-blue-500" />
-                             </div>
-                             <div className="flex-1 min-w-0">
-                               <p className="font-semibold text-black text-xs truncate">{t.product?.name}</p>
-                               <div className="flex items-center gap-2 mt-1">
-                                 <span className="text-xs text-gray-500">{t.from_branch?.name.split(' ')[0]}</span>
-                                 <ChevronRight className="h-3 w-3 text-gray-300" />
-                                 <span className="text-xs font-semibold text-blue-600">{t.to_branch?.name.split(' ')[0]}</span>
-                               </div>
-                             </div>
-                             <div className="text-right shrink-0">
-                               <p className="text-xs font-semibold text-black">{t.quantity}</p>
-                               <Badge variant="outline" className="text-[10px] font-medium py-0.5 px-1.5 border-gray-200 text-gray-500">{t.status}</Badge>
-                             </div>
-                          </div>
-                       </div>
-                     )) : (
-                       <div className="p-8 text-center">
-                          <p className="text-gray-400 font-medium text-xs">No transfers active</p>
-                       </div>
-                     )}
-                   </div>
-                </TabsContent>
-              </Tabs>
-           </Card>
+              </CardContent>
+            </Card>
+          )}
+        </div>
 
+        {/* Right: alerts + procurement */}
+        <div className="space-y-4">
+          <Card className="border border-gray-200 shadow-sm">
+            <CardHeader className="p-4 pb-2">
+              <div className="flex items-center justify-between gap-2">
+                <div>
+                  <CardTitle className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                    This Month Purchases
+                  </CardTitle>
+                  {refreshing ? (
+                    <Skeleton className="h-7 w-28 mt-2" />
+                  ) : (
+                    <p className="text-xl font-semibold text-gray-900 mt-1 tabular-nums">
+                      {formatRs(stats?.procurementHealth?.totalValue || 0)}
+                    </p>
+                  )}
+                  <p className="text-xs text-gray-500 mt-0.5">
+                    {stats?.procurementHealth?.count || 0} purchase records
+                  </p>
+                </div>
+                <ShoppingBag className="h-5 w-5 text-gray-400" />
+              </div>
+            </CardHeader>
+            <CardContent className="p-4 pt-0">
+              {(!userRole ||
+                ["SUPER_ADMIN", "ADMIN", "PURCHASE_MANAGER"].includes(
+                  userRole,
+                )) && (
+                <Button
+                  className="w-full h-9 text-sm bg-blue-600 hover:bg-blue-700"
+                  onClick={() => goTo("purchases")}
+                >
+                  Open Stock In
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </Button>
+              )}
+              {stats?.recentPurchases?.length ? (
+                <div className="mt-3 space-y-2">
+                  {stats.recentPurchases.slice(0, 4).map((p) => (
+                    <div
+                      key={p.id}
+                      className="flex items-center justify-between gap-2 text-xs"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium text-gray-800 truncate">
+                          {p.product?.name || "Product"}
+                        </p>
+                        <p className="text-gray-500 truncate">
+                          {p.supplier?.name || "No supplier"}
+                        </p>
+                      </div>
+                      <span className="tabular-nums text-gray-700 shrink-0">
+                        {formatQty(p.quantity)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </CardContent>
+          </Card>
+
+          <Card className="border border-gray-200 shadow-sm overflow-hidden bg-gradient-to-b from-white to-slate-50/80">
+            <Tabs defaultValue="low" className="w-full">
+              <div className="px-4 pt-4 pb-3 border-b border-gray-100 bg-white">
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <p className="text-sm font-semibold text-gray-900">
+                      Needs Attention
+                    </p>
+                    <p className="text-[11px] text-gray-500 mt-0.5">
+                      Critical stock & open transfers
+                    </p>
+                  </div>
+                  {(stats?.lowStockCount ?? 0) > 0 && (
+                    <span className="inline-flex items-center gap-1 rounded-full bg-red-50 text-red-700 border border-red-100 px-2 py-0.5 text-[10px] font-semibold">
+                      <AlertTriangle className="h-3 w-3" />
+                      {stats?.lowStockCount} alerts
+                    </span>
+                  )}
+                </div>
+                <TabsList className="bg-slate-100/80 p-1 rounded-xl h-10 w-full grid grid-cols-2 gap-1">
+                  <TabsTrigger
+                    value="low"
+                    className="text-xs font-semibold rounded-lg data-[state=active]:bg-white data-[state=active]:text-gray-900 data-[state=active]:shadow-sm"
+                  >
+                    Low Stock
+                  </TabsTrigger>
+                  <TabsTrigger
+                    value="pending"
+                    className="text-xs font-semibold rounded-lg data-[state=active]:bg-white data-[state=active]:text-gray-900 data-[state=active]:shadow-sm"
+                  >
+                    Transfers
+                    {(stats?.pendingTransferCount ?? 0) > 0 ? (
+                      <span className="ml-1.5 inline-flex h-5 min-w-5 items-center justify-center rounded-full bg-blue-600 text-white text-[10px] px-1">
+                        {stats?.pendingTransferCount}
+                      </span>
+                    ) : null}
+                  </TabsTrigger>
+                </TabsList>
+              </div>
+
+              <TabsContent value="low" className="m-0">
+                <div className="p-3 space-y-2.5 max-h-[380px] overflow-y-auto">
+                  {refreshing ? (
+                    Array.from({ length: 4 }).map((_, i) => (
+                      <Skeleton key={i} className="h-[72px] w-full rounded-xl" />
+                    ))
+                  ) : stats?.lowStockAlerts?.length ? (
+                    stats.lowStockAlerts.map((a, i) => {
+                      const qty = Number(a.currentQuantity) || 0;
+                      const min = Number(a.minThreshold) || 0;
+                      const critical = qty <= 0;
+                      const fillPct =
+                        min > 0
+                          ? Math.max(0, Math.min(100, (Math.max(qty, 0) / min) * 100))
+                          : 0;
+                      return (
+                        <button
+                          key={`${a.product?.id}-${a.branch?.id}-${i}`}
+                          type="button"
+                          onClick={() => goTo("stock-view")}
+                          className="w-full text-left rounded-xl border border-gray-200/80 bg-white p-3 shadow-sm hover:border-blue-200 hover:shadow transition-all"
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-gray-900 truncate leading-snug">
+                                {a.product?.name}
+                              </p>
+                              <p className="mt-1 flex items-center gap-1 text-[11px] text-gray-500">
+                                <MapPin className="h-3 w-3 shrink-0" />
+                                <span className="truncate">{a.branch?.name}</span>
+                              </p>
+                            </div>
+                            <span
+                              className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold ${
+                                critical
+                                  ? "bg-red-50 text-red-700 border border-red-100"
+                                  : "bg-amber-50 text-amber-700 border border-amber-100"
+                              }`}
+                            >
+                              {critical ? "Critical" : "Low"}
+                            </span>
+                          </div>
+
+                          <div className="mt-2.5 flex items-end justify-between gap-3">
+                            <div className="flex-1 min-w-0">
+                              <div className="h-1.5 w-full rounded-full bg-slate-100 overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all ${
+                                    critical ? "bg-red-500" : "bg-amber-400"
+                                  }`}
+                                  style={{ width: `${critical ? 4 : fillPct}%` }}
+                                />
+                              </div>
+                              <p className="mt-1 text-[10px] text-gray-400">
+                                Target min {formatQty(min)}
+                              </p>
+                            </div>
+                            <div className="text-right shrink-0">
+                              <p
+                                className={`text-sm font-bold tabular-nums leading-none ${
+                                  critical ? "text-red-600" : "text-amber-600"
+                                }`}
+                              >
+                                {formatQty(qty)}
+                              </p>
+                              <p className="text-[10px] text-gray-400 mt-0.5">
+                                on hand
+                              </p>
+                            </div>
+                          </div>
+                        </button>
+                      );
+                    })
+                  ) : (
+                    <div className="py-10 px-4 text-center rounded-xl border border-dashed border-gray-200 bg-white">
+                      <CheckCircle2 className="h-8 w-8 text-emerald-500 mx-auto mb-2 opacity-70" />
+                      <p className="text-sm font-medium text-gray-700">
+                        All levels healthy
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        No products below minimum
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <div className="p-3 pt-1 border-t border-gray-100 bg-white">
+                  <Button
+                    variant="outline"
+                    className="w-full h-9 text-xs font-medium border-gray-200"
+                    onClick={() => goTo("stock-view")}
+                  >
+                    Open stock by location
+                    <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </div>
+              </TabsContent>
+
+              <TabsContent value="pending" className="m-0">
+                <div className="p-3 space-y-2.5 max-h-[380px] overflow-y-auto">
+                  {refreshing ? (
+                    Array.from({ length: 4 }).map((_, i) => (
+                      <Skeleton key={i} className="h-[84px] w-full rounded-xl" />
+                    ))
+                  ) : stats?.pendingTransfers?.length ? (
+                    stats.pendingTransfers.map((t) => (
+                      <button
+                        key={t.id}
+                        type="button"
+                        className="w-full text-left rounded-xl border border-gray-200/80 bg-white p-3 shadow-sm hover:border-blue-200 hover:shadow transition-all"
+                        onClick={() => goTo("transfers")}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <p className="text-sm font-semibold text-gray-900 truncate">
+                            {t.product?.name}
+                          </p>
+                          <Badge
+                            variant="outline"
+                            className="shrink-0 text-[10px] font-semibold border-blue-100 bg-blue-50 text-blue-700"
+                          >
+                            {t.status}
+                          </Badge>
+                        </div>
+
+                        <div className="mt-2.5 flex items-center gap-2">
+                          <div className="flex-1 min-w-0 rounded-lg bg-slate-50 border border-slate-100 px-2 py-1.5">
+                            <p className="text-[9px] uppercase tracking-wide text-gray-400 font-medium">
+                              From
+                            </p>
+                            <p className="text-[11px] font-medium text-gray-700 truncate">
+                              {t.from_branch?.name}
+                            </p>
+                          </div>
+                          <div className="h-7 w-7 rounded-full bg-blue-50 border border-blue-100 flex items-center justify-center shrink-0">
+                            <ArrowRightLeft className="h-3.5 w-3.5 text-blue-600" />
+                          </div>
+                          <div className="flex-1 min-w-0 rounded-lg bg-blue-50/60 border border-blue-100 px-2 py-1.5">
+                            <p className="text-[9px] uppercase tracking-wide text-blue-400 font-medium">
+                              To
+                            </p>
+                            <p className="text-[11px] font-medium text-blue-800 truncate">
+                              {t.to_branch?.name}
+                            </p>
+                          </div>
+                        </div>
+
+                        <div className="mt-2 flex items-center justify-between">
+                          <span className="text-[11px] text-gray-400">Qty</span>
+                          <span className="text-sm font-bold tabular-nums text-gray-900">
+                            {formatQty(t.quantity)}
+                          </span>
+                        </div>
+                      </button>
+                    ))
+                  ) : (
+                    <div className="py-10 px-4 text-center rounded-xl border border-dashed border-gray-200 bg-white">
+                      <Truck className="h-8 w-8 text-gray-300 mx-auto mb-2" />
+                      <p className="text-sm font-medium text-gray-700">
+                        No transfers in progress
+                      </p>
+                      <p className="text-xs text-gray-400 mt-1">
+                        Pending and dispatched moves appear here
+                      </p>
+                    </div>
+                  )}
+                </div>
+                <div className="p-3 pt-1 border-t border-gray-100 bg-white">
+                  <Button
+                    variant="outline"
+                    className="w-full h-9 text-xs font-medium border-gray-200"
+                    onClick={() => goTo("transfers")}
+                  >
+                    Manage transfers
+                    <ChevronRight className="h-3.5 w-3.5 ml-1" />
+                  </Button>
+                </div>
+              </TabsContent>
+            </Tabs>
+          </Card>
         </div>
       </div>
+    </div>
+  );
+}
+
+function KpiCard({
+  label,
+  value,
+  icon: Icon,
+  tone = "default",
+  loading,
+  hint,
+  onClick,
+}: {
+  label: string;
+  value: string | number;
+  icon: typeof Package;
+  tone?: "default" | "warning" | "danger" | "success";
+  loading?: boolean;
+  hint?: string;
+  onClick?: () => void;
+}) {
+  const toneClass =
+    tone === "danger"
+      ? "border-red-200 bg-red-50/50"
+      : tone === "warning"
+        ? "border-amber-200 bg-amber-50/50"
+        : tone === "success"
+          ? "border-green-200 bg-green-50/40"
+          : "border-gray-200 bg-white";
+
+  const className = `p-3.5 rounded-xl border shadow-sm text-left transition-colors ${toneClass} ${
+    onClick ? "hover:border-blue-300 cursor-pointer" : ""
+  }`;
+
+  const body = (
+    <>
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-xs font-medium text-gray-600">{label}</p>
+        <Icon className="h-3.5 w-3.5 text-gray-400 shrink-0" />
+      </div>
+      {loading ? (
+        <Skeleton className="h-7 w-16 mt-1.5" />
+      ) : (
+        <p className="text-xl font-semibold text-gray-900 mt-1 tabular-nums leading-tight">
+          {value}
+        </p>
+      )}
+      {hint ? (
+        <p className="text-[10px] text-gray-500 mt-1 truncate">{hint}</p>
+      ) : null}
+    </>
+  );
+
+  if (onClick) {
+    return (
+      <button type="button" onClick={onClick} className={className}>
+        {body}
+      </button>
+    );
+  }
+
+  return <div className={className}>{body}</div>;
+}
+
+function EmptyBlock({ message }: { message: string }) {
+  return (
+    <div className="h-full min-h-[120px] flex items-center justify-center px-4">
+      <p className="text-xs text-gray-400 text-center">{message}</p>
     </div>
   );
 }
