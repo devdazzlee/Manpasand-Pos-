@@ -63,6 +63,49 @@ const money = (n: number) =>
     maximumFractionDigits: 2,
   });
 
+/**
+ * Short thermal-friendly unit labels for QTY column.
+ * Keeps the original quantity so RATE = price × quantity stays correct
+ * (matches old print-receipt-pdf.service.ts which has no lineTotal).
+ * Examples: "Kgs" → "Kg", "Pieces" → "Pcs". Does not convert kg→g.
+ */
+export const formatReceiptQtyParts = (
+  quantity: number,
+  unitName?: string | null,
+): { quantity: number; unit?: string } => {
+  const qty = Number(quantity);
+  const safeQty = Number.isFinite(qty) ? Math.abs(qty) : 0;
+  const displayQty = Number.isInteger(safeQty)
+    ? safeQty
+    : parseFloat(safeQty.toFixed(3));
+
+  const raw = typeof unitName === "string" ? unitName.trim() : "";
+  if (!raw) return { quantity: displayQty };
+
+  const unitLower = raw.toLowerCase();
+
+  if (unitLower.includes("kg") || unitLower.includes("kilogram")) {
+    return { quantity: displayQty, unit: "Kg" };
+  }
+  if (unitLower === "g" || unitLower === "gram" || unitLower === "grams") {
+    return { quantity: displayQty, unit: "g" };
+  }
+  if (unitLower.includes("pc") || unitLower.includes("piece")) {
+    return { quantity: displayQty, unit: "Pcs" };
+  }
+
+  const short = raw.length > 4 ? raw.replace(/s$/i, "").slice(0, 3) : raw;
+  return { quantity: displayQty, unit: short };
+};
+
+export const formatReceiptQtyLabel = (
+  quantity: number,
+  unitName?: string | null,
+): string => {
+  const parts = formatReceiptQtyParts(quantity, unitName);
+  return parts.unit ? `${parts.quantity} ${parts.unit}` : String(parts.quantity);
+};
+
 export const prepareReceiptDataFromSale = (
   sale: ReceiptSourceSale,
   branch: BranchInfoFallback,
@@ -70,10 +113,12 @@ export const prepareReceiptDataFromSale = (
 ): ReceiptData => {
   const allItems = sale.sale_items || [];
   const items = (opts?.itemFilter ? allItems.filter(opts.itemFilter) : allItems).map((item) => {
-    const lineTotal = num(item.line_total);
     const qty = Math.abs(num(item.quantity) || 1);
+    const lineTotal = num(item.line_total);
     const unitPrice =
-      item.unit_price != null ? Math.abs(num(item.unit_price)) : Math.abs(lineTotal) / Math.max(1, qty);
+      item.unit_price != null
+        ? Math.abs(num(item.unit_price))
+        : Math.abs(lineTotal) / Math.max(1, qty);
     const unitLabel =
       (item.product as any)?.unit?.name ||
       (item.product as any)?.unit_name ||
@@ -81,11 +126,12 @@ export const prepareReceiptDataFromSale = (
       (item as any)?.unit_name ||
       (item as any)?.unitName ||
       undefined;
+    const parts = formatReceiptQtyParts(qty, unitLabel);
     return {
       name: item.product?.name || "Unnamed Item",
-      quantity: qty,
+      quantity: parts.quantity,
       price: unitPrice,
-      unit: unitLabel,
+      unit: parts.unit,
     };
   });
 
@@ -142,12 +188,13 @@ const mapReceiptLineItem = (
     (item as any)?.unit_name ||
     (item as any)?.unitName ||
     undefined;
+  const parts = formatReceiptQtyParts(qty, unitLabel);
 
   return {
     name: item.product?.name || "Unnamed Item",
-    quantity: qty,
+    quantity: parts.quantity,
     price: unitPrice,
-    unit: unitLabel,
+    unit: parts.unit,
     lineTotal,
     isCredit: lineKind === "RETURN",
   };
@@ -303,12 +350,22 @@ const formatItemRate = (item: ReceiptItem): string => {
   return item.isCredit ? `- ${money(lineAmount)}` : money(lineAmount);
 };
 
+/** Thermal QTY column — expects quantity/unit already normalized via formatReceiptQtyParts. */
+const formatReceiptQty = (quantity: number | null | undefined, unit?: string | null): string => {
+  const n = Number(quantity);
+  const qtyText = !Number.isFinite(n)
+    ? "0"
+    : Number.isInteger(n)
+      ? String(n)
+      : String(parseFloat(n.toFixed(3)));
+  return unit ? `${qtyText} ${unit}` : qtyText;
+};
+
 const renderReceiptItemRowsHtml = (items: ReceiptItem[]): string =>
   items
     .map((item) => {
       const name = String(item.name || "");
-      const qty =
-        (item.quantity ?? 0).toString() + (item.unit ? ` ${item.unit}` : "");
+      const qty = formatReceiptQty(item.quantity, item.unit);
       const rate = formatItemRate(item);
       return `<div class="item-row">
   <div class="item-name">${name}</div>
@@ -680,7 +737,7 @@ export const buildReceiptPdfBlob = async (
     const rowGap = 4.5;
     for (const it of items) {
       const name = String(it.name || "");
-      const qty = `${it.quantity}${it.unit ? ` ${it.unit}` : ""}`;
+      const qty = formatReceiptQty(it.quantity, it.unit);
       const rate = formatItemRate(it);
       const nameLines: string[] = doc.splitTextToSize(name, colItemMaxWidth);
       doc.text(nameLines, left, y);

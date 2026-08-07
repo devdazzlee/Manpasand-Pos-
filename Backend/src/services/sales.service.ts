@@ -28,6 +28,15 @@ interface HoldSaleCartItem {
   unit?: string;
 }
 
+/** Product on sale lines must include unit so receipt QTY can show "1 Kg". */
+const saleItemProductInclude = {
+  product: {
+    include: {
+      unit: { select: { id: true, name: true } },
+    },
+  },
+} satisfies Prisma.SaleItemInclude;
+
 class SaleService {
   async getSales({
     branchId,
@@ -97,7 +106,7 @@ class SaleService {
 
     const include = {
       sale_items: {
-        include: { product: true },
+        include: saleItemProductInclude,
       },
       customer: true,
       branch: {
@@ -270,7 +279,7 @@ class SaleService {
       where: { id: saleId },
       data: { status: SaleStatus.CANCELLED },
       include: {
-        sale_items: { include: { product: true } },
+        sale_items: { include: saleItemProductInclude },
         customer: true,
         branch: { select: { id: true, name: true, address: true } },
         user: { select: { id: true, email: true, role: true } },
@@ -615,7 +624,7 @@ class SaleService {
       where: { id: saleId },
       include: {
         sale_items: {
-          include: { product: true },
+          include: saleItemProductInclude,
         },
         customer: true,
         branch: {

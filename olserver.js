@@ -625,10 +625,16 @@ app.post('/print-receipt', async (req, res) => {
       return it.isCredit ? `- ${money(lineAmount)}` : money(lineAmount);
     };
 
+    const formatReceiptQty = (quantity) => {
+      const n = Number(quantity);
+      if (!Number.isFinite(n)) return '0';
+      if (Number.isInteger(n)) return String(n);
+      return String(parseFloat(n.toFixed(3)));
+    };
+
     const printItemRow = (it) => {
       const name = String(it.name || '');
-      const qtyNumber = Number(it.quantity || 0);
-      const qty = qtyNumber.toString() + (it.unit ? ` ${it.unit}` : '');
+      const qty = formatReceiptQty(it.quantity) + (it.unit ? ` ${it.unit}` : '');
       const rate = formatItemRate(it);
 
       doc.font(baseFont).fontSize(BODY_MAX);

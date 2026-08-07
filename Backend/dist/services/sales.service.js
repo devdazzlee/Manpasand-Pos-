@@ -4,6 +4,14 @@ exports.SaleService = void 0;
 const client_1 = require("@prisma/client");
 const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
+/** Product on sale lines must include unit so receipt QTY can show "1 Kg". */
+const saleItemProductInclude = {
+    product: {
+        include: {
+            unit: { select: { id: true, name: true } },
+        },
+    },
+};
 class SaleService {
     async getSales({ branchId, page, limit, search, startDate, endDate, paymentMethod, paymentStatus, status, cashierId, customerId, sortBy = 'sale_date', sortOrder = 'desc', }) {
         const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
@@ -43,7 +51,7 @@ class SaleService {
         };
         const include = {
             sale_items: {
-                include: { product: true },
+                include: saleItemProductInclude,
             },
             customer: true,
             branch: {
@@ -206,7 +214,7 @@ class SaleService {
             where: { id: saleId },
             data: { status: client_1.SaleStatus.CANCELLED },
             include: {
-                sale_items: { include: { product: true } },
+                sale_items: { include: saleItemProductInclude },
                 customer: true,
                 branch: { select: { id: true, name: true, address: true } },
                 user: { select: { id: true, email: true, role: true } },
@@ -492,7 +500,7 @@ class SaleService {
             where: { id: saleId },
             include: {
                 sale_items: {
-                    include: { product: true },
+                    include: saleItemProductInclude,
                 },
                 customer: true,
                 branch: {

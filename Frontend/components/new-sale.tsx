@@ -62,6 +62,7 @@ import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
 import {
   downloadReceiptPdf,
   shareReceiptOnWhatsApp,
+  formatReceiptQtyParts,
 } from "@/lib/receipt";
 import apiClient from "@/lib/apiClient";
 import { offlineAPIClient } from "@/lib/offline-api-client";
@@ -1369,13 +1370,17 @@ export function NewSale() {
         (item as any)?.unit?.name ||
         (item as any)?.unitName ||
         (item as any)?.unit_name ||
-        (item as any)?.unit ||
+        (typeof (item as any)?.unit === "string" ? (item as any).unit : undefined) ||
         undefined;
+      const parts = formatReceiptQtyParts(
+        Number(item.quantity) || 0,
+        unitLabel,
+      );
       return {
         name: item.name,
-        quantity: item.quantity,
+        quantity: parts.quantity,
         price: getSellingPrice(item),
-        unit: unitLabel,
+        unit: parts.unit,
       };
     }),
     subtotal,
