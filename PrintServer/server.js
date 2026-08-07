@@ -645,8 +645,10 @@ app.post('/print-receipt', async (req, res) => {
     y += hr(y, 'dotted');
 
     // Column widths shared by header + rows so they line up cleanly.
-    const itemColW = W * 0.55;
-    const qtyColW = W * 0.16;
+    // QTY must fit strings like "0.01 Kg" / "0.67 Kg" on one line (old receipts
+    // only needed "1 Kg", which is why the same server looked fine before).
+    const itemColW = W * 0.50;
+    const qtyColW = W * 0.22;
     const rateColW = W - itemColW - qtyColW;
     const X_ITEM_C = margins.left;
     const X_QTY_C = X_ITEM_C + itemColW;
@@ -676,7 +678,10 @@ app.post('/print-receipt', async (req, res) => {
     const printItemRow = (it) => {
       const name = String(it.name || '');
       const qtyNumber = Number(it.quantity || 0);
-      const qty = qtyNumber.toString() + (it.unit ? ` ${it.unit}` : '');
+      const qtyText = Number.isInteger(qtyNumber)
+        ? String(qtyNumber)
+        : String(parseFloat(qtyNumber.toFixed(3)));
+      const qty = qtyText + (it.unit ? ` ${it.unit}` : '');
       const rate = formatItemRate(it);
 
       doc.font(baseFont).fontSize(BODY_MAX);
@@ -686,15 +691,19 @@ app.post('/print-receipt', async (req, res) => {
         width: itemColW,
         align: 'left',
       });
-      doc.text(qty, X_QTY_C, y, {
-        width: qtyColW,
+      // drawFit keeps "0.01 Kg" on ONE line (shrinks font). doc.text+width
+      // wraps the unit under the number and overlaps with faux-bold strokes.
+      drawFit(qty, X_QTY_C, y, qtyColW, {
+        maxSize: BODY_MAX,
+        minSize: BODY_MIN,
         align: 'right',
-        lineBreak: false,
+        font: baseFont,
       });
-      doc.text(rate, X_RATE_C, y, {
-        width: rateColW,
+      drawFit(rate, X_RATE_C, y, rateColW, {
+        maxSize: BODY_MAX,
+        minSize: BODY_MIN,
         align: 'right',
-        lineBreak: false,
+        font: baseFont,
       });
 
       y += Math.max(itemH, lineH(BODY_MAX)) + 1;

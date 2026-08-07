@@ -18,7 +18,13 @@ type PrintJobInput = {
     strn?: string;
     cashier?: string;
     customerType?: string;
-    items: Array<{ name: string; quantity: number; price: number; unit?: string }>;
+    items: Array<{
+      name: string;
+      quantity: number;
+      price: number;
+      unit?: string;
+      lineTotal?: number;
+    }>;
     subtotal: number;
     discount?: number;
     taxPercent?: number;
@@ -257,7 +263,11 @@ export async function printReceiptPDF(input: PrintJobInput) {
   for (const it of receiptData.items || []) {
     const name = String(it.name || '');
     const qty  = (it.quantity ?? 0).toString() + (it.unit ? ` ${it.unit}` : '');
-    const rate = `${money(Number(it.price || 0) * Number(it.quantity || 0))}`;
+    const rate = `${money(
+      it.lineTotal != null
+        ? Math.abs(Number(it.lineTotal))
+        : Number(it.price || 0) * Number(it.quantity || 0),
+    )}`;
     const lh = rowIQR(name, qty, rate, y);
     y += lh;
   }

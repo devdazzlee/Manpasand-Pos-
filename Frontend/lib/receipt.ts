@@ -64,15 +64,16 @@ const money = (n: number) =>
   });
 
 /**
- * Short thermal-friendly unit labels for QTY column.
- * Keeps the original quantity so RATE = price × quantity stays correct
- * (matches old print-receipt-pdf.service.ts which has no lineTotal).
- * Examples: "Kgs" → "Kg", "Pieces" → "Pcs". Does not convert kg→g.
+ * Short thermal-friendly QTY parts.
+ * - Abbreviate units: Kgs→Kg, Pieces→Pcs
+ * - For fractional kg (< 1), show grams ("10 g") so QTY stays one short line
+ *   like old receipts ("1 Kg") instead of wrapping "0.01 Kg".
+ * Caller must pass lineTotal when quantity is converted (g vs kg) so RATE stays correct.
  */
 export const formatReceiptQtyParts = (
   quantity: number,
   unitName?: string | null,
-): { quantity: number; unit?: string } => {
+): { quantity: number; unit?: string; converted?: boolean } => {
   const qty = Number(quantity);
   const safeQty = Number.isFinite(qty) ? Math.abs(qty) : 0;
   const displayQty = Number.isInteger(safeQty)
@@ -85,13 +86,29 @@ export const formatReceiptQtyParts = (
   const unitLower = raw.toLowerCase();
 
   if (unitLower.includes("kg") || unitLower.includes("kilogram")) {
+    if (safeQty > 0 && safeQty < 1) {
+      return {
+        quantity: Math.round(safeQty * 1000),
+        unit: "g",
+        converted: true,
+      };
+    }
     return { quantity: displayQty, unit: "Kg" };
   }
   if (unitLower === "g" || unitLower === "gram" || unitLower === "grams") {
-    return { quantity: displayQty, unit: "g" };
+    if (safeQty >= 1000) {
+      const kg = safeQty / 1000;
+      return {
+        quantity: Number.isInteger(kg) ? kg : parseFloat(kg.toFixed(3)),
+        unit: "Kg",
+        converted: true,
+      };
+    }
+    return { quantity: Math.round(safeQty) || displayQty, unit: "g" };
   }
   if (unitLower.includes("pc") || unitLower.includes("piece")) {
-    return { quantity: displayQty, unit: "Pcs" };
+    const whole = Number.isInteger(safeQty) ? safeQty : parseFloat(safeQty.toFixed(3));
+    return { quantity: whole, unit: "Pcs" };
   }
 
   const short = raw.length > 4 ? raw.replace(/s$/i, "").slice(0, 3) : raw;
@@ -113,12 +130,12 @@ export const prepareReceiptDataFromSale = (
 ): ReceiptData => {
   const allItems = sale.sale_items || [];
   const items = (opts?.itemFilter ? allItems.filter(opts.itemFilter) : allItems).map((item) => {
-    const qty = Math.abs(num(item.quantity) || 1);
-    const lineTotal = num(item.line_total);
+    const rawQty = Math.abs(num(item.quantity) || 1);
+    const lineTotalRaw = num(item.line_total);
     const unitPrice =
       item.unit_price != null
         ? Math.abs(num(item.unit_price))
-        : Math.abs(lineTotal) / Math.max(1, qty);
+        : Math.abs(lineTotalRaw) / Math.max(1, rawQty);
     const unitLabel =
       (item.product as any)?.unit?.name ||
       (item.product as any)?.unit_name ||
@@ -126,12 +143,16 @@ export const prepareReceiptDataFromSale = (
       (item as any)?.unit_name ||
       (item as any)?.unitName ||
       undefined;
-    const parts = formatReceiptQtyParts(qty, unitLabel);
+    const parts = formatReceiptQtyParts(rawQty, unitLabel);
+    const lineTotal =
+      lineTotalRaw !== 0 ? Math.abs(lineTotalRaw) : unitPrice * rawQty;
     return {
       name: item.product?.name || "Unnamed Item",
       quantity: parts.quantity,
       price: unitPrice,
       unit: parts.unit,
+      // Always send lineTotal so RATE stays correct if qty was converted (kg→g)
+      lineTotal,
     };
   });
 

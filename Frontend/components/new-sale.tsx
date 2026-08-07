@@ -1372,15 +1372,15 @@ export function NewSale() {
         (item as any)?.unit_name ||
         (typeof (item as any)?.unit === "string" ? (item as any).unit : undefined) ||
         undefined;
-      const parts = formatReceiptQtyParts(
-        Number(item.quantity) || 0,
-        unitLabel,
-      );
+      const unitPrice = getSellingPrice(item);
+      const rawQty = Number(item.quantity) || 0;
+      const parts = formatReceiptQtyParts(rawQty, unitLabel);
       return {
         name: item.name,
         quantity: parts.quantity,
-        price: getSellingPrice(item),
+        price: unitPrice,
         unit: parts.unit,
+        lineTotal: unitPrice * rawQty,
       };
     }),
     subtotal,
