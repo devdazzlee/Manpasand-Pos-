@@ -438,8 +438,8 @@ const ProductForm = ({
   handleRemoveImage,
   fileInputRef,
   handleImageSelect,
-  stockToAdd,
-  setStockToAdd,
+  stockQtyByBranch,
+  setStockQtyByBranch,
   stockBranchIds,
   setStockBranchIds,
   branchOptions,
@@ -464,8 +464,8 @@ const ProductForm = ({
   handleRemoveImage: (index: number) => void
   fileInputRef: React.RefObject<HTMLInputElement | null>
   handleImageSelect: (event: React.ChangeEvent<HTMLInputElement>) => void
-  stockToAdd: number
-  setStockToAdd: (n: number) => void
+  stockQtyByBranch: Record<string, number>
+  setStockQtyByBranch: React.Dispatch<React.SetStateAction<Record<string, number>>>
   stockBranchIds: string[]
   setStockBranchIds: (ids: string[]) => void
   branchOptions: Array<{ id: string; name: string; code?: string }>
@@ -660,178 +660,184 @@ const ProductForm = ({
           </div>
         </div>
 
-        {/* Stock — optional. When set, fires a POST /stock after the product
-            save succeeds (adds to existing branch stock + logs a movement). */}
+        {/* Stock — optional, per branch. When set, fires a POST /stock per
+            branch after the product save succeeds (adds to existing branch
+            stock + logs a movement). Each branch gets its own quantity —
+            checking multiple branches does NOT clone one number into all of
+            them. */}
         {(() => {
-          // Total current stock across the branches the user has selected, so
-          // the "Add Stock" field sits next to a clear "you currently have X"
-          // signal. Without this users couldn't tell why their stock column
-          // showed an unexpected number.
-          const totalCurrent = stockBranchIds.reduce(
-            (sum, id) => sum + (currentBranchStocks?.[id] ?? 0),
-            0,
+          const allChecked =
+            branchOptions.length > 0 && stockBranchIds.length === branchOptions.length
+          const someChecked = stockBranchIds.length > 0 && !allChecked
+          const triggerLabel =
+            branchOptions.length === 0
+              ? "No branches available"
+              : stockBranchIds.length === 0
+                ? "Select branches"
+                : allChecked
+                  ? `All branches (${branchOptions.length})`
+                  : stockBranchIds.length === 1
+                    ? branchOptions.find((b) => b.id === stockBranchIds[0])?.name ||
+                      "1 branch"
+                    : `${stockBranchIds.length} branches selected`
+
+          const toggleBranch = (id: string, checked: boolean) => {
+            if (checked) {
+              if (!stockBranchIds.includes(id)) {
+                setStockBranchIds([...stockBranchIds, id])
+              }
+            } else {
+              setStockBranchIds(stockBranchIds.filter((x) => x !== id))
+            }
+          }
+
+          const toggleAll = (checked: boolean) => {
+            setStockBranchIds(checked ? branchOptions.map((b) => b.id) : [])
+          }
+
+          const qtyRawKey = (branchId: string) => `stock_qty_${branchId}`
+
+          const setQty = (branchId: string, raw: string) => {
+            if (raw !== "" && !/^\d*\.?\d*$/.test(raw)) return
+            setRawNumberInputs((prev) => ({ ...prev, [qtyRawKey(branchId)]: raw }))
+            const n = raw === "" || raw === "." ? 0 : parseFloat(raw)
+            setStockQtyByBranch((prev) => ({
+              ...prev,
+              [branchId]: Number.isFinite(n) ? n : 0,
+            }))
+          }
+
+          const selectedBranches = branchOptions.filter((b) =>
+            stockBranchIds.includes(b.id),
           )
-          const hasAnyCurrent =
-            currentBranchStocks && Object.keys(currentBranchStocks).length > 0
 
           return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div>
-            <Label htmlFor="stock_to_add">{stockLabel}</Label>
-            <Input
-              id="stock_to_add"
-              type="text"
-              inputMode="decimal"
-              value={
-                rawNumberInputs["stock_to_add"] !== undefined
-                  ? rawNumberInputs["stock_to_add"]
-                  : stockToAdd && stockToAdd !== 0
-                    ? String(stockToAdd)
-                    : ""
-              }
-              onChange={(e) => {
-                const v = e.target.value
-                if (v !== "" && !/^\d*\.?\d*$/.test(v)) return
-                setRawNumberInputs((prev) => ({ ...prev, stock_to_add: v }))
-                const n = v === "" || v === "." ? 0 : parseFloat(v)
-                setStockToAdd(Number.isFinite(n) ? n : 0)
-              }}
-              onBlur={() => {
-                setRawNumberInputs((prev) => {
-                  const next = { ...prev }
-                  delete next["stock_to_add"]
-                  return next
-                })
-              }}
-              placeholder="0"
-              className={numberInputClass}
-            />
-            {hasAnyCurrent ? (
-              <p className="text-xs text-gray-500 mt-1">
-                Current{stockBranchIds.length > 1 ? " (selected branches)" : ""}:{" "}
-                <span className="font-semibold text-gray-700">
-                  {totalCurrent}
-                </span>
-                . Entering a number adds to it.
-              </p>
-            ) : (
-              <p className="text-xs text-gray-500 mt-1">
-                Optional. Leave empty to skip.
-              </p>
-            )}
-          </div>
+        <div className="space-y-3">
           <div>
             <Label>Branches</Label>
-            {(() => {
-              const allChecked =
-                branchOptions.length > 0 && stockBranchIds.length === branchOptions.length
-              const someChecked = stockBranchIds.length > 0 && !allChecked
-              const triggerLabel =
-                branchOptions.length === 0
-                  ? "No branches available"
-                  : stockBranchIds.length === 0
-                    ? "Select branches"
-                    : allChecked
-                      ? `All branches (${branchOptions.length})`
-                      : stockBranchIds.length === 1
-                        ? branchOptions.find((b) => b.id === stockBranchIds[0])?.name ||
-                          "1 branch"
-                        : `${stockBranchIds.length} branches selected`
-
-              const toggleBranch = (id: string, checked: boolean) => {
-                if (checked) {
-                  if (!stockBranchIds.includes(id)) {
-                    setStockBranchIds([...stockBranchIds, id])
-                  }
-                } else {
-                  setStockBranchIds(stockBranchIds.filter((x) => x !== id))
-                }
-              }
-
-              const toggleAll = (checked: boolean) => {
-                setStockBranchIds(checked ? branchOptions.map((b) => b.id) : [])
-              }
-
-              return (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      role="combobox"
-                      disabled={branchOptions.length === 0}
-                      className="w-full justify-between font-normal"
-                    >
-                      <span className="truncate text-left">{triggerLabel}</span>
-                      <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-[--radix-popover-trigger-width] p-2" align="start">
-                    <div className="flex items-center gap-2 px-2 py-1.5 border-b mb-1">
-                      <Checkbox
-                        id="stock-branch-all"
-                        checked={allChecked || (someChecked && "indeterminate")}
-                        onCheckedChange={(checked) => toggleAll(checked === true)}
-                      />
-                      <Label
-                        htmlFor="stock-branch-all"
-                        className="text-sm font-semibold cursor-pointer flex-1"
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  role="combobox"
+                  disabled={branchOptions.length === 0}
+                  className="w-full justify-between font-normal"
+                >
+                  <span className="truncate text-left">{triggerLabel}</span>
+                  <ChevronDown className="h-4 w-4 opacity-50 shrink-0 ml-2" />
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-[--radix-popover-trigger-width] p-2" align="start">
+                <div className="flex items-center gap-2 px-2 py-1.5 border-b mb-1">
+                  <Checkbox
+                    id="stock-branch-all"
+                    checked={allChecked || (someChecked && "indeterminate")}
+                    onCheckedChange={(checked) => toggleAll(checked === true)}
+                  />
+                  <Label
+                    htmlFor="stock-branch-all"
+                    className="text-sm font-semibold cursor-pointer flex-1"
+                  >
+                    All branches
+                  </Label>
+                  <span className="text-xs text-gray-500">
+                    {stockBranchIds.length}/{branchOptions.length}
+                  </span>
+                </div>
+                <div className="max-h-56 overflow-y-auto">
+                  {branchOptions.map((b) => {
+                    const checked = stockBranchIds.includes(b.id)
+                    const current = currentBranchStocks?.[b.id]
+                    return (
+                      <div
+                        key={b.id}
+                        className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
+                        onClick={() => toggleBranch(b.id, !checked)}
                       >
-                        All branches
-                      </Label>
-                      <span className="text-xs text-gray-500">
-                        {stockBranchIds.length}/{branchOptions.length}
-                      </span>
-                    </div>
-                    <div className="max-h-56 overflow-y-auto">
-                      {branchOptions.map((b) => {
-                        const checked = stockBranchIds.includes(b.id)
-                        const current = currentBranchStocks?.[b.id]
-                        return (
-                          <div
-                            key={b.id}
-                            className="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
-                            onClick={() => toggleBranch(b.id, !checked)}
-                          >
-                            <Checkbox
-                              id={`stock-branch-${b.id}`}
-                              checked={checked}
-                              onCheckedChange={(c) => toggleBranch(b.id, c === true)}
-                              onClick={(e) => e.stopPropagation()}
-                            />
-                            <Label
-                              htmlFor={`stock-branch-${b.id}`}
-                              className="text-sm cursor-pointer flex-1 flex items-center justify-between"
-                              onClick={(e) => e.stopPropagation()}
+                        <Checkbox
+                          id={`stock-branch-${b.id}`}
+                          checked={checked}
+                          onCheckedChange={(c) => toggleBranch(b.id, c === true)}
+                          onClick={(e) => e.stopPropagation()}
+                        />
+                        <Label
+                          htmlFor={`stock-branch-${b.id}`}
+                          className="text-sm cursor-pointer flex-1 flex items-center justify-between"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          <span>
+                            {b.name}
+                            {b.code ? (
+                              <span className="text-gray-400"> ({b.code})</span>
+                            ) : null}
+                          </span>
+                          {current !== undefined && (
+                            <span
+                              className={`text-xs ml-2 ${
+                                current > 0 ? "text-emerald-600" : "text-gray-400"
+                              }`}
                             >
-                              <span>
-                                {b.name}
-                                {b.code ? (
-                                  <span className="text-gray-400"> ({b.code})</span>
-                                ) : null}
-                              </span>
-                              {current !== undefined && (
-                                <span
-                                  className={`text-xs ml-2 ${
-                                    current > 0 ? "text-emerald-600" : "text-gray-400"
-                                  }`}
-                                >
-                                  {current}
-                                </span>
-                              )}
-                            </Label>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  </PopoverContent>
-                </Popover>
-              )
-            })()}
-            <p className="text-xs text-gray-500 mt-1">
-              Stock is added to each selected branch.
-            </p>
+                              {current}
+                            </span>
+                          )}
+                        </Label>
+                      </div>
+                    )
+                  })}
+                </div>
+              </PopoverContent>
+            </Popover>
           </div>
+
+          {selectedBranches.length > 0 && (
+            <div>
+              <Label>{stockLabel}</Label>
+              <div className="border rounded-lg divide-y mt-1">
+                {selectedBranches.map((b) => {
+                  const current = currentBranchStocks?.[b.id]
+                  const key = qtyRawKey(b.id)
+                  return (
+                    <div key={b.id} className="flex items-center gap-3 px-3 py-2">
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{b.name}</p>
+                        {current !== undefined && (
+                          <p className="text-xs text-gray-500">
+                            Current: <span className="font-semibold text-gray-700">{current}</span>
+                          </p>
+                        )}
+                      </div>
+                      <Input
+                        type="text"
+                        inputMode="decimal"
+                        value={
+                          rawNumberInputs[key] !== undefined
+                            ? rawNumberInputs[key]
+                            : stockQtyByBranch[b.id]
+                              ? String(stockQtyByBranch[b.id])
+                              : ""
+                        }
+                        onChange={(e) => setQty(b.id, e.target.value)}
+                        onBlur={() => {
+                          setRawNumberInputs((prev) => {
+                            const next = { ...prev }
+                            delete next[key]
+                            return next
+                          })
+                        }}
+                        placeholder="0"
+                        className={`w-28 shrink-0 ${numberInputClass}`}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+              <p className="text-xs text-gray-500 mt-1">
+                Optional per branch — leave a quantity empty to skip that branch.
+                Entering a number adds to that branch&apos;s existing stock.
+              </p>
+            </div>
+          )}
         </div>
           )
         })()}
@@ -1044,9 +1050,10 @@ export default function Inventory() {
   // "Add Stock" companion fields — sit alongside the product form. Stock is
   // a separate table row keyed by (product, branch), so we keep it outside
   // ProductFormData and call POST /stock after the product save succeeds.
-  // Multi-branch: the user can stock the same quantity to one, several, or
-  // every branch in a single submit.
-  const [stockToAdd, setStockToAdd] = useState<number>(0)
+  // Multi-branch: each selected branch gets its own quantity, keyed by
+  // branch_id, so different branches can be stocked with different amounts
+  // in a single submit.
+  const [stockQtyByBranch, setStockQtyByBranch] = useState<Record<string, number>>({})
   const [stockBranchIds, setStockBranchIds] = useState<string[]>([])
   // Per-branch current stock for the product being edited, keyed by branch_id.
   // Populated from GET /products/:id so the user can see what's already there
@@ -1468,22 +1475,25 @@ export default function Inventory() {
       const created = await apiService.createProduct(dataToSubmit, existingImageUrls)
       const createdId = created?.data?.id as string | undefined
 
-      // If the user entered an initial stock value, write it to every chosen
-      // branch. Run them in parallel so saving to N branches is no slower
-      // than saving to one. Failures here are surfaced separately so a
-      // stock-write hiccup doesn't make the user think the product itself
-      // failed to save.
-      if (createdId && stockToAdd > 0 && stockBranchIds.length > 0) {
+      // If the user entered a per-branch stock quantity, write it to that
+      // branch — each branch can carry a different quantity. Run them in
+      // parallel so saving to N branches is no slower than saving to one.
+      // Failures here are surfaced separately so a stock-write hiccup
+      // doesn't make the user think the product itself failed to save.
+      const branchesToStock = stockBranchIds.filter(
+        (bid) => (stockQtyByBranch[bid] ?? 0) > 0,
+      )
+      if (createdId && branchesToStock.length > 0) {
         const results = await Promise.allSettled(
-          stockBranchIds.map((bid) =>
-            apiService.addStock(createdId, bid, stockToAdd),
+          branchesToStock.map((bid) =>
+            apiService.addStock(createdId, bid, stockQtyByBranch[bid]),
           ),
         )
         const failed = results.filter((r) => r.status === "rejected").length
         if (failed > 0) {
           toast({
             title: "Product saved, but some stock writes failed",
-            description: `${failed} of ${stockBranchIds.length} branch stock writes failed. Try again from the Stock page.`,
+            description: `${failed} of ${branchesToStock.length} branch stock writes failed. Try again from the Stock page.`,
             variant: "destructive",
           })
         }
@@ -1533,19 +1543,22 @@ export default function Inventory() {
 
       // Edit-time stock entry is additive (matches POST /stock semantics —
       // a positive number is added to existing branch stock and a
-      // stock-movement of type PURCHASE is logged). Fan out across the
-      // selected branches in parallel.
-      if (stockToAdd > 0 && stockBranchIds.length > 0) {
+      // stock-movement of type PURCHASE is logged). Each branch can carry a
+      // different quantity; fan out across the selected branches in parallel.
+      const branchesToStock = stockBranchIds.filter(
+        (bid) => (stockQtyByBranch[bid] ?? 0) > 0,
+      )
+      if (branchesToStock.length > 0) {
         const results = await Promise.allSettled(
-          stockBranchIds.map((bid) =>
-            apiService.addStock(editingProduct.id, bid, stockToAdd),
+          branchesToStock.map((bid) =>
+            apiService.addStock(editingProduct.id, bid, stockQtyByBranch[bid]),
           ),
         )
         const failed = results.filter((r) => r.status === "rejected").length
         if (failed > 0) {
           toast({
             title: "Product updated, but some stock writes failed",
-            description: `${failed} of ${stockBranchIds.length} branch stock writes failed. Try again from the Stock page.`,
+            description: `${failed} of ${branchesToStock.length} branch stock writes failed. Try again from the Stock page.`,
             variant: "destructive",
           })
         }
@@ -1562,7 +1575,7 @@ export default function Inventory() {
       setEditingProduct(null)
       resetForm()
 
-      if (stockToAdd > 0 && stockBranchIds.length > 0) {
+      if (branchesToStock.length > 0) {
         await syncProductInStore(updatedProductId, existingImageUrls)
       }
     } catch (error) {
@@ -1659,10 +1672,11 @@ export default function Inventory() {
     })
     setImagePreviews([])
     setExistingImageUrls([])
-    setStockToAdd(0)
-    // Re-seed the stock branches from the user's current branch so a fresh
-    // Add dialog opens with at least one sensible default checked.
-    setStockBranchIds(selectedBranchId ? [selectedBranchId] : [])
+    setStockQtyByBranch({})
+    // Default every branch checked for a fresh Add dialog — a new product
+    // generally belongs everywhere, and the user can uncheck branches that
+    // don't apply. Quantity per branch is left blank (opt-in per branch).
+    setStockBranchIds(posBranches.map((b) => b.id))
     setCurrentBranchStocks({})
   }
 
@@ -1673,7 +1687,7 @@ export default function Inventory() {
     setEditingProduct(product)
     setIsEditDialogOpen(true)
     setIsLoadingEditProduct(true)
-    setStockToAdd(0)
+    setStockQtyByBranch({})
     loadDropdownData()
 
     const toNum = (v: any): number => {
@@ -2000,8 +2014,8 @@ export default function Inventory() {
                 handleRemoveImage={handleRemoveImage}
                 fileInputRef={fileInputRef}
                 handleImageSelect={handleImageSelect}
-                stockToAdd={stockToAdd}
-                setStockToAdd={setStockToAdd}
+                stockQtyByBranch={stockQtyByBranch}
+                setStockQtyByBranch={setStockQtyByBranch}
                 stockBranchIds={stockBranchIds}
                 setStockBranchIds={setStockBranchIds}
                 branchOptions={posBranches}
@@ -2638,8 +2652,8 @@ export default function Inventory() {
                 handleRemoveImage={handleRemoveImage}
                 fileInputRef={fileInputRef}
                 handleImageSelect={handleImageSelect}
-                stockToAdd={stockToAdd}
-                setStockToAdd={setStockToAdd}
+                stockQtyByBranch={stockQtyByBranch}
+                setStockQtyByBranch={setStockQtyByBranch}
                 stockBranchIds={stockBranchIds}
                 setStockBranchIds={setStockBranchIds}
                 branchOptions={posBranches}

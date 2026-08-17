@@ -230,7 +230,9 @@ async function printReceiptPDF(input) {
     for (const it of receiptData.items || []) {
         const name = String(it.name || '');
         const qty = (it.quantity ?? 0).toString() + (it.unit ? ` ${it.unit}` : '');
-        const rate = `${money(Number(it.price || 0) * Number(it.quantity || 0))}`;
+        const rate = `${money(it.lineTotal != null
+            ? Math.abs(Number(it.lineTotal))
+            : Number(it.price || 0) * Number(it.quantity || 0))}`;
         const lh = rowIQR(name, qty, rate, y);
         y += lh;
     }
