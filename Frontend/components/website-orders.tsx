@@ -31,6 +31,7 @@ import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
 import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change";
 import {
   downloadReceiptPdf,
+  formatReceiptQtyParts,
   generateReceiptHtml,
   receiptPageWrapper,
 } from "@/lib/receipt";
@@ -345,18 +346,44 @@ const WebsiteOrders: React.FC = () => {
       "Karachi, Pakistan";
 
     const items = (order.items || []).map((item) => {
-      const qty = parseOrderQuantity(item.quantity);
+      const packQty = parseOrderQuantity(item.quantity);
       const unitPrice = parseOrderQuantity(item.price);
-      const unitLabel = item.unit_name || item.product?.unit?.name;
+      const lineTotal =
+        parseOrderQuantity(item.total_price) || unitPrice * Math.max(packQty, 0);
+
+      // Print the weight the customer actually ordered ("200 gms"), not the
+      // catalog unit ("Kgs") multiplied by the pack count — otherwise a
+      // 200 gms line prints as "1 Kgs" / "2 Kgs".
+      const grams = resolveLineGrams(item);
+      if (grams && grams > 0) {
+        const totalGrams = grams * Math.max(packQty, 1);
+        const parts = formatReceiptQtyParts(totalGrams, "g");
+        return {
+          name: getOrderItemLabel(item),
+          quantity: parts.quantity,
+          unit: parts.unit,
+          price: parts.quantity > 0 ? lineTotal / parts.quantity : lineTotal,
+          lineTotal,
+        };
+      }
+
+      const parts = formatReceiptQtyParts(
+        packQty || 1,
+        item.unit_name || item.product?.unit?.name,
+      );
       return {
         name: getOrderItemLabel(item),
-        quantity: qty,
+        quantity: parts.quantity,
+        unit: parts.unit,
         price: unitPrice,
-        unit: unitLabel,
+        lineTotal,
       };
     });
 
-    const subtotal = items.reduce((sum, item) => sum + item.price * item.quantity, 0);
+    const subtotal = items.reduce(
+      (sum, item) => sum + (item.lineTotal ?? item.price * item.quantity),
+      0,
+    );
     const orderTotal = Number(order.total_amount) || subtotal;
 
     const customerLabel =

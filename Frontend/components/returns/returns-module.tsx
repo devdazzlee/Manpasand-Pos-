@@ -2026,8 +2026,9 @@ export function ReturnsModule({
           <DialogContent
             className={cn(
               "max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 p-4 sm:p-6",
-              "max-w-[calc(100vw-1.5rem)]",
-              newReturn.returnType === "EXCHANGE" ? "sm:max-w-6xl" : "sm:max-w-4xl",
+              newReturn.returnType === "EXCHANGE"
+                ? "max-w-[min(calc(100vw-1.5rem),80rem)]"
+                : "max-w-[min(calc(100vw-1.5rem),68rem)]",
             )}
           >
             <DialogHeader className="pr-6 min-w-0">
@@ -2065,7 +2066,7 @@ export function ReturnsModule({
                     className="pl-9"
                   />
                   {saleDropdownOpen && (
-                    <div className="absolute left-0 right-0 z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                    <div className="relative z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
                       {salesLoading || saleSearchPending ? (
                         <div className="flex items-center justify-center py-6">
                           <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
