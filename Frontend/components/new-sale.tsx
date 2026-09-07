@@ -744,7 +744,7 @@ export function NewSale() {
   // Below the threshold we render the plain CSS grid (proven, zero risk). Above
   // it, only the visible rows are mounted so the catalog can be any size.
   const VIRTUALIZE_THRESHOLD = 120;
-  const GRID_ROW_HEIGHT = 84; // card (~68px) + gap
+  const GRID_ROW_HEIGHT = 96; // initial estimate; real height comes from measureElement
   const productScrollRef = useRef<HTMLDivElement>(null);
   const productGridRef = useRef<HTMLDivElement>(null);
   const [gridColumns, setGridColumns] = useState(4);
@@ -783,10 +783,18 @@ export function NewSale() {
   const rowVirtualizer = useVirtualizer({
     count: virtualizeGrid ? gridRowCount : 0,
     getScrollElement: () => productScrollRef.current,
+    // Starting guess only — each row reports its real height via
+    // `measureElement`, so rows with 1-line vs 2-line names never overlap.
     estimateSize: () => GRID_ROW_HEIGHT,
     overscan: 6,
     scrollMargin: gridScrollMargin,
   });
+
+  // Re-measure rows when the column count changes (row contents shift).
+  useEffect(() => {
+    rowVirtualizer.measure();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gridColumns, gridProducts.length]);
 
   const renderProductCard = (product: Product) => {
     const cartItems = cart.filter(
@@ -2857,14 +2865,14 @@ export function NewSale() {
               return (
                 <div
                   key={virtualRow.key}
-                  className="grid gap-1.5 sm:gap-2"
+                  data-index={virtualRow.index}
+                  ref={rowVirtualizer.measureElement}
+                  className="grid items-stretch gap-1.5 pb-2 sm:gap-2"
                   style={{
                     position: "absolute",
                     top: 0,
                     left: 0,
                     width: "100%",
-                    height: GRID_ROW_HEIGHT,
-                    paddingBottom: 8,
                     gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
                     transform: `translateY(${
                       virtualRow.start - rowVirtualizer.options.scrollMargin
