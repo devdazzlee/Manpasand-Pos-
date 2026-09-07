@@ -1,612 +1,574 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+/**
+ * Orders — reference conversion for the POS refactor (see
+ * docs/POS_REFACTOR_GUIDE.md). Patterns to copy elsewhere:
+ *  - list + detail data via TanStack Query hooks (hooks/queries/use-orders.ts),
+ *    no apiClient calls in effects, no Zustand
+ *  - the "view a record" modal is a DetailSheet, not a <Dialog>
+ *  - the create form is >6 fields with a line-item table, so it is also a
+ *    DetailSheet (form in the body), not a <Dialog>
+ *  - <PageHeader> / <PageBody>, design tokens, `nums` for money, no emoji
+ */
+
+import React, { useMemo, useState } from "react";
+import {
+  Plus,
+  Loader2,
+  Trash2,
+  Eye,
+  RefreshCcw,
+  Search,
+  ShoppingBag,
+  X,
+} from "lucide-react";
+
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, Loader2, Trash2, Eye, RefreshCcw, Search, ShoppingBag, DollarSign, Clock } from "lucide-react";
-import apiClient from "@/lib/apiClient";
-import { API_BASE } from "@/config/constants";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
+import { PageHeader, PageBody } from "@/components/ui/page-header";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
-import { PageLoader } from "@/components/ui/page-loader";
-import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton";
 
-interface Customer { id: string; email: string; name: string | null; }
-interface Product { id: string; name: string; }
-interface OrderItem { productId: string; quantity: number; product: { name: string }; }
-interface Order { id: string; order_number: string; total_amount: string; status: string; created_at: string; items: OrderItem[]; }
+import { useOrders, useOrder, useOrderMutations } from "@/hooks/queries/use-orders";
+import { useCustomers } from "@/hooks/queries/use-customers";
+import { useProducts } from "@/hooks/queries/use-products";
+import { extractApiError } from "@/lib/api/errors";
+
+const STATUSES = ["PENDING", "PROCESSING", "COMPLETED"] as const;
+const PAYMENT_METHODS = ["CASH", "CARD", "MOBILE_MONEY"] as const;
+
+const money = (v: unknown) => `Rs ${(Number(v) || 0).toFixed(2)}`;
+const day = (iso: string) => iso.split("T")[0];
+
+type FormItem = { productId: string; quantity: number };
+const emptyForm = () => ({
+  customerId: "",
+  paymentMethod: "CASH" as string,
+  items: [{ productId: "", quantity: 1 }] as FormItem[],
+});
 
 const Orders: React.FC = () => {
   const { toast } = useToast();
 
-  const [customers, setCustomers] = useState<Customer[]>([]);
-  const [products, setProducts] = useState<Product[]>([]);
-  const [orders, setOrders] = useState<Order[]>([]);
-
   const [statusFilter, setStatusFilter] = useState<string>("");
-  const [searchTerm, setSearchTerm] = useState<string>("");
-  const [productQuery, setProductQuery] = useState("");
-  const [customerQuery, setCustomerQuery] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
-  const [isInitialLoading, setIsInitialLoading] = useState(true);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
+
+  const { orders, isFirstLoad, isRefreshing, refetch } = useOrders(
+    statusFilter ? { status: statusFilter } : {},
+  );
+  const { create, setStatus, cancel } = useOrderMutations();
+
+  // ----- create panel -----
   const [isAddOpen, setIsAddOpen] = useState(false);
-  const [isDetailOpen, setIsDetailOpen] = useState(false);
-  const [isDetailLoading, setIsDetailLoading] = useState(false);
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(null);
+  const [form, setForm] = useState(emptyForm);
+  const [customerQuery, setCustomerQuery] = useState("");
+  const [productQuery, setProductQuery] = useState("");
+  const [debouncedCustomerQuery, setDebouncedCustomerQuery] = useState("");
+  const [debouncedProductQuery, setDebouncedProductQuery] = useState("");
 
-  const [orderForm, setOrderForm] = useState<{
-    customerId: string;
-    paymentMethod: string;
-    items: OrderItem[];
-  }>({ customerId: "", paymentMethod: "CASH", items: [{ productId: "", quantity: 1, product: { name: "" } }] });
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedCustomerQuery(customerQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [customerQuery]);
+  React.useEffect(() => {
+    const t = setTimeout(() => setDebouncedProductQuery(productQuery.trim()), 300);
+    return () => clearTimeout(t);
+  }, [productQuery]);
 
-  useEffect(() => {
-    fetchOrders();
-  }, []);
+  const { customers } = useCustomers(
+    { search: debouncedCustomerQuery || undefined, page: 1, limit: 20 },
+    { enabled: isAddOpen },
+  );
+  const { products } = useProducts(
+    { search: debouncedProductQuery || undefined, isActive: true, page: 1, limit: 20 },
+    { enabled: isAddOpen },
+  );
 
-  useEffect(() => {
-    const delay = productQuery.trim() || customerQuery.trim() ? 300 : 0;
-    const timer = window.setTimeout(async () => {
-      setIsInitialLoading(true);
-      try {
-        const [cRes, pRes] = await Promise.all([
-          apiClient.get(`${API_BASE}/customer`, {
-            params: { page: 1, limit: 20, search: customerQuery.trim() || undefined },
+  // ----- detail panel -----
+  const [detailId, setDetailId] = useState<string | null>(null);
+  const detailOpen = detailId !== null;
+  const { data: detailOrder, isLoading: detailLoading } = useOrder(detailId, {
+    enabled: detailOpen,
+  });
+
+  const filtered = useMemo(
+    () =>
+      orders.filter((o) =>
+        o.order_number.toLowerCase().includes(searchTerm.trim().toLowerCase()),
+      ),
+    [orders, searchTerm],
+  );
+
+  const stats = useMemo(
+    () => ({
+      total: orders.length,
+      revenue: orders.reduce((s, o) => s + (Number(o.total_amount) || 0), 0),
+      pending: orders.filter((o) => o.status === "PENDING").length,
+    }),
+    [orders],
+  );
+
+  const formValid =
+    form.customerId && form.items.every((i) => i.productId && i.quantity > 0);
+
+  const submit = () => {
+    create.mutate(
+      { customerId: form.customerId, paymentMethod: form.paymentMethod, items: form.items },
+      {
+        onSuccess: () => {
+          toast({ title: "Order created" });
+          setIsAddOpen(false);
+          setForm(emptyForm());
+        },
+        onError: (e) =>
+          toast({
+            variant: "destructive",
+            title: "Could not create order",
+            description: extractApiError(e, "Failed to create order"),
           }),
-          apiClient.get(`${API_BASE}/products`, {
-            params: {
-              page: 1,
-              limit: 20,
-              is_active: true,
-              search: productQuery.trim() || undefined,
-            },
+      },
+    );
+  };
+
+  const changeStatus = (id: string, status: string) =>
+    setStatus.mutate(
+      { id, status },
+      {
+        onError: (e) =>
+          toast({
+            variant: "destructive",
+            title: "Status update failed",
+            description: extractApiError(e, "Failed to update status"),
           }),
-        ]);
-        setCustomers(cRes.data.data || []);
-        setProducts(pRes.data.data || []);
-      } catch (err: any) {
-        console.log("Metadata load failed", err);
+      },
+    );
+
+  const remove = (id: string) =>
+    cancel.mutate(id, {
+      onSuccess: () => toast({ title: "Order cancelled" }),
+      onError: (e) =>
         toast({
-          title: "Error",
-          description: err.response?.data?.message || err.message || "Failed to load orders data",
           variant: "destructive",
-        });
-      } finally {
-        setIsInitialLoading(false);
-      }
-    }, delay);
-    return () => window.clearTimeout(timer);
-  }, [productQuery, customerQuery, toast]);
-
-  const fetchOrders = async () => {
-    setIsLoading(true);
-    try {
-      const params = statusFilter ? { status: statusFilter } : {};
-      const res = await apiClient.get(`${API_BASE}/order`, { params });
-      setOrders(res.data.data.data);
-      toast({
-        title: "Success",
-        description: "Orders loaded successfully",
-      });
-    } catch (err: any) {
-      console.log("Orders load failed", err);
-      
-      // Extract error message from API response
-      let errorMessage = "Failed to load orders";
-      
-      if (err.response?.data?.message) {
-        errorMessage = err.response.data.message;
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  const handleCreateOrder = async () => {
-    setIsSubmitting(true);
-    try {
-      await apiClient.post(`${API_BASE}/order`, orderForm);
-      toast({
-        title: "Success",
-        description: "Order created successfully",
-      });
-      setIsAddOpen(false);
-      resetForm();
-      fetchOrders();
-    } catch (err: any) {
-      console.log("Order creation failed", err);
-      
-      // Extract error message from API response
-      let errorMessage = "Failed to create order";
-      
-      if (err.response?.data?.message) {
-        errorMessage = err.response.data.message;
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setIsSubmitting(false);
-    }
-  };
-
-  const resetForm = () => {
-    setOrderForm({ customerId: "", paymentMethod: "CASH", items: [{ productId: "", quantity: 1, product: { name: "" } }] });
-  };
-
-  const handleCancelOrder = async (orderId: string) => {
-    try {
-      await apiClient.delete(`${API_BASE}/order/${orderId}`);
-      toast({
-        title: "Success",
-        description: "Order cancelled successfully",
-      });
-      fetchOrders();
-    } catch (err: any) {
-      console.log("Cancel failed", err);
-      
-      // Extract error message from API response
-      let errorMessage = "Failed to cancel order";
-      
-      if (err.response?.data?.message) {
-        errorMessage = err.response.data.message;
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    }
-  };
-
-  const handleStatusUpdate = async (orderId: string, newStatus: string) => {
-    try {
-      await apiClient.patch(`${API_BASE}/order/${orderId}/status`, { status: newStatus });
-      toast({
-        title: "Success",
-        description: "Order status updated successfully",
-      });
-      fetchOrders();
-    } catch (err: any) {
-      console.log("Status update failed", err);
-      
-      // Extract error message from API response
-      let errorMessage = "Failed to update order status";
-      
-      if (err.response?.data?.message) {
-        errorMessage = err.response.data.message;
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    }
-  };
-
-  const viewOrderDetail = async (orderId: string) => {
-    setIsDetailOpen(true);
-    setIsDetailLoading(true);
-    setSelectedOrder(null);
-
-    try {
-      const res = await apiClient.get(`${API_BASE}/order/${orderId}`);
-      setSelectedOrder(res.data.data);
-    } catch (err: any) {
-      console.log("Fetch detail failed", err);
-      
-      // Extract error message from API response
-      let errorMessage = "Failed to load order details";
-      
-      if (err.response?.data?.message) {
-        errorMessage = err.response.data.message;
-      } else if (err.message) {
-        errorMessage = err.message;
-      }
-      
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-      setIsDetailOpen(false);
-    } finally {
-      setIsDetailLoading(false);
-    }
-  };
-
-  const addItemRow = () => setOrderForm(f => ({ ...f, items: [...f.items, { productId: "", quantity: 1, product: { name: "" } }] }));
-  const removeItemRow = (idx: number) => setOrderForm(f => ({ ...f, items: f.items.filter((_, i) => i !== idx) }));
-
-  const filtered = orders
-    .filter(o => o.order_number.toLowerCase().includes(searchTerm.toLowerCase()));
-
-  // Calculate stats
-  const totalOrders = orders.length;
-  const totalRevenue = orders.reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0);
-  const pendingOrders = orders.filter(order => order.status === 'PENDING').length;
-
-  if (isInitialLoading) {
-    return <PageLoader message="Loading orders data..." />
-  }
+          title: "Cancel failed",
+          description: extractApiError(e, "Failed to cancel order"),
+        }),
+    });
 
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-      <div className="flex flex-col lg:flex-row lg:items-center lg:justify-between gap-4">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Orders Management</h1>
-          <p className="text-sm md:text-base text-gray-600">Create & manage customer orders</p>
-        </div>
-        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              New Order
+    <>
+      <PageHeader
+        title="Orders"
+        description={`${stats.total} order${stats.total === 1 ? "" : "s"}`}
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isRefreshing}
+            >
+              <RefreshCcw className={`h-4 w-4 ${isRefreshing ? "animate-spin" : ""}`} />
             </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Create Order</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label>Customer</Label>
-                <Select
-                  value={orderForm.customerId || "none"}
-                  onValueChange={(value) => setOrderForm({ ...orderForm, customerId: value === "none" ? "" : value })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue placeholder="Select customer" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Select customer</SelectItem>
-                    {customers.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.email}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                <Input
-                  className="mt-2"
-                  placeholder="Search customers..."
-                  value={customerQuery}
-                  onChange={(e) => setCustomerQuery(e.target.value)}
-                />
-              </div>
-              <div>
-                <Label>Payment Method</Label>
-                <Select
-                  value={orderForm.paymentMethod}
-                  onValueChange={(value) => setOrderForm({ ...orderForm, paymentMethod: value })}
-                >
-                  <SelectTrigger className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {["CASH", "CARD", "MOBILE_MONEY"].map((pm) => (
-                      <SelectItem key={pm} value={pm}>
-                        {pm.replace(/_/g, " ")}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <Input
-                placeholder="Search products..."
-                value={productQuery}
-                onChange={(e) => setProductQuery(e.target.value)}
-              />
-              {orderForm.items.map((item, idx) => (
-                <div key={idx} className="grid grid-cols-3 gap-3 items-end">
-                  <div>
-                    <Label>Product</Label>
-                    <Select
-                      value={item.productId || "none"}
-                      onValueChange={(value) => {
-                        const pid = value === "none" ? "" : value;
-                        setOrderForm((f) => {
-                          const items = [...f.items];
-                          items[idx].productId = pid;
-                          return { ...f, items };
-                        });
-                      }}
-                    >
-                      <SelectTrigger className="w-full">
-                        <SelectValue placeholder="Select product" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Select product</SelectItem>
-                        {products.map((p) => (
-                          <SelectItem key={p.id} value={p.id}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div>
-                    <Label>Qty</Label>
-                    <Input 
-                      type="number" 
-                      min={1} 
-                      value={item.quantity} 
-                      onChange={e => {
-                        const q=Number(e.target.value);
-                        setOrderForm(f=>{
-                          const items=[...f.items];
-                          items[idx].quantity=q;
-                          return{...f,items};
-                        });
-                      }}
-                    />
-                  </div>
-                  <Button 
-                    variant="outline" 
-                    size="sm" 
-                    onClick={()=>removeItemRow(idx)}
-                    disabled={orderForm.items.length === 1}
-                  >
-                    Remove
-                  </Button>
-                </div>
-              ))}
-              <Button variant="link" onClick={addItemRow}>+ Add item</Button>
-              <Button 
-                onClick={handleCreateOrder} 
-                disabled={isSubmitting || !orderForm.customerId || orderForm.items.some(item => !item.productId || item.quantity <= 0)}
-                className="w-full"
-              >
-                {isSubmitting ? (
-                  <>
-                    <Loader2 className="animate-spin h-4 w-4 mr-2" />
-                    Creating Order...
-                  </>
-                ) : (
-                  "Submit Order"
-                )}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      {/* Stats Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4 md:gap-6">
-        {isLoading ? (
-          <>
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-            <StatCardSkeleton />
+            <Button size="sm" onClick={() => setIsAddOpen(true)}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              New order
+            </Button>
           </>
-        ) : (
-          <>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-                <ShoppingBag className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{totalOrders}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Revenue</CardTitle>
-                <DollarSign className="h-4 w-4 text-green-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-green-600">Rs {(Number(totalRevenue) || 0).toFixed(2)}</div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
-                <Clock className="h-4 w-4 text-orange-600" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold text-orange-600">{pendingOrders}</div>
-              </CardContent>
-            </Card>
-          </>
-        )}
-      </div>
-
-      {/* Filters */}
-      <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3 sm:gap-4">
-        <div className="relative flex-1 sm:max-w-md">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-          <Input
-            placeholder="Search Order #"
-            value={searchTerm}
-            onChange={e => setSearchTerm(e.target.value)}
-            className="pl-10"
-          />
-        </div>
-        <div className="flex items-center space-x-2">
-          <Label htmlFor="status-filter">Status:</Label>
-          <Select
-            value={statusFilter || "ALL"}
-            onValueChange={(value) => {
-              const next = value === "ALL" ? "" : value;
-              setStatusFilter(next);
-              fetchOrders();
-            }}
-          >
-            <SelectTrigger id="status-filter" className="w-[160px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="ALL">All</SelectItem>
-              <SelectItem value="PENDING">Pending</SelectItem>
-              <SelectItem value="PROCESSING">Processing</SelectItem>
-              <SelectItem value="COMPLETED">Completed</SelectItem>
-            </SelectContent>
-          </Select>
-          <Button onClick={fetchOrders} variant="outline">
-            <RefreshCcw className="w-4 h-4" />
-          </Button>
-        </div>
-      </div>
-
-      {/* Orders Table */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Orders List ({filtered.length})</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {isLoading ? (
-            <PageLoader message="Loading orders..." />
-          ) : filtered.length === 0 ? (
-            <div className="text-center py-10">
-              <ShoppingBag className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-              <p className="text-gray-600">No orders found</p>
-            </div>
-          ) : (
-            <div className="overflow-x-auto -mx-4 md:mx-0">
-              <div className="inline-block min-w-full align-middle">
-                <Table>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className="min-w-[120px]">Order #</TableHead>
-                      <TableHead className="min-w-[100px]">Total</TableHead>
-                      <TableHead className="min-w-[120px]">Status</TableHead>
-                      <TableHead className="min-w-[120px]">Date</TableHead>
-                      <TableHead className="min-w-[120px]">Actions</TableHead>
-                    </TableRow>
-                  </TableHeader>
-              <TableBody>
-                {filtered.map(o=> (
-                  <TableRow key={o.id}>
-                    <TableCell className="font-medium">{o.order_number}</TableCell>
-                    <TableCell className="font-medium">Rs {(Number(o.total_amount) || 0).toFixed(2)}</TableCell>
-                    <TableCell>
-                      <Select value={o.status} onValueChange={(value) => handleStatusUpdate(o.id, value)}>
-                        <SelectTrigger className="h-8 w-[145px]">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="PENDING">PENDING</SelectItem>
-                          <SelectItem value="PROCESSING">PROCESSING</SelectItem>
-                          <SelectItem value="COMPLETED">COMPLETED</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </TableCell>
-                    <TableCell>{o.created_at.split('T')[0]}</TableCell>
-                    <TableCell className="flex space-x-2">
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        onClick={()=>viewOrderDetail(o.id)}
-                      >
-                        <Eye className="w-4 h-4"/>
-                      </Button>
-                      <Button 
-                        size="sm" 
-                        variant="outline" 
-                        onClick={()=>handleCancelOrder(o.id)}
-                        className="text-red-600 hover:text-red-700"
-                      >
-                        <Trash2 className="w-4 h-4"/>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Detail Dialog */}
-      <Dialog open={isDetailOpen} onOpenChange={(open)=> {
-        setIsDetailOpen(open);
-        if (!open) {
-          setSelectedOrder(null);
-          setIsDetailLoading(false);
         }
-      }}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Order Details</DialogTitle>
-          </DialogHeader>
-          {isDetailLoading ? (
-            <div className="py-8">
-              <PageLoader message="Loading order details..." />
-            </div>
-          ) : selectedOrder ? (
-            <div className="space-y-4">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <Label className="text-sm font-medium">Order #</Label>
-                  <p className="text-sm">{selectedOrder.order_number}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Status</Label>
-                  <p className="text-sm">{selectedOrder.status}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Date</Label>
-                  <p className="text-sm">{selectedOrder.created_at.split('T')[0]}</p>
-                </div>
-                <div>
-                  <Label className="text-sm font-medium">Total</Label>
-                  <p className="text-sm font-medium">Rs {(Number(selectedOrder.total_amount) || 0).toFixed(2)}</p>
-                </div>
+      />
+
+      <PageBody className="space-y-5">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+          {(
+            [
+              { label: "Total orders", value: stats.total, icon: ShoppingBag },
+              { label: "Revenue", value: money(stats.revenue), icon: null },
+              { label: "Pending", value: stats.pending, icon: null },
+            ] as const
+          ).map((s) => (
+            <Card key={s.label}>
+              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-1.5">
+                <CardTitle className="text-xs font-medium text-muted-foreground">
+                  {s.label}
+                </CardTitle>
+              </CardHeader>
+              <CardContent>
+                {isFirstLoad ? (
+                  <Skeleton className="h-7 w-20" />
+                ) : (
+                  <div className="text-xl font-semibold nums">{s.value}</div>
+                )}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="relative flex-1 sm:max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              placeholder="Search order #"
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              className="h-9 pl-9"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <Label htmlFor="status-filter" className="text-xs text-muted-foreground">
+              Status
+            </Label>
+            <Select
+              value={statusFilter || "ALL"}
+              onValueChange={(v) => setStatusFilter(v === "ALL" ? "" : v)}
+            >
+              <SelectTrigger id="status-filter" className="h-9 w-[150px]">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="ALL">All</SelectItem>
+                {STATUSES.map((s) => (
+                  <SelectItem key={s} value={s}>
+                    {s[0] + s.slice(1).toLowerCase()}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
+        <Card>
+          <CardHeader className="flex flex-row items-center justify-between py-3">
+            <CardTitle className="text-sm">
+              Orders <span className="text-muted-foreground">({filtered.length})</span>
+            </CardTitle>
+            {isRefreshing && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
+          </CardHeader>
+          <CardContent className="p-0">
+            {isFirstLoad ? (
+              <div className="space-y-2 p-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-11 w-full" />
+                ))}
               </div>
-              <div>
-                <Label className="text-sm font-medium">Items</Label>
+            ) : filtered.length === 0 ? (
+              <div className="m-4 flex flex-col items-center gap-2 rounded-lg border border-dashed py-12">
+                <ShoppingBag className="h-8 w-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">No orders found</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto">
                 <Table>
                   <TableHeader>
                     <TableRow>
-                      <TableHead>Product</TableHead>
-                      <TableHead>Qty</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">Order #</TableHead>
+                      <TableHead className="text-right text-xs uppercase tracking-wide">
+                        Total
+                      </TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">Status</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">Date</TableHead>
+                      <TableHead className="w-[104px] text-xs uppercase tracking-wide">
+                        Actions
+                      </TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {selectedOrder.items.map(item=>(
-                      <TableRow key={item.productId}>
-                        <TableCell>{item.product.name}</TableCell>
-                        <TableCell>{item.quantity}</TableCell>
+                    {filtered.map((o) => (
+                      <TableRow key={o.id} className="h-11">
+                        <TableCell className="font-medium">{o.order_number}</TableCell>
+                        <TableCell className="text-right font-medium nums">
+                          {money(o.total_amount)}
+                        </TableCell>
+                        <TableCell>
+                          <Select
+                            value={o.status}
+                            onValueChange={(v) => changeStatus(o.id, v)}
+                          >
+                            <SelectTrigger className="h-8 w-[140px] text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {STATUSES.map((s) => (
+                                <SelectItem key={s} value={s}>
+                                  {s}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </TableCell>
+                        <TableCell className="text-sm text-muted-foreground nums">
+                          {day(o.created_at)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex gap-1.5">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              onClick={() => setDetailId(o.id)}
+                            >
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              onClick={() => remove(o.id)}
+                              disabled={cancel.isPending}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </TableCell>
                       </TableRow>
                     ))}
                   </TableBody>
                 </Table>
               </div>
+            )}
+          </CardContent>
+        </Card>
+      </PageBody>
+
+      {/* Create order — form is large (customer + payment + N item rows), so a
+          DetailSheet, not a Dialog. */}
+      <DetailSheet open={isAddOpen} onOpenChange={setIsAddOpen} size="lg">
+        <DetailSheetHeader title="New order" subtitle="Create a customer order" />
+        <DetailSheetBody className="space-y-5">
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Customer</Label>
+            <Input
+              placeholder="Search customers…"
+              value={customerQuery}
+              onChange={(e) => setCustomerQuery(e.target.value)}
+              className="h-9"
+            />
+            <Select
+              value={form.customerId || "none"}
+              onValueChange={(v) =>
+                setForm((f) => ({ ...f, customerId: v === "none" ? "" : v }))
+              }
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue placeholder="Select customer" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Select customer</SelectItem>
+                {customers.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>
+                    {c.name || c.email}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs text-muted-foreground">Payment method</Label>
+            <Select
+              value={form.paymentMethod}
+              onValueChange={(v) => setForm((f) => ({ ...f, paymentMethod: v }))}
+            >
+              <SelectTrigger className="h-9">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {PAYMENT_METHODS.map((pm) => (
+                  <SelectItem key={pm} value={pm}>
+                    {pm.replace(/_/g, " ")}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Items</Label>
+              <Input
+                placeholder="Search products…"
+                value={productQuery}
+                onChange={(e) => setProductQuery(e.target.value)}
+                className="h-8 w-40 text-xs"
+              />
+            </div>
+            {form.items.map((item, idx) => (
+              <div key={idx} className="flex items-end gap-2">
+                <div className="flex-1 space-y-1">
+                  <Select
+                    value={item.productId || "none"}
+                    onValueChange={(v) =>
+                      setForm((f) => {
+                        const items = [...f.items];
+                        items[idx] = { ...items[idx], productId: v === "none" ? "" : v };
+                        return { ...f, items };
+                      })
+                    }
+                  >
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Select product" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Select product</SelectItem>
+                      {products.map((p) => (
+                        <SelectItem key={p.id} value={p.id}>
+                          {p.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <Input
+                  type="number"
+                  min={1}
+                  value={item.quantity}
+                  onChange={(e) =>
+                    setForm((f) => {
+                      const items = [...f.items];
+                      items[idx] = { ...items[idx], quantity: Number(e.target.value) };
+                      return { ...f, items };
+                    })
+                  }
+                  className="h-9 w-20 nums"
+                />
+                <Button
+                  size="icon"
+                  variant="ghost"
+                  className="h-9 w-9 shrink-0"
+                  onClick={() =>
+                    setForm((f) => ({ ...f, items: f.items.filter((_, i) => i !== idx) }))
+                  }
+                  disabled={form.items.length === 1}
+                >
+                  <X className="h-4 w-4" />
+                </Button>
+              </div>
+            ))}
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() =>
+                setForm((f) => ({ ...f, items: [...f.items, { productId: "", quantity: 1 }] }))
+              }
+            >
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Add item
+            </Button>
+          </div>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setIsAddOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={submit} disabled={!formValid || create.isPending}>
+            {create.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+            Create order
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
+
+      {/* View order */}
+      <DetailSheet
+        open={detailOpen}
+        onOpenChange={(o) => !o && setDetailId(null)}
+        size="md"
+      >
+        <DetailSheetHeader
+          title={detailOrder ? detailOrder.order_number : "Order"}
+          subtitle={detailOrder ? day(detailOrder.created_at) : undefined}
+          icon={<ShoppingBag className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-5">
+          {detailLoading || !detailOrder ? (
+            <div className="space-y-3">
+              <Skeleton className="h-16 w-full" />
+              <Skeleton className="h-32 w-full" />
             </div>
           ) : (
-            <p className="text-sm text-muted-foreground py-6">Order details not available.</p>
+            <>
+              <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3">
+                <Field label="Status" value={detailOrder.status} />
+                <Field label="Date" value={day(detailOrder.created_at)} />
+                <Field
+                  label="Total"
+                  value={money(detailOrder.total_amount)}
+                  strong
+                />
+                <Field label="Items" value={String(detailOrder.items.length)} />
+              </div>
+              <div>
+                <Label className="text-xs uppercase tracking-wide text-muted-foreground">
+                  Line items
+                </Label>
+                <Table className="mt-2">
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="text-xs uppercase tracking-wide">Product</TableHead>
+                      <TableHead className="text-right text-xs uppercase tracking-wide">
+                        Qty
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {detailOrder.items.map((it) => (
+                      <TableRow key={it.productId} className="h-10">
+                        <TableCell className="text-sm">{it.product.name}</TableCell>
+                        <TableCell className="text-right text-sm nums">{it.quantity}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
           )}
-        </DialogContent>
-      </Dialog>
-    </div>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setDetailId(null)}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
+    </>
   );
 };
+
+function Field({
+  label,
+  value,
+  strong,
+}: {
+  label: string;
+  value: React.ReactNode;
+  strong?: boolean;
+}) {
+  return (
+    <div>
+      <p className="text-xs text-muted-foreground">{label}</p>
+      <p className={`text-sm ${strong ? "font-semibold nums" : ""}`}>{value}</p>
+    </div>
+  );
+}
 
 export default Orders;
