@@ -10,7 +10,11 @@ import { Toaster as ToasterOutlet } from "@/components/ui/sonner"
 // across the app render their notifications too.
 import { Toaster as ShadcnToaster } from "@/components/ui/toaster"
 
-const inter = Inter({ subsets: ["latin"] })
+const inter = Inter({
+  subsets: ["latin"],
+  display: "swap",
+  variable: "--font-sans",
+})
 
 export const metadata: Metadata = {
   title: "MANPASAND POS System",
@@ -48,7 +52,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
+      <body className={inter.variable}>
         <QueryProvider>
           <DataProvider>
             {children}
