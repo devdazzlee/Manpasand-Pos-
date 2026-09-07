@@ -1,6 +1,11 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { qk } from "@/lib/query/query-keys";
 import { STALE_TIME } from "@/lib/query/query-client";
@@ -8,6 +13,12 @@ import {
   fetchSuppliers,
   fetchSupplierLedger,
   fetchSupplierPurchases,
+  createSupplier,
+  updateSupplier,
+  deleteSupplier,
+  createSupplierPayment,
+  deleteSupplierPayment,
+  type SupplierPayload,
   type SupplierQuery,
   type Supplier,
 } from "@/lib/api/suppliers";
@@ -48,4 +59,40 @@ export function useSupplierLedger(id: string | null) {
     staleTime: STALE_TIME.volatile,
     enabled: Boolean(id),
   });
+}
+
+/**
+ * Create / update / delete a supplier, plus ledger payment writes. Every
+ * success invalidates the whole `suppliers` key so the list, purchases and
+ * ledger queries all refetch.
+ */
+export function useSupplierMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: qk.suppliers.all });
+
+  return {
+    create: useMutation({
+      mutationFn: (body: SupplierPayload) => createSupplier(body),
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, body }: { id: string; body: SupplierPayload }) =>
+        updateSupplier(id, body),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => deleteSupplier(id),
+      onSuccess: invalidate,
+    }),
+    addPayment: useMutation({
+      mutationFn: ({ id, body }: { id: string; body: SupplierPayload }) =>
+        createSupplierPayment(id, body),
+      onSuccess: invalidate,
+    }),
+    deletePayment: useMutation({
+      mutationFn: ({ id, paymentId }: { id: string; paymentId: string }) =>
+        deleteSupplierPayment(id, paymentId),
+      onSuccess: invalidate,
+    }),
+  };
 }

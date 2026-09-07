@@ -1,4 +1,4 @@
-import { getList, getOne, cleanParams, type ListResult } from "./http";
+import { getList, getOne, post, put, del, cleanParams, type ListResult } from "./http";
 
 export interface Supplier {
   id: string;
@@ -14,6 +14,8 @@ export interface SupplierQuery {
   page?: number;
   limit?: number;
   isActive?: boolean;
+  /** Maps to the `display_on_pos` server filter (the "On POS" chip). */
+  displayOnPos?: boolean;
 }
 
 export async function fetchSuppliers(
@@ -27,6 +29,7 @@ export async function fetchSuppliers(
       limit: q.limit ?? 20,
       search: q.search?.trim() || undefined,
       is_active: q.isActive,
+      display_on_pos: q.displayOnPos,
     }),
     signal,
   );
@@ -38,4 +41,27 @@ export async function fetchSupplierPurchases(id: string, signal?: AbortSignal) {
 
 export async function fetchSupplierLedger(id: string, signal?: AbortSignal) {
   return getOne<any>(`/suppliers/${id}/ledger`, { signal });
+}
+
+/** Mutation payloads are screen-shaped; keep them loose but explicit. */
+export type SupplierPayload = Record<string, unknown>;
+
+export async function createSupplier(body: SupplierPayload) {
+  return post<Supplier>("/suppliers", body);
+}
+
+export async function updateSupplier(id: string, body: SupplierPayload) {
+  return put<Supplier>(`/suppliers/${id}`, body);
+}
+
+export async function deleteSupplier(id: string) {
+  return del<void>(`/suppliers/${id}`);
+}
+
+export async function createSupplierPayment(id: string, body: SupplierPayload) {
+  return post<unknown>(`/suppliers/${id}/payments`, body);
+}
+
+export async function deleteSupplierPayment(id: string, paymentId: string) {
+  return del<void>(`/suppliers/${id}/payments/${paymentId}`);
 }

@@ -1,4 +1,4 @@
-import { getList, getOne, cleanParams, type ListResult } from "./http";
+import { getList, getOne, post, put, del, cleanParams, type ListResult } from "./http";
 
 export interface Customer {
   id: string;
@@ -40,4 +40,27 @@ export async function fetchCustomerPurchases(id: string, signal?: AbortSignal) {
 
 export async function fetchCustomerLedger(id: string, signal?: AbortSignal) {
   return getOne<any>(`/customer/${id}/ledger`, { signal });
+}
+
+/** Mutation payloads are screen-shaped; keep them loose but explicit. */
+export type CustomerPayload = Record<string, unknown>;
+
+export async function createCustomer(body: CustomerPayload) {
+  return post<Customer>("/customer", body);
+}
+
+export async function updateCustomer(id: string, body: CustomerPayload) {
+  return put<Customer>(`/customer/${id}`, body);
+}
+
+export async function deleteCustomer(id: string) {
+  return del<void>(`/customer/${id}`);
+}
+
+export async function createCustomerPayment(id: string, body: CustomerPayload) {
+  return post<unknown>(`/customer/${id}/payments`, body);
+}
+
+export async function deleteCustomerPayment(id: string, paymentId: string) {
+  return del<void>(`/customer/${id}/payments/${paymentId}`);
 }

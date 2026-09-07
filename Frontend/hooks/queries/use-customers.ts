@@ -1,6 +1,11 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query";
 
 import { qk } from "@/lib/query/query-keys";
 import { STALE_TIME } from "@/lib/query/query-client";
@@ -8,6 +13,12 @@ import {
   fetchCustomers,
   fetchCustomerLedger,
   fetchCustomerPurchases,
+  createCustomer,
+  updateCustomer,
+  deleteCustomer,
+  createCustomerPayment,
+  deleteCustomerPayment,
+  type CustomerPayload,
   type CustomerQuery,
   type Customer,
 } from "@/lib/api/customers";
@@ -49,4 +60,40 @@ export function useCustomerLedger(id: string | null) {
     staleTime: STALE_TIME.volatile,
     enabled: Boolean(id),
   });
+}
+
+/**
+ * Create / update / delete a customer, plus ledger payment writes. Every
+ * success invalidates the whole `customers` key so the list, purchases and
+ * ledger queries all refetch.
+ */
+export function useCustomerMutations() {
+  const qc = useQueryClient();
+  const invalidate = () => qc.invalidateQueries({ queryKey: qk.customers.all });
+
+  return {
+    create: useMutation({
+      mutationFn: (body: CustomerPayload) => createCustomer(body),
+      onSuccess: invalidate,
+    }),
+    update: useMutation({
+      mutationFn: ({ id, body }: { id: string; body: CustomerPayload }) =>
+        updateCustomer(id, body),
+      onSuccess: invalidate,
+    }),
+    remove: useMutation({
+      mutationFn: (id: string) => deleteCustomer(id),
+      onSuccess: invalidate,
+    }),
+    addPayment: useMutation({
+      mutationFn: ({ id, body }: { id: string; body: CustomerPayload }) =>
+        createCustomerPayment(id, body),
+      onSuccess: invalidate,
+    }),
+    deletePayment: useMutation({
+      mutationFn: ({ id, paymentId }: { id: string; paymentId: string }) =>
+        deleteCustomerPayment(id, paymentId),
+      onSuccess: invalidate,
+    }),
+  };
 }
