@@ -423,7 +423,7 @@ export function SalesHistory() {
 
         if (isAdmin) {
           const branchesRes = await apiClient.get("/branches", {
-            params: { fetch_all: true, is_active: true },
+            params: { page: 1, limit: 100, is_active: true },
           });
           const list = Array.isArray(branchesRes.data?.data)
             ? branchesRes.data.data

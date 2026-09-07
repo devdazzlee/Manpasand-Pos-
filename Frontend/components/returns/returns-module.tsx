@@ -584,7 +584,8 @@ export function ReturnsModule({
       const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN"
       
       const params: any = {
-        fetch_all: true,
+        page: 1,
+        limit: 20,
         is_active: true,
       }
       

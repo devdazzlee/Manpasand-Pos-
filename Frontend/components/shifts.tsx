@@ -383,6 +383,7 @@ function statusLabel(status?: string) {
 
 export function Shifts() {
   const [rows, setRows] = useState<ShiftRow[]>([]);
+  const [listMeta, setListMeta] = useState({ total: 0, totalPages: 1 });
   const [summary, setSummary] = useState<Summary>({
     total: 0,
     active: 0,
@@ -426,7 +427,7 @@ export function Shifts() {
   const loadEmployees = useCallback(async () => {
     try {
       const res = await apiClient.get("/employee", {
-        params: { fetch_all: "true" },
+        params: { page: 1, limit: 100 },
       });
       const list = (res.data?.data || []) as EmployeeOption[];
       setEmployees(
@@ -440,7 +441,10 @@ export function Shifts() {
   const fetchShifts = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, string> = { fetch_all: "true" };
+      const params: Record<string, string> = {
+        page: String(page),
+        limit: String(PAGE_SIZE),
+      };
       if (search.trim()) params.search = search.trim();
       if (statusFilter !== "all") params.status = statusFilter;
       if (periodFilter !== "all" && !dateFrom && !dateTo) {
@@ -452,6 +456,10 @@ export function Shifts() {
 
       const res = await apiClient.get("/shift-assignment", { params });
       setRows(res.data?.data || []);
+      setListMeta({
+        total: Number(res.data?.meta?.total) || (res.data?.data || []).length,
+        totalPages: Math.max(1, Number(res.data?.meta?.totalPages) || 1),
+      });
       const s = res.data?.meta?.summary;
       setSummary({
         total: Number(s?.total) || 0,
@@ -471,6 +479,7 @@ export function Shifts() {
       setInitialLoading(false);
     }
   }, [
+    page,
     search,
     statusFilter,
     periodFilter,
@@ -487,12 +496,9 @@ export function Shifts() {
     fetchShifts();
   }, [fetchShifts]);
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const totalPages = Math.max(1, listMeta.totalPages);
   const pageSafe = Math.min(page, totalPages);
-  const pageRows = rows.slice(
-    (pageSafe - 1) * PAGE_SIZE,
-    pageSafe * PAGE_SIZE,
-  );
+  const pageRows = rows;
 
   const hasFilters =
     Boolean(search.trim()) ||
@@ -1140,7 +1146,7 @@ export function Shifts() {
           </div>
         )}
 
-        {rows.length > PAGE_SIZE && (
+        {listMeta.total > PAGE_SIZE && (
           <div className="flex items-center justify-between pt-4">
             <p className="text-xs text-gray-500">
               Showing {(pageSafe - 1) * PAGE_SIZE + 1}–

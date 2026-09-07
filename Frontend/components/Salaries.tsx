@@ -184,6 +184,7 @@ const formatDate = (value?: string | null) => {
 
 export function Salaries() {
   const [rows, setRows] = useState<SalaryRow[]>([]);
+  const [listMeta, setListMeta] = useState({ total: 0, totalPages: 1 });
   const [summary, setSummary] = useState<Summary>({
     totalAmount: 0,
     paidAmount: 0,
@@ -221,7 +222,7 @@ export function Salaries() {
     setMetaLoading(true);
     try {
       const res = await apiClient.get("/employee", {
-        params: { fetch_all: "true" },
+        params: { page: 1, limit: 100 },
       });
       const list = (res.data?.data || []) as EmployeeOption[];
       setEmployees(
@@ -237,7 +238,10 @@ export function Salaries() {
   const fetchSalaries = useCallback(async () => {
     setLoading(true);
     try {
-      const params: Record<string, string> = { fetch_all: "true" };
+      const params: Record<string, string> = {
+        page: String(page),
+        limit: String(PAGE_SIZE),
+      };
       if (search.trim()) params.search = search.trim();
       if (paidFilter === "paid") params.is_paid = "true";
       if (paidFilter === "unpaid") params.is_paid = "false";
@@ -247,6 +251,10 @@ export function Salaries() {
 
       const res = await apiClient.get("/salaries", { params });
       setRows(res.data?.data || []);
+      setListMeta({
+        total: Number(res.data?.meta?.total) || (res.data?.data || []).length,
+        totalPages: Math.max(1, Number(res.data?.meta?.totalPages) || 1),
+      });
       const s = res.data?.meta?.summary;
       setSummary({
         totalAmount: Number(s?.totalAmount) || 0,
@@ -262,7 +270,7 @@ export function Salaries() {
       setLoading(false);
       setInitialLoading(false);
     }
-  }, [search, paidFilter, monthFilter, yearFilter, employeeFilter]);
+  }, [page, search, paidFilter, monthFilter, yearFilter, employeeFilter]);
 
   useEffect(() => {
     loadEmployees();
@@ -272,9 +280,9 @@ export function Salaries() {
     fetchSalaries();
   }, [fetchSalaries]);
 
-  const totalPages = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const totalPages = Math.max(1, listMeta.totalPages);
   const pageSafe = Math.min(page, totalPages);
-  const pageRows = rows.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE);
+  const pageRows = rows;
 
   const hasFilters =
     Boolean(search.trim()) ||
@@ -877,7 +885,7 @@ export function Salaries() {
             </div>
           )}
 
-          {rows.length > PAGE_SIZE && (
+          {listMeta.total > PAGE_SIZE && (
             <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
               <p className="text-xs text-gray-500">
                 Page {pageSafe} of {totalPages}

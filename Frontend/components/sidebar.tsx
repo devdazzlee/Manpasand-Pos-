@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ComponentType, type SVGProps } from "react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import { Badge } from "@/components/ui/badge";
@@ -43,7 +43,6 @@ import {
   Clock,
   Shield,
   StoreIcon,
-  Barcode,
   X,
   Warehouse,
   Globe,
@@ -55,8 +54,8 @@ import {
   Eye,
   EyeOff,
   Loader2,
-  type LucideIcon,
 } from "lucide-react";
+import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 
 const ADMIN_ROLES: UserRole[] = ["SUPER_ADMIN", "ADMIN"];
 const SALES_ROLES: UserRole[] = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER"];
@@ -95,7 +94,7 @@ const STAFF_ROLES: UserRole[] = [
 interface SidebarMenuItem {
   id: string;
   label: string;
-  icon: LucideIcon;
+  icon: ComponentType<SVGProps<SVGSVGElement>>;
   badge?: string;
   roles?: UserRole[];
 }
@@ -155,7 +154,7 @@ const menuSections: SidebarMenuSection[] = [
       {
         id: "barcode-generator",
         label: "Barcode Generator",
-        icon: Barcode,
+        icon: BarcodeScanIcon,
         roles: SALES_ROLES,
       },
     ],

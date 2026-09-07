@@ -647,6 +647,12 @@ function ledgerTypeBadge(type: LedgerEntry["type"]) {
 
 export function Customers() {
   const [list, setList] = useState<Customer[]>([]);
+  const [listMeta, setListMeta] = useState({
+    total: 0,
+    page: 1,
+    limit: PAGE_SIZE,
+    totalPages: 1,
+  });
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
@@ -702,19 +708,39 @@ export function Customers() {
   const fetchList = useCallback(async () => {
     setLoading(true);
     try {
-      const res = await apiClient.get(`${API_BASE}/customer`);
+      const params: Record<string, string | number | boolean> = {
+        page,
+        limit: PAGE_SIZE,
+      };
+      if (search.trim()) params.search = search.trim();
+      if (statusFilter === "active") params.is_active = true;
+      if (statusFilter === "inactive") params.is_active = false;
+      if (statusFilter === "new") {
+        params.created_after = monthStartDate().toISOString();
+      }
+      const res = await apiClient.get(`${API_BASE}/customer`, { params });
       setList(res.data.data || []);
+      setListMeta({
+        total: Number(res.data?.meta?.total) || (res.data.data || []).length,
+        page: Number(res.data?.meta?.page) || page,
+        limit: Number(res.data?.meta?.limit) || PAGE_SIZE,
+        totalPages: Math.max(1, Number(res.data?.meta?.totalPages) || 1),
+      });
     } catch (e: any) {
       toast.error(extractApiError(e, "Failed to load customers"));
     } finally {
       setLoading(false);
       setIsInitialLoading(false);
     }
-  }, []);
+  }, [page, search, statusFilter]);
 
   useEffect(() => {
-    fetchList();
-  }, [fetchList]);
+    const delay = search.trim() ? 300 : 0;
+    const timer = window.setTimeout(() => {
+      void fetchList();
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [fetchList, search]);
 
   const resetPaymentForm = () => {
     setPaymentAmount("");
@@ -961,32 +987,18 @@ export function Customers() {
     const activeCount = list.filter((c) => c.is_active).length;
     const inactiveCount = list.length - activeCount;
     const newCount = list.filter(isNewThisMonth).length;
-    return { activeCount, inactiveCount, newCount };
-  }, [list]);
+    return {
+      activeCount,
+      inactiveCount,
+      newCount,
+      total: listMeta.total,
+    };
+  }, [list, listMeta.total]);
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return list.filter((c) => {
-      if (statusFilter === "active" && !c.is_active) return false;
-      if (statusFilter === "inactive" && c.is_active) return false;
-      if (statusFilter === "new" && !isNewThisMonth(c)) return false;
-      if (!term) return true;
-      const email = displayEmail(c.email) || "";
-      return (
-        (c.name || "").toLowerCase().includes(term) ||
-        (c.phone_number || "").toLowerCase().includes(term) ||
-        email.toLowerCase().includes(term) ||
-        (c.address || "").toLowerCase().includes(term)
-      );
-    });
-  }, [list, search, statusFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const filtered = list;
+  const totalPages = Math.max(1, listMeta.totalPages);
   const pageSafe = Math.min(page, totalPages);
-  const pageRows = filtered.slice(
-    (pageSafe - 1) * PAGE_SIZE,
-    pageSafe * PAGE_SIZE,
-  );
+  const pageRows = filtered;
 
   const hasFilters = Boolean(search.trim()) || statusFilter !== "all";
 
@@ -995,7 +1007,7 @@ export function Customers() {
     label: string;
     count: number;
   }> = [
-    { key: "all", label: "All", count: list.length },
+    { key: "all", label: "All", count: listMeta.total },
     { key: "active", label: "Active", count: stats.activeCount },
     { key: "inactive", label: "Inactive", count: stats.inactiveCount },
   ];
@@ -1075,7 +1087,7 @@ export function Customers() {
         items={[
           {
             label: "Total Customers",
-            value: list.length.toLocaleString(),
+            value: stats.total.toLocaleString(),
             icon: Users,
             hint: "All customers in the system",
             onClick: () => {
@@ -1212,7 +1224,7 @@ export function Customers() {
             <p className="text-sm font-semibold text-gray-900">
               Customer List{" "}
               <span className="font-normal text-gray-500">
-                ({filtered.length})
+                ({listMeta.total})
               </span>
             </p>
           </div>
@@ -1444,7 +1456,7 @@ export function Customers() {
             </div>
           )}
 
-          {filtered.length > PAGE_SIZE && (
+          {listMeta.total > PAGE_SIZE && (
             <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
               <p className="text-xs text-gray-500">
                 Page {pageSafe} of {totalPages}

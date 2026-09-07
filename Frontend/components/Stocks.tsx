@@ -122,7 +122,9 @@ export function Stocks() {
     const loadMeta = async () => {
       setIsInitialLoading(true);
       try {
-        const bRes = await apiClient.get(`${API_BASE}/branches?fetch_all=true`);
+        const bRes = await apiClient.get(`${API_BASE}/branches`, {
+          params: { page: 1, limit: 100 },
+        });
         setBranches(bRes.data.data);
         toast({
           title: "Success",
@@ -193,7 +195,8 @@ export function Stocks() {
       setLoadingProducts(true);
       try {
         const params: any = {
-          fetch_all: true,
+          page: 1,
+          limit: 20,
           is_active: true,
         };
         
@@ -218,7 +221,10 @@ export function Stocks() {
       }
     };
 
-    fetchProducts();
+    const timer = window.setTimeout(() => {
+      fetchProducts();
+    }, productSearch ? 300 : 0);
+    return () => window.clearTimeout(timer);
   }, [productSearch]);
 
   // Filter stocks by product name

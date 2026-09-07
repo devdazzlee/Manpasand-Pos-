@@ -16,7 +16,7 @@ export const listExpenses = asyncHandler(async (req: Request, res: Response) => 
         page: Number(page),
         limit: Number(limit),
     });
-    new ApiResponse(result.data, 'Expenses retrieved successfully', 200).send(res);
+    new ApiResponse(result.data, 'Expenses retrieved successfully', 200, true, result.meta).send(res);
 });
 
 export const createEmployeeType = asyncHandler(async (req: Request, res: Response) => {

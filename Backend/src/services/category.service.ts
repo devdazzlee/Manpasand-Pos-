@@ -4,7 +4,7 @@ import { AppError } from '../utils/apiError';
 import { CreateCategoryInput, UpdateCategoryInput } from '../validations/category.validation';
 import { imageService } from './common/cloudinaryService';
 import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
-import { invalidatePattern } from '../utils/webCache';
+import { parsePagination, paginationMeta } from '../utils/pagination';
 
 const CATEGORY_CLOUDINARY_FOLDER = 'manpasand/categories';
 
@@ -22,14 +22,6 @@ function resolveCategoryImage(
   category: { CategoryImages?: { image: string }[] },
 ): string | null {
   return category.CategoryImages?.[0]?.image ?? null;
-}
-
-export async function invalidateWebCategoryCache(): Promise<void> {
-  await Promise.all([
-    invalidatePattern('home:'),
-    invalidatePattern('categories:'),
-    invalidatePattern('category:'),
-  ]);
 }
 
 export class CategoryService {
@@ -73,10 +65,7 @@ export class CategoryService {
       where: { id },
       include: {
         branch: true,
-        products: {
-          where: { is_active: true },
-          select: { id: true, name: true },
-        },
+        _count: { select: { products: true } },
         ...CATEGORY_IMAGE_INCLUDE,
       },
     });
@@ -85,10 +74,11 @@ export class CategoryService {
       throw new AppError(404, 'Category not found');
     }
 
-    const { CategoryImages, ...rest } = category;
+    const { CategoryImages, _count, ...rest } = category;
     return {
       ...rest,
       image: resolveCategoryImage(category),
+      product_count: _count.products,
     };
   }
 
@@ -160,14 +150,16 @@ export class CategoryService {
       where.branch_id = branch_id;
     }
 
-    const shouldPaginate =
-      typeof limit === 'number' && Number.isFinite(limit) && limit > 0;
+    const { page: safePage, limit: safeLimit, skip } = parsePagination({
+      page,
+      limit: limit ?? 20,
+    });
 
     const [categories, total] = await Promise.all([
       prisma.category.findMany({
         where,
-        skip: shouldPaginate ? (page - 1) * limit : undefined,
-        take: shouldPaginate ? limit : undefined,
+        skip,
+        take: safeLimit,
         orderBy: { created_at: 'desc' },
         include: {
           branch: {
@@ -191,12 +183,7 @@ export class CategoryService {
           product_count: _count.products,
         };
       }),
-      meta: {
-        total,
-        page,
-        limit: shouldPaginate ? limit : total,
-        totalPages: shouldPaginate ? Math.ceil(total / limit) : 1,
-      },
+      meta: paginationMeta(total, safePage, safeLimit),
     };
   }
 

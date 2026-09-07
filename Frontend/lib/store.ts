@@ -77,6 +77,13 @@ interface Customer {
   is_active?: boolean
 }
 
+export type ListMeta = {
+  total: number
+  page: number
+  limit: number
+  totalPages: number
+}
+
 interface StoreState {
   // Data
   products: Product[]
@@ -84,6 +91,8 @@ interface StoreState {
   customers: Customer[]
   branches: Branch[]
   suppliers: any[]
+  productsMeta: ListMeta | null
+  customersMeta: ListMeta | null
   
   // Loading states
   productsLoading: boolean
@@ -100,11 +109,29 @@ interface StoreState {
   lastSuppliersFetch: number | null
   
   // Actions
-  fetchProducts: (options?: { force?: boolean; search?: string; categoryId?: string }) => Promise<void>
+  fetchProducts: (options?: {
+    force?: boolean
+    search?: string
+    categoryId?: string
+    subcategoryId?: string
+    page?: number
+    limit?: number
+    isActive?: boolean
+    displayOnPos?: boolean
+    isFeatured?: boolean
+    stockStatus?: "out" | "low"
+  }) => Promise<void>
   fetchCategories: (force?: boolean) => Promise<void>
-  fetchCustomers: (force?: boolean) => Promise<void>
+  fetchCustomers: (options?: {
+    force?: boolean
+    search?: string
+    page?: number
+    limit?: number
+    isActive?: boolean
+    createdAfter?: string
+  }) => Promise<void>
   fetchBranches: (force?: boolean) => Promise<void>
-  fetchSuppliers: (force?: boolean) => Promise<void>
+  fetchSuppliers: (options?: { force?: boolean; search?: string; page?: number; limit?: number }) => Promise<void>
   upsertProductFromApi: (rawProduct: any) => void
   removeProductFromStore: (productId: string) => void
   upsertCategoryInStore: (category: Category) => void
@@ -213,6 +240,8 @@ export const useStore = create<StoreState>()(
       customers: [],
       branches: [],
       suppliers: [],
+      productsMeta: null,
+      customersMeta: null,
       productsLoading: false,
       categoriesLoading: false,
       customersLoading: false,
@@ -225,21 +254,48 @@ export const useStore = create<StoreState>()(
       lastSuppliersFetch: null,
 
       // Fetch products with caching and full-database search support
-      fetchProducts: async (options?: { force?: boolean; search?: string; categoryId?: string }) => {
-        const { force = false, search, categoryId } = options ?? {}
+      fetchProducts: async (options?: {
+        force?: boolean
+        search?: string
+        categoryId?: string
+        subcategoryId?: string
+        page?: number
+        limit?: number
+        isActive?: boolean
+        displayOnPos?: boolean
+        isFeatured?: boolean
+        stockStatus?: "out" | "low"
+      }) => {
+        const {
+          force = false,
+          search,
+          categoryId,
+          subcategoryId,
+          page = 1,
+          limit = 20,
+          isActive,
+          displayOnPos,
+          isFeatured,
+          stockStatus,
+        } = options ?? {}
         const state = get()
         const now = Date.now()
-        const hasFilters = Boolean(search) || Boolean(categoryId)
+        const hasFilters =
+          Boolean(search) ||
+          Boolean(categoryId) ||
+          Boolean(subcategoryId) ||
+          page > 1 ||
+          isActive !== undefined ||
+          displayOnPos !== undefined ||
+          isFeatured !== undefined ||
+          Boolean(stockStatus)
 
-        // Use cached data when no filters applied AND we're not forcing a refresh
-        // Skip cache when force is true to ensure fresh data
         if (!hasFilters && !force) {
           if (
             state.products.length > 0 &&
             state.lastProductsFetch &&
             now - state.lastProductsFetch < CACHE_DURATION
           ) {
-            // Audit: Cache hit within duration
             return
           }
         }
@@ -247,30 +303,30 @@ export const useStore = create<StoreState>()(
         set({ productsLoading: true })
 
         try {
-          // Check if online
           const isOnline = syncManager.canMakeRequest()
           
-          // If offline, try to load from IndexedDB first
           if (!isOnline) {
-            console.log('📡 Offline mode - loading products from IndexedDB')
             const offlineProducts = await offlineDB.getProducts()
             if (offlineProducts.length > 0) {
               const mappedProducts = offlineProducts.map(p => mapApiProductToStoreProduct(p.data || p))
               set({
-                products: mappedProducts,
+                products: mappedProducts.slice(0, limit),
                 productsLoading: false,
                 lastProductsFetch: now,
+                productsMeta: {
+                  total: mappedProducts.length,
+                  page: 1,
+                  limit,
+                  totalPages: Math.max(1, Math.ceil(mappedProducts.length / limit)),
+                },
               })
-              console.log(`Loaded ${mappedProducts.length} products from offline cache`)
               return
             }
           }
           
-          // Check if user is ADMIN - admins should see all products
           const userRole = localStorage.getItem("role")
           const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN"
           
-          // Get branch_id from localStorage if available (only for non-admin users)
           let branchId = null
           if (!isAdmin) {
             try {
@@ -288,53 +344,53 @@ export const useStore = create<StoreState>()(
           }
 
           const params: Record<string, any> = {
-            fetch_all: true,
+            page,
+            limit,
             ...(branchId && !isAdmin ? { branch_id: branchId } : {}),
           }
 
-          if (force) {
-            params._t = Date.now()
-          }
-
-          if (search) {
-            params.search = search
-          }
-
-          if (categoryId) {
-            params.category_id = categoryId
-          }
+          if (force) params._t = Date.now()
+          if (search) params.search = search
+          if (categoryId) params.category_id = categoryId
+          if (subcategoryId) params.subcategory_id = subcategoryId
+          if (isActive !== undefined) params.is_active = isActive
+          if (displayOnPos !== undefined) params.display_on_pos = displayOnPos
+          if (isFeatured !== undefined) params.is_featured = isFeatured
+          if (stockStatus) params.stock_status = stockStatus
 
           const res = await apiClient.get("/products", { params })
           const rawProducts = Array.isArray(res.data?.data) ? res.data.data : []
           const apiProducts = rawProducts.map(mapApiProductToStoreProduct)
+          const meta = res.data?.meta || {
+            total: apiProducts.length,
+            page,
+            limit,
+            totalPages: 1,
+          }
 
-          // Save products to IndexedDB for offline use
           if (apiProducts.length > 0) {
             await offlineDB.saveProducts(rawProducts)
           }
 
           set({
             products: apiProducts,
+            productsMeta: meta,
             productsLoading: false,
             lastProductsFetch: now,
           })
-
-          console.log(`Loaded ${apiProducts.length} products${hasFilters ? ' (full search)' : ''}`)
         } catch (error) {
           console.log('Failed to fetch products:', error)
           
-          // If online request failed, try offline cache
           if (syncManager.canMakeRequest()) {
             try {
               const offlineProducts = await offlineDB.getProducts()
               if (offlineProducts.length > 0) {
                 const mappedProducts = offlineProducts.map(p => mapApiProductToStoreProduct(p.data || p))
                 set({
-                  products: mappedProducts,
+                  products: mappedProducts.slice(0, limit),
                   productsLoading: false,
                   lastProductsFetch: now,
                 })
-                console.log(`Using offline cache: ${mappedProducts.length} products`)
                 return
               }
             } catch (offlineError) {
@@ -367,7 +423,7 @@ export const useStore = create<StoreState>()(
           set({ categoriesLoading: true })
           
           try {
-            const res = await apiClient.get("/categories", { params: { limit: 1000 } })
+            const res = await apiClient.get("/categories", { params: { page: 1, limit: 50 } })
             const categories = [{ id: "all", name: "All" }, ...res.data.data]
             
             set({ 
@@ -390,30 +446,49 @@ export const useStore = create<StoreState>()(
       },
 
       // Fetch customers with caching
-      fetchCustomers: async (force = false) => {
+      fetchCustomers: async (options?: {
+        force?: boolean
+        search?: string
+        page?: number
+        limit?: number
+        isActive?: boolean
+        createdAfter?: string
+      }) => {
+        const force = typeof options === "boolean" ? options : Boolean(options?.force)
+        const search = typeof options === "object" ? options?.search : undefined
+        const page = typeof options === "object" ? options?.page ?? 1 : 1
+        const limit = typeof options === "object" ? options?.limit ?? 20 : 20
+        const isActive = typeof options === "object" ? options?.isActive : undefined
+        const createdAfter = typeof options === "object" ? options?.createdAfter : undefined
         const state = get()
         const now = Date.now()
         
-        if (!force && 
+        if (!force && !search && page === 1 && isActive === undefined && !createdAfter &&
             state.customers.length > 0 && 
             state.lastCustomersFetch && 
             (now - state.lastCustomersFetch) < CACHE_DURATION) {
-          // Audit: Cache hit within duration
           return
         }
 
         set({ customersLoading: true })
         
         try {
-          const res = await apiClient.get("/customer")
+          const res = await apiClient.get("/customer", {
+            params: {
+              page,
+              limit,
+              ...(search ? { search } : {}),
+              ...(isActive !== undefined ? { is_active: isActive } : {}),
+              ...(createdAfter ? { created_after: createdAfter } : {}),
+            },
+          })
           
           set({ 
             customers: res.data.data, 
+            customersMeta: res.data.meta || null,
             customersLoading: false,
             lastCustomersFetch: now
           })
-          
-          console.log(`Loaded ${res.data.data.length} customers`)
         } catch (error) {
           console.log('Failed to fetch customers:', error)
           set({ customersLoading: false })
@@ -437,7 +512,7 @@ export const useStore = create<StoreState>()(
         set({ branchesLoading: true })
         
         try {
-          const res = await apiClient.get("/branches", { params: { fetch_all: true } })
+          const res = await apiClient.get("/branches", { params: { page: 1, limit: 50 } })
           const branchesRaw = res.data?.data || res.data || []
           const branches = branchesRaw.map((b: any) => ({
              id: b.id,
@@ -462,11 +537,15 @@ export const useStore = create<StoreState>()(
       },
 
       // Fetch suppliers with caching
-      fetchSuppliers: async (force = false) => {
+      fetchSuppliers: async (options?: { force?: boolean; search?: string; page?: number; limit?: number }) => {
+        const force = typeof options === "boolean" ? options : Boolean(options?.force)
+        const search = typeof options === "object" ? options?.search : undefined
+        const page = typeof options === "object" ? options?.page ?? 1 : 1
+        const limit = typeof options === "object" ? options?.limit ?? 20 : 20
         const state = get()
         const now = Date.now()
         
-        if (!force && 
+        if (!force && !search && page === 1 &&
             state.suppliers.length > 0 && 
             state.lastSuppliersFetch && 
             (now - state.lastSuppliersFetch) < CACHE_DURATION) {
@@ -476,7 +555,9 @@ export const useStore = create<StoreState>()(
         set({ suppliersLoading: true })
         
         try {
-          const res = await apiClient.get("/suppliers", { params: { fetch_all: true } })
+          const res = await apiClient.get("/suppliers", {
+            params: { page, limit, ...(search ? { search } : {}) },
+          })
           const suppliers = res.data.data || []
           
           set({ 
@@ -484,8 +565,6 @@ export const useStore = create<StoreState>()(
             suppliersLoading: false,
             lastSuppliersFetch: now
           })
-          
-          console.log(`Loaded ${suppliers.length} suppliers`)
         } catch (error) {
           console.log('Failed to fetch suppliers:', error)
           set({ suppliersLoading: false })
@@ -573,26 +652,25 @@ export const useStore = create<StoreState>()(
     }),
     {
       name: 'pos-store',
-      version: 3,
+      version: 4,
       migrate: (persistedState) => {
         const state = (persistedState || {}) as Partial<StoreState>
         return {
           ...state,
           products: [],
           categories: [],
+          customers: [],
+          suppliers: [],
           lastCategoriesFetch: null,
+          lastProductsFetch: null,
+          lastCustomersFetch: null,
+          lastSuppliersFetch: null,
         } as StoreState
       },
       partialize: (state) => ({
-        // Products and categories are fetched fresh on load — persisting them
-        // caused stale dropdowns/cards after edits and on browser refresh.
-        customers: state.customers,
+        // List pages are fetched fresh so we never persist a stale full catalog.
         branches: state.branches,
-        suppliers: state.suppliers,
-        lastProductsFetch: state.lastProductsFetch,
-        lastCustomersFetch: state.lastCustomersFetch,
         lastBranchesFetch: state.lastBranchesFetch,
-        lastSuppliersFetch: state.lastSuppliersFetch,
       }),
     }
   )

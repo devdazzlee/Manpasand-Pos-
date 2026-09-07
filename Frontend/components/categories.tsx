@@ -344,7 +344,9 @@ export function Categories() {
   const fetchBranches = async () => {
     try {
       setBranchesLoading(true)
-      const response = await apiClient.get("/branches?is_active=true&fetch_all=true")
+      const response = await apiClient.get("/branches", {
+        params: { page: 1, limit: 100, is_active: true },
+      })
       setBranches(response.data.data || [])
     } catch (error: any) {
       console.log("Error fetching branches:", error)
@@ -362,58 +364,21 @@ export function Categories() {
   const fetchCategories = async () => {
     try {
       setIsLoading(true)
-      // Check if user is ADMIN - admins should see all categories
-      const userRole = localStorage.getItem("role");
-      const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
       
       const params: any = {
-        fetch_all: true,
+        page: 1,
+        limit: 50,
       };
       
       const response = await apiClient.get("/categories", { params })
       const categoriesData = response.data.data || []
       
-      // Fetch product counts for each category
-      const categoriesWithCounts = await Promise.all(
-        categoriesData.map(async (category: Category) => {
-          try {
-            // Check if user is ADMIN - admins should see all products
-            const userRole = localStorage.getItem("role");
-            const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
-            
-            const params: any = {
-              category_id: category.id,
-              fetch_all: true,
-            };
-            
-            // Don't filter by branch_id for admin users
-            if (!isAdmin) {
-              const branchStr = localStorage.getItem("branch");
-              if (branchStr && branchStr !== "Not Found") {
-                try {
-                  const branchObj = JSON.parse(branchStr);
-                  params.branch_id = branchObj.id || branchStr;
-                } catch (e) {
-                  params.branch_id = branchStr;
-                }
-              }
-            }
-            
-            const productsResponse = await apiClient.get("/products", { params });
-            const products = productsResponse.data?.data || [];
-            return normalizeCategory({
-              ...category,
-              productCount: Array.isArray(products) ? products.length : 0,
-            } as Record<string, unknown>);
-          } catch (error) {
-            console.error(`Error fetching products for category ${category.id}:`, error);
-            return normalizeCategory({
-              ...category,
-              productCount: 0,
-            } as Record<string, unknown>);
-          }
-        })
-      );
+      const categoriesWithCounts = categoriesData.map((category: Category) =>
+        normalizeCategory({
+          ...category,
+          productCount: Number((category as Category & { product_count?: number }).product_count || category.productCount || 0),
+        } as Record<string, unknown>),
+      )
       
       setCategories(categoriesWithCounts);
     } catch (error: any) {
@@ -438,7 +403,8 @@ export function Categories() {
       
       const params: any = {
         category_id: categoryId,
-        fetch_all: true,
+        page: 1,
+        limit: 20,
       };
       
       // Don't filter by branch_id for admin users

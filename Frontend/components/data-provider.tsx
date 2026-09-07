@@ -10,7 +10,7 @@ interface DataProviderProps {
 }
 
 export function DataProvider({ children }: DataProviderProps) {
-  const { fetchProducts, fetchCategories, fetchCustomers } = useStore()
+  const { fetchCategories } = useStore()
   const { toast } = useToast()
 
   useEffect(() => {
@@ -24,9 +24,7 @@ export function DataProvider({ children }: DataProviderProps) {
         
         // Initialize all data in parallel
         await Promise.all([
-          fetchProducts(),
           fetchCategories(true),
-          fetchCustomers()
         ])
         console.log('✅ All data initialized successfully')
       } catch (error) {

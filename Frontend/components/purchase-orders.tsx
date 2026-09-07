@@ -224,10 +224,11 @@ export function PurchaseOrders() {
     const fetchProducts = async () => {
       setLoadingProducts(true)
       try {
-        const params: any = {
-          fetch_all: true,
-          is_active: true,
-        }
+      const params: any = {
+        page: 1,
+        limit: 20,
+        is_active: true,
+      }
         
         if (productSearch) {
           params.search = productSearch
@@ -251,8 +252,11 @@ export function PurchaseOrders() {
       }
     }
 
-    fetchProducts()
-  }, [productSearch])
+    const timer = window.setTimeout(() => {
+      fetchProducts();
+    }, productSearch ? 300 : 0);
+    return () => window.clearTimeout(timer);
+  }, [productSearch]);
 
   const getStatusColor = (status: string) => {
     switch (status) {

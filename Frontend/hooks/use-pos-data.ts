@@ -5,8 +5,10 @@ import { useCallback, useMemo } from 'react'
 export function usePosData() {
   // 1. Atomic selectors for Data
   const products = useStore(state => state.products)
+  const productsMeta = useStore(state => state.productsMeta)
   const categories = useStore(state => state.categories)
   const customers = useStore(state => state.customers)
+  const customersMeta = useStore(state => state.customersMeta)
   const branches = useStore(state => state.branches)
   const suppliers = useStore(state => state.suppliers)
   
@@ -37,9 +39,9 @@ export function usePosData() {
       await Promise.all([
         fetchProductsAction({ force: true }),
         fetchCategoriesAction(true),
-        fetchCustomersAction(true),
+        fetchCustomersAction({ force: true }),
         fetchBranchesAction(true),
-        fetchSuppliersAction(true)
+        fetchSuppliersAction({ force: true })
       ])
       toast.success("Data Refreshed", {
         description: "All enterprise telemetry has been updated.",
@@ -52,7 +54,18 @@ export function usePosData() {
   }, [fetchProductsAction, fetchCategoriesAction, fetchCustomersAction, fetchBranchesAction, fetchSuppliersAction])
 
   // 5. Stable Wrapper for fetchProducts with options support
-  const fetchProducts = useCallback((options?: { force?: boolean; search?: string; categoryId?: string }) => 
+  const fetchProducts = useCallback((options?: {
+    force?: boolean
+    search?: string
+    categoryId?: string
+    subcategoryId?: string
+    page?: number
+    limit?: number
+    isActive?: boolean
+    displayOnPos?: boolean
+    isFeatured?: boolean
+    stockStatus?: "out" | "low"
+  }) => 
     fetchProductsAction(options), [fetchProductsAction])
 
   const refreshProducts = useCallback(async () => {
@@ -63,8 +76,10 @@ export function usePosData() {
   return useMemo(() => ({
     // Data
     products,
+    productsMeta,
     categories,
     customers,
+    customersMeta,
     branches,
     suppliers,
     
@@ -90,7 +105,7 @@ export function usePosData() {
     fetchSuppliers: fetchSuppliersAction,
     clearStore: clearStoreAction,
   }), [
-    products, categories, customers, branches, suppliers,
+    products, productsMeta, categories, customers, customersMeta, branches, suppliers,
     productsLoading, categoriesLoading, customersLoading, branchesLoading, suppliersLoading,
     isAnyLoading, refreshAllData, refreshProducts, fetchProducts,
     upsertProductFromApiAction, removeProductFromStoreAction,

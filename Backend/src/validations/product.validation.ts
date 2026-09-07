@@ -63,12 +63,14 @@ export const getProductSchema = z.object({
 export const listProductsSchema = z.object({
     query: z.object({
         page: z.string().optional().default('1'),
-        limit: z.string().optional().default('10'),
+        limit: z.string().optional().default('20'),
         search: z.string().optional(),
         category_id: z.string().optional(),
         subcategory_id: z.string().optional(),
         is_active: z.string().optional(),
         display_on_pos: z.string().optional(),
+        is_featured: z.string().optional(),
+        stock_status: z.enum(['out', 'low']).optional(),
         branch_id: z.string().optional(),
         fetch_all: z.string().optional(),
     }),

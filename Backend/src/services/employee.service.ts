@@ -162,7 +162,7 @@ export class EmployeeService {
       ];
     }
 
-    const take = fetch_all ? 1000 : limit;
+    const take = fetch_all ? Math.min(100, Math.max(limit, 1)) : limit;
     const skip = fetch_all ? 0 : (page - 1) * limit;
 
     const [employees, total] = await Promise.all([
@@ -390,10 +390,10 @@ export class EmployeeService {
     }
   }
 
-  async listDepartments(fetch_all = true) {
+  async listDepartments(fetch_all = false) {
     const departments = await prisma.department.findMany({
       orderBy: { name: 'asc' },
-      take: fetch_all ? undefined : 100,
+      take: fetch_all ? 100 : 20,
       include: {
         _count: { select: { employees: true } },
       },

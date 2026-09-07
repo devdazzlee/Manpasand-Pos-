@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useMemo, useRef, useState, useCallback } from "react";
+import React, { useMemo, useRef, useState, useCallback, useEffect } from "react";
+import apiClient from "@/lib/apiClient";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -110,14 +111,51 @@ export function StockProductPicker({
 }: StockProductPickerProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [categoryFilter, setCategoryFilter] = useState("all");
+  const [remoteProducts, setRemoteProducts] = useState<StockPickerProduct[]>([]);
+  const [remoteLoading, setRemoteLoading] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const isSplit = layout === "split";
 
   const categoryOptions = useMemo(() => dedupeCategories(categories), [categories]);
 
+  useEffect(() => {
+    const timer = window.setTimeout(async () => {
+      setRemoteLoading(true);
+      try {
+        const res = await apiClient.get("/products", {
+          params: {
+            page: 1,
+            limit: 20,
+            is_active: true,
+            search: searchTerm.trim() || undefined,
+            category_id: categoryFilter !== "all" ? categoryFilter : undefined,
+          },
+        });
+        const raw = Array.isArray(res.data?.data) ? res.data.data : [];
+        setRemoteProducts(
+          raw.map((item: any) => ({
+            id: item.id,
+            name: item.name,
+            sku: item.sku,
+            barcode: item.code || item.sku,
+            category_id: item.category?.id || item.category_id,
+            categoryId: item.category?.id || item.category_id,
+          })),
+        );
+      } catch {
+        setRemoteProducts([]);
+      } finally {
+        setRemoteLoading(false);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [searchTerm, categoryFilter]);
+
   const filteredProducts = useMemo(() => {
+    const catalog = remoteProducts.length > 0 ? remoteProducts : products;
     const term = normalizeSearch(searchTerm);
-    return products
+    return catalog
       .filter((p) => {
         if (
           categoryFilter !== "all" &&
@@ -128,7 +166,7 @@ export function StockProductPicker({
         return matchesProduct(p, term);
       })
       .slice(0, maxGridResults);
-  }, [products, searchTerm, categoryFilter, maxGridResults]);
+  }, [products, remoteProducts, searchTerm, categoryFilter, maxGridResults]);
 
   const lineMap = useMemo(
     () => new Map(lines.map((l) => [l.productId, l])),
@@ -262,7 +300,7 @@ export function StockProductPicker({
         <span className="hidden sm:inline">Enter = add top match</span>
       </div>
 
-      {loading ? (
+      {loading || remoteLoading ? (
         <div
           className={cn(
             "grid gap-1.5",

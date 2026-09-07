@@ -8,6 +8,7 @@
 import { offlineDB } from './offline-db';
 import { syncManager } from './offline-sync';
 import { offlineAPIClient } from './offline-api-client';
+import { collectPaginatedData } from './paginated-fetch';
 
 export async function initializeOfflineMode() {
   try {
@@ -47,47 +48,19 @@ export async function initializeOfflineMode() {
   }
 }
 
-import { API_BASE } from '../config/constants';
-
 async function fetchInitialData() {
   try {
-    const token = localStorage.getItem('token');
-
-    // Fetch products
-    try {
-      const productsRes = await fetch(`${API_BASE}/products`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-      });
-      if (productsRes.ok) {
-        const productsData = await productsRes.json();
-        if (productsData.data) {
-          await offlineDB.saveProducts(productsData.data);
-          console.log(`✅ Cached ${productsData.data.length} products`);
-        }
-      }
-    } catch (error) {
-      console.warn('⚠️ Could not fetch products:', error);
+    const products = await collectPaginatedData('/products', {}, { limit: 100, maxPages: 50 });
+    if (products.length > 0) {
+      await offlineDB.saveProducts(products);
+      console.log(`✅ Cached ${products.length} products`);
     }
 
-    // Fetch customers
-    try {
-      const customersRes = await fetch(`${API_BASE}/customer`, {
-        headers: token ? { 'Authorization': `Bearer ${token}` } : {}
-      });
-      if (customersRes.ok) {
-        const customersData = await customersRes.json();
-        if (customersData.data) {
-          await offlineDB.saveCustomers(customersData.data);
-          console.log(`✅ Cached ${customersData.data.length} customers`);
-        }
-      }
-    } catch (error) {
-      console.warn('⚠️ Could not fetch customers:', error);
+    const customers = await collectPaginatedData('/customer', {}, { limit: 100, maxPages: 50 });
+    if (customers.length > 0) {
+      await offlineDB.saveCustomers(customers);
+      console.log(`✅ Cached ${customers.length} customers`);
     }
-
-    // Fetch other critical data as needed
-    // Add more fetch calls here for categories, branches, etc.
-
   } catch (error) {
     console.error('❌ Failed to fetch initial data:', error);
   }

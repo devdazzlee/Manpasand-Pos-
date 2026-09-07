@@ -8,6 +8,7 @@ import { imageService } from './common/cloudinaryService';
 import { randomUUID } from 'crypto';
 import { addDecimal, asNumber } from '../utils/helpers';
 import { generateUniqueNumericSku, isNineDigitNumericSku } from '../utils/numericBarcodeSku';
+import { parsePagination, paginationMeta, MAX_LIMIT } from '../utils/pagination';
 
 
 type RelationField =
@@ -950,6 +951,8 @@ export class ProductService {
         subcategory_id,
         is_active,
         display_on_pos,
+        is_featured,
+        stock_status,
         branch_id,
         fetchAll = false,
     }: {
@@ -965,6 +968,8 @@ export class ProductService {
         // must pass these explicitly.
         is_active?: boolean;
         display_on_pos?: boolean;
+        is_featured?: boolean;
+        stock_status?: 'out' | 'low';
         branch_id?: string;
         fetchAll?: boolean;
     }) {
@@ -974,6 +979,7 @@ export class ProductService {
             where.OR = [
                 { name: { contains: search, mode: 'insensitive' } },
                 { sku: { contains: search, mode: 'insensitive' } },
+                { code: { contains: search, mode: 'insensitive' } },
                 { description: { contains: search, mode: 'insensitive' } },
             ];
         }
@@ -994,19 +1000,37 @@ export class ProductService {
             where.display_on_pos = display_on_pos;
         }
 
-        const normalizedLimit = limit && limit > 0 ? limit : 10;
-        const pageSize = fetchAll ? 100 : normalizedLimit;
+        if (is_featured !== undefined) {
+            where.is_featured = is_featured;
+        }
+
+        if (stock_status === 'out') {
+            where.NOT = { stock: { some: { current_quantity: { gt: 0 } } } };
+        } else if (stock_status === 'low') {
+            where.stock = {
+                some: {
+                    current_quantity: { gt: 0 },
+                    minimum_quantity: { gt: 0 },
+                },
+            };
+        }
+
+        const { page: pageNumber, limit: normalizedLimit } = parsePagination({ page, limit });
+        const pageSize = fetchAll ? MAX_LIMIT : normalizedLimit;
 
         const minimalSelect: Prisma.ProductSelect = {
             id: true,
             name: true,
             sku: true,
+            code: true,
+            pct_or_hs_code: true,
             purchase_rate: true,
             sales_rate_exc_dis_and_tax: true,
             sales_rate_inc_dis_and_tax: true,
             discount_amount: true,
             is_active: true,
             display_on_pos: true,
+            is_featured: true,
             created_at: true,
             updated_at: true,
             category: {
@@ -1111,14 +1135,7 @@ export class ProductService {
             });
 
         const total = await prisma.product.count({ where });
-
-        const chunkPageCount = Math.max(1, Math.ceil(total / pageSize));
-        const paginatedTotalPages = Math.max(1, Math.ceil(total / Math.max(normalizedLimit, 1)));
-
-        const pagesToFetch = fetchAll ? Array.from({ length: chunkPageCount }, (_, i) => i + 1) : [page];
-
-        const pageResults = await Promise.all(pagesToFetch.map((pageNumber) => fetchPage(pageNumber)));
-        const products = fetchAll ? pageResults.flat() : pageResults[0] || [];
+        const products = await fetchPage(fetchAll ? 1 : pageNumber);
 
         const mapped = products.map((p) => {
             let currentStock: Prisma.Decimal = new Prisma.Decimal(0);
@@ -1158,11 +1175,8 @@ export class ProductService {
         return {
             data: mapped,
             meta: {
-                total,
-                page: fetchAll ? 1 : page,
-                limit: fetchAll ? mapped.length : normalizedLimit,
-                totalPages: fetchAll ? 1 : paginatedTotalPages,
-                fetchAll,
+                ...paginationMeta(total, fetchAll ? 1 : pageNumber, pageSize),
+                fetchAll: false,
             },
         };
     }

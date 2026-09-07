@@ -390,7 +390,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
           fetchSuppliers(),
         ]);
         const brandRes = await apiClient.get(`${API_BASE}/brands`, {
-          params: { limit: 1000 },
+          params: { limit: 100 },
         });
         if (!cancelled) {
           setBrands(brandRes.data?.data || brandRes.data || []);

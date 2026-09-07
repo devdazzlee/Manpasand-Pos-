@@ -65,24 +65,19 @@ export function Reports() {
       const userRole = localStorage.getItem("role")
       const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN"
       
-      const params: any = {
-        fetch_all: true,
-      }
-      
-      // Don't filter by branch_id for admin users
+      const params: Record<string, string> = {}
       if (!isAdmin) {
         const branchStr = localStorage.getItem("branch")
         if (branchStr && branchStr !== "Not Found") {
           try {
             const branchObj = JSON.parse(branchStr)
             params.branch_id = branchObj.id || branchStr
-          } catch (e) {
+          } catch {
             params.branch_id = branchStr
           }
         }
       }
 
-      // Use the new reports API endpoint
       const reportsRes = await apiClient.get("/reports", { params })
 
       console.log("📊 Reports API Response:", reportsRes.data)

@@ -240,7 +240,7 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
     fetchBranches();
     fetchCategories();
     apiClient
-      .get(`${API_BASE}/brands`, { params: { limit: 1000 } })
+      .get(`${API_BASE}/brands`, { params: { limit: 100 } })
       .then((res) => setBrands(res.data?.data || res.data || []))
       .catch(() => setBrands([]));
   }, [fetchBranches, fetchCategories]);

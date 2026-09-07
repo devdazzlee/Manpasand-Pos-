@@ -29,6 +29,8 @@ const Orders: React.FC = () => {
 
   const [statusFilter, setStatusFilter] = useState<string>("");
   const [searchTerm, setSearchTerm] = useState<string>("");
+  const [productQuery, setProductQuery] = useState("");
+  const [customerQuery, setCustomerQuery] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -44,44 +46,42 @@ const Orders: React.FC = () => {
   }>({ customerId: "", paymentMethod: "CASH", items: [{ productId: "", quantity: 1, product: { name: "" } }] });
 
   useEffect(() => {
-    fetchMetadata();
     fetchOrders();
   }, []);
 
-  const fetchMetadata = async () => {
-    setIsInitialLoading(true);
-    try {
-      const [cRes, pRes] = await Promise.all([
-        apiClient.get(`${API_BASE}/customer`),
-        apiClient.get(`${API_BASE}/products?fetch_all=true`),
-      ]);
-      setCustomers(cRes.data.data);
-      setProducts(pRes.data.data);
-      toast({
-        title: "Success",
-        description: "Orders data loaded successfully",
-      });
-    } catch (err: any) {
-      console.log("Metadata load failed", err);
-      
-      // Extract error message from API response
-      let errorMessage = "Failed to load orders data";
-      
-      if (err.response?.data?.message) {
-        errorMessage = err.response.data.message;
-      } else if (err.message) {
-        errorMessage = err.message;
+  useEffect(() => {
+    const delay = productQuery.trim() || customerQuery.trim() ? 300 : 0;
+    const timer = window.setTimeout(async () => {
+      setIsInitialLoading(true);
+      try {
+        const [cRes, pRes] = await Promise.all([
+          apiClient.get(`${API_BASE}/customer`, {
+            params: { page: 1, limit: 20, search: customerQuery.trim() || undefined },
+          }),
+          apiClient.get(`${API_BASE}/products`, {
+            params: {
+              page: 1,
+              limit: 20,
+              is_active: true,
+              search: productQuery.trim() || undefined,
+            },
+          }),
+        ]);
+        setCustomers(cRes.data.data || []);
+        setProducts(pRes.data.data || []);
+      } catch (err: any) {
+        console.log("Metadata load failed", err);
+        toast({
+          title: "Error",
+          description: err.response?.data?.message || err.message || "Failed to load orders data",
+          variant: "destructive",
+        });
+      } finally {
+        setIsInitialLoading(false);
       }
-      
-      toast({
-        title: "Error",
-        description: errorMessage,
-        variant: "destructive",
-      });
-    } finally {
-      setIsInitialLoading(false);
-    }
-  };
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [productQuery, customerQuery, toast]);
 
   const fetchOrders = async () => {
     setIsLoading(true);
@@ -291,6 +291,12 @@ const Orders: React.FC = () => {
                     ))}
                   </SelectContent>
                 </Select>
+                <Input
+                  className="mt-2"
+                  placeholder="Search customers..."
+                  value={customerQuery}
+                  onChange={(e) => setCustomerQuery(e.target.value)}
+                />
               </div>
               <div>
                 <Label>Payment Method</Label>
@@ -310,6 +316,11 @@ const Orders: React.FC = () => {
                   </SelectContent>
                 </Select>
               </div>
+              <Input
+                placeholder="Search products..."
+                value={productQuery}
+                onChange={(e) => setProductQuery(e.target.value)}
+              />
               {orderForm.items.map((item, idx) => (
                 <div key={idx} className="grid grid-cols-3 gap-3 items-end">
                   <div>

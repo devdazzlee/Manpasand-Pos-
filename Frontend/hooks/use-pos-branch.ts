@@ -40,7 +40,7 @@ export function usePosBranch() {
 
         if (isAdmin) {
           const response = await apiClient.get("/branches", {
-            params: { fetch_all: true },
+            params: { page: 1, limit: 100, is_active: true },
           });
           const rawBranches = Array.isArray(response?.data?.data) ? response.data.data : [];
           const activeBranches = rawBranches

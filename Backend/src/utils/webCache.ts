@@ -73,3 +73,23 @@ export const WEB_CACHE_TTL = {
   SEARCH_SUGGEST: 2 * 60,
   PRODUCT_COUNT: 10 * 60,
 } as const;
+
+/**
+ * Key prefixes written by web.service.ts. Invalidation must use these exact
+ * prefixes so POS catalog edits show up on the public website.
+ */
+export const WEB_CACHE_PREFIXES = {
+  HOME: 'home:',
+  CATEGORIES_LIST: 'categories:',
+  CATEGORY_DETAIL: 'category:',
+  PRODUCT_LIST: 'products:',
+  PRODUCT_DETAIL: 'product:',
+  SEARCH_SUGGEST: 'suggest:',
+  PRODUCT_COUNT: 'meta:',
+} as const;
+
+export async function invalidateWebCatalogCache(): Promise<void> {
+  await Promise.all(
+    Object.values(WEB_CACHE_PREFIXES).map((prefix) => invalidatePattern(prefix)),
+  );
+}

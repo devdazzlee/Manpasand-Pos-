@@ -396,6 +396,12 @@ function SupplierFormFields({
 
 const Suppliers: React.FC = () => {
   const [list, setList] = useState<Supplier[]>([]);
+  const [listMeta, setListMeta] = useState({
+    total: 0,
+    page: 1,
+    limit: PAGE_SIZE,
+    totalPages: 1,
+  });
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
@@ -451,21 +457,37 @@ const Suppliers: React.FC = () => {
     setLoading(true);
     try {
       const res = await apiClient.get(`${API_BASE}/suppliers`, {
-        params: { search: q || undefined, fetch_all: "true" },
+        params: {
+          search: q || undefined,
+          page,
+          limit: PAGE_SIZE,
+          ...(statusFilter === "active" ? { is_active: true } : {}),
+          ...(statusFilter === "inactive" ? { is_active: false } : {}),
+          ...(statusFilter === "pos" ? { display_on_pos: true } : {}),
+        },
       });
       setList(res.data.data || []);
+      setListMeta({
+        total: Number(res.data?.meta?.total) || (res.data.data || []).length,
+        page: Number(res.data?.meta?.page) || page,
+        limit: Number(res.data?.meta?.limit) || PAGE_SIZE,
+        totalPages: Math.max(1, Number(res.data?.meta?.totalPages) || 1),
+      });
     } catch (e: any) {
       toast.error(extractApiError(e, "Failed to load suppliers"));
     } finally {
       setLoading(false);
       setIsInitialLoading(false);
     }
-  }, [search]);
+  }, [search, page, statusFilter]);
 
   useEffect(() => {
-    fetchList("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    const delay = search.trim() ? 300 : 0;
+    const timer = window.setTimeout(() => {
+      void fetchList(search);
+    }, delay);
+    return () => window.clearTimeout(timer);
+  }, [fetchList, search, page, statusFilter]);
 
   const resetPaymentForm = () => {
     setPaymentAmount("");
@@ -533,7 +555,6 @@ const Suppliers: React.FC = () => {
   const handleSearchChange = (v: string) => {
     setSearch(v);
     setPage(1);
-    fetchList(v);
   };
 
   const clearFilters = () => {
@@ -708,32 +729,18 @@ const Suppliers: React.FC = () => {
     const activeCount = list.filter(isActiveSupplier).length;
     const inactiveCount = list.length - activeCount;
     const posCount = list.filter((s) => s.display_on_pos).length;
-    return { activeCount, inactiveCount, posCount };
-  }, [list]);
+    return {
+      activeCount,
+      inactiveCount,
+      posCount,
+      total: listMeta.total,
+    };
+  }, [list, listMeta.total]);
 
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase();
-    return list.filter((s) => {
-      if (statusFilter === "active" && !isActiveSupplier(s)) return false;
-      if (statusFilter === "inactive" && isActiveSupplier(s)) return false;
-      if (statusFilter === "pos" && !s.display_on_pos) return false;
-      if (!term) return true;
-      return (
-        s.name.toLowerCase().includes(term) ||
-        (s.code || "").toLowerCase().includes(term) ||
-        (s.phone_number || "").toLowerCase().includes(term) ||
-        (s.mobile_number || "").toLowerCase().includes(term) ||
-        (s.email || "").toLowerCase().includes(term)
-      );
-    });
-  }, [list, search, statusFilter]);
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const filtered = list;
+  const totalPages = Math.max(1, listMeta.totalPages);
   const pageSafe = Math.min(page, totalPages);
-  const pageRows = filtered.slice(
-    (pageSafe - 1) * PAGE_SIZE,
-    pageSafe * PAGE_SIZE,
-  );
+  const pageRows = filtered;
 
   const hasFilters = Boolean(search.trim()) || statusFilter !== "all";
 
@@ -742,7 +749,7 @@ const Suppliers: React.FC = () => {
     label: string;
     count: number;
   }> = [
-    { key: "all", label: "All", count: list.length },
+    { key: "all", label: "All", count: listMeta.total },
     { key: "active", label: "Active", count: stats.activeCount },
     { key: "inactive", label: "Inactive", count: stats.inactiveCount },
     { key: "pos", label: "On POS", count: stats.posCount },
@@ -781,7 +788,7 @@ const Suppliers: React.FC = () => {
         items={[
           {
             label: "Total Suppliers",
-            value: list.length.toLocaleString(),
+            value: stats.total.toLocaleString(),
             icon: Truck,
             hint: "All suppliers in the system",
             onClick: () => {
@@ -900,7 +907,7 @@ const Suppliers: React.FC = () => {
             <p className="text-sm font-semibold text-gray-900">
               Supplier List{" "}
               <span className="font-normal text-gray-500">
-                ({filtered.length})
+                ({listMeta.total})
               </span>
             </p>
           </div>
@@ -1102,7 +1109,7 @@ const Suppliers: React.FC = () => {
             </div>
           )}
 
-          {filtered.length > PAGE_SIZE && (
+          {listMeta.total > PAGE_SIZE && (
             <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
               <p className="text-xs text-gray-500">
                 Page {pageSafe} of {totalPages}

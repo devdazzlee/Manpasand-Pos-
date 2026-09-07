@@ -4,6 +4,7 @@ import { ReportsService } from '../services/reports.service';
 import { ApiResponse } from '../utils/apiResponse';
 import asyncHandler from '../middleware/asyncHandler';
 import { resolveBranchId } from '../utils/resolveBranchId';
+import { invalidateWebCatalogCache } from '../utils/webCache';
 import { parse as csvParse } from 'csv-parse/sync';
 import XLSX from 'xlsx';
 import fs from 'fs';
@@ -42,6 +43,7 @@ export const createProduct = asyncHandler(async (req: Request, res: Response) =>
         );
     }
 
+    await invalidateWebCatalogCache();
     new ApiResponse(product, 'Product created successfully', 201).send(res);
 });
 
@@ -56,8 +58,8 @@ export const updateProduct = asyncHandler(async (req: Request, res: Response) =>
 
     const product = await productService.updateProduct(req.params.id, updateData);
 
-    // Send response IMMEDIATELY — don't make the client wait for Cloudinary
     new ApiResponse(product, 'Product updated successfully').send(res);
+    void invalidateWebCatalogCache();
 
     // Process images in the background AFTER response is sent
     let base64Images: string[] = [];
@@ -83,33 +85,43 @@ export const updateProduct = asyncHandler(async (req: Request, res: Response) =>
 
     if (hasNewImages || hasExistingImagesField) {
         productService.updateProductImagesFromBase64(product.id, base64Images, keepImages)
-            .then(() => console.log(`✅ Images updated for product ${product.id}`))
+            .then(() => {
+                console.log(`✅ Images updated for product ${product.id}`);
+                return invalidateWebCatalogCache();
+            })
             .catch((err) => console.error(`❌ Image update failed for product ${product.id}:`, err));
     }
 });
 
 export const toggleProductStatus = asyncHandler(async (req: Request, res: Response) => {
     await productService.toggleProductStatus(req.params.id);
+    await invalidateWebCatalogCache();
     new ApiResponse(null, 'Product status changed successfully').send(res);
 });
 
 export const deleteProduct = asyncHandler(async (req: Request, res: Response) => {
     const product = await productService.deleteProduct(req.params.id);
+    await invalidateWebCatalogCache();
     new ApiResponse(product, 'Product deleted successfully').send(res);
 });
 
 export const listProducts = asyncHandler(async (req: Request, res: Response) => {
     const {
         page = 1,
-        limit = 10,
+        limit = 20,
         search,
         category_id,
         subcategory_id,
         is_active,
         display_on_pos,
+        is_featured,
+        stock_status,
         branch_id,
         fetch_all,
     } = req.query;
+
+    const stockStatus =
+        stock_status === 'out' || stock_status === 'low' ? stock_status : undefined;
 
     const result = await productService.listProducts({
         page: Number(page),
@@ -119,10 +131,11 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
         subcategory_id: subcategory_id as string | undefined,
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
+        is_featured: is_featured ? is_featured === 'true' : undefined,
+        stock_status: stockStatus,
         branch_id: branch_id as string | undefined,
         fetchAll: fetch_all ? fetch_all === 'true' : false,
     });
-    console.log(result);
 
     new ApiResponse(result.data, 'Products retrieved successfully', 200, true, result.meta).send(res);
 });
@@ -480,6 +493,7 @@ export const importProductRow = asyncHandler(async (req: Request, res: Response)
 
     try {
         const created = await productService.createProductFromBulkUpload(enhancedProd, createdBy);
+        await invalidateWebCatalogCache();
         new ApiResponse(
             {
                 id: created.id,
@@ -580,11 +594,13 @@ export const bulkUploadProducts = asyncHandler(async (req: Request, res: Respons
         ).send(res);
     }
 
+    await invalidateWebCatalogCache();
     new ApiResponse(results, 'Bulk upload completed').send(res);
 });
 
 export const deleteAllProducts = asyncHandler(async (req: Request, res: Response) => {
     const result = await productService.deleteAllProducts();
+    await invalidateWebCatalogCache();
     new ApiResponse(
         result, 
         `Successfully deleted ${result.deletedCount} products, ${result.deletedImages} product images, ${result.deletedStocks} stock records, ${result.deletedStockMovements} stock movements, ${result.deletedSaleItems} sale items, ${result.deletedPurchaseOrderItems} purchase order items, and ${result.deletedOrderItems} order items`,

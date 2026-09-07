@@ -27,8 +27,19 @@ export const getCustomerById = asyncHandler(async (req: Request, res: Response) 
 });
 
 export const getCustomers = asyncHandler(async (req: Request, res: Response) => {
-    const customers = await customerService.getCustomers(req.query.search as string | undefined);
-    new ApiResponse(customers, 'Customers fetched').send(res);
+    const result = await customerService.getCustomers({
+        search: req.query.search as string | undefined,
+        page: Number(req.query.page),
+        limit: Number(req.query.limit),
+        is_active:
+            req.query.is_active === 'true'
+                ? true
+                : req.query.is_active === 'false'
+                    ? false
+                    : undefined,
+        created_after: req.query.created_after as string | undefined,
+    });
+    new ApiResponse(result.data, 'Customers fetched', 200, true, result.meta).send(res);
 });
 
 export const updateCustomerByAdmin = asyncHandler(async (req: Request, res: Response) => {

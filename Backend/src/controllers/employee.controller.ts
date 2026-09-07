@@ -72,7 +72,7 @@ export const createDepartment = asyncHandler(async (req: Request, res: Response)
 
 export const listDepartments = asyncHandler(async (req: Request, res: Response) => {
   const raw = req.query.fetch_all;
-  const fetch_all = raw === undefined || String(raw) === 'true';
+  const fetch_all = String(raw) === 'true';
   const departments = await employeeService.listDepartments(fetch_all);
   new ApiResponse(departments, 'Departments fetched successfully', 200).send(res);
 });

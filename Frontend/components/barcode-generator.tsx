@@ -15,7 +15,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableHeader,
@@ -26,18 +25,18 @@ import {
 } from "@/components/ui/table";
 import {
   Printer,
-  Package,
   Search,
   Loader2,
   X,
   Trash2,
   ChevronLeft,
   ChevronRight,
-  Upload,
+  ChevronDown,
+  ChevronUp,
   Download,
   FileSpreadsheet,
-  Barcode as BarcodeIcon,
 } from "lucide-react";
+import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 import JsBarcode from "jsbarcode";
 import { PageLoader } from "./ui/page-loader";
 import { usePosData } from "@/hooks/use-pos-data";
@@ -81,7 +80,7 @@ export default function BarcodeGenerator() {
     SelectedProductItem[]
   >([]);
   const [searchTerm, setSearchTerm] = useState("");
-  const [globalExpiryDuration, setGlobalExpiryDuration] = useState("");
+  const [globalExpiryDuration, setGlobalExpiryDuration] = useState("12");
   // Global default net weight + a global copies value so a whole batch can be
   // configured in one click for bulk printing workflows.
   const [globalNetWeight, setGlobalNetWeight] = useState("");
@@ -94,12 +93,11 @@ export default function BarcodeGenerator() {
   const printRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
   const [kioskMode, setKioskMode] = useState(false);
-  const [customNetWeightMode, setCustomNetWeightMode] = useState<Record<string, boolean>>({});
 
   // Product picker table state
-  const [activeTab, setActiveTab] = useState<"select" | "bulk">("select");
   const [categoryFilter, setCategoryFilter] = useState("all");
   const [tablePage, setTablePage] = useState(1);
+  const [showMoreOptions, setShowMoreOptions] = useState(false);
 
   // What gets printed on the label — wired into generatePDFAndPrint below.
   const [includeProductName, setIncludeProductName] = useState(true);
@@ -119,6 +117,10 @@ export default function BarcodeGenerator() {
     }
   }, []);
 
+  useEffect(() => {
+    productSearchInputRef.current?.focus();
+  }, []);
+
   const expiryOptions = [
     { value: "3", label: "3 Months" },
     { value: "6", label: "6 Months" },
@@ -129,11 +131,11 @@ export default function BarcodeGenerator() {
   ];
 
   const paperSizes = [
-    { value: "50x30mm", label: "50mm x 30mm (Standard)" },
-    { value: "60x40mm", label: "60mm x 40mm (Large)" },
-    { value: "40x25mm", label: "40mm x 25mm (Small)" },
-    { value: "3x2inch", label: "3\" x 2\" (Zebra/ZDesigner - 76mm x 51mm)" },
-    { value: "76x51mm", label: "76mm x 51mm (3\" x 2\" Alternative)" },
+    { value: "50x30mm", label: "50 × 30 mm" },
+    { value: "60x40mm", label: "60 × 40 mm" },
+    { value: "40x25mm", label: "40 × 25 mm" },
+    { value: "3x2inch", label: "3 × 2 in (Zebra)" },
+    { value: "76x51mm", label: "76 × 51 mm" },
   ];
 
   // Direct printing function
@@ -177,6 +179,35 @@ export default function BarcodeGenerator() {
     return expiry;
   };
 
+  const buildSelectedItem = (
+    product: Product,
+    overrides?: Partial<Pick<SelectedProductItem, "netWeight" | "expiryDuration" | "copies">>,
+  ): SelectedProductItem => {
+    const expiryDuration = overrides?.expiryDuration || globalExpiryDuration || "12";
+    const packageDate = new Date();
+    return {
+      id: `${Date.now()}-${product.id}`,
+      product,
+      netWeight: overrides?.netWeight || globalNetWeight || "",
+      packageDate,
+      expiryDuration,
+      expiryDate: calculateExpiryDate(packageDate, expiryDuration),
+      copies: Math.max(1, overrides?.copies ?? (parseInt(globalCopies, 10) || 1)),
+    };
+  };
+
+  const withPrintDefaults = (item: SelectedProductItem): SelectedProductItem => {
+    const packageDate = item.packageDate || new Date();
+    const expiryDuration = item.expiryDuration || globalExpiryDuration || "12";
+    return {
+      ...item,
+      packageDate,
+      expiryDuration,
+      expiryDate: item.expiryDate || calculateExpiryDate(packageDate, expiryDuration),
+      copies: Math.max(1, item.copies || 1),
+    };
+  };
+
   // Global store with custom hook
   const {
     products,
@@ -192,9 +223,9 @@ export default function BarcodeGenerator() {
     const fetchData = async () => {
       try {
         if (searchTerm.length >= 2) {
-          await fetchProducts({ force: true, search: searchTerm });
+          await fetchProducts({ force: true, search: searchTerm, page: 1, limit: 20 });
         } else {
-          await fetchProducts();
+          await fetchProducts({ force: true, page: 1, limit: 20 });
         }
       } catch (error) {
         toast({
@@ -439,7 +470,7 @@ export default function BarcodeGenerator() {
   const isProductSelected = (productId: string) =>
     selectedProducts.some((sp) => sp.product.id === productId);
 
-  const handleProductSelect = (productId: string) => {
+  const handleProductSelect = (productId: string, options?: { keepSearch?: boolean }) => {
     const product = products.find((p) => p.id === productId);
     if (!product) return;
 
@@ -459,38 +490,22 @@ export default function BarcodeGenerator() {
         position: "top-right",
         duration: 300,
       });
-      setSearchTerm("");
-      if (productSearchInputRef.current) productSearchInputRef.current.focus();
+      if (!options?.keepSearch) {
+        setSearchTerm("");
+        productSearchInputRef.current?.focus();
+      }
       return;
     }
 
-    const newItem: SelectedProductItem = {
-      id: Date.now().toString(),
-      product,
-      netWeight: globalNetWeight || "",
-      packageDate: new Date(),
-      expiryDuration: "",
-      copies: Math.max(1, parseInt(globalCopies, 10) || 1),
-    };
-
-    if (globalExpiryDuration) {
-      newItem.expiryDuration = globalExpiryDuration;
-      newItem.expiryDate = calculateExpiryDate(
-        newItem.packageDate,
-        globalExpiryDuration
-      );
-    }
-
-    setSelectedProducts((prev) => [...prev, newItem]);
+    setSelectedProducts((prev) => [...prev, buildSelectedItem(product)]);
     sonnerToast.success(`Added ${product.name}`, {
       description: `SKU ${product.sku || product.code || ""}`.trim(),
       position: "top-right",
       duration: 300,
     });
-    setSearchTerm("");
-    if (productSearchInputRef.current) {
-      // Re-focus so the next scan/search lands here without an extra click.
-      productSearchInputRef.current.focus();
+    if (!options?.keepSearch) {
+      setSearchTerm("");
+      productSearchInputRef.current?.focus();
     }
   };
 
@@ -500,7 +515,7 @@ export default function BarcodeGenerator() {
     if (existingItem) {
       removeProduct(existingItem.id);
     } else {
-      handleProductSelect(product.id);
+      handleProductSelect(product.id, { keepSearch: true });
     }
   };
 
@@ -513,20 +528,7 @@ export default function BarcodeGenerator() {
       const existingIds = new Set(prev.map((sp) => sp.product.id));
       const additions: SelectedProductItem[] = productsToAdd
         .filter((p) => !existingIds.has(p.id))
-        .map((p) => {
-          const item: SelectedProductItem = {
-            id: `${Date.now()}-${p.id}`,
-            product: p,
-            netWeight: globalNetWeight || "",
-            packageDate: new Date(),
-            expiryDuration: globalExpiryDuration || "",
-            copies: Math.max(1, parseInt(globalCopies, 10) || 1),
-          };
-          if (globalExpiryDuration) {
-            item.expiryDate = calculateExpiryDate(item.packageDate, globalExpiryDuration);
-          }
-          return item;
-        });
+        .map((p) => buildSelectedItem(p));
       addedCount = additions.length;
       return [...prev, ...additions];
     });
@@ -635,25 +637,16 @@ export default function BarcodeGenerator() {
         const expiryDuration =
           String(row["Expiry Months"] ?? row.ExpiryMonths ?? row.expiryMonths ?? "").trim() ||
           globalExpiryDuration ||
-          "";
+          "12";
         const copiesRaw = parseInt(String(row.Copies ?? row.copies ?? ""), 10);
         const copies =
           Number.isFinite(copiesRaw) && copiesRaw > 0
             ? copiesRaw
             : Math.max(1, parseInt(globalCopies, 10) || 1);
 
-        const item: SelectedProductItem = {
-          id: `${Date.now()}-${product.id}`,
-          product,
-          netWeight,
-          packageDate: new Date(),
-          expiryDuration,
-          copies,
-        };
-        if (expiryDuration) {
-          item.expiryDate = calculateExpiryDate(item.packageDate, expiryDuration);
-        }
-        additions.push(item);
+        additions.push(
+          buildSelectedItem(product, { netWeight, expiryDuration, copies }),
+        );
       });
 
       if (additions.length) {
@@ -669,10 +662,6 @@ export default function BarcodeGenerator() {
             : `${additions.length} product${additions.length === 1 ? "" : "s"} added` +
               (notFound ? `, ${notFound} row${notFound === 1 ? "" : "s"} didn't match any SKU.` : "."),
       });
-
-      if (additions.length > 0) {
-        setActiveTab("select");
-      }
     } catch (err: any) {
       toast({
         variant: "destructive",
@@ -707,35 +696,6 @@ export default function BarcodeGenerator() {
     );
   };
 
-  // Apply globally-configured values (expiry duration, net weight, copies)
-  // to every selected product. Each value is only applied when it's set, so
-  // the user can choose which fields to bulk-update.
-  const applyGlobalDates = () => {
-    if (!globalExpiryDuration && !globalNetWeight && !globalCopies) return;
-    const copiesNum = Math.max(1, parseInt(globalCopies, 10) || 1);
-    setSelectedProducts((prev) => {
-      const updated = prev.map((item) => {
-        const next = { ...item };
-        if (globalExpiryDuration) {
-          next.expiryDuration = globalExpiryDuration;
-          next.expiryDate = calculateExpiryDate(item.packageDate, globalExpiryDuration);
-        }
-        if (globalNetWeight) {
-          next.netWeight = globalNetWeight;
-        }
-        if (globalCopies) {
-          next.copies = copiesNum;
-        }
-        return next;
-      });
-      toast({
-        title: "Applied to all products",
-        description: `${updated.length} product${updated.length === 1 ? "" : "s"} updated.`,
-      });
-      return updated;
-    });
-  };
-
   const clearAll = () => {
     setSelectedProducts([]);
     toast({
@@ -750,17 +710,11 @@ export default function BarcodeGenerator() {
 
 
   const handlePrintAll = async () => {
-    if (selectedProducts.length === 0) return;
-
-    const invalidProducts = selectedProducts.filter(
-      (item) => !item.netWeight.trim() || !item.packageDate || !item.expiryDate
-    );
-
-    if (invalidProducts.length > 0) {
+    if (selectedProducts.length === 0) {
       toast({
         variant: "destructive",
-        title: "Incomplete data",
-        description: `${invalidProducts.length} products are missing required information.`,
+        title: "No products selected",
+        description: "Search and tap a product first, then print.",
       });
       return;
     }
@@ -824,10 +778,12 @@ export default function BarcodeGenerator() {
     
     // Expand each product into N labels based on its copies count, so a
     // single click prints continuous strips from the thermal printer.
-    const labelsToRender: SelectedProductItem[] = selectedProducts.flatMap((sp) => {
-      const n = Math.max(1, sp.copies || 1);
-      return Array.from({ length: n }, () => sp);
-    });
+    const labelsToRender: SelectedProductItem[] = selectedProducts
+      .map(withPrintDefaults)
+      .flatMap((sp) => {
+        const n = Math.max(1, sp.copies || 1);
+        return Array.from({ length: n }, () => sp);
+      });
 
     // Process each label
     for (let labelIdx = 0; labelIdx < labelsToRender.length; labelIdx++) {
@@ -1137,7 +1093,7 @@ export default function BarcodeGenerator() {
           </style>
         </head>
         <body>
-          ${selectedProducts.map((sp) => {
+          ${selectedProducts.map(withPrintDefaults).map((sp) => {
             const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
             const barcodeValue = encodeLabelBarcodeValue(sp.product.sku, sp.product.code, price);
             const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
@@ -1233,7 +1189,7 @@ export default function BarcodeGenerator() {
         </style>
       </head>
       <body>
-        ${selectedProducts.map((sp) => {
+        ${selectedProducts.map(withPrintDefaults).map((sp) => {
           const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
           const barcodeValue = encodeLabelBarcodeValue(sp.product.sku, sp.product.code, price);
           const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
@@ -1279,15 +1235,7 @@ export default function BarcodeGenerator() {
     });
   };
 
-  const isFormValid =
-    selectedProducts.length > 0 &&
-    selectedProducts.every(
-      (item) =>
-        item.netWeight.trim() &&
-        item.packageDate &&
-        item.expiryDate &&
-        item.copies > 0,
-    );
+  const canPrint = selectedProducts.length > 0;
 
   // Total label count across all selected products — what the printer will
   // actually emit. Drives the print button label so the user knows how many
@@ -1297,212 +1245,421 @@ export default function BarcodeGenerator() {
     0,
   );
 
+  const previewItem = selectedProducts[0];
+  const previewPrice = previewItem
+    ? Math.round(
+        Number(
+          calculatePriceByWeight(
+            previewItem.netWeight,
+            previewItem.product.sales_rate_exc_dis_and_tax,
+          ),
+        ),
+      )
+    : 0;
+  const previewBarcodeValue = previewItem
+    ? encodeLabelBarcodeValue(
+        previewItem.product.sku,
+        previewItem.product.code,
+        previewPrice,
+      )
+    : "000000000";
+  const copiesForProduct = (productId: string) =>
+    selectedProducts.find((sp) => sp.product.id === productId)?.copies;
+
   if (productsLoading && products.length === 0) {
     return <PageLoader message="Loading Barcode Generator..." />;
   }
 
   return (
-    <div className="p-3 sm:p-4 md:p-6 space-y-4 md:space-y-6 min-w-0 overflow-x-hidden">
-      <div className="min-w-0">
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
-          <BarcodeIcon className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600 shrink-0" />
-          <span className="truncate">Barcode Generator</span>
-        </h1>
-        <p className="text-xs sm:text-sm text-gray-600 mt-1">
-          Configure label content, pick products, and print barcodes.
-        </p>
+    <div className="p-3 sm:p-4 md:p-6 space-y-4 min-w-0 overflow-x-hidden pb-24 md:pb-6">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
+        <div className="min-w-0">
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
+            <BarcodeScanIcon className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600 shrink-0" />
+            <span className="truncate">Barcode Generator</span>
+          </h1>
+          <p className="text-xs sm:text-sm text-gray-600 mt-1">
+            Search a product, then print. Weight and expiry are optional.
+          </p>
+        </div>
+        <div className="flex items-center gap-2 shrink-0">
+          <Button
+            variant="outline"
+            onClick={clearAll}
+            disabled={!canPrint}
+            className="hidden sm:inline-flex"
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Clear
+          </Button>
+          <Button onClick={handlePrintAll} disabled={!canPrint || isPrinting}>
+            {isPrinting ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Printer className="h-4 w-4 mr-2" />
+            )}
+            {isPrinting
+              ? "Printing..."
+              : `Print ${totalLabels} Label${totalLabels === 1 ? "" : "s"}`}
+          </Button>
+        </div>
       </div>
 
-      {/* Generation Settings + Preview */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 md:gap-6 min-w-0">
-        <Card className="xl:col-span-2 min-w-0 overflow-hidden">
-          <CardHeader className="px-4 py-3 sm:p-6">
-            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-              <Package className="h-5 w-5 shrink-0" />
-              Generation Settings
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 px-4 pb-4 sm:p-6 sm:pt-0">
-            {/* Barcode Printer - configured globally in Printer Settings */}
-            <div className="space-y-2 min-w-0">
-              <Label>Barcode Printer</Label>
-              {barcodePrinter ? (
-                <div className="px-3 py-2 rounded-lg border border-purple-100 bg-purple-50/60 flex flex-wrap items-center gap-2 text-sm text-purple-800 min-w-0">
-                  <span className="shrink-0">🖨️</span>
-                  <span className="font-medium break-all">{barcodePrinter}</span>
-                  <span className="text-purple-600 text-xs">(change in Printer Settings)</span>
-                </div>
-              ) : (
-                <div className="px-3 py-2 rounded-lg border border-amber-100 bg-amber-50 text-sm text-amber-800">
-                  No barcode printer configured. Go to <strong>Printer Settings</strong> to set one.
-                </div>
-              )}
+      <Card className="min-w-0 overflow-hidden">
+        <CardContent className="p-3 sm:p-4 space-y-4">
+          <div className="flex flex-col sm:flex-row gap-3 min-w-0">
+            <div className="relative flex-1 min-w-0">
+              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              <Input
+                ref={productSearchInputRef}
+                placeholder="Scan or search by name, SKU, or code"
+                value={searchTerm}
+                autoComplete="off"
+                onChange={(e) => setSearchTerm(e.target.value)}
+                onKeyDown={handleSearchKeyDown}
+                className="pl-9 w-full h-11"
+              />
             </div>
+            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <SelectTrigger className="w-full sm:w-48 shrink-0 h-11">
+                <SelectValue placeholder="All Categories" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Categories</SelectItem>
+                {categoryOptions.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <Label className="text-xs text-gray-600">Barcode Size</Label>
-                <Select value={selectedPaperSize} onValueChange={setSelectedPaperSize}>
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {paperSizes.map((size) => (
-                      <SelectItem key={size.value} value={size.value}>
-                        {size.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div>
-                <Label className="text-xs text-gray-600">Default Expiry</Label>
-                <Select onValueChange={setGlobalExpiryDuration} value={globalExpiryDuration}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose expiry duration" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {expiryOptions.map((opt) => (
-                      <SelectItem key={opt.value} value={opt.value}>
-                        {opt.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+          {canPrint && (
+            <p className="text-sm text-green-700">
+              {selectedProducts.length} product{selectedProducts.length === 1 ? "" : "s"} selected
+              {" · "}
+              {totalLabels} label{totalLabels === 1 ? "" : "s"}
+            </p>
+          )}
+
+          {productsLoading ? (
+            <div className="rounded-lg border py-10 text-center text-gray-500">
+              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
+              Loading products...
             </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <Label htmlFor="global-net-weight" className="text-xs text-gray-600">
-                  Default Net Weight
-                </Label>
-                <Input
-                  id="global-net-weight"
-                  value={globalNetWeight}
-                  onChange={(e) => setGlobalNetWeight(e.target.value)}
-                  placeholder="e.g. 500g"
-                />
-              </div>
-              <div>
-                <Label htmlFor="global-copies" className="text-xs text-gray-600">
-                  Copies / product
-                </Label>
-                <Input
-                  id="global-copies"
-                  type="number"
-                  inputMode="numeric"
-                  min={1}
-                  value={globalCopies}
-                  onChange={(e) => setGlobalCopies(e.target.value)}
-                  placeholder="1"
-                />
-              </div>
+          ) : pagedProducts.length === 0 ? (
+            <div className="rounded-lg border border-dashed py-10 text-center text-gray-500 text-sm">
+              {searchTerm || categoryFilter !== "all"
+                ? "No matching products found."
+                : "No products available."}
             </div>
-
-            {/* Label content toggles — wired directly into what gets drawn on the printed PDF. */}
-            <div className="space-y-2 border-t pt-4">
-              <Label className="text-sm font-semibold text-gray-900">Label Content</Label>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
-                  <Label htmlFor="include-name" className="text-sm font-normal cursor-pointer">
-                    Product Name
+          ) : (
+            <>
+              <div className="space-y-3 md:hidden">
+                <div className="flex items-center gap-2 px-1">
+                  <Checkbox
+                    checked={allOnPageSelected}
+                    onCheckedChange={toggleSelectAllOnPage}
+                    id="select-all-mobile"
+                  />
+                  <Label htmlFor="select-all-mobile" className="text-sm font-normal cursor-pointer">
+                    Select all on this page
                   </Label>
-                  <Switch id="include-name" checked={includeProductName} onCheckedChange={setIncludeProductName} />
                 </div>
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
-                  <Label htmlFor="include-price" className="text-sm font-normal cursor-pointer">
-                    Price
-                  </Label>
-                  <Switch id="include-price" checked={includePrice} onCheckedChange={setIncludePrice} />
-                </div>
-                <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
-                  <Label htmlFor="include-sku" className="text-sm font-normal cursor-pointer">
-                    SKU
-                  </Label>
-                  <Switch id="include-sku" checked={includeSku} onCheckedChange={setIncludeSku} />
-                </div>
-              </div>
-            </div>
-
-            <Button
-              onClick={applyGlobalDates}
-              variant="outline"
-              size="sm"
-              className="w-full"
-              disabled={
-                selectedProducts.length === 0 ||
-                (!globalExpiryDuration && !globalNetWeight && !globalCopies)
-              }
-            >
-              Apply Defaults to Selected Products
-            </Button>
-          </CardContent>
-        </Card>
-
-        {/* Preview */}
-        <Card className="min-w-0 overflow-hidden">
-          <CardHeader className="px-4 py-3 sm:p-6">
-            <CardTitle className="flex items-center gap-2 text-base sm:text-lg">
-              <BarcodeIcon className="h-5 w-5 shrink-0" />
-              Preview
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="space-y-4 px-4 pb-4 sm:p-6 sm:pt-0">
-            {(() => {
-              const previewItem = selectedProducts[0];
-              const previewPrice = previewItem
-                ? Math.round(
-                    Number(
-                      calculatePriceByWeight(
-                        previewItem.netWeight,
-                        previewItem.product.sales_rate_exc_dis_and_tax,
-                      ),
-                    ),
-                  )
-                : 0;
-              const previewBarcodeValue = previewItem
-                ? encodeLabelBarcodeValue(previewItem.product.sku, previewItem.product.code, previewPrice)
-                : "000000000";
-
-              return (
-                <>
-                  <div className="rounded-xl border-2 border-dashed border-gray-200 bg-white p-3 sm:p-4 flex flex-col items-center justify-center gap-1.5 min-w-0 overflow-hidden">
-                    {includeProductName && (
-                      <p className="text-xs font-bold uppercase text-center truncate w-full">
-                        {previewItem ? previewItem.product.name : "Sample Product"}
+                {pagedProducts.map((product, idx) => {
+                  const selected = isProductSelected(product.id);
+                  const copies = copiesForProduct(product.id);
+                  const stock = product.current_stock ?? product.stock ?? 0;
+                  return (
+                    <button
+                      type="button"
+                      key={product.id}
+                      onClick={() => handleProductSelect(product.id, { keepSearch: true })}
+                      className={`w-full text-left rounded-lg border p-3 space-y-1 transition ${
+                        selected
+                          ? "border-blue-300 bg-blue-50/60"
+                          : "border-gray-200 bg-white"
+                      }`}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="font-semibold text-sm leading-snug">
+                          {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}. {product.name}
+                        </p>
+                        <span className="text-sm font-bold text-green-700 shrink-0">
+                          Rs {product.sales_rate_exc_dis_and_tax || 0}
+                        </span>
+                      </div>
+                      <p className="text-xs text-gray-500 truncate">
+                        SKU: {product.sku || product.code || "—"}
                       </p>
-                    )}
-                    {includeSku && (
-                      <p className="text-[10px] text-gray-500 truncate max-w-full">
-                        SKU: {previewItem ? previewItem.product.sku || previewItem.product.code || "—" : "SAMPLE"}
+                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                        {product.category ? (
+                          <Badge variant="secondary" className="text-[10px]">
+                            {product.category}
+                          </Badge>
+                        ) : null}
+                        <span className="text-xs text-gray-600">Stock: {stock}</span>
+                        {selected ? (
+                          <Badge className="text-[10px] bg-blue-600">
+                            {copies} label{copies === 1 ? "" : "s"}
+                          </Badge>
+                        ) : (
+                          <span className="text-xs text-blue-600">Tap to add</span>
+                        )}
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <div className="hidden md:block border rounded-lg overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead className="w-10">
+                        <Checkbox checked={allOnPageSelected} onCheckedChange={toggleSelectAllOnPage} />
+                      </TableHead>
+                      <TableHead className="w-10">#</TableHead>
+                      <TableHead>Product</TableHead>
+                      <TableHead>SKU</TableHead>
+                      <TableHead>Category</TableHead>
+                      <TableHead>Price</TableHead>
+                      <TableHead>Stock</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pagedProducts.map((product, idx) => {
+                      const selected = isProductSelected(product.id);
+                      const copies = copiesForProduct(product.id);
+                      const stock = product.current_stock ?? product.stock ?? 0;
+                      return (
+                        <TableRow
+                          key={product.id}
+                          className={`cursor-pointer ${selected ? "bg-blue-50/50" : ""}`}
+                          onClick={() => {
+                            if (!selected) handleProductSelect(product.id, { keepSearch: true });
+                          }}
+                        >
+                          <TableCell onClick={(e) => e.stopPropagation()}>
+                            <Checkbox
+                              checked={selected}
+                              onCheckedChange={() => toggleProductRow(product)}
+                            />
+                          </TableCell>
+                          <TableCell className="text-gray-500">
+                            {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}
+                          </TableCell>
+                          <TableCell className="font-medium">
+                            <span>{product.name}</span>
+                            {selected ? (
+                              <Badge className="ml-2 text-[10px] bg-blue-600">
+                                {copies} label{copies === 1 ? "" : "s"}
+                              </Badge>
+                            ) : null}
+                          </TableCell>
+                          <TableCell className="text-gray-600">{product.sku || product.code || "—"}</TableCell>
+                          <TableCell>
+                            {product.category ? (
+                              <Badge variant="secondary">{product.category}</Badge>
+                            ) : (
+                              <span className="text-gray-400">—</span>
+                            )}
+                          </TableCell>
+                          <TableCell>Rs {product.sales_rate_exc_dis_and_tax || 0}</TableCell>
+                          <TableCell>{stock}</TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
+
+          {filteredProducts.length > 0 && (
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
+              <span className="text-xs sm:text-sm text-center sm:text-left">
+                Showing {(tablePage - 1) * TABLE_PAGE_SIZE + 1} to{" "}
+                {Math.min(tablePage * TABLE_PAGE_SIZE, filteredProducts.length)} of{" "}
+                {filteredProducts.length} products
+              </span>
+              <div className="flex items-center justify-center gap-1">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setTablePage((p) => Math.max(1, p - 1))}
+                  disabled={tablePage === 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="px-2 text-xs font-medium">
+                  {tablePage} / {totalTablePages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="h-8 w-8 p-0"
+                  onClick={() => setTablePage((p) => Math.min(totalTablePages, p + 1))}
+                  disabled={tablePage === totalTablePages}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {canPrint && (
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 min-w-0">
+          <Card className="xl:col-span-2 min-w-0 overflow-hidden">
+            <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
+              <CardTitle className="flex items-center justify-between gap-2 text-base">
+                <span>Print queue</span>
+                <Button variant="ghost" size="sm" onClick={clearAll} className="text-red-600 hover:text-red-700">
+                  <Trash2 className="h-4 w-4 mr-1.5" />
+                  Clear
+                </Button>
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-3 sm:px-6 pb-4 space-y-2 max-h-[60vh] overflow-y-auto">
+              {selectedProducts.map((item) => (
+                <div
+                  key={item.id}
+                  className="rounded-lg border border-gray-200 p-3 space-y-2 min-w-0"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm truncate">{item.product.name}</p>
+                      <p className="text-xs text-gray-500 truncate">
+                        {item.product.sku || item.product.code || "—"} · Rs{" "}
+                        {item.product.sales_rate_exc_dis_and_tax || 0}
                       </p>
-                    )}
-                    <img
-                      src={generateBarcodeDataURL(previewBarcodeValue)}
-                      alt="Barcode preview"
-                      className="h-14 sm:h-16 max-w-full object-contain"
-                    />
-                    <p className="text-xs font-mono text-gray-600 break-all text-center">{previewBarcodeValue}</p>
-                    {includePrice && (
-                      <p className="text-sm font-bold text-blue-600">Rs {previewItem ? previewPrice : 0}</p>
-                    )}
+                    </div>
+                    <Button
+                      onClick={() => removeProduct(item.id)}
+                      variant="ghost"
+                      size="sm"
+                      className="h-7 w-7 p-0 text-gray-400 hover:text-red-600 shrink-0"
+                    >
+                      <X className="h-4 w-4" />
+                    </Button>
                   </div>
-                  {!previewItem && (
-                    <p className="text-xs text-center text-gray-400">
-                      Select a product below to preview its real label.
-                    </p>
-                  )}
-                </>
-              );
-            })()}
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    <div>
+                      <Label className="text-[11px] text-gray-500">Copies</Label>
+                      <div className="flex items-center gap-1">
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() =>
+                            updateProductData(item.id, "copies", Math.max(1, (item.copies || 1) - 1))
+                          }
+                          disabled={(item.copies || 1) <= 1}
+                        >
+                          -
+                        </Button>
+                        <Input
+                          type="number"
+                          inputMode="numeric"
+                          min={1}
+                          value={item.copies}
+                          onChange={(e) => {
+                            const n = parseInt(e.target.value, 10);
+                            updateProductData(
+                              item.id,
+                              "copies",
+                              Number.isFinite(n) && n > 0 ? n : 1,
+                            );
+                          }}
+                          className="h-8 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
+                        />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          className="h-8 w-8 p-0"
+                          onClick={() => updateProductData(item.id, "copies", (item.copies || 1) + 1)}
+                        >
+                          +
+                        </Button>
+                      </div>
+                    </div>
+                    <div>
+                      <Label className="text-[11px] text-gray-500">Weight</Label>
+                      <Input
+                        value={item.netWeight}
+                        list={`weights-${item.id}`}
+                        onChange={(e) => updateProductData(item.id, "netWeight", e.target.value)}
+                        placeholder="Optional"
+                        className="h-8"
+                      />
+                      <datalist id={`weights-${item.id}`}>
+                        {getNetWeightOptions(item.product.unitName)
+                          .filter((opt) => opt.value !== "custom")
+                          .map((opt) => (
+                            <option key={opt.value} value={opt.value} />
+                          ))}
+                      </datalist>
+                    </div>
+                    <div className="col-span-2 sm:col-span-1">
+                      <Label className="text-[11px] text-gray-500">Expiry</Label>
+                      <Select
+                        value={item.expiryDuration || "12"}
+                        onValueChange={(value) => updateProductData(item.id, "expiryDuration", value)}
+                      >
+                        <SelectTrigger className="h-8">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {expiryOptions.map((opt) => (
+                            <SelectItem key={opt.value} value={opt.value}>
+                              {opt.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
 
-            <div className="space-y-2 pt-2 border-t">
-              <Button
-                onClick={handlePrintAll}
-                className="w-full"
-                disabled={!isFormValid || isPrinting}
-              >
+          <Card className="min-w-0 overflow-hidden">
+            <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <BarcodeScanIcon className="h-5 w-5 shrink-0 text-blue-600" />
+                Preview
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="px-4 pb-4 sm:px-6 space-y-3">
+              <div className="rounded-xl border-2 border-dashed border-gray-200 bg-white p-3 flex flex-col items-center justify-center gap-1.5 min-w-0">
+                {includeProductName && (
+                  <p className="text-xs font-bold uppercase text-center truncate w-full">
+                    {previewItem ? previewItem.product.name : "Sample Product"}
+                  </p>
+                )}
+                {includeSku && (
+                  <p className="text-[10px] text-gray-500 truncate max-w-full">
+                    SKU: {previewItem ? previewItem.product.sku || previewItem.product.code || "—" : "SAMPLE"}
+                  </p>
+                )}
+                <img
+                  src={generateBarcodeDataURL(previewBarcodeValue)}
+                  alt="Barcode preview"
+                  className="h-14 max-w-full object-contain"
+                />
+                <p className="text-xs font-mono text-gray-600 break-all text-center">{previewBarcodeValue}</p>
+                {includePrice && (
+                  <p className="text-sm font-bold text-blue-600">Rs {previewItem ? previewPrice : 0}</p>
+                )}
+              </div>
+              <Button onClick={handlePrintAll} className="w-full" disabled={!canPrint || isPrinting}>
                 {isPrinting ? (
                   <Loader2 className="h-4 w-4 mr-2 animate-spin" />
                 ) : (
@@ -1512,279 +1669,148 @@ export default function BarcodeGenerator() {
                   ? "Printing..."
                   : `Print ${totalLabels} Label${totalLabels === 1 ? "" : "s"}`}
               </Button>
-              <Button
-                onClick={clearAll}
-                variant="outline"
-                className="w-full"
-                disabled={selectedProducts.length === 0}
-              >
-                <Trash2 className="h-4 w-4 mr-2" />
-                Clear All
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-      </div>
+            </CardContent>
+          </Card>
+        </div>
+      )}
 
-      {/* Product selection */}
-      <Card className="min-w-0 overflow-hidden">
-        <CardContent className="p-0">
-          <Tabs value={activeTab} onValueChange={(v) => setActiveTab(v as "select" | "bulk")}>
-            <div className="border-b px-3 sm:px-4 pt-3 sm:pt-4">
-              <TabsList className="grid w-full max-w-md grid-cols-2 h-auto">
-                <TabsTrigger value="select" className="text-xs sm:text-sm">Select Products</TabsTrigger>
-                <TabsTrigger value="bulk" className="text-xs sm:text-sm">Bulk Upload</TabsTrigger>
-              </TabsList>
-            </div>
+      <div>
+        <button
+          type="button"
+          onClick={() => setShowMoreOptions((open) => !open)}
+          className="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900"
+        >
+          {showMoreOptions ? (
+            <ChevronUp className="h-4 w-4" />
+          ) : (
+            <ChevronDown className="h-4 w-4" />
+          )}
+          More options
+        </button>
 
-            <TabsContent value="select" className="p-3 sm:p-4 space-y-4 mt-0">
-              <div className="flex flex-col gap-3 min-w-0">
-                <div className="flex flex-col sm:flex-row gap-3 min-w-0">
-                  <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                    <SelectTrigger className="w-full sm:w-48 shrink-0">
-                      <SelectValue placeholder="All Categories" />
+        {showMoreOptions && (
+          <Card className="mt-3 min-w-0 overflow-hidden">
+            <CardContent className="p-4 space-y-4">
+              <div className="space-y-2">
+                <Label>Barcode printer</Label>
+                {barcodePrinter ? (
+                  <div className="px-3 py-2 rounded-lg border border-purple-100 bg-purple-50/60 flex flex-wrap items-center gap-2 text-sm text-purple-800">
+                    <span className="font-medium break-all">{barcodePrinter}</span>
+                    <span className="text-purple-600 text-xs">(change in Printer Settings)</span>
+                  </div>
+                ) : (
+                  <div className="px-3 py-2 rounded-lg border border-amber-100 bg-amber-50 text-sm text-amber-800">
+                    No barcode printer configured. Set one in <strong>Printer Settings</strong>.
+                  </div>
+                )}
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+                <div>
+                  <Label className="text-xs text-gray-600">Label size</Label>
+                  <Select value={selectedPaperSize} onValueChange={setSelectedPaperSize}>
+                    <SelectTrigger>
+                      <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Categories</SelectItem>
-                      {categoryOptions.map((c) => (
-                        <SelectItem key={c} value={c}>
-                          {c}
+                      {paperSizes.map((size) => (
+                        <SelectItem key={size.value} value={size.value}>
+                          {size.label}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
-
-                  <div className="relative flex-1 min-w-0">
-                    <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                    <Input
-                      ref={productSearchInputRef}
-                      placeholder="Scan or search by name, SKU, code"
-                      value={searchTerm}
-                      autoComplete="off"
-                      onChange={(e) => setSearchTerm(e.target.value)}
-                      onKeyDown={handleSearchKeyDown}
-                      className="pl-9 w-full"
-                    />
-                  </div>
                 </div>
+                <div>
+                  <Label className="text-xs text-gray-600">Default expiry</Label>
+                  <Select value={globalExpiryDuration} onValueChange={setGlobalExpiryDuration}>
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {expiryOptions.map((opt) => (
+                        <SelectItem key={opt.value} value={opt.value}>
+                          {opt.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div>
+                  <Label htmlFor="global-net-weight" className="text-xs text-gray-600">
+                    Default weight
+                  </Label>
+                  <Input
+                    id="global-net-weight"
+                    value={globalNetWeight}
+                    onChange={(e) => setGlobalNetWeight(e.target.value)}
+                    placeholder="e.g. 500g"
+                  />
+                </div>
+                <div>
+                  <Label htmlFor="global-copies" className="text-xs text-gray-600">
+                    Default copies
+                  </Label>
+                  <Input
+                    id="global-copies"
+                    type="number"
+                    inputMode="numeric"
+                    min={1}
+                    value={globalCopies}
+                    onChange={(e) => setGlobalCopies(e.target.value)}
+                    placeholder="1"
+                  />
+                </div>
+              </div>
 
-                <div className="flex flex-col sm:flex-row sm:items-center gap-2 min-w-0">
-                  <span className="text-sm font-medium text-green-700 shrink-0">
-                    Selected: {selectedProducts.length}
-                  </span>
-                  <div className="flex flex-col sm:flex-row gap-2 flex-1 sm:justify-end">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="w-full sm:w-auto text-red-600 border-red-200 hover:bg-red-50 hover:text-red-700"
-                      onClick={clearAll}
-                      disabled={selectedProducts.length === 0}
-                    >
-                      <Trash2 className="h-3.5 w-3.5 mr-1.5" />
-                      Clear Selection
-                    </Button>
-                    <Button
-                      size="sm"
-                      className="w-full sm:w-auto"
-                      onClick={handlePrintAll}
-                      disabled={!isFormValid || isPrinting}
-                    >
-                      {isPrinting ? (
-                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                      ) : (
-                        <BarcodeIcon className="h-3.5 w-3.5 mr-1.5" />
-                      )}
-                      Generate Barcodes
-                    </Button>
+              <div className="space-y-2">
+                <Label className="text-sm font-semibold text-gray-900">Show on label</Label>
+                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+                    <Label htmlFor="include-name" className="text-sm font-normal cursor-pointer">
+                      Product name
+                    </Label>
+                    <Switch id="include-name" checked={includeProductName} onCheckedChange={setIncludeProductName} />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+                    <Label htmlFor="include-price" className="text-sm font-normal cursor-pointer">
+                      Price
+                    </Label>
+                    <Switch id="include-price" checked={includePrice} onCheckedChange={setIncludePrice} />
+                  </div>
+                  <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
+                    <Label htmlFor="include-sku" className="text-sm font-normal cursor-pointer">
+                      SKU
+                    </Label>
+                    <Switch id="include-sku" checked={includeSku} onCheckedChange={setIncludeSku} />
                   </div>
                 </div>
               </div>
 
-              {productsLoading ? (
-                <div className="rounded-lg border py-10 text-center text-gray-500">
-                  <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-                  Loading products...
-                </div>
-              ) : pagedProducts.length === 0 ? (
-                <div className="rounded-lg border border-dashed py-10 text-center text-gray-500 text-sm">
-                  {searchTerm || categoryFilter !== "all"
-                    ? "No matching products found."
-                    : "No products available."}
-                </div>
-              ) : (
-                <>
-                  {/* Mobile product cards */}
-                  <div className="space-y-3 md:hidden">
-                    <div className="flex items-center gap-2 px-1">
-                      <Checkbox
-                        checked={allOnPageSelected}
-                        onCheckedChange={toggleSelectAllOnPage}
-                        id="select-all-mobile"
-                      />
-                      <Label htmlFor="select-all-mobile" className="text-sm font-normal cursor-pointer">
-                        Select all on this page
-                      </Label>
-                    </div>
-                    {pagedProducts.map((product, idx) => {
-                      const selected = isProductSelected(product.id);
-                      const stock = product.current_stock ?? product.stock ?? 0;
-                      return (
-                        <div
-                          key={product.id}
-                          role="button"
-                          tabIndex={0}
-                          onClick={() => toggleProductRow(product)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter" || e.key === " ") {
-                              e.preventDefault();
-                              toggleProductRow(product);
-                            }
-                          }}
-                          className={`w-full text-left rounded-lg border p-3 space-y-2 transition cursor-pointer ${
-                            selected
-                              ? "border-blue-300 bg-blue-50/60"
-                              : "border-gray-200 bg-white"
-                          }`}
-                        >
-                          <div className="flex items-start gap-3">
-                            <Checkbox
-                              checked={selected}
-                              onCheckedChange={() => toggleProductRow(product)}
-                              onClick={(e) => e.stopPropagation()}
-                              className="mt-0.5"
-                              aria-label={`Select ${product.name}`}
-                            />
-                            <div className="min-w-0 flex-1">
-                              <div className="flex items-start justify-between gap-2">
-                                <p className="font-semibold text-sm leading-snug">
-                                  {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}. {product.name}
-                                </p>
-                                <span className="text-sm font-bold text-green-700 shrink-0">
-                                  Rs {product.sales_rate_exc_dis_and_tax || 0}
-                                </span>
-                              </div>
-                              <p className="text-xs text-gray-500 mt-1 truncate">
-                                SKU: {product.sku || product.code || "—"}
-                              </p>
-                              <div className="flex flex-wrap items-center gap-2 mt-2">
-                                {product.category ? (
-                                  <Badge variant="secondary" className="text-[10px]">
-                                    {product.category}
-                                  </Badge>
-                                ) : null}
-                                <span className="text-xs text-gray-600">Stock: {stock}</span>
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  {/* Desktop table */}
-                  <div className="hidden md:block border rounded-lg overflow-x-auto">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead className="w-10">
-                            <Checkbox checked={allOnPageSelected} onCheckedChange={toggleSelectAllOnPage} />
-                          </TableHead>
-                          <TableHead className="w-10">#</TableHead>
-                          <TableHead>Product Name</TableHead>
-                          <TableHead>SKU</TableHead>
-                          <TableHead>Category</TableHead>
-                          <TableHead>Price</TableHead>
-                          <TableHead>Stock</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {pagedProducts.map((product, idx) => {
-                          const selected = isProductSelected(product.id);
-                          const stock = product.current_stock ?? product.stock ?? 0;
-                          return (
-                            <TableRow key={product.id} className={selected ? "bg-blue-50/50" : undefined}>
-                              <TableCell>
-                                <Checkbox checked={selected} onCheckedChange={() => toggleProductRow(product)} />
-                              </TableCell>
-                              <TableCell className="text-gray-500">
-                                {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}
-                              </TableCell>
-                              <TableCell className="font-medium">{product.name}</TableCell>
-                              <TableCell className="text-gray-600">{product.sku || product.code || "—"}</TableCell>
-                              <TableCell>
-                                {product.category ? (
-                                  <Badge variant="secondary">{product.category}</Badge>
-                                ) : (
-                                  <span className="text-gray-400">—</span>
-                                )}
-                              </TableCell>
-                              <TableCell>Rs {product.sales_rate_exc_dis_and_tax || 0}</TableCell>
-                              <TableCell>{stock}</TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
-                  </div>
-                </>
-              )}
-
-              {filteredProducts.length > 0 && (
-                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
-                  <span className="text-xs sm:text-sm text-center sm:text-left">
-                    Showing {(tablePage - 1) * TABLE_PAGE_SIZE + 1} to{" "}
-                    {Math.min(tablePage * TABLE_PAGE_SIZE, filteredProducts.length)} of{" "}
-                    {filteredProducts.length} products
-                  </span>
-                  <div className="flex items-center justify-center gap-1">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      onClick={() => setTablePage((p) => Math.max(1, p - 1))}
-                      disabled={tablePage === 1}
-                    >
-                      <ChevronLeft className="h-4 w-4" />
-                    </Button>
-                    <span className="px-2 text-xs font-medium">
-                      {tablePage} / {totalTablePages}
-                    </span>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 w-8 p-0"
-                      onClick={() => setTablePage((p) => Math.min(totalTablePages, p + 1))}
-                      disabled={tablePage === totalTablePages}
-                    >
-                      <ChevronRight className="h-4 w-4" />
-                    </Button>
-                  </div>
-                </div>
-              )}
-            </TabsContent>
-
-            <TabsContent value="bulk" className="p-3 sm:p-4 mt-0">
-              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 sm:p-8 text-center space-y-3">
-                <Upload className="h-8 w-8 text-gray-400 mx-auto" />
+              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 space-y-3">
                 <div>
-                  <p className="text-sm font-medium text-gray-700">Upload a CSV or Excel file</p>
-                  <p className="text-xs text-gray-500 mt-1 max-w-md mx-auto">
-                    Columns: SKU (required), Net Weight, Expiry Months, Copies — any missing values fall back to
-                    the defaults set in Generation Settings.
+                  <p className="text-sm font-medium text-gray-700">Bulk upload</p>
+                  <p className="text-xs text-gray-500 mt-1">
+                    CSV or Excel with SKU, plus optional Net Weight, Expiry Months, and Copies.
                   </p>
                 </div>
-                <div className="flex flex-col sm:flex-row items-stretch sm:items-center justify-center gap-2 pt-1">
+                <div className="flex flex-col sm:flex-row gap-2">
                   <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={downloadBulkTemplate}>
                     <Download className="h-3.5 w-3.5 mr-1.5" />
-                    Download Template
+                    Download template
                   </Button>
-                  <Button size="sm" className="w-full sm:w-auto" onClick={() => bulkFileInputRef.current?.click()} disabled={bulkParsing}>
+                  <Button
+                    size="sm"
+                    className="w-full sm:w-auto"
+                    onClick={() => bulkFileInputRef.current?.click()}
+                    disabled={bulkParsing}
+                  >
                     {bulkParsing ? (
                       <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
                     ) : (
                       <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
                     )}
-                    {bulkParsing ? "Processing..." : "Choose File"}
+                    {bulkParsing ? "Processing..." : "Choose file"}
                   </Button>
                 </div>
                 <input
@@ -1795,273 +1821,25 @@ export default function BarcodeGenerator() {
                   onChange={handleBulkFileChange}
                 />
               </div>
-            </TabsContent>
-          </Tabs>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        )}
+      </div>
 
-      {/* Configure Selected Products */}
-      <Card className="min-w-0 overflow-hidden">
-        <CardHeader className="px-4 py-3 sm:p-6">
-          <CardTitle className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-base sm:text-lg">
-            <span className="min-w-0">Configure Selected Products ({selectedProducts.length})</span>
-            {totalLabels > 0 && (
-              <span className="text-xs sm:text-sm font-normal text-gray-600 bg-gray-100 rounded-full px-3 py-1 w-fit">
-                {totalLabels} label{totalLabels === 1 ? "" : "s"} total
-              </span>
+      {canPrint && (
+        <div className="fixed bottom-0 inset-x-0 z-30 md:hidden border-t bg-white/95 backdrop-blur p-3">
+          <Button onClick={handlePrintAll} className="w-full h-11" disabled={isPrinting}>
+            {isPrinting ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <Printer className="h-4 w-4 mr-2" />
             )}
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="px-3 sm:px-6 pb-4 sm:pb-6">
-          {selectedProducts.length === 0 ? (
-            <div className="text-center text-gray-500 py-8 px-2">
-              <Package className="h-12 w-12 mx-auto mb-4 text-gray-400" />
-              <p>No products selected yet.</p>
-              <p className="text-sm">Check products from the list above to configure and print their labels.</p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 sm:gap-4 max-h-[75vh] overflow-y-auto overflow-x-hidden pr-0 sm:pr-1">
-              {selectedProducts.map((item) => (
-                  <div
-                    key={item.id}
-                    className="border rounded-lg p-3 space-y-3 self-start min-w-0 overflow-hidden"
-                  >
-                    <div className="flex justify-between items-start gap-2">
-                      <div className="min-w-0">
-                        <h3 className="font-medium text-sm truncate">{item.product.name}</h3>
-                        <p className="text-xs text-gray-600 break-words">
-                          SKU: {item.product.sku} · Price: Rs {item.product.sales_rate_exc_dis_and_tax}
-                        </p>
-                      </div>
-                      <Button
-                        onClick={() => removeProduct(item.id)}
-                        variant="ghost"
-                        size="sm"
-                        className="h-7 w-7 p-0 text-gray-500 hover:text-red-600 shrink-0"
-                      >
-                        <X className="h-4 w-4" />
-                      </Button>
-                    </div>
-
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <Label htmlFor={`weight-${item.id}`}>
-                          Net Weight *
-                        </Label>
-                        {(() => {
-                          const options = getNetWeightOptions(item.product.unitName);
-                          const optionValues = options.map((opt) => opt.value);
-                          const isCustomValue =
-                            item.netWeight &&
-                            !optionValues.includes(item.netWeight);
-                          const showCustomInput =
-                            customNetWeightMode[item.id] || isCustomValue;
-
-                          return showCustomInput ? (
-                            <div className="space-y-2">
-                              <Input
-                                id={`weight-${item.id}`}
-                                value={item.netWeight}
-                                onChange={(e) =>
-                                  updateProductData(
-                                    item.id,
-                                    "netWeight",
-                                    e.target.value
-                                  )
-                                }
-                                placeholder={
-                                  isWeightUnit(item.product.unitName)
-                                    ? "e.g., 500g, 1kg"
-                                    : "e.g., 1, 2, 3"
-                                }
-                              />
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                onClick={() => {
-                                  setCustomNetWeightMode((prev) => ({
-                                    ...prev,
-                                    [item.id]: false,
-                                  }));
-                                  // Reset to empty or first option if value doesn't match
-                                  if (isCustomValue) {
-                                    updateProductData(
-                                      item.id,
-                                      "netWeight",
-                                      ""
-                                    );
-                                  }
-                                }}
-                                className="w-full"
-                              >
-                                Use Dropdown
-                              </Button>
-                            </div>
-                          ) : (
-                            <Select
-                              value={item.netWeight || ""}
-                              onValueChange={(value) => {
-                                if (value === "custom") {
-                                  setCustomNetWeightMode((prev) => ({
-                                    ...prev,
-                                    [item.id]: true,
-                                  }));
-                                  updateProductData(item.id, "netWeight", "");
-                                } else {
-                                  updateProductData(item.id, "netWeight", value);
-                                }
-                              }}
-                            >
-                              <SelectTrigger id={`weight-${item.id}`}>
-                                <SelectValue placeholder="Select net weight" />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {options.map((option) => (
-                                  <SelectItem
-                                    key={option.value}
-                                    value={option.value}
-                                  >
-                                    {option.label}
-                                  </SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          );
-                        })()}
-                      </div>
-                      <div>
-                        <Label>Package Date</Label>
-                        <Input
-                          value={formatDate(item.packageDate)}
-                          readOnly
-                          className="bg-gray-100"
-                        />
-                      </div>
-                      <div>
-                        <Label>Expiry Duration *</Label>
-                        <Select
-                          onValueChange={(value) =>
-                            updateProductData(item.id, "expiryDuration", value)
-                          }
-                          value={item.expiryDuration}
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="Set expiry" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {expiryOptions.map((opt) => (
-                              <SelectItem key={opt.value} value={opt.value}>
-                                {opt.label}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div>
-                        <Label htmlFor={`copies-${item.id}`}>Copies</Label>
-                        <div className="flex items-center gap-1">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-9 w-9 p-0"
-                            onClick={() =>
-                              updateProductData(
-                                item.id,
-                                "copies",
-                                Math.max(1, (item.copies || 1) - 1),
-                              )
-                            }
-                            disabled={(item.copies || 1) <= 1}
-                          >
-                            -
-                          </Button>
-                          <Input
-                            id={`copies-${item.id}`}
-                            type="number"
-                            inputMode="numeric"
-                            min={1}
-                            value={item.copies}
-                            onChange={(e) => {
-                              const n = parseInt(e.target.value, 10);
-                              updateProductData(
-                                item.id,
-                                "copies",
-                                Number.isFinite(n) && n > 0 ? n : 1,
-                              );
-                            }}
-                            className="text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-9 w-9 p-0"
-                            onClick={() =>
-                              updateProductData(
-                                item.id,
-                                "copies",
-                                (item.copies || 1) + 1,
-                              )
-                            }
-                          >
-                            +
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Compact preview — keeps the visual confirmation
-                        without dominating the card height. */}
-                    <div className="bg-gray-50 px-3 py-2 rounded border flex flex-col sm:flex-row sm:items-center gap-2 sm:gap-3 min-w-0">
-                      <img
-                        src={generateBarcodeDataURL(
-                          encodeLabelBarcodeValue(
-                            item.product.sku,
-                            item.product.code,
-                            Math.round(
-                              Number(
-                                calculatePriceByWeight(
-                                  item.netWeight,
-                                  item.product.sales_rate_exc_dis_and_tax,
-                                ),
-                              ),
-                            ),
-                          ),
-                        )}
-                        alt="Barcode Preview"
-                        className="h-8 max-w-full object-contain bg-white p-1 rounded shrink-0 self-center sm:self-auto"
-                      />
-                      <div className="flex-1 min-w-0 text-xs text-gray-700 space-y-0.5">
-                        <div className="flex justify-between gap-2">
-                          <span className="truncate">
-                            Net: {formatWeightDisplay(item.netWeight)}
-                          </span>
-                          <span className="font-semibold shrink-0">
-                            Rs{" "}
-                            {Math.round(
-                              Number(
-                                calculatePriceByWeight(
-                                  item.netWeight,
-                                  item.product.sales_rate_exc_dis_and_tax,
-                                ),
-                              ),
-                            )}
-                          </span>
-                        </div>
-                        <div className="flex justify-between gap-2 text-gray-500">
-                          <span className="truncate">PKG {formatDate(item.packageDate)}</span>
-                          <span className="truncate shrink-0">EXP {formatDate(item.expiryDate)}</span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </CardContent>
-        </Card>
+            {isPrinting
+              ? "Printing..."
+              : `Print ${totalLabels} Label${totalLabels === 1 ? "" : "s"}`}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }

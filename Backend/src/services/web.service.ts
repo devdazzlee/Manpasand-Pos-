@@ -1,7 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
-import { withCache, WEB_CACHE_TTL } from '../utils/webCache';
+import { withCache, WEB_CACHE_TTL, WEB_CACHE_PREFIXES } from '../utils/webCache';
 import { startOfMonth } from 'date-fns';
 
 type SortKey = 'newest' | 'oldest' | 'price-asc' | 'price-desc' | 'name-asc' | 'name-desc';
@@ -108,7 +108,7 @@ export class WebService {
     const bestLimit =
       opts.bestLimit === 0 ? 0 : clampLimit(opts.bestLimit ?? 0, 0, 24);
     const categoriesLimit = clampLimit(opts.categoriesLimit, 24, 50);
-    const cacheKey = `home:v3:f${featuredLimit}:b${bestLimit}:c${categoriesLimit}`;
+    const cacheKey = `${WEB_CACHE_PREFIXES.HOME}v3:f${featuredLimit}:b${bestLimit}:c${categoriesLimit}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.HOME, async () => {
       const [featured, bestSellers, categories, productCount, featuredTotal, categoriesTotal] =
@@ -207,8 +207,8 @@ export class WebService {
     const search = (opts.search ?? '').trim();
 
     const cacheKey = all
-      ? `categories:all`
-      : `categories:p${page}:l${limit}:q${search.toLowerCase()}`;
+      ? `${WEB_CACHE_PREFIXES.CATEGORIES_LIST}all`
+      : `${WEB_CACHE_PREFIXES.CATEGORIES_LIST}p${page}:l${limit}:q${search.toLowerCase()}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.CATEGORIES_LIST, async () => {
       const where: Prisma.CategoryWhereInput = { is_active: true };
@@ -249,7 +249,7 @@ export class WebService {
     const limit = clampLimit(opts.limit, 12, 48);
     const page = clampPage(opts.page);
     const sort: SortKey = opts.sort && SORT_MAP[opts.sort] ? opts.sort : 'newest';
-    const cacheKey = `category:${trimmed}:p${page}:l${limit}:s${sort}`;
+    const cacheKey = `${WEB_CACHE_PREFIXES.CATEGORY_DETAIL}${trimmed}:p${page}:l${limit}:s${sort}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.CATEGORY_DETAIL, async () => {
       const category = await prisma.category.findUnique({
@@ -337,7 +337,7 @@ export class WebService {
       };
     }
 
-    const cacheKey = `products:p${page}:l${limit}:s${sort}:q${search.toLowerCase()}:c${
+    const cacheKey = `${WEB_CACHE_PREFIXES.PRODUCT_LIST}p${page}:l${limit}:s${sort}:q${search.toLowerCase()}:c${
       opts.category_id ?? opts.category_slug ?? ''
     }:sc${opts.subcategory_id ?? ''}:min${min ?? ''}:max${max ?? ''}:f${opts.featured ? 1 : 0}`;
 
@@ -370,7 +370,7 @@ export class WebService {
     const trimmed = id?.trim();
     if (!trimmed) throw new AppError(400, 'Product id is required');
 
-    return withCache(`product:${trimmed}`, WEB_CACHE_TTL.PRODUCT_DETAIL, async () => {
+    return withCache(`${WEB_CACHE_PREFIXES.PRODUCT_DETAIL}${trimmed}`, WEB_CACHE_TTL.PRODUCT_DETAIL, async () => {
       const product = await prisma.product.findUnique({
         where: { id: trimmed },
         select: {
@@ -413,7 +413,7 @@ export class WebService {
     if (!trimmed || trimmed.length < 2) return [];
 
     const safeLimit = clampLimit(limit, 8, 20);
-    const cacheKey = `suggest:${trimmed.toLowerCase()}:l${safeLimit}`;
+    const cacheKey = `${WEB_CACHE_PREFIXES.SEARCH_SUGGEST}${trimmed.toLowerCase()}:l${safeLimit}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.SEARCH_SUGGEST, async () => {
       const rows = await prisma.product.findMany({
@@ -450,7 +450,7 @@ export class WebService {
   }
 
   async getProductCount() {
-    return withCache('meta:product-count', WEB_CACHE_TTL.PRODUCT_COUNT, async () => {
+    return withCache(`${WEB_CACHE_PREFIXES.PRODUCT_COUNT}product-count`, WEB_CACHE_TTL.PRODUCT_COUNT, async () => {
       const count = await prisma.product.count({ where: { is_active: true } });
       return { count };
     });

@@ -7,7 +7,7 @@ export class ExpenseService {
         return await prisma.expense.create({ data });
     }
 
-    async listExpenses({ page = 1, limit = 10 }: { page?: number; limit?: number }) {
+    async listExpenses({ page = 1, limit = 20 }: { page?: number; limit?: number }) {
         const [expenses, total] = await Promise.all([
             prisma.expense.findMany({
                 skip: (page - 1) * limit,

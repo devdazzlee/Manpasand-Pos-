@@ -5,6 +5,7 @@
 
 import { offlineDB } from './offline-db';
 import apiClient from './apiClient';
+import { collectPaginatedData } from './paginated-fetch';
 
 export interface SyncStatus {
   isOnline: boolean;
@@ -172,43 +173,22 @@ class OfflineSyncManager {
     console.log('📥 Pulling fresh data from server...');
 
     try {
-      // Fetch products
-      const products = await apiClient.get('/products');
-      let productsArray: any[] = [];
-      
-      // Handle different API response structures
-      if (products?.data) {
-        if (Array.isArray(products.data)) {
-          productsArray = products.data;
-        } else if (Array.isArray(products.data.data)) {
-          productsArray = products.data.data;
-        } else if (products.data.data && Array.isArray(products.data.data)) {
-          productsArray = products.data.data;
-        }
-      }
-      
+      const productsArray = await collectPaginatedData('/products', {}, { limit: 100, maxPages: 50 });
       if (productsArray.length > 0) {
         await offlineDB.saveProducts(productsArray);
         console.log(`✅ Updated ${productsArray.length} products`);
       } else {
-        console.warn('No products array found in response:', products);
+        console.warn('No products array found in response');
       }
 
-      // Fetch customers (use /customer endpoint, not /customers)
-      const customers = await apiClient.get('/customer');
-      const customersArray = Array.isArray(customers?.data?.data) 
-        ? customers.data.data 
-        : Array.isArray(customers?.data) 
-        ? customers.data 
-        : [];
+      const customersArray = await collectPaginatedData('/customer', {}, { limit: 100, maxPages: 50 });
       if (customersArray.length > 0) {
         await offlineDB.saveCustomers(customersArray);
         console.log(`✅ Updated ${customersArray.length} customers`);
       } else {
-        console.warn('No customers array found in response:', customers);
+        console.warn('No customers array found in response');
       }
 
-      // Clear expired cache
       await offlineDB.clearExpiredCache();
     } catch (error) {
       console.error('❌ Failed to pull fresh data:', error);

@@ -110,6 +110,7 @@ interface DropdownOption {
   name: string
   percentage?: number // for taxes
   is_active?: boolean
+  category_id?: string
 }
 
 interface Product {
@@ -991,6 +992,7 @@ export default function Inventory() {
   // Global store data
   const {
     products: globalProducts,
+    productsMeta,
     categories: globalCategories,
     categoriesLoading,
     productsLoading,
@@ -1007,7 +1009,7 @@ export default function Inventory() {
 
   // Product cards are derived from the global store — single source of truth.
   const [currentPage, setCurrentPage] = useState(1)
-  const [pageSize, setPageSize] = useState<number>(10)
+  const [pageSize, setPageSize] = useState<number>(20)
   const [gotoPage, setGotoPage] = useState<string>("")
 
   // State for filters
@@ -1109,39 +1111,39 @@ export default function Inventory() {
     // falls back to the "Select X" placeholder even though the product has
     // a value set.
     async getUnits() {
-      const response = await apiClient.get("/units", { params: { limit: 1000 } })
+      const response = await apiClient.get("/units", { params: { limit: 100 } })
       return response.data
     },
 
     async getTaxes() {
-      const response = await apiClient.get("/taxes", { params: { limit: 1000 } })
+      const response = await apiClient.get("/taxes", { params: { limit: 100 } })
       return response.data
     },
 
     async getSubcategories() {
-      const response = await apiClient.get("/subcategories", { params: { limit: 1000 } })
+      const response = await apiClient.get("/subcategories", { params: { limit: 100 } })
       return response.data
     },
 
     async getSuppliers() {
       const response = await apiClient.get("/suppliers", {
-        params: { fetch_all: true },
+        params: { page: 1, limit: 100 },
       })
       return response.data
     },
 
     async getBrands() {
-      const response = await apiClient.get("/brands", { params: { limit: 1000 } })
+      const response = await apiClient.get("/brands", { params: { limit: 100 } })
       return response.data
     },
 
     async getColors() {
-      const response = await apiClient.get("/colors", { params: { limit: 1000 } })
+      const response = await apiClient.get("/colors", { params: { limit: 100 } })
       return response.data
     },
 
     async getSizes() {
-      const response = await apiClient.get("/sizes", { params: { limit: 1000 } })
+      const response = await apiClient.get("/sizes", { params: { limit: 100 } })
       return response.data
     },
 
@@ -1235,13 +1237,13 @@ export default function Inventory() {
         colorsData,
         sizesData,
       ] = await Promise.all([
-        apiClient.get("/units", { params: { limit: 1000 } }),
-        apiClient.get("/taxes", { params: { limit: 1000 } }),
-        apiClient.get("/subcategories", { params: { limit: 1000 } }),
-        apiClient.get("/suppliers", { params: { fetch_all: true } }),
-        apiClient.get("/brands", { params: { limit: 1000 } }),
-        apiClient.get("/colors", { params: { limit: 1000 } }),
-        apiClient.get("/sizes", { params: { limit: 1000 } }),
+        apiClient.get("/units", { params: { limit: 100 } }),
+        apiClient.get("/taxes", { params: { limit: 100 } }),
+        apiClient.get("/subcategories", { params: { limit: 100 } }),
+        apiClient.get("/suppliers", { params: { page: 1, limit: 100 } }),
+        apiClient.get("/brands", { params: { limit: 100 } }),
+        apiClient.get("/colors", { params: { limit: 100 } }),
+        apiClient.get("/sizes", { params: { limit: 100 } }),
         fetchCategories(true),
       ])
 
@@ -1277,8 +1279,33 @@ export default function Inventory() {
   }, [loadDropdownData])
 
   useEffect(() => {
-    fetchProducts({ force: true }).catch(() => undefined)
-  }, [fetchProducts])
+    const delay = searchTerm.trim() ? 300 : 0
+    const timer = window.setTimeout(() => {
+      const limit = Math.min(Math.max(pageSize || 20, 1), 100)
+      fetchProducts({
+        force: true,
+        page: currentPage,
+        limit,
+        search: searchTerm.trim() || undefined,
+        categoryId: selectedCategory !== "__all__" ? selectedCategory : undefined,
+        subcategoryId: selectedSubcategory !== "__all__" ? selectedSubcategory : undefined,
+        isActive:
+          statusFilter === "ACTIVE" ? true : statusFilter === "INACTIVE" ? false : undefined,
+        isFeatured: statusFilter === "FEATURED" ? true : undefined,
+        stockStatus: statusFilter === "OUT" ? "out" : statusFilter === "LOW" ? "low" : undefined,
+      }).catch(() => undefined)
+    }, delay)
+
+    return () => window.clearTimeout(timer)
+  }, [
+    fetchProducts,
+    currentPage,
+    pageSize,
+    searchTerm,
+    selectedCategory,
+    selectedSubcategory,
+    statusFilter,
+  ])
 
   // Seed the stock branch selection from the user's current POS branch the
   // first time we know it. Don't clobber an explicit user pick afterwards.
@@ -1289,55 +1316,7 @@ export default function Inventory() {
   }, [selectedBranchId, stockBranchIds.length])
 
   const filteredProductsAll = useMemo(() => {
-    let filtered = [...globalProducts]
-
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase()
-      filtered = filtered.filter((product) => {
-        const haystack = [
-          product.name,
-          product.sku,
-          product.code,
-          product.pct_or_hs_code,
-          product.category,
-          product.brandName,
-        ]
-          .filter(Boolean)
-          .join(" ")
-          .toLowerCase()
-        return haystack.includes(term)
-      })
-    }
-
-    if (selectedCategory !== "__all__") {
-      filtered = filtered.filter((product) => product.categoryId === selectedCategory)
-    }
-
-    if (selectedSubcategory !== "__all__") {
-      filtered = filtered.filter(
-        (product) => product.subcategoryId && product.subcategoryId === selectedSubcategory,
-      )
-    }
-
-    if (statusFilter === "ACTIVE") {
-      filtered = filtered.filter((product) => product.is_active)
-    } else if (statusFilter === "INACTIVE") {
-      filtered = filtered.filter((product) => !product.is_active)
-    } else if (statusFilter === "FEATURED") {
-      filtered = filtered.filter((product) => product.is_featured)
-    } else if (statusFilter === "OUT") {
-      filtered = filtered.filter((product) => {
-        const stock = Number(product.available_stock ?? product.current_stock ?? product.stock ?? 0)
-        return stock <= 0
-      })
-    } else if (statusFilter === "LOW") {
-      filtered = filtered.filter((product) => {
-        const stock = Number(product.available_stock ?? product.current_stock ?? product.stock ?? 0)
-        const min = Number(product.minimum_stock ?? product.min_qty ?? 0)
-        return stock > 0 && min > 0 && stock <= min
-      })
-    }
-
+    const filtered = [...globalProducts]
     const nameOf = (p: any) => String(p?.name || "").toLowerCase()
     const stockOf = (p: any) => Number(p?.available_stock ?? p?.current_stock ?? p?.stock ?? 0)
     const priceOf = (p: any) => Number(p?.sales_rate_exc_dis_and_tax ?? 0)
@@ -1371,7 +1350,7 @@ export default function Inventory() {
     }
 
     return filtered
-  }, [globalProducts, searchTerm, selectedCategory, selectedSubcategory, sortBy, statusFilter])
+  }, [globalProducts, sortBy])
 
   const hasActiveFilters =
     searchTerm.trim() !== "" ||
@@ -1401,43 +1380,39 @@ export default function Inventory() {
     }
 
     return {
-      total: globalProducts.length,
+      total: productsMeta?.total ?? globalProducts.length,
       active,
       inactive,
       featured,
       outOfStock,
       lowStock,
     }
-  }, [globalProducts])
+  }, [globalProducts, productsMeta])
 
   const subcategoryFilterOptions = useMemo(() => {
-    const map = new Map<string, string>()
-    for (const product of globalProducts) {
-      if (!product.subcategoryId || !product.subcategory) continue
-      if (String(product.subcategory).trim().toLowerCase() === "unknown") continue
-      if (
-        selectedCategory !== "__all__" &&
-        product.categoryId !== selectedCategory
-      ) {
-        continue
-      }
-      map.set(product.subcategoryId, product.subcategory)
-    }
-    return Array.from(map.entries())
-      .map(([id, name]) => ({ id, name }))
+    return subcategories
+      .filter((sub) => {
+        if (!sub.id || !sub.name) return false
+        if (String(sub.name).trim().toLowerCase() === "unknown") return false
+        if (
+          selectedCategory !== "__all__" &&
+          sub.category_id &&
+          sub.category_id !== selectedCategory
+        ) {
+          return false
+        }
+        return true
+      })
+      .map((sub) => ({ id: sub.id, name: sub.name }))
       .sort((a, b) => a.name.localeCompare(b.name))
-  }, [globalProducts, selectedCategory])
+  }, [subcategories, selectedCategory])
 
-  const filteredProductCount = filteredProductsAll.length
+  const filteredProductCount = productsMeta?.total ?? filteredProductsAll.length
 
-  const products = useMemo(() => {
-    let paginated = filteredProductsAll
-    if (pageSize !== 0) {
-      const startIndex = (currentPage - 1) * pageSize
-      paginated = filteredProductsAll.slice(startIndex, startIndex + pageSize)
-    }
-    return paginated.map(mapStoreProductToCard)
-  }, [filteredProductsAll, currentPage, pageSize])
+  const products = useMemo(
+    () => filteredProductsAll.map(mapStoreProductToCard),
+    [filteredProductsAll],
+  )
 
   const syncProductInStore = async (productId: string, imageUrls?: string[]) => {
     const detail = await apiService.getProductById(productId)
@@ -1837,7 +1812,7 @@ export default function Inventory() {
     setImagePreviews((prev) => prev.filter((_, i) => i !== index))
   }
 
-  const totalPages = Math.ceil(filteredProductCount / pageSize)
+  const totalPages = Math.max(1, productsMeta?.totalPages ?? 1)
 
   const clearCatalogFilters = () => {
     setSearchTerm("")
@@ -2225,11 +2200,9 @@ export default function Inventory() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="10">10 per page</SelectItem>
-              <SelectItem value="25">25 per page</SelectItem>
+              <SelectItem value="20">20 per page</SelectItem>
               <SelectItem value="50">50 per page</SelectItem>
               <SelectItem value="100">100 per page</SelectItem>
-              <SelectItem value="200">200 per page</SelectItem>
-              <SelectItem value="0">Show all</SelectItem>
             </SelectContent>
           </Select>
         </div>
@@ -2552,16 +2525,10 @@ export default function Inventory() {
               {filteredProductCount > 0 && (
                 <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
                   <p className="text-sm text-gray-600">
-                    {pageSize === 0 ? (
-                      <>Showing all {filteredProductCount} products</>
-                    ) : (
-                      <>
-                        Showing {(currentPage - 1) * pageSize + 1}–
-                        {Math.min(currentPage * pageSize, filteredProductCount)} of {filteredProductCount}
-                      </>
-                    )}
+                    Showing {(currentPage - 1) * pageSize + 1}–
+                    {Math.min(currentPage * pageSize, filteredProductCount)} of {filteredProductCount}
                   </p>
-                  {pageSize !== 0 && totalPages > 1 && (
+                  {totalPages > 1 && (
                     <div className="flex items-center gap-1.5">
                       <Button
                         variant="outline"

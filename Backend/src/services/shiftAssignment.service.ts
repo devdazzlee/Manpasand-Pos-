@@ -249,7 +249,7 @@ export class ShiftAssignmentService {
   }) {
     const page = params.page || 1;
     const fetchAll = !!params.fetch_all;
-    const limit = fetchAll ? 2000 : params.limit || 20;
+    const limit = fetchAll ? 100 : params.limit || 20;
     const skip = fetchAll ? 0 : (page - 1) * limit;
     const { start: todayStart, end: todayEnd } = todayUtcBounds();
 

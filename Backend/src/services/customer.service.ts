@@ -6,6 +6,7 @@ import { config } from '../config/app';
 import bcrypt from 'bcryptjs';
 import { asNumber } from '../utils/helpers';
 import { CreateCustomerPaymentInput } from '../validations/customer.validation';
+import { parsePagination, paginationMeta } from '../utils/pagination';
 
 class CustomerService {
     private generateToken(cusId: Customer['id'], email: Customer['email']): string {
@@ -125,22 +126,48 @@ class CustomerService {
         return customer;
     }
 
-    public async getCustomers(search?: string) {
-        const customers = await prisma.customer.findMany({
-            where: search
+    public async getCustomers(params?: {
+        search?: string;
+        page?: number;
+        limit?: number;
+        is_active?: boolean;
+        created_after?: string;
+    }) {
+        const search = params?.search;
+        const { page, limit, skip } = parsePagination({
+            page: params?.page,
+            limit: params?.limit,
+        });
+        const createdAfter = params?.created_after ? new Date(params.created_after) : null;
+        const validCreatedAfter =
+            createdAfter && !Number.isNaN(createdAfter.getTime()) ? createdAfter : null;
+
+        const where = {
+            ...(params?.is_active !== undefined ? { is_active: params.is_active } : {}),
+            ...(validCreatedAfter ? { created_at: { gte: validCreatedAfter } } : {}),
+            ...(search
                 ? {
                     OR: [
-                        { name: { contains: search, mode: 'insensitive' } },
-                        { email: { contains: search, mode: 'insensitive' } },
+                        { name: { contains: search, mode: 'insensitive' as const } },
+                        { email: { contains: search, mode: 'insensitive' as const } },
                         { phone_number: { contains: search } },
                     ],
                 }
-                : undefined,
-            orderBy: { created_at: 'desc' },
-        });
+                : {}),
+        };
+
+        const [customers, total] = await Promise.all([
+            prisma.customer.findMany({
+                where,
+                orderBy: { created_at: 'desc' },
+                skip,
+                take: limit,
+            }),
+            prisma.customer.count({ where }),
+        ]);
 
         if (customers.length === 0) {
-            return [];
+            return { data: [], meta: paginationMeta(total, page, limit) };
         }
 
         const customerIds = customers.map((customer) => customer.id);
@@ -208,7 +235,8 @@ class CustomerService {
             ]),
         );
 
-        return customers.map((customer) => {
+        return {
+            data: customers.map((customer) => {
             const stats = statsByCustomerId.get(customer.id);
             const opening = asNumber(customer.previous_credit_balance);
             const unpaid = unpaidByCustomerId.get(customer.id) ?? 0;
@@ -222,7 +250,9 @@ class CustomerService {
                 last_sale_date: stats?.last_sale_date ?? null,
                 balance_due,
             };
-        });
+            }),
+            meta: paginationMeta(total, page, limit),
+        };
     }
 
     public async updateCustomer(

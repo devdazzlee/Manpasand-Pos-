@@ -72,6 +72,8 @@ interface Sale {
     const [isLoading, setIsLoading] = useState(false);
     const [isInitialLoading, setIsInitialLoading] = useState(true);
     const [searchTerm, setSearchTerm] = useState("");
+    const [productQuery, setProductQuery] = useState("");
+    const [customerQuery, setCustomerQuery] = useState("");
 
     // Dialogs
     const [isAddOpen, setIsAddOpen] = useState(false);
@@ -97,14 +99,10 @@ interface Sale {
       const loadMeta = async () => {
         setIsInitialLoading(true);
         try {
-          const [bRes, cRes, pRes] = await Promise.all([
-            apiClient.get(`${API_BASE}/branches?fetch_all=true`),
-            apiClient.get(`${API_BASE}/customer`),
-            apiClient.get(`${API_BASE}/products?fetch_all=true`),
+          const [bRes] = await Promise.all([
+            apiClient.get(`${API_BASE}/branches`, { params: { page: 1, limit: 100 } }),
           ]);
           setBranches(bRes.data.data);
-          setCustomers(cRes.data.data);
-          setProducts(pRes.data.data);
           // default branch filter
           if (bRes.data.data.length) {
             setBranchFilter(bRes.data.data[0].id);
@@ -127,6 +125,31 @@ interface Sale {
       };
       loadMeta();
     }, [toast]);
+
+    useEffect(() => {
+      const timer = window.setTimeout(async () => {
+        try {
+          const [cRes, pRes] = await Promise.all([
+            apiClient.get(`${API_BASE}/customer`, {
+              params: { page: 1, limit: 20, search: customerQuery.trim() || undefined },
+            }),
+            apiClient.get(`${API_BASE}/products`, {
+              params: {
+                page: 1,
+                limit: 20,
+                is_active: true,
+                search: productQuery.trim() || undefined,
+              },
+            }),
+          ]);
+          setCustomers(cRes.data.data || []);
+          setProducts(pRes.data.data || []);
+        } catch (err) {
+          console.log(err);
+        }
+      }, 300);
+      return () => window.clearTimeout(timer);
+    }, [productQuery, customerQuery]);
 
     // 2) Fetch sales when branchFilter changes
     useEffect(() => {
@@ -333,6 +356,12 @@ interface Sale {
                       ))}
                     </SelectContent>
                   </Select>
+                  <Input
+                    className="mt-2"
+                    placeholder="Search customers..."
+                    value={customerQuery}
+                    onChange={(e) => setCustomerQuery(e.target.value)}
+                  />
                 </div>
 
                 {/* Payment Method */}
@@ -366,6 +395,11 @@ interface Sale {
                 )}
 
                 {/* Line Items */}
+                <Input
+                  placeholder="Search products..."
+                  value={productQuery}
+                  onChange={(e) => setProductQuery(e.target.value)}
+                />
                 {saleForm.items.map((item, i) => (
                   <div key={i} className="grid grid-cols-4 gap-2 items-end">
                     <div>

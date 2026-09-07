@@ -138,7 +138,7 @@ export async function fetchInventoryDashboard(
 
 export async function fetchBranchesForFilter(): Promise<BranchOption[]> {
   const res = await apiClient.get("/branches", {
-    params: { fetch_all: true },
+    params: { page: 1, limit: 100 },
   });
   const data = unwrapData<BranchOption[]>(res.data);
   return Array.isArray(data) ? data : [];

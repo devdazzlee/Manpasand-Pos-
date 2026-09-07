@@ -503,6 +503,7 @@ function ReadOnlyRow({ label, value }: { label: string; value: React.ReactNode }
 
 export function EmployeeManagement() {
   const [list, setList] = useState<Employee[]>([])
+  const [listMeta, setListMeta] = useState({ total: 0, totalPages: 1 })
   const [departments, setDepartments] = useState<NamedEntity[]>([])
   const [employeeTypes, setEmployeeTypes] = useState<NamedEntity[]>([])
   const [loading, setLoading] = useState(false)
@@ -567,7 +568,10 @@ export function EmployeeManagement() {
   const fetchEmployees = useCallback(async (opts?: { silent?: boolean }) => {
     if (!opts?.silent) setLoading(true)
     try {
-      const params: Record<string, string> = { fetch_all: "true" }
+      const params: Record<string, string> = {
+        page: String(page),
+        limit: String(PAGE_SIZE),
+      }
       if (search.trim()) params.search = search.trim()
       if (statusFilter !== "all") params.status = statusFilter
       if (departmentFilter !== "all") params.department_id = departmentFilter
@@ -576,6 +580,10 @@ export function EmployeeManagement() {
 
       const res = await apiClient.get("/employee", { params })
       setList(unwrapList(res.data?.data))
+      setListMeta({
+        total: Number(res.data?.meta?.total) || unwrapList(res.data?.data).length,
+        totalPages: Math.max(1, Number(res.data?.meta?.totalPages) || 1),
+      })
     } catch (err) {
       toast.error("Failed to load employees", {
         description: extractApiError(err, "Could not fetch employees."),
@@ -584,13 +592,13 @@ export function EmployeeManagement() {
     } finally {
       if (!opts?.silent) setLoading(false)
     }
-  }, [search, statusFilter, departmentFilter, typeFilter, employmentFilter])
+  }, [page, search, statusFilter, departmentFilter, typeFilter, employmentFilter])
 
   const fetchLookups = useCallback(async () => {
     try {
       const [typesRes, depsRes] = await Promise.all([
         apiClient.get("/employee/types"),
-        apiClient.get("/employee/departments", { params: { fetch_all: "true" } }),
+        apiClient.get("/employee/departments", { params: { page: 1, limit: 100 } }),
       ])
       setEmployeeTypes(unwrapList(typesRes.data?.data))
       setDepartments(unwrapList(depsRes.data?.data))
@@ -611,20 +619,23 @@ export function EmployeeManagement() {
 
   useEffect(() => {
     if (isInitialLoading) return
-    const t = setTimeout(() => {
-      void fetchEmployees()
-      setPage(1)
-    }, 250)
-    return () => clearTimeout(t)
+    setPage(1)
   }, [
     search,
     statusFilter,
     departmentFilter,
     typeFilter,
     employmentFilter,
-    fetchEmployees,
     isInitialLoading,
   ])
+
+  useEffect(() => {
+    if (isInitialLoading) return
+    const t = setTimeout(() => {
+      void fetchEmployees()
+    }, 250)
+    return () => clearTimeout(t)
+  }, [fetchEmployees, isInitialLoading])
 
   const fetchShifts = useCallback(async (employeeId: string) => {
     setShiftsLoading(true)
@@ -701,9 +712,9 @@ export function EmployeeManagement() {
     return rows
   }, [list, sortKey])
 
-  const totalPages = Math.max(1, Math.ceil(sorted.length / PAGE_SIZE))
+  const totalPages = Math.max(1, listMeta.totalPages)
   const pageSafe = Math.min(page, totalPages)
-  const pageRows = sorted.slice((pageSafe - 1) * PAGE_SIZE, pageSafe * PAGE_SIZE)
+  const pageRows = sorted
 
   const hasFilters =
     statusFilter !== "all" ||
@@ -1709,11 +1720,11 @@ export function EmployeeManagement() {
             </div>
           )}
 
-          {sorted.length > PAGE_SIZE && (
+          {listMeta.total > PAGE_SIZE && (
             <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
               <p className="text-xs text-gray-500">
                 Showing {(pageSafe - 1) * PAGE_SIZE + 1}–
-                {Math.min(pageSafe * PAGE_SIZE, sorted.length)} of {sorted.length}
+                {Math.min(pageSafe * PAGE_SIZE, listMeta.total)} of {listMeta.total}
               </p>
               <div className="flex items-center gap-2">
                 <Button

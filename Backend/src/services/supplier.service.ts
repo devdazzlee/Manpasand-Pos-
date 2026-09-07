@@ -138,7 +138,7 @@ export class SupplierService {
             where.display_on_pos = display_on_pos;
         }
 
-        const take = fetch_all ? 1000 : limit;
+        const take = fetch_all ? Math.min(100, Math.max(limit, 1)) : limit;
         const skip = fetch_all ? 0 : (page - 1) * limit;
 
         const [suppliers, total] = await Promise.all([

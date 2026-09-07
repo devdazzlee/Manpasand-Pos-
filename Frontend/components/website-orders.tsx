@@ -32,8 +32,6 @@ import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-ch
 import {
   downloadReceiptPdf,
   formatReceiptQtyParts,
-  generateReceiptHtml,
-  receiptPageWrapper,
 } from "@/lib/receipt";
 import { cn } from "@/lib/utils";
 import { formatMoneyDisplay } from "@/lib/money";
@@ -417,28 +415,6 @@ const WebsiteOrders: React.FC = () => {
       thankYouMessage: "Thank you for shopping!",
       footerMessage: "Visit us again soon!",
     };
-  };
-
-  const handleBrowserPrint = (order: WebsiteOrder) => {
-    const receiptData = buildReceiptData(order);
-    const content = generateReceiptHtml(receiptData, logoDataUri);
-    const html = receiptPageWrapper(content);
-    const printWindow = window.open("", "_blank", "width=420,height=600");
-    if (!printWindow) {
-      toast({ title: "Unable to open print window", variant: "destructive" });
-      return;
-    }
-    printWindow.document.open();
-    printWindow.document.write(html);
-    printWindow.document.close();
-    printWindow.focus();
-    setTimeout(() => {
-      try {
-        printWindow.print();
-      } catch (error) {
-        console.error("Print failed", error);
-      }
-    }, 500);
   };
 
   const handlePrinterPrint = async (order: WebsiteOrder) => {
@@ -1578,14 +1554,6 @@ const WebsiteOrders: React.FC = () => {
                       <Download className="h-4 w-4 mr-2" />
                     )}
                     Download PDF
-                  </Button>
-                  <Button
-                    className="w-full sm:w-auto"
-                    variant="outline"
-                    onClick={() => handleBrowserPrint(selectedOrder)}
-                  >
-                    <Printer className="h-4 w-4 mr-2" />
-                    Print Receipt
                   </Button>
                   <Button
                     className="w-full sm:w-auto"
