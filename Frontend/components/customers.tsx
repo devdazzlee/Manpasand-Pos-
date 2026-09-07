@@ -430,7 +430,20 @@ interface CustomerFormFieldsProps {
   errors: CustomerFormErrors;
   onChange: (patch: Partial<CustomerFormValues>) => void;
   onClearError: (field: keyof CustomerFormErrors) => void;
+  onBlurField: (field: keyof CustomerFormValues) => void;
   disabled?: boolean;
+}
+
+/** Validate a single field against the form schema (used for on-blur feedback). */
+function validateCustomerField(
+  field: keyof CustomerFormValues,
+  value: unknown,
+): string | undefined {
+  const shape = customerFormSchema.shape as Record<string, z.ZodTypeAny>;
+  const fieldSchema = shape[field];
+  if (!fieldSchema) return undefined;
+  const res = fieldSchema.safeParse(value);
+  return res.success ? undefined : res.error.errors[0]?.message;
 }
 
 function CustomerFormFields({
@@ -439,10 +452,26 @@ function CustomerFormFields({
   errors,
   onChange,
   onClearError,
+  onBlurField,
   disabled = false,
 }: CustomerFormFieldsProps) {
+  const errorCount = Object.values(errors).filter(Boolean).length;
+
   return (
     <div className="space-y-4">
+      {errorCount > 0 && (
+        <div
+          role="alert"
+          className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+        >
+          <XCircle className="mt-0.5 h-4 w-4 shrink-0" />
+          <span>
+            Please fix {errorCount} highlighted{" "}
+            {errorCount === 1 ? "field" : "fields"} below before saving.
+          </span>
+        </div>
+      )}
+
       <div className="space-y-1">
         <Label htmlFor={`${idPrefix}-name`} className={customerFieldLabelClass}>
           Name<span className="text-destructive">*</span>
@@ -454,6 +483,7 @@ function CustomerFormFields({
             onChange({ name: e.target.value });
             if (errors.name) onClearError("name");
           }}
+          onBlur={() => onBlurField("name")}
           placeholder="Enter customer name"
           disabled={disabled}
           aria-invalid={errors.name ? true : undefined}
@@ -484,6 +514,7 @@ function CustomerFormFields({
             onChange({ phone_number: e.target.value });
             if (errors.phone_number) onClearError("phone_number");
           }}
+          onBlur={() => onBlurField("phone_number")}
           placeholder="Enter phone number"
           disabled={disabled}
           aria-invalid={errors.phone_number ? true : undefined}
@@ -512,6 +543,7 @@ function CustomerFormFields({
             onChange({ email: e.target.value });
             if (errors.email) onClearError("email");
           }}
+          onBlur={() => onBlurField("email")}
           placeholder="customer@example.com"
           disabled={disabled}
           aria-invalid={errors.email ? true : undefined}
@@ -579,6 +611,7 @@ function CustomerFormFields({
               onChange({ credit_limit: e.target.value });
               if (errors.credit_limit) onClearError("credit_limit");
             }}
+            onBlur={() => onBlurField("credit_limit")}
             placeholder="Leave empty for unlimited"
             disabled={disabled}
             aria-invalid={errors.credit_limit ? true : undefined}
@@ -615,6 +648,7 @@ function CustomerFormFields({
                 onClearError("previous_credit_balance");
               }
             }}
+            onBlur={() => onBlurField("previous_credit_balance")}
             placeholder="Amount owed before POS"
             disabled={disabled}
             aria-invalid={
@@ -655,6 +689,7 @@ function CustomerFormFields({
               onClearError("default_discount_percent");
             }
           }}
+          onBlur={() => onBlurField("default_discount_percent")}
           placeholder="0"
           disabled={disabled}
           aria-invalid={errors.default_discount_percent ? true : undefined}
@@ -1057,6 +1092,25 @@ export function Customers() {
     setErrors((p) => ({ ...p, [field]: undefined }));
   };
 
+  // Per-field validation on blur so the user sees what's missing without
+  // having to hit Save first.
+  const blurField = (field: keyof CustomerFormValues) => {
+    const msg = validateCustomerField(field, form[field]);
+    setErrors((p) => ({ ...p, [field]: msg }));
+  };
+
+  const focusFirstError = (errs: CustomerFormErrors, prefix: string) => {
+    const first = (Object.keys(errs) as Array<keyof CustomerFormErrors>).find(
+      (k) => errs[k],
+    );
+    if (!first) return;
+    requestAnimationFrame(() => {
+      const el = document.getElementById(`${prefix}-${first}`);
+      el?.scrollIntoView({ block: "center", behavior: "smooth" });
+      (el as HTMLElement | null)?.focus?.();
+    });
+  };
+
   const closeForm = () => {
     setAddOpen(false);
     setEditOpen(false);
@@ -1067,8 +1121,10 @@ export function Customers() {
   const submit = () => {
     const parsed = customerFormSchema.safeParse(form);
     if (!parsed.success) {
-      setErrors(zodErrorsToMap(parsed.error));
+      const errMap = zodErrorsToMap(parsed.error);
+      setErrors(errMap);
       toast({ variant: "destructive", title: firstZodError(parsed.error) });
+      focusFirstError(errMap, editOpen ? "edit" : "add");
       return;
     }
     setErrors({});
@@ -1727,6 +1783,7 @@ export function Customers() {
             errors={errors}
             onChange={setField}
             onClearError={clearError}
+            onBlurField={blurField}
             disabled={submitting}
           />
         </DetailSheetBody>
