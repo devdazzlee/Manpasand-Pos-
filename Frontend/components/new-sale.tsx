@@ -2234,7 +2234,7 @@ export function NewSale() {
         <div className="mb-2 sm:mb-4 md:mb-6">
           <div className="mb-2 hidden flex-col gap-3 sm:mb-4 sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <div className="min-w-0 pl-10 lg:pl-0">
-              <h1 className="text-xl font-bold text-gray-900 sm:text-2xl md:text-3xl">New Sales</h1>
+              <h1 className="text-lg font-bold text-gray-900 sm:text-xl">New Sale</h1>
               {lastTransactionId && (
                 <p className="text-sm text-green-600">
                   Last transaction: {lastTransactionId}
@@ -2633,9 +2633,10 @@ export function NewSale() {
 
           {/* Printer info - configured globally in Printer Settings */}
           {receiptPrinter && (
-            <div className="mb-2 hidden items-center gap-2 rounded-xl border border-blue-100 bg-blue-50/60 px-4 py-2.5 text-sm text-blue-800 sm:mb-4 sm:flex">
-              <span className="font-medium">🖨️ {receiptPrinter}</span>
-              <span className="text-blue-600 text-xs">(change in Printer Settings)</span>
+            <div className="mb-2 hidden items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600 sm:mb-4 sm:flex">
+              <Printer className="h-3.5 w-3.5 shrink-0 text-slate-400" />
+              <span className="font-medium text-slate-700">{receiptPrinter}</span>
+              <span className="text-slate-400">· change in Printer Settings</span>
             </div>
           )}
 
@@ -2682,39 +2683,35 @@ export function NewSale() {
                   type="button"
                   onClick={() => handleProductClick(product)}
                   className={cn(
-                    "group relative flex flex-col rounded-lg border bg-white p-2 text-left shadow-sm transition-all duration-150 sm:min-h-[4rem] sm:rounded-xl sm:p-2.5",
-                    "active:scale-[0.98] sm:hover:-translate-y-0.5 sm:hover:border-blue-300 sm:hover:shadow-md",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-2",
+                    "group relative flex flex-col rounded-xl border bg-white p-2.5 text-left transition-colors duration-100 sm:min-h-[4.5rem]",
+                    "active:scale-[0.98] sm:hover:border-blue-300 sm:hover:bg-blue-50/40",
+                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1",
                     inCart
-                      ? "border-blue-400 bg-blue-50/30 ring-1 ring-blue-200"
+                      ? "border-blue-500 bg-blue-50/50 ring-1 ring-blue-500"
                       : "border-slate-200",
                   )}
                 >
                   {inCart && (
-                    <span className="absolute -right-1 -top-1 flex h-4 min-w-4 items-center justify-center rounded-full bg-blue-600 px-1 text-[9px] font-bold tabular-nums text-white shadow-sm sm:-right-1.5 sm:-top-1.5 sm:h-5 sm:min-w-[1.25rem] sm:px-1.5 sm:text-[10px]">
+                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-bold tabular-nums text-white shadow-sm">
                       {formatQuantityValue(totalQuantity)}
                     </span>
                   )}
 
-                  <span className="line-clamp-2 text-[10px] font-medium leading-tight text-slate-800 sm:min-h-[1.6rem] sm:flex-1 sm:text-xs sm:leading-snug group-hover:text-slate-900">
+                  <span className="line-clamp-2 flex-1 text-[13px] font-medium leading-snug text-slate-900">
                     {product.name}
                   </span>
 
-                  {/* TESTING: show product unit on card — comment out when done */}
-                  <span className="mt-0.5 text-[8px] font-semibold uppercase tracking-wide text-amber-600 sm:text-[10px]">
-                    {product.unitName || "No unit"}
-                  </span>
-
-                  <div className="mt-1 flex items-end justify-between gap-1 border-t border-slate-100 pt-1 sm:gap-1.5">
+                  <div className="mt-1.5 flex items-baseline justify-between gap-2 border-t border-slate-100 pt-1.5">
                     {product.category ? (
-                      <span className="hidden truncate text-[10px] font-medium uppercase tracking-wide text-slate-400 sm:inline">
+                      <span className="hidden truncate text-[11px] text-slate-400 sm:inline">
                         {product.category}
                       </span>
                     ) : (
-                      <span className="hidden text-[10px] text-slate-300 sm:inline">—</span>
+                      <span className="hidden text-[11px] text-slate-300 sm:inline">—</span>
                     )}
-                    <span className="ml-auto shrink-0 text-[11px] font-bold tabular-nums text-blue-600 sm:text-sm">
-                      Rs {formatMoney(product.price)}
+                    <span className="ml-auto shrink-0 text-[15px] font-bold tabular-nums text-slate-900">
+                      <span className="text-[11px] font-medium text-slate-400">Rs </span>
+                      {formatMoney(product.price)}
                     </span>
                   </div>
                 </button>
@@ -2727,7 +2724,7 @@ export function NewSale() {
       {/* Cart Section */}
       <div
         className={cn(
-          "flex w-full flex-col bg-white lg:h-full lg:w-[300px] lg:shrink-0 lg:border-l lg:border-slate-200",
+          "flex w-full flex-col bg-white lg:h-full lg:w-[360px] lg:shrink-0 lg:border-l lg:border-slate-200",
           cart.length === 0
             ? "max-lg:hidden"
             : cn(
@@ -2966,36 +2963,36 @@ export function NewSale() {
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 rounded-none rounded-l-md text-slate-600"
+                            className="h-8 w-8 rounded-none rounded-l-md text-slate-600"
                             onClick={(e) => {
                               e.stopPropagation();
                               bumpQuantity(item.id, -1);
                             }}
                           >
-                            <Minus className="h-3 w-3" />
+                            <Minus className="h-3.5 w-3.5" />
                           </Button>
-                          <span className="min-w-[1.75rem] px-1 text-center text-xs font-bold tabular-nums text-slate-900">
+                          <span className="min-w-[2rem] px-1 text-center text-sm font-bold tabular-nums text-slate-900">
                             {qtyDisplay}
                           </span>
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-7 w-7 rounded-none rounded-r-md text-slate-600"
+                            className="h-8 w-8 rounded-none rounded-r-md text-slate-600"
                             onClick={(e) => {
                               e.stopPropagation();
                               bumpQuantity(item.id, 1);
                             }}
                           >
-                            <Plus className="h-3 w-3" />
+                            <Plus className="h-3.5 w-3.5" />
                           </Button>
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-xs font-medium leading-tight text-slate-900">
+                          <p className="truncate text-[13px] font-medium leading-tight text-slate-900">
                             {item.name}
                           </p>
-                          <p className="mt-0.5 text-[10px] tabular-nums text-slate-500">
+                          <p className="mt-0.5 text-[11px] tabular-nums text-slate-500">
                             Rs {formatMoney(effectiveUnitPrice)} each
                             {isPriceOverridden(item) && (
                               <span className="ml-1 font-medium text-amber-600">· custom</span>
@@ -3003,7 +3000,7 @@ export function NewSale() {
                           </p>
                         </div>
 
-                        <span className="shrink-0 text-xs font-bold tabular-nums text-slate-900">
+                        <span className="shrink-0 text-[13px] font-bold tabular-nums text-slate-900">
                           {formatMoney(lineAmount)}
                         </span>
 
