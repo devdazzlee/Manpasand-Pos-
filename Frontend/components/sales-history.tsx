@@ -1,13 +1,12 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
-import apiClient from "@/lib/apiClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { PageLoader } from "@/components/ui/page-loader";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -31,13 +30,22 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
+import { PageHeader, PageBody } from "@/components/ui/page-header";
 import {
   Search,
   Printer,
@@ -61,6 +69,7 @@ import {
   User,
   CreditCard,
   CalendarIcon,
+  RefreshCcw,
 } from "lucide-react";
 import {
   format,
@@ -89,6 +98,15 @@ import {
   shareReceiptOnWhatsApp,
 } from "@/lib/receipt";
 import { EditSaleDialog } from "@/components/edit-sale-dialog";
+import { extractApiError } from "@/lib/api/errors";
+import { getSession } from "@/lib/session";
+import { useBranches, useBranch } from "@/hooks/queries/use-branches";
+import { useSales, useSale, useSalesMutations } from "@/hooks/queries/use-sales";
+import {
+  fetchSaleById,
+  fetchAllSalesForExport,
+  type SalesQuery,
+} from "@/lib/api/sales";
 
 interface SaleItem {
   id: string;
@@ -168,11 +186,6 @@ interface SalesSummary {
   averageOrderValue: number;
   totalTaxCollected: number;
   totalDiscounts: number;
-}
-
-interface BranchOption {
-  id: string;
-  name: string;
 }
 
 type DatePreset = "all" | "today" | "yesterday" | "week" | "month" | "custom";
@@ -316,11 +329,9 @@ export function SalesHistory() {
   const { receiptPrinter, getReceiptPrinterObj } = usePrinterSettings();
   const logoDataUri = useLogoDataUri();
 
-  const [sales, setSales] = useState<Sale[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [summary, setSummary] = useState<SalesSummary>(EMPTY_SUMMARY);
-  const [cashiers, setCashiers] = useState<Cashier[]>([]);
-  const [branches, setBranches] = useState<BranchOption[]>([]);
+  const session = getSession();
+  const isAdmin = session.isAdmin;
+  const canManageSales = isAdmin || session.role === "BRANCH_MANAGER";
 
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
@@ -336,35 +347,23 @@ export function SalesHistory() {
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
-  const [totalSales, setTotalSales] = useState(0);
-  const [totalPages, setTotalPages] = useState(1);
   useScrollToTopOnPageChange(currentPage);
   const [sortBy, setSortBy] = useState<SortField>("sale_date");
   const [sortOrder, setSortOrder] = useState<"asc" | "desc">("desc");
 
-  const [viewSale, setViewSale] = useState<Sale | null>(null);
-  const [viewLoading, setViewLoading] = useState(false);
+  const [viewRowId, setViewRowId] = useState<string | null>(null);
+  const viewOpen = viewRowId !== null;
   const [receiptHtml, setReceiptHtml] = useState("");
   const [receiptData, setReceiptData] = useState<ReceiptData | null>(null);
   const [kioskMode, setKioskMode] = useState(false);
-  const [branchInfo, setBranchInfo] = useState({
-    name: "MANPASAND GENERAL STORE",
-    address: "Karachi",
-  });
   const [exporting, setExporting] = useState(false);
   const [cancelTarget, setCancelTarget] = useState<Sale | null>(null);
-  const [cancelling, setCancelling] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
-  const [deleting, setDeleting] = useState(false);
   const [editSale, setEditSale] = useState<Sale | null>(null);
   const [actionBusy, setActionBusy] = useState<{
     saleId: string;
     action: string;
   } | null>(null);
-
-  const userRole = typeof window !== "undefined" ? localStorage.getItem("role") : null;
-  const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN";
-  const canManageSales = isAdmin || userRole === "BRANCH_MANAGER";
 
   const isSaleBusy = (saleId: string, action?: string) =>
     !!actionBusy &&
@@ -385,8 +384,9 @@ export function SalesHistory() {
     }
   };
 
+  // Debounced search (guide: 250 ms) feeds the query hook.
   useEffect(() => {
-    const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 350);
+    const timer = setTimeout(() => setDebouncedSearch(searchTerm.trim()), 250);
     return () => clearTimeout(timer);
   }, [searchTerm]);
 
@@ -409,35 +409,19 @@ export function SalesHistory() {
     pageSize,
   ]);
 
-  useEffect(() => {
-    const loadLookups = async () => {
-      try {
-        const branchStr = localStorage.getItem("branch");
-        if (branchStr && branchStr !== "Not Found" && !isAdmin) {
-          const branchRes = await apiClient.get(`/branches/${branchStr}`);
-          setBranchInfo({
-            name: branchRes.data.data.name || branchStr,
-            address: branchRes.data.data.address || "Karachi",
-          });
-        }
-
-        if (isAdmin) {
-          const branchesRes = await apiClient.get("/branches", {
-            params: { page: 1, limit: 100, is_active: true },
-          });
-          const list = Array.isArray(branchesRes.data?.data)
-            ? branchesRes.data.data
-            : branchesRes.data?.data?.data || [];
-          setBranches(
-            list.map((b: any) => ({ id: b.id, name: b.name })).filter((b: BranchOption) => b.id),
-          );
-        }
-      } catch (error) {
-        console.warn("Failed to load lookups", error);
-      }
-    };
-    loadLookups();
-  }, [isAdmin]);
+  // ----- branch resolution via shared hooks -----
+  const { branches } = useBranches({ isActive: true, enabled: isAdmin });
+  const scopedBranchId = !isAdmin && session.branchId ? session.branchId : null;
+  const { data: scopedBranch } = useBranch(scopedBranchId);
+  const branchInfo = useMemo(() => {
+    if (scopedBranchId && scopedBranch) {
+      return {
+        name: scopedBranch.name || scopedBranchId,
+        address: scopedBranch.address || "Karachi",
+      };
+    }
+    return { name: "MANPASAND GENERAL STORE", address: "Karachi" };
+  }, [scopedBranchId, scopedBranch]);
 
   const resolveDateParams = useCallback(() => {
     if (datePreset === "custom") {
@@ -453,103 +437,119 @@ export function SalesHistory() {
     };
   }, [datePreset, customStart, customEnd]);
 
-  const buildParams = useCallback(
-    (overrides?: { page?: number; limit?: number; forExport?: boolean }) => {
-      const params: Record<string, string> = {};
-      const storedBranch = localStorage.getItem("branch");
-      const role = localStorage.getItem("role");
-      const admin = role === "ADMIN" || role === "SUPER_ADMIN";
-
-      // Branch users: always scoped to login branch.
-      // Admins: all branches unless a branch filter is chosen.
-      if (admin) {
-        if (branchFilter !== "all") {
-          params.branchId = branchFilter;
-        }
-      } else if (storedBranch && storedBranch !== "Not Found" && storedBranch.trim()) {
-        params.branchId = storedBranch.trim();
-      }
-
-      if (!overrides?.forExport) {
-        params.page = String(overrides?.page ?? currentPage);
-        params.limit = String(overrides?.limit ?? pageSize);
-      } else if (overrides.limit) {
-        params.page = "1";
-        params.limit = String(overrides.limit);
-      }
-
-      if (debouncedSearch) params.search = debouncedSearch;
-      if (paymentMethod !== "all") params.paymentMethod = paymentMethod;
-      if (paymentStatus !== "all") params.paymentStatus = paymentStatus;
-      if (orderStatus !== "all") params.status = orderStatus;
-      if (cashierId !== "all") params.cashierId = cashierId;
-
-      const { startDate, endDate } = resolveDateParams();
-      if (startDate) params.startDate = startDate;
-      if (endDate) params.endDate = endDate;
-
-      params.sortBy = sortBy;
-      params.sortOrder = sortOrder;
-      return params;
-    },
-    [
-      branchFilter,
-      currentPage,
-      pageSize,
-      debouncedSearch,
-      paymentMethod,
-      paymentStatus,
-      orderStatus,
-      cashierId,
-      resolveDateParams,
+  // Every filter the old buildParams() produced — reproduced 1:1 as hook params.
+  const listParams = useMemo<SalesQuery>(() => {
+    const { startDate, endDate } = resolveDateParams();
+    const resolvedBranchId = isAdmin
+      ? branchFilter !== "all"
+        ? branchFilter
+        : undefined
+      : session.branchId || undefined;
+    return {
+      page: currentPage,
+      limit: pageSize,
+      search: debouncedSearch || undefined,
+      paymentMethod: paymentMethod !== "all" ? paymentMethod : undefined,
+      paymentStatus: paymentStatus !== "all" ? paymentStatus : undefined,
+      status: orderStatus !== "all" ? orderStatus : undefined,
+      cashierId: cashierId !== "all" ? cashierId : undefined,
+      branchId: resolvedBranchId,
+      startDate,
+      endDate,
       sortBy,
       sortOrder,
-    ],
+    };
+  }, [
+    resolveDateParams,
+    isAdmin,
+    branchFilter,
+    session.branchId,
+    currentPage,
+    pageSize,
+    debouncedSearch,
+    paymentMethod,
+    paymentStatus,
+    orderStatus,
+    cashierId,
+    sortBy,
+    sortOrder,
+  ]);
+
+  const {
+    sales: rawSales,
+    meta,
+    summary: rawSummary,
+    cashiers,
+    isFirstLoad,
+    isRefreshing,
+    refetch,
+    error: listError,
+  } = useSales(listParams);
+
+  const sales = rawSales as unknown as Sale[];
+  const summary = rawSummary ?? EMPTY_SUMMARY;
+  const loading = isFirstLoad;
+  const totalSales = meta?.total ?? sales.length;
+  const totalPages = Math.max(1, meta?.totalPages ?? 1);
+
+  const { remove: removeSale, cancel: cancelSaleM } = useSalesMutations();
+
+  useEffect(() => {
+    if (listError) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load sales",
+        description: extractApiError(listError, "Failed to load sales"),
+      });
+    }
+  }, [listError]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ----- sale detail (gated on the sheet being open) -----
+  const viewRow = useMemo(
+    () => sales.find((s) => s.id === viewRowId) ?? null,
+    [sales, viewRowId],
+  );
+  const viewQuery = useSale(viewRowId, { enabled: viewOpen });
+  const viewSale: Sale | null =
+    (viewQuery.data as unknown as Sale) ?? viewRow ?? null;
+  const viewLoading = viewQuery.isLoading && !viewRow;
+
+  useEffect(() => {
+    if (viewQuery.error) {
+      toast({
+        title: "Loaded from list data",
+        description: "Could not refresh full sale details.",
+      });
+    }
+  }, [viewQuery.error]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const buildReceiptFromSale = useCallback(
+    (sale: Sale): ReceiptData => {
+      const data = prepareReceiptDataFromSale(sale, {
+        name: sale.branch?.name || branchInfo.name,
+        address: sale.branch?.address || branchInfo.address,
+      });
+      if (sale.user?.email) {
+        data.cashier = sale.user.email.split("@")[0] || sale.user.email;
+      }
+      return data;
+    },
+    [branchInfo.name, branchInfo.address],
   );
 
-  const fetchSales = useCallback(async () => {
-    setLoading(true);
-    try {
-      const res = await apiClient.get<{
-        data: Sale[];
-        meta?: {
-          total?: number;
-          totalPages?: number;
-          page?: number;
-          limit?: number;
-          summary?: SalesSummary;
-          cashiers?: Cashier[];
-        };
-      }>("/sale", { params: buildParams() });
-
-      const validSales = (res.data.data || []).filter(
-        (sale) => sale.id && sale.sale_number && sale.sale_date && sale.total_amount !== undefined,
-      );
-
-      setSales(validSales);
-      setTotalSales(res.data.meta?.total ?? validSales.length);
-      setTotalPages(res.data.meta?.totalPages ?? 1);
-      setSummary(res.data.meta?.summary || EMPTY_SUMMARY);
-      if (Array.isArray(res.data.meta?.cashiers)) {
-        setCashiers(res.data.meta.cashiers);
-      }
-    } catch (err) {
-      console.error("Failed to fetch sales:", err);
-      toast({ title: "Failed to load sales", variant: "destructive" });
-    } finally {
-      setLoading(false);
-    }
-  }, [buildParams, toast]);
-
+  // Rebuild the receipt preview whenever the sale detail or logo changes.
   useEffect(() => {
-    fetchSales();
-  }, [fetchSales]);
+    if (!viewOpen || !viewSale) return;
+    const data = buildReceiptFromSale(viewSale);
+    setReceiptData(data);
+    setReceiptHtml(receiptPageWrapper(generateReceiptHtml(data, logoDataUri)));
+  }, [viewOpen, viewSale, logoDataUri, buildReceiptFromSale]);
 
-  // Refresh receipt preview once logo is available
-  useEffect(() => {
-    if (!viewSale || !logoDataUri || !receiptData) return;
-    setReceiptHtml(receiptPageWrapper(generateReceiptHtml(receiptData, logoDataUri)));
-  }, [logoDataUri, viewSale, receiptData]);
+  const closeView = () => {
+    setViewRowId(null);
+    setReceiptHtml("");
+    setReceiptData(null);
+  };
 
   const activeFilterCount = useMemo(() => {
     let count = 0;
@@ -591,68 +591,34 @@ export function SalesHistory() {
 
   const fetchSaleDetails = async (sale: Sale): Promise<Sale> => {
     try {
-      const res = await apiClient.get(`/sale/${sale.id}`);
-      return res.data?.data || sale;
+      const detailed = await fetchSaleById(sale.id);
+      return (detailed as unknown as Sale) || sale;
     } catch {
       return sale;
     }
   };
 
-  const handleDeleteSale = async () => {
+  const handleDeleteSale = () => {
     if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await apiClient.delete(`/sale/${deleteTarget.id}`);
-      toast({ title: "Sale deleted" });
-      setDeleteTarget(null);
-      fetchSales();
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Delete failed",
-        description: error?.response?.data?.message || error?.message || "Unable to delete sale",
-      });
-    } finally {
-      setDeleting(false);
-    }
-  };
-
-  const buildReceiptFromSale = (sale: Sale): ReceiptData => {
-    const data = prepareReceiptDataFromSale(sale, {
-      name: sale.branch?.name || branchInfo.name,
-      address: sale.branch?.address || branchInfo.address,
-    });
-    if (sale.user?.email) {
-      data.cashier = sale.user.email.split("@")[0] || sale.user.email;
-    }
-    return data;
-  };
-
-  const openSaleDetails = async (sale: Sale, showReceipt = true) => {
-    await runSaleAction(sale.id, "view", async () => {
-      setViewLoading(true);
-      setViewSale(sale);
-      try {
-        const detailed = await fetchSaleDetails(sale);
-        setViewSale(detailed);
-        const data = buildReceiptFromSale(detailed);
-        setReceiptData(data);
-        if (showReceipt) {
-          setReceiptHtml(receiptPageWrapper(generateReceiptHtml(data, logoDataUri)));
-        }
-      } catch (error) {
-        console.error(error);
-        const data = buildReceiptFromSale(sale);
-        setReceiptData(data);
-        setReceiptHtml(receiptPageWrapper(generateReceiptHtml(data, logoDataUri)));
+    const target = deleteTarget;
+    removeSale.mutate(target.id, {
+      onSuccess: () => {
+        toast({ title: "Sale deleted" });
+        setDeleteTarget(null);
+        if (viewRowId === target.id) closeView();
+      },
+      onError: (error) => {
         toast({
-          title: "Loaded from list data",
-          description: "Could not refresh full sale details.",
+          variant: "destructive",
+          title: "Delete failed",
+          description: extractApiError(error, "Unable to delete sale"),
         });
-      } finally {
-        setViewLoading(false);
-      }
+      },
     });
+  };
+
+  const openSaleDetails = (sale: Sale) => {
+    setViewRowId(sale.id);
   };
 
   const handlePrintReceipt = async (sale?: Sale) => {
@@ -750,30 +716,21 @@ export function SalesHistory() {
     });
   };
 
-  const handleCancelSale = async () => {
+  const handleCancelSale = () => {
     if (!cancelTarget) return;
-    setCancelling(true);
-    try {
-      await apiClient.patch(`/sale/${cancelTarget.id}/cancel`);
-      toast({ title: "Sale cancelled" });
-      setCancelTarget(null);
-      fetchSales();
-    } catch (error: any) {
-      toast({
-        variant: "destructive",
-        title: "Cancel failed",
-        description: error?.response?.data?.message || error?.message || "Unable to cancel sale",
-      });
-    } finally {
-      setCancelling(false);
-    }
-  };
-
-  const fetchAllForExport = async (): Promise<Sale[]> => {
-    const res = await apiClient.get<{ data: Sale[] }>("/sale", {
-      params: buildParams({ forExport: true, page: 1, limit: 5000 }),
+    cancelSaleM.mutate(cancelTarget.id, {
+      onSuccess: () => {
+        toast({ title: "Sale cancelled" });
+        setCancelTarget(null);
+      },
+      onError: (error) => {
+        toast({
+          variant: "destructive",
+          title: "Cancel failed",
+          description: extractApiError(error, "Unable to cancel sale"),
+        });
+      },
     });
-    return res.data.data || [];
   };
 
   const rowsForExport = (list: Sale[]) =>
@@ -800,7 +757,7 @@ export function SalesHistory() {
   const handleExport = async (type: "csv" | "xlsx" | "pdf") => {
     setExporting(true);
     try {
-      const list = await fetchAllForExport();
+      const list = (await fetchAllSalesForExport(listParams)) as unknown as Sale[];
       const rows = rowsForExport(list);
       if (!rows.length) {
         toast({ title: "Nothing to export", variant: "destructive" });
@@ -929,807 +886,798 @@ export function SalesHistory() {
   ];
 
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
-        <div>
-          <h1 className="text-2xl md:text-3xl font-bold">Sales History</h1>
-          <p className="text-sm md:text-base text-gray-600">
-            Professional sales ledger with filters, exports, and receipt tools
-          </p>
+    <>
+      <PageHeader
+        title="Sales History"
+        description="Professional sales ledger with filters, exports, and receipt tools"
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isRefreshing}
+              title="Refresh"
+            >
+              <RefreshCcw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setShowFilters((v) => !v)}>
+              <Filter className="mr-2 h-4 w-4" />
+              Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
+            </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" disabled={exporting}>
+                  {exporting ? (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  ) : (
+                    <Download className="mr-2 h-4 w-4" />
+                  )}
+                  Export
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuItem onClick={() => handleExport("csv")}>
+                  <FileText className="mr-2 h-4 w-4" /> Export CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("xlsx")}>
+                  <FileSpreadsheet className="mr-2 h-4 w-4" /> Export Excel
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExport("pdf")}>
+                  <Printer className="mr-2 h-4 w-4" /> Export PDF
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </>
+        }
+      />
+
+      <PageBody className="space-y-4 md:space-y-6">
+        {/* Summary Cards */}
+        <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
+          {loading
+            ? Array.from({ length: 6 }).map((_, index) => (
+                <Card key={`summary-skel-${index}`}>
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <Skeleton className="h-3 w-24" />
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4 space-y-2">
+                    <Skeleton className="h-7 w-28" />
+                    <Skeleton className="h-3 w-20" />
+                  </CardContent>
+                </Card>
+              ))
+            : summaryCards.map((card) => (
+                <Card key={card.label}>
+                  <CardHeader className="pb-2 pt-4 px-4">
+                    <CardTitle className="text-xs font-medium text-muted-foreground uppercase tracking-wide">
+                      {card.label}
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="px-4 pb-4">
+                    <p className="text-lg font-bold text-foreground nums">{card.value}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">{card.hint}</p>
+                  </CardContent>
+                </Card>
+              ))}
         </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" size="sm" onClick={() => setShowFilters((v) => !v)}>
-            <Filter className="mr-2 h-4 w-4" />
-            Filters{activeFilterCount ? ` (${activeFilterCount})` : ""}
-          </Button>
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" disabled={exporting}>
-                {exporting ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="mr-2 h-4 w-4" />
-                )}
-                Export
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleExport("csv")}>
-                <FileText className="mr-2 h-4 w-4" /> Export CSV
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport("xlsx")}>
-                <FileSpreadsheet className="mr-2 h-4 w-4" /> Export Excel
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleExport("pdf")}>
-                <Printer className="mr-2 h-4 w-4" /> Export PDF
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-      </div>
 
-      {/* Summary Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3">
-        {loading
-          ? Array.from({ length: 6 }).map((_, index) => (
-              <Card key={`summary-skel-${index}`} className="border-gray-200 shadow-sm">
-                <CardHeader className="pb-2 pt-4 px-4">
-                  <div className="h-3 w-24 rounded bg-gray-200 animate-pulse" />
-                </CardHeader>
-                <CardContent className="px-4 pb-4 space-y-2">
-                  <div className="h-7 w-28 rounded bg-gray-200 animate-pulse" />
-                  <div className="h-3 w-20 rounded bg-gray-100 animate-pulse" />
-                </CardContent>
-              </Card>
-            ))
-          : summaryCards.map((card) => (
-              <Card key={card.label} className="border-gray-200 shadow-sm">
-                <CardHeader className="pb-2 pt-4 px-4">
-                  <CardTitle className="text-xs font-medium text-gray-500 uppercase tracking-wide">
-                    {card.label}
-                  </CardTitle>
-                </CardHeader>
-                <CardContent className="px-4 pb-4">
-                  <p className="text-lg font-bold text-gray-900">{card.value}</p>
-                  <p className="text-xs text-gray-500 mt-0.5">{card.hint}</p>
-                </CardContent>
-              </Card>
-            ))}
-      </div>
+        {/* Filters */}
+        {showFilters && (
+          <Card>
+            <CardContent className="pt-4 space-y-3">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                <div className="relative xl:col-span-2">
+                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+                  <Input
+                    className="pl-9"
+                    placeholder="Search invoice #, sale #, customer, barcode notes…"
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                  />
+                </div>
 
-      {/* Filters */}
-      {showFilters && (
-        <Card className="border-gray-200 shadow-sm">
-          <CardContent className="pt-4 space-y-3">
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-              <div className="relative xl:col-span-2">
-                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
-                <Input
-                  className="pl-9"
-                  placeholder="Search invoice #, sale #, customer, barcode notes…"
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-              </div>
-
-              <div>
-                <Select value={datePreset} onValueChange={(v) => setDatePreset(v as DatePreset)}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Date range" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All dates</SelectItem>
-                    <SelectItem value="today">Today</SelectItem>
-                    <SelectItem value="yesterday">Yesterday</SelectItem>
-                    <SelectItem value="week">This Week</SelectItem>
-                    <SelectItem value="month">This Month</SelectItem>
-                    <SelectItem value="custom">Custom Range</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Select value={cashierId} onValueChange={setCashierId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Cashier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Cashiers</SelectItem>
-                    {cashiers.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.email}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Select value={paymentMethod} onValueChange={setPaymentMethod}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Payment method" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Payment Methods</SelectItem>
-                    {PAYMENT_METHODS.map((m) => (
-                      <SelectItem key={m} value={m}>
-                        {m.replace("_", " ")}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Select value={paymentStatus} onValueChange={setPaymentStatus}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Payment status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Payment Statuses</SelectItem>
-                    {PAYMENT_STATUSES.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div>
-                <Select value={orderStatus} onValueChange={setOrderStatus}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Order status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Order Statuses</SelectItem>
-                    {ORDER_STATUSES.map((s) => (
-                      <SelectItem key={s} value={s}>
-                        {s}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {isAdmin && (
                 <div>
-                  <Select value={branchFilter} onValueChange={setBranchFilter}>
+                  <Select value={datePreset} onValueChange={(v) => setDatePreset(v as DatePreset)}>
                     <SelectTrigger>
-                      <SelectValue placeholder="Branch" />
+                      <SelectValue placeholder="Date range" />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">All Branches</SelectItem>
-                      {branches.map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.name}
+                      <SelectItem value="all">All dates</SelectItem>
+                      <SelectItem value="today">Today</SelectItem>
+                      <SelectItem value="yesterday">Yesterday</SelectItem>
+                      <SelectItem value="week">This Week</SelectItem>
+                      <SelectItem value="month">This Month</SelectItem>
+                      <SelectItem value="custom">Custom Range</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                <div>
+                  <Select value={cashierId} onValueChange={setCashierId}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Cashier" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Cashiers</SelectItem>
+                      {cashiers.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>
+                          {c.email}
                         </SelectItem>
                       ))}
                     </SelectContent>
                   </Select>
                 </div>
-              )}
-            </div>
 
-            {datePreset === "custom" && (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
                 <div>
-                  <Label className="text-xs text-gray-500">From</Label>
-                  <Input
-                    type="date"
-                    value={customStart}
-                    onChange={(e) => setCustomStart(e.target.value)}
-                  />
+                  <Select value={paymentMethod} onValueChange={setPaymentMethod}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Payment method" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Payment Methods</SelectItem>
+                      {PAYMENT_METHODS.map((m) => (
+                        <SelectItem key={m} value={m}>
+                          {m.replace("_", " ")}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
+
                 <div>
-                  <Label className="text-xs text-gray-500">To</Label>
-                  <Input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
+                  <Select value={paymentStatus} onValueChange={setPaymentStatus}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Payment status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Payment Statuses</SelectItem>
+                      {PAYMENT_STATUSES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
-              </div>
-            )}
 
-            {activeFilterCount > 0 && (
-              <div className="flex justify-end">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={clearFilters}
-                  className="text-red-600 hover:bg-red-50 hover:text-red-700"
-                >
-                  <X className="mr-1 h-4 w-4" /> Clear filters
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+                <div>
+                  <Select value={orderStatus} onValueChange={setOrderStatus}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Order status" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All Order Statuses</SelectItem>
+                      {ORDER_STATUSES.map((s) => (
+                        <SelectItem key={s} value={s}>
+                          {s}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
 
-      {/* Sales list */}
-      <Card className="border-gray-200 shadow-sm overflow-hidden">
-        <CardHeader className="pb-3 px-4 sm:px-6">
-          <div>
-            <CardTitle>
-              Sales History {loading ? "" : `(${totalSales})`}
-            </CardTitle>
-            <p className="text-sm text-gray-500 mt-0.5">
-              {loading
-                ? "Loading sales…"
-                : `Showing ${pageStart}–${pageEnd} of ${totalSales}${
-                    !isAdmin
-                      ? " · your branch only"
-                      : branchFilter === "all"
-                        ? " · all branches"
-                        : ""
-                  }`}
-            </p>
-          </div>
-        </CardHeader>
-        <CardContent className="space-y-4 p-0 sm:p-0">
-          {loading ? (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
-              {Array.from({ length: 6 }).map((_, index) => (
-                <div
-                  key={index}
-                  className="animate-pulse rounded-2xl border border-gray-200 bg-white p-4"
-                >
-                  <div className="h-14 rounded-xl bg-gray-100" />
-                  <div className="mt-4 h-4 w-2/3 rounded bg-gray-100" />
-                  <div className="mt-2 h-3 w-1/2 rounded bg-gray-100" />
-                  <div className="mt-4 grid grid-cols-2 gap-2">
-                    <div className="h-10 rounded-lg bg-gray-100" />
-                    <div className="h-10 rounded-lg bg-gray-100" />
+                {isAdmin && (
+                  <div>
+                    <Select value={branchFilter} onValueChange={setBranchFilter}>
+                      <SelectTrigger>
+                        <SelectValue placeholder="Branch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All Branches</SelectItem>
+                        {branches.map((b) => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                )}
+              </div>
+
+              {datePreset === "custom" && (
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 max-w-xl">
+                  <div>
+                    <Label className="text-xs text-muted-foreground">From</Label>
+                    <Input
+                      type="date"
+                      value={customStart}
+                      onChange={(e) => setCustomStart(e.target.value)}
+                    />
+                  </div>
+                  <div>
+                    <Label className="text-xs text-muted-foreground">To</Label>
+                    <Input type="date" value={customEnd} onChange={(e) => setCustomEnd(e.target.value)} />
                   </div>
                 </div>
-              ))}
-            </div>
-          ) : sales.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-gray-200 bg-white mx-4 mb-4 px-6 py-16 text-center">
-              <Receipt className="h-12 w-12 text-gray-400" />
-              <h3 className="mt-4 text-lg font-semibold text-gray-900">No sales found</h3>
-              <p className="mt-1 max-w-sm text-sm text-gray-500">
-                Adjust your search or filters to find transactions.
-              </p>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
-              {sales.map((sale) => {
-                const isRefund =
-                  sale.status === "REFUNDED" ||
-                  !!sale.original_sale_id ||
-                  toNumber(sale.total_amount) < 0;
+              )}
 
-                return (
-                  <div
-                    key={sale.id}
-                    className={cn(
-                      "group flex flex-col overflow-hidden rounded-2xl border bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md",
-                      isRefund
-                        ? "border-red-200 hover:border-red-300"
-                        : "border-gray-200 hover:border-gray-300",
-                    )}
+              {activeFilterCount > 0 && (
+                <div className="flex justify-end">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={clearFilters}
+                    className="text-destructive hover:text-destructive"
                   >
+                    <X className="mr-1 h-4 w-4" /> Clear filters
+                  </Button>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        )}
+
+        {/* Sales list */}
+        <Card className="overflow-hidden">
+          <CardHeader className="pb-3 px-4 sm:px-6">
+            <div className="flex items-center justify-between gap-2">
+              <div>
+                <CardTitle>Sales History {loading ? "" : `(${totalSales})`}</CardTitle>
+                <p className="text-sm text-muted-foreground mt-0.5">
+                  {loading
+                    ? "Loading sales…"
+                    : `Showing ${pageStart}–${pageEnd} of ${totalSales}${
+                        !isAdmin
+                          ? " · your branch only"
+                          : branchFilter === "all"
+                            ? " · all branches"
+                            : ""
+                      }`}
+                </p>
+              </div>
+              {isRefreshing && !loading && (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              )}
+            </div>
+          </CardHeader>
+          <CardContent className="space-y-4 p-0 sm:p-0">
+            {loading ? (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
+                {Array.from({ length: 6 }).map((_, index) => (
+                  <Skeleton key={index} className="h-56 w-full rounded-2xl" />
+                ))}
+              </div>
+            ) : sales.length === 0 ? (
+              <div className="m-4 mb-4 flex flex-col items-center gap-2 rounded-lg border border-dashed px-6 py-16 text-center">
+                <Receipt className="h-8 w-8 text-muted-foreground/50" />
+                <h3 className="text-sm font-semibold text-foreground">No sales found</h3>
+                <p className="max-w-sm text-sm text-muted-foreground">
+                  Adjust your search or filters to find transactions.
+                </p>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
+                {sales.map((sale) => {
+                  const isRefund =
+                    sale.status === "REFUNDED" ||
+                    !!sale.original_sale_id ||
+                    toNumber(sale.total_amount) < 0;
+
+                  return (
                     <div
+                      key={sale.id}
                       className={cn(
-                        "border-b px-4 py-4",
+                        "group flex flex-col overflow-hidden rounded-2xl border bg-background shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md",
                         isRefund
-                          ? "border-red-100 bg-gradient-to-r from-red-50 to-rose-50/40"
-                          : "border-gray-100 bg-gradient-to-r from-slate-50 to-emerald-50/40",
+                          ? "border-red-200 hover:border-red-300"
+                          : "border-border hover:border-border",
                       )}
                     >
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0 flex-1">
-                          <div className="flex flex-wrap items-center gap-2">
-                            <Badge
-                              variant={isRefund ? "destructive" : "default"}
-                              className="text-[10px] uppercase"
-                            >
-                              {isRefund ? "Refund" : "Sale"}
-                            </Badge>
-                            <Badge
-                              variant={statusBadgeVariant(sale.status)}
-                              className="text-[10px] uppercase"
-                            >
-                              {sale.status}
-                            </Badge>
-                            <Badge
-                              variant={paymentStatusVariant(sale.payment_status)}
-                              className="text-[10px] uppercase"
-                            >
-                              {sale.payment_status || "PAID"}
-                            </Badge>
+                      <div
+                        className={cn(
+                          "border-b px-4 py-4",
+                          isRefund
+                            ? "border-red-100 bg-red-50/50"
+                            : "border-border bg-muted/40",
+                        )}
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex flex-wrap items-center gap-2">
+                              <Badge
+                                variant={isRefund ? "destructive" : "default"}
+                                className="text-xs uppercase"
+                              >
+                                {isRefund ? "Refund" : "Sale"}
+                              </Badge>
+                              <Badge
+                                variant={statusBadgeVariant(sale.status)}
+                                className="text-xs uppercase"
+                              >
+                                {sale.status}
+                              </Badge>
+                              <Badge
+                                variant={paymentStatusVariant(sale.payment_status)}
+                                className="text-xs uppercase"
+                              >
+                                {sale.payment_status || "PAID"}
+                              </Badge>
+                            </div>
+                            <p className="mt-2 truncate font-mono text-sm font-semibold text-foreground">
+                              {sale.invoice_number || sale.sale_number}
+                            </p>
+                            <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground nums">
+                              <CalendarIcon className="h-3.5 w-3.5" />
+                              {format(parseISO(sale.sale_date), "MMM dd, yyyy · hh:mm a")}
+                            </p>
                           </div>
-                          <p className="mt-2 truncate font-mono text-sm font-semibold text-gray-900">
-                            {sale.invoice_number || sale.sale_number}
-                          </p>
-                          <p className="mt-1 flex items-center gap-1.5 text-xs text-gray-500">
-                            <CalendarIcon className="h-3.5 w-3.5" />
-                            {format(parseISO(sale.sale_date), "MMM dd, yyyy · hh:mm a")}
-                          </p>
+                          <div className="text-right">
+                            <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+                              Total
+                            </p>
+                            <p
+                              className={cn(
+                                "text-xl font-bold nums",
+                                isRefund ? "text-red-600" : "text-emerald-700",
+                              )}
+                            >
+                              {formatCurrency(sale.total_amount)}
+                            </p>
+                          </div>
                         </div>
-                        <div className="text-right">
-                          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-500">
-                            Total
-                          </p>
-                          <p
-                            className={cn(
-                              "text-xl font-bold",
-                              isRefund ? "text-red-600" : "text-emerald-700",
-                            )}
+                      </div>
+
+                      <div className="flex flex-1 flex-col p-4">
+                        <div className="space-y-2 text-sm">
+                          <div className="flex items-start gap-2 text-foreground">
+                            <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0">
+                              <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Branch
+                              </p>
+                              <p className="truncate font-medium">
+                                {sale.branch?.name || "—"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-2 text-foreground">
+                            <User className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0">
+                              <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Customer / Cashier
+                              </p>
+                              <p className="truncate font-medium">
+                                {customerLabel(sale)} · {cashierLabel(sale)}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="flex items-start gap-2 text-foreground">
+                            <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                            <div className="min-w-0">
+                              <p className="text-xs uppercase tracking-wide text-muted-foreground">
+                                Payment
+                              </p>
+                              <p className="truncate font-medium">
+                                {(sale.payment_method || "CASH").replace("_", " ")} ·{" "}
+                                {itemCount(sale) > 0
+                                  ? `${itemCount(sale)} items · Qty ${formatQty(totalQuantity(sale))}`
+                                  : "No line items saved"}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-3 gap-2 rounded-lg bg-muted/60 p-2 text-xs">
+                            <div>
+                              <p className="text-muted-foreground">Subtotal</p>
+                              <p className="font-semibold nums">
+                                {formatCurrency(sale.subtotal)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Discount</p>
+                              <p className="font-semibold nums">
+                                {formatCurrency(sale.discount_amount)}
+                              </p>
+                            </div>
+                            <div>
+                              <p className="text-muted-foreground">Tax</p>
+                              <p className="font-semibold nums">
+                                {formatCurrency(sale.tax_amount)}
+                              </p>
+                            </div>
+                          </div>
+                        </div>
+
+                        <div className="mt-4 flex flex-wrap items-center gap-2">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            className="flex-1"
+                            onClick={() => openSaleDetails(sale)}
                           >
-                            {formatCurrency(sale.total_amount)}
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    <div className="flex flex-1 flex-col p-4">
-                      <div className="space-y-2 text-sm">
-                        <div className="flex items-start gap-2 text-gray-700">
-                          <Building2 className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                          <div className="min-w-0">
-                            <p className="text-[11px] uppercase tracking-wide text-gray-500">
-                              Branch
-                            </p>
-                            <p className="truncate font-medium">
-                              {sale.branch?.name || "—"}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-2 text-gray-700">
-                          <User className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                          <div className="min-w-0">
-                            <p className="text-[11px] uppercase tracking-wide text-gray-500">
-                              Customer / Cashier
-                            </p>
-                            <p className="truncate font-medium">
-                              {customerLabel(sale)} · {cashierLabel(sale)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="flex items-start gap-2 text-gray-700">
-                          <CreditCard className="mt-0.5 h-4 w-4 shrink-0 text-gray-400" />
-                          <div className="min-w-0">
-                            <p className="text-[11px] uppercase tracking-wide text-gray-500">
-                              Payment
-                            </p>
-                            <p className="truncate font-medium">
-                              {(sale.payment_method || "CASH").replace("_", " ")} ·{" "}
-                              {itemCount(sale) > 0
-                                ? `${itemCount(sale)} items · Qty ${formatQty(totalQuantity(sale))}`
-                                : "No line items saved"}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="grid grid-cols-3 gap-2 rounded-lg bg-gray-50 p-2 text-xs">
-                          <div>
-                            <p className="text-gray-500">Subtotal</p>
-                            <p className="font-semibold">
-                              {formatCurrency(sale.subtotal)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500">Discount</p>
-                            <p className="font-semibold">
-                              {formatCurrency(sale.discount_amount)}
-                            </p>
-                          </div>
-                          <div>
-                            <p className="text-gray-500">Tax</p>
-                            <p className="font-semibold">
-                              {formatCurrency(sale.tax_amount)}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="mt-4 flex flex-wrap items-center gap-2">
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="flex-1"
-                          disabled={!!actionBusy}
-                          onClick={() => openSaleDetails(sale, true)}
-                        >
-                          {isSaleBusy(sale.id, "view") ? (
-                            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                          ) : (
                             <Eye className="mr-1.5 h-4 w-4" />
-                          )}
-                          View
-                        </Button>
-                        {canManageSales && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => openEditSale(sale)}
-                            disabled={!!sale.original_sale_id || !!actionBusy}
-                          >
-                            <Pencil className="mr-1.5 h-4 w-4" /> Edit
+                            View
                           </Button>
-                        )}
-                        {canManageSales && (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="text-red-600 hover:text-red-700"
-                            disabled={!!actionBusy}
-                            onClick={() => setDeleteTarget(sale)}
-                          >
-                            <Trash2 className="mr-1.5 h-4 w-4" /> Delete
-                          </Button>
-                        )}
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
+                          {canManageSales && (
                             <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-8 w-8"
-                              disabled={
-                                !!actionBusy && actionBusy.saleId === sale.id
-                              }
+                              variant="outline"
+                              size="sm"
+                              onClick={() => openEditSale(sale)}
+                              disabled={!!sale.original_sale_id || !!actionBusy}
                             >
-                              {actionBusy?.saleId === sale.id ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <MoreHorizontal className="h-4 w-4" />
-                              )}
+                              <Pencil className="mr-1.5 h-4 w-4" /> Edit
                             </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end" className="w-52">
-                            <DropdownMenuItem
+                          )}
+                          {canManageSales && (
+                            <Button
+                              variant="outline"
+                              size="sm"
+                              className="text-destructive hover:text-destructive"
                               disabled={!!actionBusy}
-                              onSelect={(e) => {
-                                e.preventDefault();
-                                openSaleDetails(sale, true);
-                              }}
+                              onClick={() => setDeleteTarget(sale)}
                             >
-                              {isSaleBusy(sale.id, "view") ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : (
-                                <Eye className="mr-2 h-4 w-4" />
-                              )}
-                              View Invoice
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={!!actionBusy}
-                              onSelect={(e) => {
-                                e.preventDefault();
-                                handlePrintReceipt(sale);
-                              }}
-                            >
-                              {isSaleBusy(sale.id, "print") ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : (
-                                <Printer className="mr-2 h-4 w-4" />
-                              )}
-                              Print Receipt
-                            </DropdownMenuItem>
-                            <DropdownMenuItem
-                              disabled={!!actionBusy}
-                              onSelect={(e) => {
-                                e.preventDefault();
-                                handleDownloadPdf(sale);
-                              }}
-                            >
-                              {isSaleBusy(sale.id, "pdf") ? (
-                                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                              ) : (
-                                <Download className="mr-2 h-4 w-4" />
-                              )}
-                              Download PDF
-                            </DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            {canManageSales && (
-                              <DropdownMenuItem
+                              <Trash2 className="mr-1.5 h-4 w-4" /> Delete
+                            </Button>
+                          )}
+                          <DropdownMenu>
+                            <DropdownMenuTrigger asChild>
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-8 w-8"
                                 disabled={
-                                  !!sale.original_sale_id || !!actionBusy
+                                  !!actionBusy && actionBusy.saleId === sale.id
                                 }
+                              >
+                                {actionBusy?.saleId === sale.id ? (
+                                  <Loader2 className="h-4 w-4 animate-spin" />
+                                ) : (
+                                  <MoreHorizontal className="h-4 w-4" />
+                                )}
+                              </Button>
+                            </DropdownMenuTrigger>
+                            <DropdownMenuContent align="end" className="w-52">
+                              <DropdownMenuItem
                                 onSelect={(e) => {
                                   e.preventDefault();
-                                  openEditSale(sale);
+                                  openSaleDetails(sale);
                                 }}
                               >
-                                <Pencil className="mr-2 h-4 w-4" /> Edit Sale
+                                <Eye className="mr-2 h-4 w-4" />
+                                View Invoice
                               </DropdownMenuItem>
-                            )}
-                            {canManageSales && (
-                              <>
-                                <DropdownMenuSeparator />
+                              <DropdownMenuItem
+                                disabled={!!actionBusy}
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handlePrintReceipt(sale);
+                                }}
+                              >
+                                {isSaleBusy(sale.id, "print") ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Printer className="mr-2 h-4 w-4" />
+                                )}
+                                Print Receipt
+                              </DropdownMenuItem>
+                              <DropdownMenuItem
+                                disabled={!!actionBusy}
+                                onSelect={(e) => {
+                                  e.preventDefault();
+                                  handleDownloadPdf(sale);
+                                }}
+                              >
+                                {isSaleBusy(sale.id, "pdf") ? (
+                                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                                ) : (
+                                  <Download className="mr-2 h-4 w-4" />
+                                )}
+                                Download PDF
+                              </DropdownMenuItem>
+                              <DropdownMenuSeparator />
+                              {canManageSales && (
                                 <DropdownMenuItem
-                                  className="text-red-600 focus:text-red-600"
-                                  disabled={!!actionBusy}
+                                  disabled={
+                                    !!sale.original_sale_id || !!actionBusy
+                                  }
                                   onSelect={(e) => {
                                     e.preventDefault();
-                                    setDeleteTarget(sale);
+                                    openEditSale(sale);
                                   }}
                                 >
-                                  <Trash2 className="mr-2 h-4 w-4" /> Delete
+                                  <Pencil className="mr-2 h-4 w-4" /> Edit Sale
                                 </DropdownMenuItem>
-                                {isAdmin && (
+                              )}
+                              {canManageSales && (
+                                <>
+                                  <DropdownMenuSeparator />
                                   <DropdownMenuItem
-                                    disabled={
-                                      sale.status === "CANCELLED" ||
-                                      !!sale.original_sale_id ||
-                                      !!actionBusy
-                                    }
+                                    className="text-destructive focus:text-destructive"
+                                    disabled={!!actionBusy}
                                     onSelect={(e) => {
                                       e.preventDefault();
-                                      setCancelTarget(sale);
+                                      setDeleteTarget(sale);
                                     }}
                                   >
-                                    Cancel Status
+                                    <Trash2 className="mr-2 h-4 w-4" /> Delete
                                   </DropdownMenuItem>
-                                )}
-                              </>
-                            )}
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+                                  {isAdmin && (
+                                    <DropdownMenuItem
+                                      disabled={
+                                        sale.status === "CANCELLED" ||
+                                        !!sale.original_sale_id ||
+                                        !!actionBusy
+                                      }
+                                      onSelect={(e) => {
+                                        e.preventDefault();
+                                        setCancelTarget(sale);
+                                      }}
+                                    >
+                                      Cancel Status
+                                    </DropdownMenuItem>
+                                  )}
+                                </>
+                              )}
+                            </DropdownMenuContent>
+                          </DropdownMenu>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Professional pagination */}
-          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between px-4 py-3 border-t">
-            <div className="flex flex-wrap items-center gap-3">
-              <div className="flex items-center gap-2">
-                <Label htmlFor="page-size" className="text-sm whitespace-nowrap">
-                  Cards per page
-                </Label>
-                <Select
-                  value={String(pageSize)}
-                  onValueChange={(value) => {
-                    setPageSize(Number(value));
-                    setCurrentPage(1);
-                  }}
-                >
-                  <SelectTrigger className="w-[100px]" id="page-size">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="10">10</SelectItem>
-                    <SelectItem value="25">25</SelectItem>
-                    <SelectItem value="50">50</SelectItem>
-                    <SelectItem value="100">100</SelectItem>
-                  </SelectContent>
-                </Select>
+                  );
+                })}
               </div>
-              <p className="text-sm text-gray-600">
-                Page {currentPage} of {totalPages} · {totalSales} total
-              </p>
-            </div>
+            )}
 
-            <div className="flex items-center gap-1">
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={currentPage <= 1 || loading}
-                onClick={() => setCurrentPage(1)}
-                title="First page"
-              >
-                <ChevronsLeft className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={currentPage <= 1 || loading}
-                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
-                title="Previous"
-              >
-                <ChevronLeft className="h-4 w-4" />
-              </Button>
-              {pageNumbers.map((page) => (
+            {/* Professional pagination */}
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between px-4 py-3 border-t border-border">
+              <div className="flex flex-wrap items-center gap-3">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="page-size" className="text-sm whitespace-nowrap">
+                    Cards per page
+                  </Label>
+                  <Select
+                    value={String(pageSize)}
+                    onValueChange={(value) => {
+                      setPageSize(Number(value));
+                      setCurrentPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="w-[100px]" id="page-size">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="10">10</SelectItem>
+                      <SelectItem value="25">25</SelectItem>
+                      <SelectItem value="50">50</SelectItem>
+                      <SelectItem value="100">100</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-sm text-muted-foreground nums">
+                  Page {currentPage} of {totalPages} · {totalSales} total
+                </p>
+              </div>
+
+              <div className="flex items-center gap-1">
                 <Button
-                  key={page}
-                  variant={page === currentPage ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 min-w-[36px]"
-                  disabled={loading}
-                  onClick={() => setCurrentPage(page)}
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  disabled={currentPage <= 1 || loading}
+                  onClick={() => setCurrentPage(1)}
+                  title="First page"
                 >
-                  {page}
+                  <ChevronsLeft className="h-4 w-4" />
                 </Button>
-              ))}
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={currentPage >= totalPages || loading}
-                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
-                title="Next"
-              >
-                <ChevronRight className="h-4 w-4" />
-              </Button>
-              <Button
-                variant="outline"
-                size="icon"
-                className="h-8 w-8"
-                disabled={currentPage >= totalPages || loading}
-                onClick={() => setCurrentPage(totalPages)}
-                title="Last page"
-              >
-                <ChevronsRight className="h-4 w-4" />
-              </Button>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Invoice / Receipt Dialog */}
-      <Dialog
-        open={!!viewSale}
-        onOpenChange={(open) => {
-          if (!open) {
-            setViewSale(null);
-            setReceiptHtml("");
-            setReceiptData(null);
-          }
-        }}
-      >
-        <DialogContent className="w-[min(96vw,1120px)] max-w-[1120px] sm:max-w-[1120px] max-h-[92vh] overflow-y-auto gap-3 p-4 sm:p-6">
-          <DialogHeader className="space-y-1 pr-8">
-            <div className="flex flex-wrap items-start justify-between gap-2">
-              <div>
-                <DialogTitle className="text-base sm:text-lg">
-                  Invoice {viewSale?.invoice_number || viewSale?.sale_number}
-                </DialogTitle>
-                <DialogDescription className="text-xs sm:text-sm">
-                  Sale details and branded receipt
-                </DialogDescription>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  disabled={currentPage <= 1 || loading}
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  title="Previous"
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                {pageNumbers.map((page) => (
+                  <Button
+                    key={page}
+                    variant={page === currentPage ? "default" : "outline"}
+                    size="sm"
+                    className="h-8 min-w-[36px]"
+                    disabled={loading}
+                    onClick={() => setCurrentPage(page)}
+                  >
+                    {page}
+                  </Button>
+                ))}
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  disabled={currentPage >= totalPages || loading}
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  title="Next"
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+                <Button
+                  variant="outline"
+                  size="icon"
+                  className="h-8 w-8"
+                  disabled={currentPage >= totalPages || loading}
+                  onClick={() => setCurrentPage(totalPages)}
+                  title="Last page"
+                >
+                  <ChevronsRight className="h-4 w-4" />
+                </Button>
               </div>
-              {viewSale && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {canManageSales && !viewSale.original_sale_id && (
+            </div>
+          </CardContent>
+        </Card>
+      </PageBody>
+
+      {/* Invoice / Receipt — DetailSheet (large: tables + receipt preview) */}
+      <DetailSheet
+        open={viewOpen}
+        onOpenChange={(open) => {
+          if (!open) closeView();
+        }}
+        size="xl"
+      >
+        <DetailSheetHeader
+          title={`Invoice ${viewSale?.invoice_number || viewSale?.sale_number || ""}`}
+          subtitle="Sale details and branded receipt"
+          icon={<Receipt className="h-5 w-5" />}
+          actions={
+            viewSale ? (
+              <div className="flex flex-wrap items-center gap-2">
+                {canManageSales && !viewSale.original_sale_id && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    disabled={!!actionBusy}
+                    onClick={() => openEditSale(viewSale)}
+                  >
+                    <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
+                  </Button>
+                )}
+                {canManageSales && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8 text-destructive hover:text-destructive"
+                    disabled={!!actionBusy}
+                    onClick={() => setDeleteTarget(viewSale)}
+                  >
+                    <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
+                  </Button>
+                )}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                     <Button
                       size="sm"
-                      variant="outline"
                       className="h-8"
-                      disabled={!!actionBusy}
-                      onClick={() => openEditSale(viewSale)}
+                      disabled={!!actionBusy && actionBusy.saleId === viewSale.id}
                     >
-                      <Pencil className="mr-1.5 h-3.5 w-3.5" /> Edit
+                      {actionBusy?.saleId === viewSale.id ? (
+                        <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                      ) : (
+                        <Printer className="mr-1.5 h-3.5 w-3.5" />
+                      )}
+                      Print / Export
                     </Button>
-                  )}
-                  {canManageSales && (
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-red-600"
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    <DropdownMenuItem
                       disabled={!!actionBusy}
-                      onClick={() => setDeleteTarget(viewSale)}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        handlePrintReceipt(viewSale);
+                      }}
                     >
-                      <Trash2 className="mr-1.5 h-3.5 w-3.5" /> Delete
-                    </Button>
-                  )}
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button size="sm" className="h-8" disabled={!!actionBusy && actionBusy.saleId === viewSale.id}>
-                        {actionBusy?.saleId === viewSale.id ? (
-                          <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Printer className="mr-1.5 h-3.5 w-3.5" />
-                        )}
-                        Print / Export
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end" className="w-52">
-                      <DropdownMenuItem
-                        disabled={!!actionBusy}
-                        onSelect={(e) => {
-                          e.preventDefault();
-                          handlePrintReceipt(viewSale);
-                        }}
-                      >
-                        {isSaleBusy(viewSale.id, "print") ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Printer className="mr-2 h-4 w-4" />
-                        )}
-                        Print Receipt
-                      </DropdownMenuItem>
-                      <DropdownMenuItem onClick={handleBrowserPrint} disabled={!!actionBusy}>
-                        <FileText className="mr-2 h-4 w-4" /> Browser Print
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={!!actionBusy}
-                        onSelect={(e) => {
-                          e.preventDefault();
-                          handleDownloadPdf(viewSale);
-                        }}
-                      >
-                        {isSaleBusy(viewSale.id, "pdf") ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <Download className="mr-2 h-4 w-4" />
-                        )}
-                        Download PDF
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem
-                        disabled={!!actionBusy}
-                        onSelect={async (e) => {
-                          e.preventDefault();
-                          if (!viewSale) return;
-                          await runSaleAction(viewSale.id, "whatsapp", async () => {
-                            const detailed = await fetchSaleDetails(viewSale);
-                            const data = buildReceiptFromSale(detailed);
-                            try {
-                              const { fellBack } = await shareReceiptOnWhatsApp(
-                                data,
-                                logoDataUri,
-                                viewSale.customer?.phone_number ||
-                                  viewSale.customer?.mobile_number ||
-                                  "",
-                              );
-                              if (fellBack) {
-                                toast({
-                                  title: "Receipt downloaded",
-                                  description: "Attach the PDF in WhatsApp chat.",
-                                });
-                              }
-                            } catch (err: any) {
+                      {isSaleBusy(viewSale.id, "print") ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Printer className="mr-2 h-4 w-4" />
+                      )}
+                      Print Receipt
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onClick={handleBrowserPrint} disabled={!!actionBusy}>
+                      <FileText className="mr-2 h-4 w-4" /> Browser Print
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      disabled={!!actionBusy}
+                      onSelect={(e) => {
+                        e.preventDefault();
+                        handleDownloadPdf(viewSale);
+                      }}
+                    >
+                      {isSaleBusy(viewSale.id, "pdf") ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <Download className="mr-2 h-4 w-4" />
+                      )}
+                      Download PDF
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      disabled={!!actionBusy}
+                      onSelect={async (e) => {
+                        e.preventDefault();
+                        if (!viewSale) return;
+                        await runSaleAction(viewSale.id, "whatsapp", async () => {
+                          const detailed = await fetchSaleDetails(viewSale);
+                          const data = buildReceiptFromSale(detailed);
+                          try {
+                            const { fellBack } = await shareReceiptOnWhatsApp(
+                              data,
+                              logoDataUri,
+                              viewSale.customer?.phone_number ||
+                                viewSale.customer?.mobile_number ||
+                                "",
+                            );
+                            if (fellBack) {
                               toast({
-                                title: err?.message || "Failed to share",
-                                variant: "destructive",
+                                title: "Receipt downloaded",
+                                description: "Attach the PDF in WhatsApp chat.",
                               });
                             }
-                          });
-                        }}
-                      >
-                        {isSaleBusy(viewSale.id, "whatsapp") ? (
-                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                        ) : (
-                          <MessageCircle className="mr-2 h-4 w-4" />
-                        )}
-                        WhatsApp
-                      </DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-              )}
-            </div>
-            {receiptPrinter && (
-              <p className="text-[11px] text-gray-500">Printer: {receiptPrinter}</p>
-            )}
-          </DialogHeader>
+                          } catch (err: any) {
+                            toast({
+                              title: err?.message || "Failed to share",
+                              variant: "destructive",
+                            });
+                          }
+                        });
+                      }}
+                    >
+                      {isSaleBusy(viewSale.id, "whatsapp") ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                      ) : (
+                        <MessageCircle className="mr-2 h-4 w-4" />
+                      )}
+                      WhatsApp
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ) : undefined
+          }
+        />
 
+        <DetailSheetBody className="space-y-3">
+          {receiptPrinter && (
+            <p className="text-xs text-muted-foreground">Printer: {receiptPrinter}</p>
+          )}
           {viewLoading || !viewSale ? (
-            <div className="py-10">
-              <PageLoader />
+            <div className="space-y-3">
+              <Skeleton className="h-24 w-full" />
+              <Skeleton className="h-40 w-full" />
+              <Skeleton className="h-64 w-full" />
             </div>
           ) : (
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 xl:grid-cols-2 gap-3">
               <div className="space-y-3 text-sm">
-                <div className="grid grid-cols-2 gap-2 rounded-md border bg-gray-50/80 p-3">
+                <div className="grid grid-cols-2 gap-2 rounded-md border bg-muted/40 p-3">
                   <div>
-                    <p className="text-[11px] text-gray-500">Date & Time</p>
-                    <p className="font-medium text-sm">{format(parseISO(viewSale.sale_date), "PPpp")}</p>
+                    <p className="text-xs text-muted-foreground">Date & Time</p>
+                    <p className="font-medium text-sm nums">
+                      {format(parseISO(viewSale.sale_date), "PPpp")}
+                    </p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-gray-500">Cashier</p>
+                    <p className="text-xs text-muted-foreground">Cashier</p>
                     <p className="font-medium text-sm">{cashierLabel(viewSale)}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-gray-500">Customer</p>
+                    <p className="text-xs text-muted-foreground">Customer</p>
                     <p className="font-medium text-sm">{customerLabel(viewSale)}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-gray-500">Branch</p>
+                    <p className="text-xs text-muted-foreground">Branch</p>
                     <p className="font-medium text-sm">{viewSale.branch?.name || "—"}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-gray-500">Payment</p>
+                    <p className="text-xs text-muted-foreground">Payment</p>
                     <p className="font-medium text-sm">
                       {viewSale.payment_method} · {viewSale.payment_status || "PAID"}
                     </p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-gray-500">Order Status</p>
+                    <p className="text-xs text-muted-foreground">Order Status</p>
                     <Badge variant={statusBadgeVariant(viewSale.status)}>{viewSale.status}</Badge>
                   </div>
                 </div>
@@ -1737,16 +1685,16 @@ export function SalesHistory() {
                 <div className="rounded-md border overflow-hidden">
                   <Table>
                     <TableHeader>
-                      <TableRow className="bg-gray-50/80">
-                        <TableHead className="h-9">Item</TableHead>
-                        <TableHead className="h-9 text-right">Qty</TableHead>
-                        <TableHead className="h-9 text-right">Total</TableHead>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="h-9 text-xs uppercase tracking-wide">Item</TableHead>
+                        <TableHead className="h-9 text-right text-xs uppercase tracking-wide">Qty</TableHead>
+                        <TableHead className="h-9 text-right text-xs uppercase tracking-wide">Total</TableHead>
                       </TableRow>
                     </TableHeader>
                     <TableBody>
                       {(viewSale.sale_items || []).length === 0 ? (
                         <TableRow>
-                          <TableCell colSpan={3} className="text-center text-gray-500 py-6">
+                          <TableCell colSpan={3} className="text-center text-muted-foreground py-6">
                             No line items
                           </TableCell>
                         </TableRow>
@@ -1754,8 +1702,8 @@ export function SalesHistory() {
                         (viewSale.sale_items || []).map((item) => (
                           <TableRow key={item.id}>
                             <TableCell className="py-2">{item.product?.name || "Item"}</TableCell>
-                            <TableCell className="py-2 text-right">{formatQty(item.quantity)}</TableCell>
-                            <TableCell className="py-2 text-right">
+                            <TableCell className="py-2 text-right nums">{formatQty(item.quantity)}</TableCell>
+                            <TableCell className="py-2 text-right nums">
                               {formatCurrency(item.line_total)}
                             </TableCell>
                           </TableRow>
@@ -1765,29 +1713,29 @@ export function SalesHistory() {
                   </Table>
                 </div>
 
-                <div className="space-y-1 rounded-md bg-gray-50 p-3">
+                <div className="space-y-1 rounded-md bg-muted/60 p-3">
                   <div className="flex justify-between text-sm">
                     <span>Subtotal</span>
-                    <span>{formatCurrency(viewSale.subtotal)}</span>
+                    <span className="nums">{formatCurrency(viewSale.subtotal)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span>Discount</span>
-                    <span>{formatCurrency(viewSale.discount_amount)}</span>
+                    <span className="nums">{formatCurrency(viewSale.discount_amount)}</span>
                   </div>
                   <div className="flex justify-between text-sm">
                     <span>Tax</span>
-                    <span>{formatCurrency(viewSale.tax_amount)}</span>
+                    <span className="nums">{formatCurrency(viewSale.tax_amount)}</span>
                   </div>
                   <div className="flex justify-between font-bold border-t pt-2 mt-1">
                     <span>Total</span>
-                    <span>{formatCurrency(viewSale.total_amount)}</span>
+                    <span className="nums">{formatCurrency(viewSale.total_amount)}</span>
                   </div>
                 </div>
 
                 {viewSale.notes && (
                   <div>
-                    <p className="text-[11px] text-gray-500 mb-1">Notes</p>
-                    <p className="rounded-md border bg-white p-2 text-xs whitespace-pre-wrap break-words">
+                    <p className="text-xs text-muted-foreground mb-1">Notes</p>
+                    <p className="rounded-md border bg-background p-2 text-xs whitespace-pre-wrap break-words">
                       {viewSale.notes}
                     </p>
                   </div>
@@ -1795,7 +1743,7 @@ export function SalesHistory() {
 
                 {(viewSale.return_sales?.length || 0) > 0 && (
                   <div>
-                    <p className="text-[11px] text-gray-500 mb-1">Return History</p>
+                    <p className="text-xs text-muted-foreground mb-1">Return History</p>
                     <div className="space-y-1">
                       {viewSale.return_sales!.map((r) => (
                         <div
@@ -1803,8 +1751,8 @@ export function SalesHistory() {
                           className="flex items-center justify-between rounded border px-2 py-1.5 text-xs"
                         >
                           <span className="font-mono">{r.sale_number}</span>
-                          <span>{format(parseISO(r.sale_date), "MMM dd, yyyy")}</span>
-                          <span className="text-red-600">{formatCurrency(r.total_amount)}</span>
+                          <span className="nums">{format(parseISO(r.sale_date), "MMM dd, yyyy")}</span>
+                          <span className="text-red-600 nums">{formatCurrency(r.total_amount)}</span>
                         </div>
                       ))}
                     </div>
@@ -1812,7 +1760,7 @@ export function SalesHistory() {
                 )}
               </div>
 
-              <div className="rounded-md border bg-white overflow-hidden">
+              <div className="rounded-md border bg-background overflow-hidden">
                 <iframe
                   title="Receipt preview"
                   srcDoc={receiptHtml}
@@ -1821,58 +1769,78 @@ export function SalesHistory() {
               </div>
             </div>
           )}
+        </DetailSheetBody>
 
-          <DialogFooter className="sm:justify-end">
-            <Button variant="outline" onClick={() => setViewSale(null)}>
-              Close
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={closeView}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
 
       {/* Cancel confirm */}
-      <Dialog open={!!cancelTarget} onOpenChange={(open) => !open && setCancelTarget(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Cancel sale?</DialogTitle>
-            <DialogDescription>
-              This will mark {cancelTarget?.sale_number} as CANCELLED. Stock is not automatically restored.
-              Prefer Refund/Return for inventory-safe reversals.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setCancelTarget(null)} disabled={cancelling}>
-              Keep
-            </Button>
-            <Button variant="destructive" onClick={handleCancelSale} disabled={cancelling}>
-              {cancelling ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+      <AlertDialog
+        open={!!cancelTarget}
+        onOpenChange={(open) => {
+          if (!open && !cancelSaleM.isPending) setCancelTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel sale?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This will mark {cancelTarget?.sale_number} as CANCELLED. Stock is not automatically
+              restored. Prefer Refund/Return for inventory-safe reversals.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={cancelSaleM.isPending}>Keep</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleCancelSale();
+              }}
+              disabled={cancelSaleM.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {cancelSaleM.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Cancel Sale
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete confirm */}
-      <Dialog open={!!deleteTarget} onOpenChange={(open) => !open && setDeleteTarget(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Delete sale?</DialogTitle>
-            <DialogDescription>
-              Permanently delete {deleteTarget?.sale_number}. This cannot be undone. Stock is not restored —
-              use Refund/Return if you need inventory back.
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDeleteTarget(null)} disabled={deleting}>
-              Keep
-            </Button>
-            <Button variant="destructive" onClick={handleDeleteSale} disabled={deleting}>
-              {deleting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(open) => {
+          if (!open && !removeSale.isPending) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete sale?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Permanently delete {deleteTarget?.sale_number}. This cannot be undone. Stock is not
+              restored — use Refund/Return if you need inventory back.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={removeSale.isPending}>Keep</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleDeleteSale();
+              }}
+              disabled={removeSale.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+            >
+              {removeSale.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
               Delete Sale
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Edit sale — full POS editor */}
       <EditSaleDialog
@@ -1882,12 +1850,12 @@ export function SalesHistory() {
           if (!open) setEditSale(null);
         }}
         onUpdated={() => {
-          fetchSales();
-          if (viewSale && editSale && viewSale.id === editSale.id) {
-            openSaleDetails(editSale, true);
+          refetch();
+          if (viewRowId && editSale && viewRowId === editSale.id) {
+            viewQuery.refetch();
           }
         }}
       />
-    </div>
+    </>
   );
 }
