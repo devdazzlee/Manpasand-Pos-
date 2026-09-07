@@ -2,6 +2,7 @@ import type React from "react"
 import type { Metadata, Viewport } from "next"
 import { Inter } from "next/font/google"
 import "./globals.css"
+import { QueryProvider } from "@/lib/query/query-provider"
 import { DataProvider } from "@/components/data-provider"
 import { PWABanner } from "@/components/pwa-banner"
 import { Toaster as ToasterOutlet } from "@/components/ui/sonner"
@@ -48,11 +49,13 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <DataProvider>
-          {children}
-          <ToasterOutlet position="bottom-right" richColors />
-          <ShadcnToaster />
-        </DataProvider>
+        <QueryProvider>
+          <DataProvider>
+            {children}
+            <ToasterOutlet position="bottom-right" richColors />
+            <ShadcnToaster />
+          </DataProvider>
+        </QueryProvider>
         <PWABanner />
         {/* Unregister stale service workers in development to prevent timeout issues */}
         <script
