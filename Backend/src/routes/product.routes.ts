@@ -13,6 +13,7 @@ import {
   deleteAllProducts,
   deleteProduct,
   uploadProductImage,
+  getPosCatalog,
 } from '../controllers/product.controller';
 import {
   createProductSchema,
@@ -42,6 +43,7 @@ router.post('/bulk-upload', uploadBulk.single('file'), bulkUploadProducts);
 router.post('/import-row', importProductRow);
 router.delete('/all', deleteAllProducts);
 router.get('/', validate(listProductsSchema), listProducts);
+router.get('/pos-catalog', authenticate, getPosCatalog);
 router.get('/export/excel', exportProductsToExcel);
 router.get('/featured', getFeaturedProducts);
 router.get('/best-selling', authenticate, getBestSellingProducts);

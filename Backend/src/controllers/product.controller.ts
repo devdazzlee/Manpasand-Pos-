@@ -140,6 +140,12 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
     new ApiResponse(result.data, 'Products retrieved successfully', 200, true, result.meta).send(res);
 });
 
+export const getPosCatalog = asyncHandler(async (req: Request, res: Response) => {
+    const branchId = resolveBranchId(req) || (req.query.branch_id as string | undefined);
+    const result = await productService.getPosCatalog({ branch_id: branchId });
+    new ApiResponse(result.data, 'POS catalog retrieved successfully', 200, true, result.meta).send(res);
+});
+
 export const exportProductsToExcel = asyncHandler(async (req: Request, res: Response) => {
     const {
         search,

@@ -68,6 +68,7 @@ import { mapApiProductToStoreProduct } from "@/lib/store";
 import { offlineAPIClient } from "@/lib/offline-api-client";
 import { offlineDB } from "@/lib/offline-db";
 import { syncManager } from "@/lib/offline-sync";
+import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAllPosProducts } from "@/hooks/queries/use-products";
 import { useCategories } from "@/hooks/queries/use-categories";
 import { useCustomers } from "@/hooks/queries/use-customers";
@@ -705,44 +706,136 @@ export function NewSale() {
     };
   }, [paymentDialogOpen]);
 
-  // Client-side filtering for instant search results
-  // This provides instant feedback without API calls
-  const filteredProducts = products.filter((product) => {
-    // Hide inactive products from the POS sale screen. The global product
-    // list now returns inactive items too (so the admin Products tab can
-    // manage them), but they must never be sellable from here.
-    if (product.is_active === false) return false;
+  // Build a search index once per catalog change: each row keeps a single
+  // lowercased haystack string so a keystroke is one `includes()`, not four
+  // `toLowerCase()` calls per product.
+  const productIndex = useMemo(
+    () =>
+      products.map((product) => ({
+        product,
+        hay: `${product.name ?? ""} ${product.code ?? ""} ${
+          product.barcode ?? ""
+        } ${product.sku ?? ""}`.toLowerCase(),
+      })),
+    [products],
+  );
 
-    // Filter by category
-    const matchesCategory =
-      selectedCategory === "all" || product.categoryId === selectedCategory;
+  // Client-side filtering — instant, no API call. Memoised so it only re-runs
+  // when the catalog, the search term, or the category actually changes.
+  const filteredProducts = useMemo(() => {
+    const needle = searchTerm.toLowerCase().trim();
+    const out: typeof products = [];
+    for (const { product, hay } of productIndex) {
+      // Inactive products are never sellable from the POS screen.
+      if (product.is_active === false) continue;
+      if (selectedCategory !== "all" && product.categoryId !== selectedCategory) continue;
+      if (needle && !hay.includes(needle)) continue;
+      out.push(product);
+    }
+    return out;
+  }, [productIndex, searchTerm, selectedCategory]);
 
-    // Filter by search term (client-side)
-    const matchesSearch = !searchTerm || (() => {
-      const searchLower = searchTerm.toLowerCase().trim();
-      if (searchLower.length === 0) return true;
-
-      // Search in name, code, barcode, SKU (same fields used for POS scanning)
-      const nameMatch = product.name?.toLowerCase().includes(searchLower);
-      const codeMatch = product.code?.toLowerCase().includes(searchLower);
-      const barcodeMatch = product.barcode?.toLowerCase().includes(searchLower);
-      const skuMatch = product.sku?.toLowerCase().includes(searchLower);
-
-      return nameMatch || codeMatch || barcodeMatch || skuMatch;
-    })();
-
-    return matchesCategory && matchesSearch;
-  });
-
-  // Search/category filtering runs over the whole in-memory catalog, but the
-  // grid only paints a bounded slice so a large catalog can't flood the DOM.
-  // (The search dropdown below already shows the top matches regardless.)
-  const GRID_RENDER_CAP = 300;
-  const gridProducts = filteredProducts.slice(0, GRID_RENDER_CAP);
-  const gridOverflowCount = Math.max(0, filteredProducts.length - GRID_RENDER_CAP);
+  const gridProducts = filteredProducts;
 
   // Only the first catalog load blocks the grid; background refreshes are silent.
   const isProductQueryPending = productsLoading;
+
+  // --- Product grid virtualization -----------------------------------------
+  // Below the threshold we render the plain CSS grid (proven, zero risk). Above
+  // it, only the visible rows are mounted so the catalog can be any size.
+  const VIRTUALIZE_THRESHOLD = 120;
+  const GRID_ROW_HEIGHT = 84; // card (~68px) + gap
+  const productScrollRef = useRef<HTMLDivElement>(null);
+  const productGridRef = useRef<HTMLDivElement>(null);
+  const [gridColumns, setGridColumns] = useState(4);
+  const [gridScrollMargin, setGridScrollMargin] = useState(0);
+
+  // Column count from the scroll container's inner width (its own padding aside).
+  useEffect(() => {
+    const el = productScrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const compute = () => {
+      const w = el.clientWidth;
+      setGridColumns(w < 480 ? 3 : w < 680 ? 4 : w < 1000 ? 5 : 6);
+    };
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  const virtualizeGrid = gridProducts.length > VIRTUALIZE_THRESHOLD;
+  const gridRowCount = Math.ceil(gridProducts.length / gridColumns);
+
+  // How far the grid sits below the top of the scroll container — the header,
+  // filters and printer chip all scroll with it, so this isn't constant.
+  useLayoutEffect(() => {
+    const grid = productGridRef.current;
+    const scroll = productScrollRef.current;
+    if (!grid || !scroll) return;
+    setGridScrollMargin(
+      grid.getBoundingClientRect().top -
+        scroll.getBoundingClientRect().top +
+        scroll.scrollTop,
+    );
+  }, [virtualizeGrid, productsLoading, isProductQueryPending, receiptPrinter, gridColumns]);
+
+  const rowVirtualizer = useVirtualizer({
+    count: virtualizeGrid ? gridRowCount : 0,
+    getScrollElement: () => productScrollRef.current,
+    estimateSize: () => GRID_ROW_HEIGHT,
+    overscan: 6,
+    scrollMargin: gridScrollMargin,
+  });
+
+  const renderProductCard = (product: Product) => {
+    const cartItems = cart.filter(
+      (item) =>
+        (item as CartItem).productId === product.id || item.id === product.id,
+    );
+    const totalQty = cartItems.reduce((sum, item) => sum + item.quantity, 0);
+    const inCart = totalQty > 0;
+
+    return (
+      <button
+        key={product.id}
+        type="button"
+        onClick={() => handleProductClick(product)}
+        className={cn(
+          "group relative flex h-full flex-col rounded-xl border bg-white p-2.5 text-left transition-colors duration-100",
+          "active:scale-[0.98] sm:hover:border-blue-300 sm:hover:bg-blue-50/40",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1",
+          inCart
+            ? "border-blue-500 bg-blue-50/50 ring-1 ring-blue-500"
+            : "border-slate-200",
+        )}
+      >
+        {inCart && (
+          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-bold tabular-nums text-white shadow-sm">
+            {formatQuantityValue(totalQty)}
+          </span>
+        )}
+
+        <span className="line-clamp-2 flex-1 text-[13px] font-medium leading-snug text-slate-900">
+          {product.name}
+        </span>
+
+        <div className="mt-1.5 flex items-baseline justify-between gap-2 border-t border-slate-100 pt-1.5">
+          {product.category ? (
+            <span className="hidden truncate text-[11px] text-slate-400 sm:inline">
+              {product.category}
+            </span>
+          ) : (
+            <span className="hidden text-[11px] text-slate-300 sm:inline">—</span>
+          )}
+          <span className="ml-auto shrink-0 text-[15px] font-bold tabular-nums text-slate-900">
+            <span className="text-[11px] font-medium text-slate-400">Rs </span>
+            {formatMoney(product.price)}
+          </span>
+        </div>
+      </button>
+    );
+  };
 
   const SEARCH_DROPDOWN_LIMIT = 25;
 
@@ -2283,6 +2376,7 @@ export function NewSale() {
 
       {/* Products Section */}
       <div
+        ref={productScrollRef}
         className={cn(
           "min-h-0 flex-1 overflow-auto p-2 sm:p-4 md:p-6",
           cart.length > 0 && "pb-28 sm:pb-40 lg:pb-6",
@@ -2748,63 +2842,40 @@ export function NewSale() {
                 : "Try a different search term"}
             </p>
           </div>
-        ) : (
+        ) : !virtualizeGrid ? (
           <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
-            {gridProducts.map((product) => {
-              const cartItems = cart.filter(
-                (item) =>
-                  (item as CartItem).productId === product.id || item.id === product.id,
-              );
-              const totalQuantity = cartItems.reduce((sum, item) => sum + item.quantity, 0);
-              const inCart = totalQuantity > 0;
-
+            {gridProducts.map((product) => renderProductCard(product))}
+          </div>
+        ) : (
+          <div
+            ref={productGridRef}
+            style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}
+          >
+            {rowVirtualizer.getVirtualItems().map((virtualRow) => {
+              const start = virtualRow.index * gridColumns;
+              const rowItems = gridProducts.slice(start, start + gridColumns);
               return (
-                <button
-                  key={product.id}
-                  type="button"
-                  onClick={() => handleProductClick(product)}
-                  className={cn(
-                    "group relative flex flex-col rounded-xl border bg-white p-2.5 text-left transition-colors duration-100 sm:min-h-[4.5rem]",
-                    "active:scale-[0.98] sm:hover:border-blue-300 sm:hover:bg-blue-50/40",
-                    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1",
-                    inCart
-                      ? "border-blue-500 bg-blue-50/50 ring-1 ring-blue-500"
-                      : "border-slate-200",
-                  )}
+                <div
+                  key={virtualRow.key}
+                  className="grid gap-1.5 sm:gap-2"
+                  style={{
+                    position: "absolute",
+                    top: 0,
+                    left: 0,
+                    width: "100%",
+                    height: GRID_ROW_HEIGHT,
+                    paddingBottom: 8,
+                    gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
+                    transform: `translateY(${
+                      virtualRow.start - rowVirtualizer.options.scrollMargin
+                    }px)`,
+                  }}
                 >
-                  {inCart && (
-                    <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-bold tabular-nums text-white shadow-sm">
-                      {formatQuantityValue(totalQuantity)}
-                    </span>
-                  )}
-
-                  <span className="line-clamp-2 flex-1 text-[13px] font-medium leading-snug text-slate-900">
-                    {product.name}
-                  </span>
-
-                  <div className="mt-1.5 flex items-baseline justify-between gap-2 border-t border-slate-100 pt-1.5">
-                    {product.category ? (
-                      <span className="hidden truncate text-[11px] text-slate-400 sm:inline">
-                        {product.category}
-                      </span>
-                    ) : (
-                      <span className="hidden text-[11px] text-slate-300 sm:inline">—</span>
-                    )}
-                    <span className="ml-auto shrink-0 text-[15px] font-bold tabular-nums text-slate-900">
-                      <span className="text-[11px] font-medium text-slate-400">Rs </span>
-                      {formatMoney(product.price)}
-                    </span>
-                  </div>
-                </button>
+                  {rowItems.map((product) => renderProductCard(product))}
+                </div>
               );
             })}
           </div>
-        )}
-        {gridOverflowCount > 0 && (
-          <p className="mt-3 text-center text-xs text-slate-500">
-            Showing first {GRID_RENDER_CAP} of {filteredProducts.length}. Type to
-            narrow down.
-          </p>
         )}
       </div>
 

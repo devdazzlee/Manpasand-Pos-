@@ -1,12 +1,14 @@
 "use client";
 
-import { keepPreviousData, useQuery } from "@tanstack/react-query";
+import { useEffect } from "react";
+import { keepPreviousData, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { qk } from "@/lib/query/query-keys";
 import { STALE_TIME } from "@/lib/query/query-client";
 import {
   fetchProducts,
   fetchAllPosProducts,
+  readPosCatalogCache,
   type ProductQuery,
   type PosProduct,
 } from "@/lib/api/products";
@@ -43,23 +45,48 @@ export function useProducts(params: ProductQuery, options?: { enabled?: boolean 
 }
 
 /**
- * The full sellable POS catalog, loaded once per session and cached. The selling
- * screen filters this in memory, so product search and category switches are
- * instant instead of one server round trip per keystroke.
+ * The full sellable POS catalog, loaded once per session and cached.
+ *
+ * Stale-while-revalidate against IndexedDB: on first mount the grid paints
+ * immediately from the last cached catalog (if any) while the network copy
+ * fetches in the background. `fetchAllPosProducts` writes each fresh copy back
+ * to IndexedDB. The screen filters this list in memory, so product search and
+ * category switches are instant instead of one server round trip per keystroke.
  */
 export function useAllPosProducts(options?: { enabled?: boolean }) {
+  const qc = useQueryClient();
+  const enabled = options?.enabled ?? true;
+
+  // Seed from the offline cache once, if React Query has nothing yet. Marked
+  // stale (updatedAt: 0) so the network revalidation still runs on mount.
+  useEffect(() => {
+    if (!enabled) return;
+    if (qc.getQueryData(qk.products.posCatalog)) return;
+    let cancelled = false;
+    readPosCatalogCache().then((cached) => {
+      if (cancelled || cached.length === 0) return;
+      if (qc.getQueryData(qk.products.posCatalog)) return;
+      qc.setQueryData(qk.products.posCatalog, cached, { updatedAt: 0 });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [qc, enabled]);
+
   const query = useQuery({
     queryKey: qk.products.posCatalog,
     queryFn: () => fetchAllPosProducts(),
     staleTime: 5 * 60_000,
     gcTime: 30 * 60_000,
-    enabled: options?.enabled ?? true,
+    enabled,
   });
 
   return {
     ...query,
     products: query.data ?? EMPTY,
-    isFirstLoad: query.isPending,
+    /** No cached catalog yet — show skeletons. Once seeded from IndexedDB this
+     *  is false even while the first network fetch is still in flight. */
+    isFirstLoad: query.isPending && (query.data ?? EMPTY).length === 0,
     isRefreshing: query.isFetching && !query.isPending,
   };
 }

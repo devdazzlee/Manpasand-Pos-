@@ -1181,6 +1181,92 @@ export class ProductService {
         };
     }
 
+    /**
+     * Slim, unpaginated catalog for the POS selling screen.
+     *
+     * Returns only the fields the sale grid + add-to-cart need — no images,
+     * description, brand/supplier/color/size/tax joins or order counts. This is
+     * fetched once per session by the client and filtered in memory, so keeping
+     * the row small keeps the whole-catalog payload cheap.
+     */
+    async getPosCatalog({ branch_id }: { branch_id?: string } = {}) {
+        const rows = await prisma.product.findMany({
+            where: { is_active: true, display_on_pos: true },
+            orderBy: { name: 'asc' },
+            select: {
+                id: true,
+                name: true,
+                code: true,
+                sku: true,
+                purchase_rate: true,
+                sales_rate_exc_dis_and_tax: true,
+                sales_rate_inc_dis_and_tax: true,
+                discount_amount: true,
+                min_qty: true,
+                max_qty: true,
+                is_active: true,
+                display_on_pos: true,
+                is_batch: true,
+                non_inventory_item: true,
+                is_deal: true,
+                is_featured: true,
+                is_loose_item: true,
+                updated_at: true,
+                category: { select: { id: true, name: true } },
+                subcategory: { select: { id: true, name: true } },
+                unit: { select: { id: true, name: true } },
+                stock: branch_id
+                    ? {
+                          where: { branch_id },
+                          select: {
+                              current_quantity: true,
+                              reserved_quantity: true,
+                              minimum_quantity: true,
+                              maximum_quantity: true,
+                          },
+                      }
+                    : {
+                          select: {
+                              current_quantity: true,
+                              reserved_quantity: true,
+                              minimum_quantity: true,
+                              maximum_quantity: true,
+                              branch_id: true,
+                          },
+                      },
+            },
+        });
+
+        const data = rows.map((p) => {
+            let current = new Prisma.Decimal(0);
+            let reserved = new Prisma.Decimal(0);
+            let minimum = new Prisma.Decimal(0);
+            let maximum = new Prisma.Decimal(0);
+
+            const stock = (p as any).stock as any[] | undefined;
+            if (Array.isArray(stock)) {
+                for (const s of stock) {
+                    current = current.plus(s.current_quantity || 0);
+                    reserved = reserved.plus(s.reserved_quantity || 0);
+                    minimum = minimum.plus(s.minimum_quantity || 0);
+                    maximum = maximum.plus(s.maximum_quantity || 0);
+                }
+            }
+
+            const { stock: _drop, ...rest } = p as any;
+            return {
+                ...rest,
+                current_stock: asNumber(current),
+                reserved_stock: asNumber(reserved),
+                available_stock: asNumber(current.minus(reserved)),
+                minimum_stock: asNumber(minimum),
+                maximum_stock: asNumber(maximum),
+            };
+        });
+
+        return { data, meta: { total: data.length } };
+    }
+
     async getFeaturedProducts() {
         // Fetch featured products from the database
         let featuredProducts = await prisma.product.findMany({

@@ -43,6 +43,7 @@
     "@tanstack/query-sync-storage-persister": "5",
     "@tanstack/react-query": "5",
     "@tanstack/react-query-persist-client": "5",
+    "@tanstack/react-virtual": "3",
     "autoprefixer": "^10.4.20",
     "axios": "^1.10.0",
     "class-variance-authority": "^0.7.1",

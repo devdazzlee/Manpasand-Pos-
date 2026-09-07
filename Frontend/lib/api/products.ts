@@ -1,7 +1,7 @@
 import { getList, getOne, cleanParams, type ListResult } from "./http";
-import { collectPaginatedData } from "@/lib/paginated-fetch";
 import { getBranchScopeParam } from "@/lib/session";
 import { mapApiProductToStoreProduct } from "@/lib/store";
+import { offlineDB } from "@/lib/offline-db";
 
 /** The normalised product shape the POS screens consume. */
 export type PosProduct = ReturnType<typeof mapApiProductToStoreProduct>;
@@ -50,12 +50,31 @@ export async function fetchProductById(id: string, signal?: AbortSignal): Promis
  * The whole sellable POS catalog (active + display-on-pos), fetched once and
  * cached for the session. The selling screen filters this in memory so search
  * and category switches are instant — no per-keystroke server round trip.
+ *
+ * Hits the slim `/products/pos-catalog` projection (no images / description /
+ * brand-supplier-tax joins), returns the entire catalog in one response, and
+ * mirrors the raw rows into IndexedDB so a reload / offline start is instant.
  */
 export async function fetchAllPosProducts(): Promise<PosProduct[]> {
-  const raw = await collectPaginatedData<any>(
-    "/products",
-    cleanParams({ is_active: true, display_on_pos: true, ...getBranchScopeParam() }),
-    { limit: 200, maxPages: 100 },
+  const res = await getList<any>(
+    "/products/pos-catalog",
+    cleanParams({ ...getBranchScopeParam() }),
   );
-  return raw.map(mapApiProductToStoreProduct);
+  void offlineDB.saveProducts(res.data).catch(() => {});
+  return res.data.map(mapApiProductToStoreProduct);
+}
+
+/**
+ * Last-known POS catalog from IndexedDB — used to paint the sale grid instantly
+ * on load while the network copy revalidates in the background.
+ */
+export async function readPosCatalogCache(): Promise<PosProduct[]> {
+  try {
+    const rows = await offlineDB.getProducts();
+    return rows
+      .map((r: any) => mapApiProductToStoreProduct(r.data ?? r))
+      .filter((p) => p.is_active !== false && p.display_on_pos !== false);
+  } catch {
+    return [];
+  }
 }
