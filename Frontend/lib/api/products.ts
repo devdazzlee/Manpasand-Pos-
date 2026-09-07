@@ -1,4 +1,5 @@
 import { getList, getOne, cleanParams, type ListResult } from "./http";
+import { collectPaginatedData } from "@/lib/paginated-fetch";
 import { getBranchScopeParam } from "@/lib/session";
 import { mapApiProductToStoreProduct } from "@/lib/store";
 
@@ -43,4 +44,18 @@ export async function fetchProducts(
 export async function fetchProductById(id: string, signal?: AbortSignal): Promise<PosProduct> {
   const raw = await getOne<any>(`/products/${id}`, { signal });
   return mapApiProductToStoreProduct(raw);
+}
+
+/**
+ * The whole sellable POS catalog (active + display-on-pos), fetched once and
+ * cached for the session. The selling screen filters this in memory so search
+ * and category switches are instant — no per-keystroke server round trip.
+ */
+export async function fetchAllPosProducts(): Promise<PosProduct[]> {
+  const raw = await collectPaginatedData<any>(
+    "/products",
+    cleanParams({ is_active: true, display_on_pos: true, ...getBranchScopeParam() }),
+    { limit: 200, maxPages: 100 },
+  );
+  return raw.map(mapApiProductToStoreProduct);
 }

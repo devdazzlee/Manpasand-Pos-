@@ -68,7 +68,7 @@ import { mapApiProductToStoreProduct } from "@/lib/store";
 import { offlineAPIClient } from "@/lib/offline-api-client";
 import { offlineDB } from "@/lib/offline-db";
 import { syncManager } from "@/lib/offline-sync";
-import { useProducts } from "@/hooks/queries/use-products";
+import { useAllPosProducts } from "@/hooks/queries/use-products";
 import { useCategories } from "@/hooks/queries/use-categories";
 import { useCustomers } from "@/hooks/queries/use-customers";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
@@ -454,32 +454,18 @@ export function NewSale() {
   const [showDiscountRow, setShowDiscountRow] = useState(false);
   const [priceEditLineId, setPriceEditLineId] = useState<string | null>(null);
 
-  // Debounced search terms — the queries below key off these, so React Query
-  // de-dupes, caches per term, and cancels the previous request automatically.
-  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [customerSearch, setCustomerSearch] = useState("");
-
-  useEffect(() => {
-    if (isProcessingScanRef.current) return;
-    const delay = searchTerm.trim() ? 250 : 0;
-    const t = window.setTimeout(() => setDebouncedSearch(searchTerm.trim()), delay);
-    return () => window.clearTimeout(t);
-  }, [searchTerm]);
 
   const { categories, isLoading: categoriesLoading } = useCategories({ withAll: true });
 
+  // The entire sellable catalog, fetched once per session and cached. Search and
+  // category switches filter it in memory (see `filteredProducts` below), so
+  // they are instant — no server round trip per keystroke.
   const {
     products,
     isFirstLoad: productsLoading,
     isRefreshing: productsRefreshing,
-  } = useProducts({
-    search: debouncedSearch || undefined,
-    categoryId: selectedCategory !== "all" ? selectedCategory : undefined,
-    isActive: true,
-    displayOnPos: true,
-    page: 1,
-    limit: 20,
-  });
+  } = useAllPosProducts();
 
   const { customers, isLoading: customersLoading } = useCustomers({
     search: customerSearch || undefined,
@@ -748,10 +734,15 @@ export function NewSale() {
     return matchesCategory && matchesSearch;
   });
 
-  const isProductQueryPending =
-    searchTerm.trim() !== debouncedSearch ||
-    productsLoading ||
-    productsRefreshing;
+  // Search/category filtering runs over the whole in-memory catalog, but the
+  // grid only paints a bounded slice so a large catalog can't flood the DOM.
+  // (The search dropdown below already shows the top matches regardless.)
+  const GRID_RENDER_CAP = 300;
+  const gridProducts = filteredProducts.slice(0, GRID_RENDER_CAP);
+  const gridOverflowCount = Math.max(0, filteredProducts.length - GRID_RENDER_CAP);
+
+  // Only the first catalog load blocks the grid; background refreshes are silent.
+  const isProductQueryPending = productsLoading;
 
   const SEARCH_DROPDOWN_LIMIT = 25;
 
@@ -2698,7 +2689,7 @@ export function NewSale() {
                     {filteredProducts.length} product
                     {filteredProducts.length === 1 ? "" : "s"}
                     {selectedCategory !== "all" ? ` in ${selectedCategoryLabel}` : ""}
-                    {isProductQueryPending && (
+                    {(isProductQueryPending || productsRefreshing) && (
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
                     )}
                   </>
@@ -2759,7 +2750,7 @@ export function NewSale() {
           </div>
         ) : (
           <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
-            {filteredProducts.map((product) => {
+            {gridProducts.map((product) => {
               const cartItems = cart.filter(
                 (item) =>
                   (item as CartItem).productId === product.id || item.id === product.id,
@@ -2808,6 +2799,12 @@ export function NewSale() {
               );
             })}
           </div>
+        )}
+        {gridOverflowCount > 0 && (
+          <p className="mt-3 text-center text-xs text-slate-500">
+            Showing first {GRID_RENDER_CAP} of {filteredProducts.length}. Type to
+            narrow down.
+          </p>
         )}
       </div>
 

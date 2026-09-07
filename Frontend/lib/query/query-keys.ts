@@ -23,6 +23,7 @@ export const qk = {
     list: (params: ListParams = {}) => ["products", "list", params] as const,
     detail: (id: string) => ["products", "detail", id] as const,
     bestSelling: ["products", "best-selling"] as const,
+    posCatalog: ["products", "pos-catalog"] as const,
   },
   customers: {
     all: ["customers"] as const,
