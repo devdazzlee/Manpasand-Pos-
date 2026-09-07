@@ -39,10 +39,10 @@ import {
 import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 import JsBarcode from "jsbarcode";
 import { PageLoader } from "./ui/page-loader";
-import { usePosData } from "@/hooks/use-pos-data";
+import { useProducts } from "@/hooks/queries/use-products";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
-import apiClient from "@/lib/apiClient";
+import { extractApiError } from "@/lib/api/errors";
 import { isKioskMode, silentPrint, enableKioskMode } from "@/utils/kiosk-printing";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
 import { encodeLabelBarcodeValue } from "@/lib/labelBarcode";
@@ -61,6 +61,9 @@ interface Product {
   weight?: string;
   mfgDate?: string;
   expDate?: string;
+  is_active?: boolean;
+  current_stock?: number;
+  stock?: number;
 }
 
 interface SelectedProductItem {
@@ -80,6 +83,7 @@ export default function BarcodeGenerator() {
     SelectedProductItem[]
   >([]);
   const [searchTerm, setSearchTerm] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [globalExpiryDuration, setGlobalExpiryDuration] = useState("12");
   // Global default net weight + a global copies value so a whole batch can be
   // configured in one click for bulk printing workflows.
@@ -208,39 +212,39 @@ export default function BarcodeGenerator() {
     };
   };
 
-  // Global store with custom hook
-  const {
-    products,
-    productsLoading,
-    isAnyLoading,
-    refreshAllData,
-    fetchProducts,
-  } = usePosData();
-
-
-  // Handle initial load and search
   useEffect(() => {
-    const fetchData = async () => {
-      try {
-        if (searchTerm.length >= 2) {
-          await fetchProducts({ force: true, search: searchTerm, page: 1, limit: 20 });
-        } else {
-          await fetchProducts({ force: true, page: 1, limit: 20 });
-        }
-      } catch (error) {
-        toast({
-          variant: "destructive",
-          title: "Failed to load data",
-          description: "Could not fetch products from server",
-        });
-      }
-    };
-
-    const debounceTimer = setTimeout(fetchData, 300);
-    return () => clearTimeout(debounceTimer);
+    const delay = searchTerm.trim().length >= 2 ? 250 : 0;
+    const t = window.setTimeout(
+      () => setDebouncedSearch(searchTerm.trim()),
+      delay,
+    );
+    return () => window.clearTimeout(t);
   }, [searchTerm]);
 
-  // Printer loading handled by global usePrinterSettings hook
+  const {
+    products: rawProducts,
+    isFirstLoad,
+    isRefreshing,
+    error: listError,
+  } = useProducts({
+    search: debouncedSearch.length >= 2 ? debouncedSearch : undefined,
+    isActive: true,
+    page: 1,
+    limit: 20,
+  });
+  const products = rawProducts as unknown as Product[];
+
+  useEffect(() => {
+    if (!listError) return;
+    toast({
+      variant: "destructive",
+      title: "Failed to load data",
+      description: extractApiError(
+        listError,
+        "Could not fetch products from server",
+      ),
+    });
+  }, [listError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const parseWeightToGrams = (weightInput: any) => {
     if (!weightInput || weightInput.trim() === "") return 0;
@@ -442,18 +446,8 @@ export default function BarcodeGenerator() {
       list = list.filter((p) => p.category === categoryFilter);
     }
 
-    if (searchTerm) {
-      const lower = searchTerm.toLowerCase();
-      list = list.filter(
-        (product) =>
-          product.name.toLowerCase().includes(lower) ||
-          (product.sku && product.sku.toLowerCase().includes(lower)) ||
-          (product.code && product.code.toLowerCase().includes(lower)),
-      );
-    }
-
     return list;
-  }, [products, searchTerm, categoryFilter]);
+  }, [products, categoryFilter]);
 
   // Reset to page 1 whenever the visible set changes, so the user never
   // lands on a page that no longer exists after filtering.
@@ -1266,7 +1260,7 @@ export default function BarcodeGenerator() {
   const copiesForProduct = (productId: string) =>
     selectedProducts.find((sp) => sp.product.id === productId)?.copies;
 
-  if (productsLoading && products.length === 0) {
+  if (isFirstLoad) {
     return <PageLoader message="Loading Barcode Generator..." />;
   }
 
@@ -1310,6 +1304,9 @@ export default function BarcodeGenerator() {
           <div className="flex flex-col sm:flex-row gap-3 min-w-0">
             <div className="relative flex-1 min-w-0">
               <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+              {isRefreshing && (
+                <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-blue-500" />
+              )}
               <Input
                 ref={productSearchInputRef}
                 placeholder="Scan or search by name, SKU, or code"
@@ -1317,7 +1314,7 @@ export default function BarcodeGenerator() {
                 autoComplete="off"
                 onChange={(e) => setSearchTerm(e.target.value)}
                 onKeyDown={handleSearchKeyDown}
-                className="pl-9 w-full h-11"
+                className={`pl-9 w-full h-11 ${isRefreshing ? "pr-9" : ""}`}
               />
             </div>
             <Select value={categoryFilter} onValueChange={setCategoryFilter}>
@@ -1343,7 +1340,7 @@ export default function BarcodeGenerator() {
             </p>
           )}
 
-          {productsLoading ? (
+          {isRefreshing && pagedProducts.length === 0 ? (
             <div className="rounded-lg border py-10 text-center text-gray-500">
               <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
               Loading products...

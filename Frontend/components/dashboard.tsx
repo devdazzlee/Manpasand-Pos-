@@ -45,7 +45,6 @@ import {
   InventoryAudit,
   BulkProductUpload,
 } from "./inventory/index";
-import { Sales } from "./sales";
 import Orders from "./orders";
 import WebsiteOrders from "./website-orders";
 import Subcategories from "./sub-categories";

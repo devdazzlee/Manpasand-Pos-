@@ -20,12 +20,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
 import {
   BarChart3,
   TrendingUp,
@@ -1009,16 +1008,12 @@ export function InventoryAudit() {
         </div>
       ) : null}
 
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="sm:max-w-[520px] border border-gray-200">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-semibold text-black">
-              Branch audit detail
-            </DialogTitle>
-            <DialogDescription className="text-sm text-gray-500">
-              Financial breakdown for this location
-            </DialogDescription>
-          </DialogHeader>
+      <DetailSheet open={detailOpen} onOpenChange={setDetailOpen} size="md">
+        <DetailSheetHeader
+          title="Branch audit detail"
+          subtitle="Financial breakdown for this location"
+        />
+        <DetailSheetBody>
 
           {detailRow ? (
             <div className="space-y-4 pt-1">
@@ -1077,8 +1072,13 @@ export function InventoryAudit() {
               </div>
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setDetailOpen(false)}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
     </div>
   );
 }

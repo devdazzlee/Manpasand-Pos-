@@ -7,13 +7,11 @@ import { Button } from "@/components/ui/button"
 import { LoadingButton } from "@/components/ui/loading-button"
 import { PageLoader } from "@/components/ui/page-loader"
 import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from "@/components/ui/dialog"
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet"
 import { useLoading } from "@/hooks/use-loading"
 import { useToast } from "@/hooks/use-toast"
 import {
@@ -877,29 +875,43 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
         </Card>
       </div>
 
-      {/* KPI detail modals — clicking a stat card opens the underlying data here instead of dumping the user onto another page to hunt for it. */}
-      <Dialog open={activeModal !== null} onOpenChange={(open) => !open && setActiveModal(null)}>
-        <DialogContent className="max-w-lg w-[92vw] sm:w-full max-h-[85vh] flex flex-col">
+      <DetailSheet
+        open={activeModal !== null}
+        onOpenChange={(open) => !open && setActiveModal(null)}
+        size="lg"
+      >
+        <DetailSheetHeader
+          title={
+            activeModal === "sales"
+              ? "Today's sales"
+              : activeModal === "transactions"
+                ? "Recent transactions"
+                : activeModal === "customers"
+                  ? "Customers"
+                  : "Low stock items"
+          }
+          subtitle={
+            activeModal === "sales"
+              ? `${formatCurrency(stats?.todaySalesTotal || 0)} across ${stats?.todaySalesCount || 0} transactions${stats?.branch ? ` at ${stats.branch.name}` : " — all branches"}`
+              : activeModal === "transactions"
+                ? `Last ${recentSales.length} sales${isAdmin ? " across all branches" : ""}`
+                : activeModal === "customers"
+                  ? `${stats?.totalCustomers || 0} total · ${stats?.newCustomersToday || 0} new today`
+                  : `${stats?.lowStockCount || 0} items below threshold${stats?.branch ? ` at ${stats.branch.name}` : " — all branches"}`
+          }
+        />
+        <DetailSheetBody className="space-y-2">
           {activeModal === "sales" && (
-            <>
-              <DialogHeader>
-                <DialogTitle>Today's Sales</DialogTitle>
-                <DialogDescription>
-                  {formatCurrency(stats?.todaySalesTotal || 0)} across {stats?.todaySalesCount || 0} transactions
-                  {stats?.branch ? ` at ${stats.branch.name}` : " — all branches"}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
-                {stats?.todaySales?.length ? stats.todaySales.map((s) => (
+            stats?.todaySales?.length ? stats.todaySales.map((s) => (
                   <div key={s.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 border rounded-lg">
                     <div className="min-w-0">
                       <div className="font-medium text-sm truncate">{s.sale_number}</div>
-                      <div className="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
+                      <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
                         <span>{timeAgo(s.created_at)}</span>
                         {isAdmin && s.branch && (
                           <>
                             <span>·</span>
-                            <span className="inline-flex items-center gap-0.5 text-blue-600">
+                            <span className="inline-flex items-center gap-0.5">
                               <MapPin className="h-3 w-3" />
                               {s.branch.name}
                             </span>
@@ -915,36 +927,23 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
                     </div>
                   </div>
                 )) : (
-                  <div className="text-center text-gray-500 py-8">No sales yet today</div>
-                )}
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => { setActiveModal(null); onNavigate?.("sales-history") }}>
-                  Open Sales History
-                </Button>
-              </DialogFooter>
-            </>
+                  <div className="text-center text-muted-foreground py-8">No sales yet today</div>
+                )
           )}
 
           {activeModal === "transactions" && (
-            <>
-              <DialogHeader>
-                <DialogTitle>Recent Transactions</DialogTitle>
-                <DialogDescription>Last {recentSales.length} sales{isAdmin ? " across all branches" : ""}</DialogDescription>
-              </DialogHeader>
-              <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
-                {recentSales.length ? recentSales.map((sale) => (
+            recentSales.length ? recentSales.map((sale) => (
                   <div key={sale.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 p-3 border rounded-lg">
                     <div className="min-w-0">
                       <div className="font-medium text-sm truncate">{sale.customerName}</div>
-                      <div className="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
+                      <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
                         <span>{sale.saleNumber}</span>
                         <span>·</span>
                         <span>{timeAgo(sale.saleDate)}</span>
                         {isAdmin && sale.branch && (
                           <>
                             <span>·</span>
-                            <span className="inline-flex items-center gap-0.5 text-blue-600">
+                            <span className="inline-flex items-center gap-0.5">
                               <MapPin className="h-3 w-3" />
                               {sale.branch.name}
                             </span>
@@ -960,73 +959,42 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
                     </div>
                   </div>
                 )) : (
-                  <div className="text-center text-gray-500 py-8">No recent transactions</div>
-                )}
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => { setActiveModal(null); onNavigate?.("sales-history") }}>
-                  Open Sales History
-                </Button>
-              </DialogFooter>
-            </>
+                  <div className="text-center text-muted-foreground py-8">No recent transactions</div>
+                )
           )}
 
           {activeModal === "customers" && (
-            <>
-              <DialogHeader>
-                <DialogTitle>Customers</DialogTitle>
-                <DialogDescription>
-                  {stats?.totalCustomers || 0} total · {stats?.newCustomersToday || 0} new today
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
-                {customersLoading ? (
+            customersLoading ? (
                   <div className="flex flex-col items-center justify-center py-8 space-y-2">
-                    <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-                    <span className="text-sm text-gray-500">Loading customers...</span>
+                    <Loader2 className="h-6 w-6 animate-spin" />
+                    <span className="text-sm text-muted-foreground">Loading customers…</span>
                   </div>
                 ) : customers.length ? customers.slice(0, 20).map((c) => (
                   <div key={c.id} className="flex items-center justify-between gap-2 p-3 border rounded-lg">
                     <div className="min-w-0">
                       <div className="font-medium text-sm truncate">{c.name || "Unnamed Customer"}</div>
-                      <div className="text-xs text-gray-500 truncate">{c.phone_number || c.email || "No contact info"}</div>
+                      <div className="text-xs text-muted-foreground truncate">{c.phone_number || c.email || "No contact info"}</div>
                     </div>
                     {typeof c.sale_count === "number" && (
-                      <div className="text-xs text-gray-500 shrink-0 whitespace-nowrap">{c.sale_count} orders</div>
+                      <div className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">{c.sale_count} orders</div>
                     )}
                   </div>
                 )) : (
-                  <div className="text-center text-gray-500 py-8">No customers found</div>
-                )}
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => { setActiveModal(null); onNavigate?.("customers") }}>
-                  Open Customers
-                </Button>
-              </DialogFooter>
-            </>
+                  <div className="text-center text-muted-foreground py-8">No customers found</div>
+                )
           )}
 
           {activeModal === "lowstock" && (
-            <>
-              <DialogHeader>
-                <DialogTitle>Low Stock Items</DialogTitle>
-                <DialogDescription>
-                  {stats?.lowStockCount || 0} items below threshold
-                  {stats?.branch ? ` at ${stats.branch.name}` : " — all branches"}
-                </DialogDescription>
-              </DialogHeader>
-              <div className="flex-1 overflow-y-auto space-y-2 -mx-1 px-1">
-                {stats?.lowStockProducts?.length ? stats.lowStockProducts.map((item) => (
+            stats?.lowStockProducts?.length ? stats.lowStockProducts.map((item) => (
                   <div key={item.id} className="flex items-center justify-between gap-2 p-3 border rounded-lg">
                     <div className="min-w-0">
                       <div className="font-medium text-sm truncate">{item.product.name}</div>
-                      <div className="text-xs text-gray-500 flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
+                      <div className="text-xs text-muted-foreground flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mt-0.5">
                         <span>{item.product.sku}</span>
                         {isAdmin && item.branch && (
                           <>
                             <span>·</span>
-                            <span className="inline-flex items-center gap-0.5 text-blue-600">
+                            <span className="inline-flex items-center gap-0.5">
                               <MapPin className="h-3 w-3" />
                               {item.branch.name}
                             </span>
@@ -1034,25 +1002,36 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
                         )}
                       </div>
                     </div>
-                    <Badge variant="outline" className="border-yellow-300 text-yellow-700 shrink-0 whitespace-nowrap">
+                    <Badge variant="outline" className="shrink-0 whitespace-nowrap">
                       {item.current_quantity} left
                     </Badge>
                   </div>
                 )) : (
-                  <div className="text-center text-gray-500 py-8">No low stock items</div>
-                )}
-              </div>
-              {canOpenInventory && (
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => { setActiveModal(null); onNavigate?.("inventory-dashboard") }}>
-                    Open Inventory Dashboard
-                  </Button>
-                </DialogFooter>
-              )}
-            </>
+                  <div className="text-center text-muted-foreground py-8">No low stock items</div>
+                )
           )}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setActiveModal(null)}>
+            Close
+          </Button>
+          {(activeModal === "sales" || activeModal === "transactions") && (
+            <Button onClick={() => { setActiveModal(null); onNavigate?.("sales-history") }}>
+              Open sales history
+            </Button>
+          )}
+          {activeModal === "customers" && (
+            <Button onClick={() => { setActiveModal(null); onNavigate?.("customers") }}>
+              Open customers
+            </Button>
+          )}
+          {activeModal === "lowstock" && canOpenInventory && (
+            <Button onClick={() => { setActiveModal(null); onNavigate?.("inventory-dashboard") }}>
+              Open inventory
+            </Button>
+          )}
+        </DetailSheetFooter>
+      </DetailSheet>
     </div>
   )
 }

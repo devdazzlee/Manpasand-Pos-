@@ -742,7 +742,7 @@ const WebsiteOrders: React.FC = () => {
               variant="outline"
               className="text-xs font-medium border-border text-muted-foreground"
             >
-              {filtered.length} shown
+              {isFirstLoad ? "Loading…" : `${filtered.length} shown`}
             </Badge>
           </>
         }
@@ -850,14 +850,23 @@ const WebsiteOrders: React.FC = () => {
                   )}
                 >
                   {s.label}
-                  <span
-                    className={cn(
-                      "inline-flex min-w-[1.25rem] justify-center rounded-full px-1 text-xs nums",
-                      active ? "bg-white/20 text-primary-foreground" : "bg-muted text-muted-foreground",
-                    )}
-                  >
-                    {count}
-                  </span>
+                  {isFirstLoad ? (
+                    <span
+                      className={cn(
+                        "inline-block h-3 w-6 rounded-full animate-pulse",
+                        active ? "bg-white/25" : "bg-muted",
+                      )}
+                    />
+                  ) : (
+                    <span
+                      className={cn(
+                        "inline-flex min-w-[1.25rem] justify-center rounded-full px-1 text-xs nums",
+                        active ? "bg-white/20 text-primary-foreground" : "bg-muted text-muted-foreground",
+                      )}
+                    >
+                      {count}
+                    </span>
+                  )}
                 </button>
               );
             })}
@@ -920,7 +929,9 @@ const WebsiteOrders: React.FC = () => {
                   <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
                 )}
                 <p className="text-xs text-muted-foreground">
-                  {filtered.length} result{filtered.length === 1 ? "" : "s"}
+                  {isFirstLoad
+                    ? "Loading…"
+                    : `${filtered.length} result${filtered.length === 1 ? "" : "s"}`}
                 </p>
               </div>
             </div>

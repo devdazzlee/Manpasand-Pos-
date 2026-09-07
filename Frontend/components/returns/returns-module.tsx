@@ -16,6 +16,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import {
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet"
+import { PageHeader } from "@/components/ui/page-header"
 import { Textarea } from "@/components/ui/textarea"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -1396,6 +1403,12 @@ export function ReturnsModule({
     setIsProcessOpen(true)
   }
 
+  const closeProcessView = () => {
+    if (processingReturn) return
+    setFormErrors({})
+    setIsProcessOpen(false)
+  }
+
   const syncReturnedItemsToForm = (items: SelectedReturnItem[]) => {
     setNewReturn((prev) => ({
       ...prev,
@@ -1974,6 +1987,7 @@ export function ReturnsModule({
 
   return (
     <div className="p-4 md:p-6 space-y-4 md:space-y-6">
+      {!isProcessOpen && (
       <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
         <div>
           <h1 className="text-2xl md:text-3xl font-bold">
@@ -2012,37 +2026,29 @@ export function ReturnsModule({
           </div>
         )}
       </div>
+      )}
 
-      {(moduleTab === "returns" || moduleTab === "exchanges") && (
-        <Dialog
-          open={isProcessOpen}
-          onOpenChange={(open) => {
-            if (!open && processingReturn) {
-              return
-            }
-            if (!open) setFormErrors({})
-            setIsProcessOpen(open)
-          }}
-        >
-          <DialogContent
-            className={cn(
-              "max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 p-4 sm:p-6",
+      {isProcessOpen && (
+        <div className="space-y-4 min-w-0">
+          <PageHeader
+            title={newReturn.returnType === "EXCHANGE" ? "Process Exchange" : "Process Return"}
+            description={
               newReturn.returnType === "EXCHANGE"
-                ? "max-w-[min(calc(100vw-1.5rem),80rem)]"
-                : "max-w-[min(calc(100vw-1.5rem),68rem)]",
-            )}
-          >
-            <DialogHeader className="pr-6 min-w-0">
-              <DialogTitle className="text-lg sm:text-xl break-words">
-                {newReturn.returnType === "EXCHANGE" ? "Process Exchange" : "Process Return"}
-              </DialogTitle>
-              <DialogDescription className="text-xs sm:text-sm break-words">
-                {newReturn.returnType === "EXCHANGE"
-                  ? "Return selected items and issue replacement products. Price difference is calculated automatically."
-                  : "Return items from an original sale and issue a refund."}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 min-w-0 overflow-x-hidden">
+                ? "Return selected items and issue replacement products. Price difference is calculated automatically."
+                : "Return items from an original sale and issue a refund."
+            }
+            actions={
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={closeProcessView}
+                disabled={processingReturn || saleDetailsLoading}
+              >
+                Cancel
+              </Button>
+            }
+          />
+            <div className="space-y-4 min-w-0">
               <div className="space-y-2" ref={saleDropdownRef}>
                 <Label htmlFor="sale-search">Select Sale *</Label>
                 <div className="relative">
@@ -2064,10 +2070,10 @@ export function ReturnsModule({
                         triggerSaleSearch(saleSearch, { immediate: true })
                       }
                     }}
-                    className="pl-9"
+                    className="pl-9 focus-visible:ring-0 focus-visible:ring-offset-0 focus-visible:border-gray-300"
                   />
                   {saleDropdownOpen && (
-                    <div className="relative z-20 mt-1 max-h-60 overflow-y-auto rounded-md border border-gray-200 bg-white shadow-lg">
+                    <div className="absolute left-0 right-0 top-full z-50 mt-1 max-h-72 overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white py-1 shadow-lg">
                       {salesLoading || saleSearchPending ? (
                         <div className="flex items-center justify-center py-6">
                           <Loader2 className="h-6 w-6 animate-spin text-blue-500" />
@@ -2094,7 +2100,7 @@ export function ReturnsModule({
                           <button
                             key={sale.id}
                             type="button"
-                            className={`w-full px-3 py-2 text-left text-sm transition hover:bg-blue-50 ${
+                            className={`w-full shrink-0 px-3 py-2.5 text-left text-sm transition hover:bg-blue-50 ${
                               newReturn.saleId === sale.id
                                 ? "bg-blue-50 font-semibold text-blue-900"
                                 : "text-gray-800"
@@ -2772,11 +2778,11 @@ export function ReturnsModule({
                 />
               </div>
             </div>
-            <DialogFooter className="gap-2 sm:gap-0">
+            <div className="flex flex-col-reverse sm:flex-row gap-2 sm:justify-end sticky bottom-0 bg-background border-t pt-4 pb-1">
               <Button 
                 variant="outline" 
                 className="w-full sm:w-auto"
-                onClick={() => setIsProcessOpen(false)}
+                onClick={closeProcessView}
                 disabled={processingReturn || saleDetailsLoading}
               >
                 Cancel
@@ -2793,11 +2799,12 @@ export function ReturnsModule({
                     : "Processing refund..."
                   : "Review & confirm"}
               </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+            </div>
+        </div>
       )}
 
+      {!isProcessOpen && (
+      <>
       {!hideModuleTabs && (
         <Tabs
           value={moduleTab}
@@ -3111,6 +3118,8 @@ export function ReturnsModule({
           </div>
         </>
       )}
+      </>
+      )}
 
       <Dialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-lg max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 p-4 sm:p-6">
@@ -3133,8 +3142,8 @@ export function ReturnsModule({
         </DialogContent>
       </Dialog>
 
-      {/* View Return Details Dialog */}
-      <Dialog
+      {/* View return / exchange details */}
+      <DetailSheet
         open={isViewOpen}
         onOpenChange={(open) => {
           setIsViewOpen(open)
@@ -3142,24 +3151,25 @@ export function ReturnsModule({
             setReturnDetailsAfterCompletion(false)
           }
         }}
+        size="xl"
       >
-        <DialogContent className="max-w-[calc(100vw-1.5rem)] sm:max-w-5xl max-h-[90dvh] overflow-y-auto overflow-x-hidden min-w-0 p-4 sm:p-6">
-          <DialogHeader className="pr-6">
-            <DialogTitle className="text-lg sm:text-2xl font-bold break-words">
-              {returnDetailsAfterCompletion
-                ? selectedReturn?.status === "EXCHANGED"
-                  ? "Exchange completed"
-                  : "Return completed"
-                : selectedReturnSummary?.transactionType === "EXCHANGE"
-                  ? `Exchange Details — ${selectedReturn?.sale_number || selectedReturn?.id}`
-                  : `Return Details — ${selectedReturn?.sale_number || selectedReturn?.id}`}
-            </DialogTitle>
-            <DialogDescription className="text-xs sm:text-sm">
-              {returnDetailsAfterCompletion
-                ? "Transaction completed successfully. Review the breakdown below, then print or share the receipt."
-                : "Full return / exchange breakdown with items and settlement."}
-            </DialogDescription>
-          </DialogHeader>
+        <DetailSheetHeader
+          title={
+            returnDetailsAfterCompletion
+              ? selectedReturn?.status === "EXCHANGED"
+                ? "Exchange completed"
+                : "Return completed"
+              : selectedReturnSummary?.transactionType === "EXCHANGE"
+                ? `Exchange Details — ${selectedReturn?.sale_number || selectedReturn?.id}`
+                : `Return Details — ${selectedReturn?.sale_number || selectedReturn?.id}`
+          }
+          subtitle={
+            returnDetailsAfterCompletion
+              ? "Transaction completed successfully. Review the breakdown below, then print or share the receipt."
+              : "Full return / exchange breakdown with items and settlement."
+          }
+        />
+        <DetailSheetBody>
           {selectedReturn && selectedReturnSummary && (
             <div className="space-y-4">
               {returnDetailsAfterCompletion && (
@@ -3379,7 +3389,8 @@ export function ReturnsModule({
               )}
             </div>
           )}
-          <DialogFooter className="pt-2">
+        </DetailSheetBody>
+        <DetailSheetFooter>
             <div className="flex flex-col-reverse sm:flex-row flex-wrap items-stretch sm:items-center gap-2 w-full sm:justify-end">
               <Button variant="outline" onClick={() => setIsViewOpen(false)} size="sm" className="w-full sm:w-auto">
                 Close
@@ -3415,9 +3426,8 @@ export function ReturnsModule({
                 Share on WhatsApp
               </Button>
             </div>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </DetailSheetFooter>
+      </DetailSheet>
     </div>
   )
 }

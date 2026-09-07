@@ -31,8 +31,8 @@ export function useProducts(params: ProductQuery, options?: { enabled?: boolean 
     products: query.data?.data ?? EMPTY,
     meta: query.data?.meta ?? null,
     /** True only on the very first load — use for skeletons, not for refetches. */
-    isFirstLoad: query.isLoading,
+    isFirstLoad: query.isPending,
     /** True while a background search/page change resolves. */
-    isRefreshing: query.isFetching && !query.isLoading,
+    isRefreshing: query.isFetching && !query.isPending,
   };
 }

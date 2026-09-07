@@ -86,6 +86,30 @@ export const qk = {
     all: ["subcategories"] as const,
     list: (params: ListParams = {}) => ["subcategories", "list", params] as const,
   },
+  employees: {
+    all: ["employees"] as const,
+    list: (params: ListParams = {}) => ["employees", "list", params] as const,
+    detail: (id: string) => ["employees", "detail", id] as const,
+    shiftHistory: (id: string) => ["employees", id, "shift-history"] as const,
+  },
+  employeeTypes: {
+    all: ["employeeTypes"] as const,
+    list: (params: ListParams = {}) => ["employeeTypes", "list", params] as const,
+  },
+  employeeDepartments: {
+    all: ["employeeDepartments"] as const,
+    list: (params: ListParams = {}) => ["employeeDepartments", "list", params] as const,
+  },
+  salaries: {
+    all: ["salaries"] as const,
+    list: (params: ListParams = {}) => ["salaries", "list", params] as const,
+    detail: (id: string) => ["salaries", "detail", id] as const,
+  },
+  shiftAssignments: {
+    all: ["shiftAssignments"] as const,
+    list: (params: ListParams = {}) => ["shiftAssignments", "list", params] as const,
+    detail: (id: string) => ["shiftAssignments", "detail", id] as const,
+  },
 } as const;
 
 /**

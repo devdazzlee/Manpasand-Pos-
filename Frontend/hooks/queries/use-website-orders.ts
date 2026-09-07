@@ -32,8 +32,8 @@ export function useWebsiteOrders(params: WebsiteOrdersQuery) {
   return {
     ...query,
     orders: query.data ?? EMPTY,
-    isFirstLoad: query.isLoading,
-    isRefreshing: query.isFetching && !query.isLoading,
+    isFirstLoad: query.isPending || query.isPlaceholderData,
+    isRefreshing: query.isFetching && !query.isPending && !query.isPlaceholderData,
   };
 }
 

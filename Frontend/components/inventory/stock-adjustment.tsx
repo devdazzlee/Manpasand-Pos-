@@ -21,12 +21,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
 import {
   Plus,
   ClipboardCheck,
@@ -1305,16 +1304,12 @@ export function StockAdjustment() {
       </Card>
 
       {/* Detail dialog */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="sm:max-w-[560px] border border-gray-200">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-semibold text-black">
-              Adjustment detail
-            </DialogTitle>
-            <DialogDescription className="text-sm text-gray-500">
-              Audit record for this stock correction
-            </DialogDescription>
-          </DialogHeader>
+      <DetailSheet open={detailOpen} onOpenChange={setDetailOpen} size="md">
+        <DetailSheetHeader
+          title="Adjustment detail"
+          subtitle="Audit record for this stock correction"
+        />
+        <DetailSheetBody>
 
           {detailRow ? (
             <div className="space-y-4 pt-1">
@@ -1435,8 +1430,13 @@ export function StockAdjustment() {
               )}
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setDetailOpen(false)}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
     </div>
   );
 }

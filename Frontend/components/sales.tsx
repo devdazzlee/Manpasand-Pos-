@@ -9,7 +9,6 @@
     CardHeader,
     CardTitle,
   } from "@/components/ui/card";
-  import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
   import { Label } from "@/components/ui/label";
   import {
     Table,
@@ -38,6 +37,7 @@
   import { useToast } from "@/hooks/use-toast";
   import { CashRegister } from "@/components/cash-register";
   import { usePrinterSettings } from "@/hooks/use-printer-settings";
+  import { useDashboardTab } from "@/lib/dashboard-tabs";
 
 interface Branch { id: string; name: string; }
 interface Customer { id: string; email: string; name: string | null; }
@@ -58,6 +58,7 @@ interface Sale {
 
   export function Sales() {
     const { toast } = useToast();
+    const { setActiveTab } = useDashboardTab();
 
     // Data
     const [branches, setBranches] = useState<Branch[]>([]);
@@ -300,202 +301,11 @@ interface Sale {
           <TabsContent value="sales" className="space-y-4 md:space-y-6 mt-4">
             {/* Add Sale Button */}
             <div className="flex items-center justify-end">
-          <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-            <DialogTrigger asChild>
-              <Button>
+              <Button onClick={() => setActiveTab("new-sale")}>
                 <Plus className="h-4 w-4 mr-2" />
                 Add Sale
               </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>Create New Sale</DialogTitle>
-              </DialogHeader>
-              <div className="space-y-4">
-                {/* Branch */}
-                <div>
-                  <Label htmlFor="sale-branch">Branch</Label>
-                  <Select
-                    value={saleForm.branchId || "none"}
-                    onValueChange={(value) =>
-                      setSaleForm({ ...saleForm, branchId: value === "none" ? "" : value })
-                    }
-                  >
-                    <SelectTrigger id="sale-branch" className="w-full">
-                      <SelectValue placeholder="Select branch" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Select branch</SelectItem>
-                      {branches.map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Customer */}
-                <div>
-                  <Label htmlFor="sale-customer">Customer</Label>
-                  <Select
-                    value={saleForm.customerId || "none"}
-                    onValueChange={(value) =>
-                      setSaleForm({ ...saleForm, customerId: value === "none" ? "" : value })
-                    }
-                  >
-                    <SelectTrigger id="sale-customer" className="w-full">
-                      <SelectValue placeholder="-- walk-in --" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">-- walk-in --</SelectItem>
-                      {customers.map((c) => (
-                        <SelectItem key={c.id} value={c.id}>
-                          {c.email}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <Input
-                    className="mt-2"
-                    placeholder="Search customers..."
-                    value={customerQuery}
-                    onChange={(e) => setCustomerQuery(e.target.value)}
-                  />
-                </div>
-
-                {/* Payment Method */}
-                <div>
-                  <Label htmlFor="sale-payment">Payment Method</Label>
-                  <Select
-                    value={saleForm.paymentMethod}
-                    onValueChange={(value) =>
-                      setSaleForm({ ...saleForm, paymentMethod: value })
-                    }
-                  >
-                    <SelectTrigger id="sale-payment" className="w-full">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER", "CREDIT"].map((m) => (
-                        <SelectItem key={m} value={m}>
-                          {m.replace("_", " ")}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-
-                {/* Printer info - configured globally in Printer Settings */}
-                {receiptPrinter && (
-                  <div className="px-3 py-2 rounded-lg border border-blue-100 bg-blue-50/60 flex items-center gap-2 text-sm text-blue-800">
-                    🖨️ <span className="font-medium">{receiptPrinter}</span>
-                    <span className="text-blue-600 text-xs">(change in Printer Settings)</span>
-                  </div>
-                )}
-
-                {/* Line Items */}
-                <Input
-                  placeholder="Search products..."
-                  value={productQuery}
-                  onChange={(e) => setProductQuery(e.target.value)}
-                />
-                {saleForm.items.map((item, i) => (
-                  <div key={i} className="grid grid-cols-4 gap-2 items-end">
-                    <div>
-                      <Label htmlFor={`prod-${i}`}>Product</Label>
-                      <Select
-                        value={item.productId || "none"}
-                        onValueChange={(value) => {
-                          const pid = value === "none" ? "" : value;
-                          setSaleForm((f) => {
-                            const items = [...f.items];
-                            items[i].productId = pid;
-                            return { ...f, items };
-                          });
-                        }}
-                      >
-                        <SelectTrigger id={`prod-${i}`} className="w-full">
-                          <SelectValue placeholder="Select product" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Select product</SelectItem>
-                          {products.map((p) => (
-                            <SelectItem key={p.id} value={p.id}>
-                              {p.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div>
-                      <Label htmlFor={`qty-${i}`}>Qty</Label>
-                      <Input
-                        id={`qty-${i}`}
-                        type="number"
-                        min={1}
-                        value={item.quantity}
-                        onChange={e => {
-                          const qty = Number(e.target.value);
-                          setSaleForm(f => {
-                            const items = [...f.items];
-                            items[i].quantity = qty;
-                            return { ...f, items };
-                          });
-                        }}
-                      />
-                    </div>
-                    <div>
-                      <Label htmlFor={`price-${i}`}>Price</Label>
-                      <Input
-                        id={`price-${i}`}
-                        type="number"
-                        min={0}
-                        step={0.01}
-                        value={item.price}
-                        onChange={e => {
-                          const pr = Number(e.target.value);
-                          setSaleForm(f => {
-                            const items = [...f.items];
-                            items[i].price = pr;
-                            return { ...f, items };
-                          });
-                        }}
-                      />
-                    </div>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => removeItemRow(i)}
-                      disabled={saleForm.items.length === 1}
-                    >
-                      Remove
-                    </Button>
-                  </div>
-                ))}
-
-                <Button variant="link" onClick={addItemRow}>
-                  + Add another item
-                </Button>
-
-                <Button
-                  onClick={handleAddSale}
-                  className="w-full"
-                  disabled={isSubmitting || !saleForm.branchId || saleForm.items.some(item => !item.productId || item.quantity <= 0 || item.price <= 0)}
-                >
-                  {isSubmitting ? (
-                    <>
-                      <Loader2 className="animate-spin h-4 w-4 mr-2" />
-                      Creating Sale...
-                    </>
-                  ) : (
-                    "Save Sale"
-                  )}
-                </Button>
-              </div>
-            </DialogContent>
-          </Dialog>
-        </div>
+            </div>
 
         {/* Stats Cards */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">

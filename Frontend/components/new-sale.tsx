@@ -103,6 +103,10 @@ import {
 } from "@/components/ui/select";
 import { useHoldSales } from "@/hooks/use-hold-sales";
 import { usePosBranch } from "@/hooks/use-pos-branch";
+import {
+  RepeatSaleCombobox,
+  type RepeatSalePayload,
+} from "@/components/repeat-sale-combobox";
 
 interface CartItem {
   id: string; // Unique cart item ID (product.id + timestamp for separate entries)
@@ -442,6 +446,9 @@ export function NewSale() {
   const [isDeletingHoldSale, setIsDeletingHoldSale] = useState(false);
   const [resumingHoldIndex, setResumingHoldIndex] = useState<number | null>(null);
 
+  const [repeatConflict, setRepeatConflict] = useState<RepeatSalePayload | null>(
+    null,
+  );
   const [globalDiscountType, setGlobalDiscountType] = useState<"percentage" | "fixed">("fixed");
   const [globalDiscountValue, setGlobalDiscountValue] = useState<string>("");
   const [showDiscountRow, setShowDiscountRow] = useState(false);
@@ -740,6 +747,11 @@ export function NewSale() {
 
     return matchesCategory && matchesSearch;
   });
+
+  const isProductQueryPending =
+    searchTerm.trim() !== debouncedSearch ||
+    productsLoading ||
+    productsRefreshing;
 
   const SEARCH_DROPDOWN_LIMIT = 25;
 
@@ -1233,6 +1245,60 @@ export function NewSale() {
       setGlobalDiscountValue("");
     }
     setIsHoldingSale(false);
+  };
+
+  const buildCartFromRepeat = (payload: RepeatSalePayload): CartItem[] =>
+    payload.items.map((item, index) => ({
+      id: `repeat_${item.productId}_${Date.now()}_${index}`,
+      productId: item.productId,
+      name: item.name,
+      price: item.price,
+      originalPrice: item.price,
+      actualUnitPrice: item.price,
+      quantity: item.quantity,
+      category: "all",
+      unitId: item.unitId,
+      unitName: item.unitName,
+      unit: item.unitName,
+    }));
+
+  const applyRepeatSale = (
+    payload: RepeatSalePayload,
+    mode: "replace" | "merge",
+  ) => {
+    const incoming = buildCartFromRepeat(payload);
+    setCartSync((prev) => {
+      if (mode === "replace") return incoming;
+      const merged = prev.map((line) => ({ ...line }));
+      incoming.forEach((item) => {
+        const match = merged.find(
+          (line) => line.productId && line.productId === item.productId,
+        );
+        if (match) {
+          match.quantity += item.quantity;
+        } else {
+          merged.push(item);
+        }
+      });
+      return merged;
+    });
+    if (payload.customerId) {
+      setSelectedCustomer(payload.customerId);
+    }
+    const label = payload.saleNumber ? ` from sale #${payload.saleNumber}` : "";
+    toast.success(
+      `${mode === "replace" ? "Loaded" : "Added"} ${incoming.length} item${
+        incoming.length === 1 ? "" : "s"
+      }${label}`,
+    );
+  };
+
+  const handleRepeatSale = (payload: RepeatSalePayload) => {
+    if (cartRef.current.length === 0) {
+      applyRepeatSale(payload, "replace");
+      return;
+    }
+    setRepeatConflict(payload);
   };
 
   const handleRetrieveHoldSale = async (index: number) => {
@@ -2242,6 +2308,11 @@ export function NewSale() {
               )}
             </div>
             <div className="hidden flex-wrap items-center gap-2 sm:flex">
+              <RepeatSaleCombobox
+                branchId={selectedBranchId}
+                disabled={paymentLoading || branchLoading || !hasBranch}
+                onRepeat={handleRepeatSale}
+              />
               {cart.length > 0 && (
                 <Button
                   variant="outline"
@@ -2309,6 +2380,14 @@ export function NewSale() {
               Branch is not configured. Hold Sale and checkout may fail until a branch is assigned.
             </p>
           )}
+          <div className="mb-2 sm:hidden">
+            <RepeatSaleCombobox
+              branchId={selectedBranchId}
+              disabled={paymentLoading || branchLoading || !hasBranch}
+              className="h-9 w-full bg-white text-sm font-normal"
+              onRepeat={handleRepeatSale}
+            />
+          </div>
           <div className="mb-2 sm:mb-3">
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
               Product search
@@ -2609,10 +2688,20 @@ export function NewSale() {
             </div>
             <div className="mt-1.5 hidden flex-wrap items-center gap-2 text-sm text-gray-600 sm:mt-3 sm:flex">
               <span className="flex items-center gap-1.5">
-                {filteredProducts.length} product{filteredProducts.length === 1 ? "" : "s"}
-                {selectedCategory !== "all" ? ` in ${selectedCategoryLabel}` : ""}
-                {productsRefreshing && (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                {isProductQueryPending && filteredProducts.length === 0 ? (
+                  <>
+                    Searching…
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                  </>
+                ) : (
+                  <>
+                    {filteredProducts.length} product
+                    {filteredProducts.length === 1 ? "" : "s"}
+                    {selectedCategory !== "all" ? ` in ${selectedCategoryLabel}` : ""}
+                    {isProductQueryPending && (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                    )}
+                  </>
                 )}
               </span>
               {selectedCategory !== "all" && (
@@ -2641,7 +2730,8 @@ export function NewSale() {
           )}
 
         {/* Products Grid */}
-        {productsLoading ? (
+        {productsLoading ||
+        (isProductQueryPending && filteredProducts.length === 0) ? (
           <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
             {Array.from({ length: 12 }).map((_, i) => (
               <div
@@ -3462,6 +3552,44 @@ export function NewSale() {
               ) : (
                 "Delete"
               )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={repeatConflict !== null}
+        onOpenChange={(open) => !open && setRepeatConflict(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cart already has items</AlertDialogTitle>
+            <AlertDialogDescription>
+              {repeatConflict
+                ? `Sale #${repeatConflict.saleNumber || ""} has ${
+                    repeatConflict.items.length
+                  } item${repeatConflict.items.length === 1 ? "" : "s"}. Replace the current cart, or add these on top of it?`
+                : ""}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter className="gap-2 sm:gap-2">
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button
+              variant="outline"
+              onClick={() => {
+                if (repeatConflict) applyRepeatSale(repeatConflict, "merge");
+                setRepeatConflict(null);
+              }}
+            >
+              Add to cart
+            </Button>
+            <AlertDialogAction
+              onClick={() => {
+                if (repeatConflict) applyRepeatSale(repeatConflict, "replace");
+                setRepeatConflict(null);
+              }}
+            >
+              Replace cart
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

@@ -38,8 +38,8 @@ export function useCustomers(params: CustomerQuery, options?: { enabled?: boolea
     ...query,
     customers: query.data?.data ?? EMPTY,
     meta: query.data?.meta ?? null,
-    isFirstLoad: query.isLoading,
-    isRefreshing: query.isFetching && !query.isLoading,
+    isFirstLoad: query.isPending || query.isPlaceholderData,
+    isRefreshing: query.isFetching && !query.isPending && !query.isPlaceholderData,
   };
 }
 

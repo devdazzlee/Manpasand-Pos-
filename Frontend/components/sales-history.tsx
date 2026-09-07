@@ -360,6 +360,7 @@ export function SalesHistory() {
   const [cancelTarget, setCancelTarget] = useState<Sale | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Sale | null>(null);
   const [editSale, setEditSale] = useState<Sale | null>(null);
+  const [reprintSale, setReprintSale] = useState<Sale | null>(null);
   const [actionBusy, setActionBusy] = useState<{
     saleId: string;
     action: string;
@@ -716,6 +717,43 @@ export function SalesHistory() {
     });
   };
 
+  // Post-edit "Sale updated" dialog — uses the exact same print path as
+  // New Sale's success dialog (`handleSuccessPrint`): full printer object is
+  // forwarded to the print server, no silent browser-print fallback.
+  const handleEditedPrint = async (sale?: Sale) => {
+    const target = sale || reprintSale;
+    if (!target) return;
+    await runSaleAction(target.id, "print", async () => {
+      const printerInfo = getReceiptPrinterObj();
+      if (!printerInfo) {
+        toast({
+          variant: "destructive",
+          title: "Please select a receipt printer in Printer Settings",
+        });
+        return;
+      }
+      try {
+        const detailed = await fetchSaleDetails(target);
+        const data = buildReceiptFromSale(detailed);
+        await printReceiptViaServer(
+          {
+            ...printerInfo,
+            columns:
+              printerInfo.receiptProfile?.columns || { fontA: 48, fontB: 64 },
+          },
+          data,
+          { copies: 1, cut: true, openDrawer: false },
+        );
+        toast({ title: "Receipt sent to printer" });
+      } catch (err: any) {
+        toast({
+          variant: "destructive",
+          title: err?.message || "Failed to print receipt",
+        });
+      }
+    });
+  };
+
   const handleCancelSale = () => {
     if (!cancelTarget) return;
     cancelSaleM.mutate(cancelTarget.id, {
@@ -884,6 +922,25 @@ export function SalesHistory() {
     { label: "Total Tax Collected", value: formatCurrency(summary.totalTaxCollected), hint: "VAT / GST" },
     { label: "Total Discounts", value: formatCurrency(summary.totalDiscounts), hint: "Applied discounts" },
   ];
+
+  if (editSale) {
+    return (
+      <EditSaleDialog
+        sale={editSale}
+        open
+        onOpenChange={(open) => {
+          if (!open) setEditSale(null);
+        }}
+        onUpdated={() => {
+          refetch();
+          if (viewRowId && viewRowId === editSale.id) {
+            viewQuery.refetch();
+          }
+          setReprintSale(editSale);
+        }}
+      />
+    );
+  }
 
   return (
     <>
@@ -1842,20 +1899,93 @@ export function SalesHistory() {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* Edit sale — full POS editor */}
-      <EditSaleDialog
-        sale={editSale}
-        open={!!editSale}
+      {/* Offer to regenerate / share the bill right after an edit is saved */}
+      <AlertDialog
+        open={!!reprintSale}
         onOpenChange={(open) => {
-          if (!open) setEditSale(null);
+          if (!open) setReprintSale(null);
         }}
-        onUpdated={() => {
-          refetch();
-          if (viewRowId && editSale && viewRowId === editSale.id) {
-            viewQuery.refetch();
-          }
-        }}
-      />
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Sale updated</AlertDialogTitle>
+            <AlertDialogDescription>
+              Generate the new bill for sale #{reprintSale?.sale_number}.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          <div className="grid grid-cols-2 gap-2 py-1">
+            <Button
+              variant="outline"
+              className="h-11 border-blue-200 text-blue-600 hover:bg-blue-50 hover:text-blue-700"
+              disabled={!!actionBusy}
+              onClick={() => reprintSale && handleDownloadPdf(reprintSale)}
+            >
+              {reprintSale && isSaleBusy(reprintSale.id, "pdf") ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              PDF
+            </Button>
+            <Button
+              variant="outline"
+              className="h-11"
+              disabled={!!actionBusy}
+              onClick={() => reprintSale && handleEditedPrint(reprintSale)}
+            >
+              {reprintSale && isSaleBusy(reprintSale.id, "print") ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Printer className="mr-2 h-4 w-4" />
+              )}
+              Print
+            </Button>
+            <Button
+              className="col-span-2 h-11 bg-green-600 text-white hover:bg-green-700"
+              disabled={!!actionBusy}
+              onClick={async () => {
+                if (!reprintSale) return;
+                await runSaleAction(reprintSale.id, "whatsapp", async () => {
+                  const detailed = await fetchSaleDetails(reprintSale);
+                  const data = buildReceiptFromSale(detailed);
+                  try {
+                    const { fellBack } = await shareReceiptOnWhatsApp(
+                      data,
+                      logoDataUri,
+                      reprintSale.customer?.phone_number ||
+                        reprintSale.customer?.mobile_number ||
+                        "",
+                    );
+                    if (fellBack) {
+                      toast({
+                        title: "Receipt downloaded",
+                        description: "Attach the PDF in WhatsApp chat.",
+                      });
+                    }
+                  } catch (err: any) {
+                    toast({
+                      title: err?.message || "Failed to share",
+                      variant: "destructive",
+                    });
+                  }
+                });
+              }}
+            >
+              {reprintSale && isSaleBusy(reprintSale.id, "whatsapp") ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <MessageCircle className="mr-2 h-4 w-4" />
+              )}
+              WhatsApp
+            </Button>
+          </div>
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!actionBusy}>Done</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

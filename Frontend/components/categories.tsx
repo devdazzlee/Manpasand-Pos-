@@ -9,13 +9,6 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -623,18 +616,19 @@ export function Categories() {
         </Card>
       </PageBody>
 
-      {/* Add / Edit — name + slug + status + image (≤ 6 fields), stays a Dialog (guide §2). */}
-      <Dialog
+      <DetailSheet
         open={addOpen || editOpen}
         onOpenChange={(open) => {
           if (!open) closeForm();
         }}
+        size="lg"
       >
-        <DialogContent className="max-h-[85vh] max-w-lg overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editOpen ? "Edit category" : "New category"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-1">
+        <DetailSheetHeader
+          title={editOpen ? "Edit category" : "New category"}
+          subtitle={editOpen ? "Update this category" : "Add a category to the catalog"}
+          icon={<Layers className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-4">
             <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
               <div className="space-y-1.5">
                 <Label htmlFor="cat-name" className="text-xs font-medium text-foreground">
@@ -738,8 +732,8 @@ export function Categories() {
                 {formError}
               </p>
             )}
-          </div>
-          <DialogFooter>
+        </DetailSheetBody>
+        <DetailSheetFooter>
             <Button variant="outline" onClick={closeForm} disabled={submitting}>
               Cancel
             </Button>
@@ -747,9 +741,8 @@ export function Categories() {
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editOpen ? "Update category" : "Create category"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </DetailSheetFooter>
+      </DetailSheet>
 
       {/* Products in category — was a modal list, now a DetailSheet (guide §2). */}
       <DetailSheet

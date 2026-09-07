@@ -447,6 +447,21 @@ const Suppliers: React.FC = () => {
     error: listError,
   } = useSuppliers(listParams);
 
+  const allCountQuery = useSuppliers({ page: 1, limit: 1 });
+  const activeCountQuery = useSuppliers({ page: 1, limit: 1, isActive: true });
+  const inactiveCountQuery = useSuppliers({ page: 1, limit: 1, isActive: false });
+  const posCountQuery = useSuppliers({ page: 1, limit: 1, displayOnPos: true });
+  const statsLoading =
+    allCountQuery.isPending ||
+    activeCountQuery.isPending ||
+    inactiveCountQuery.isPending;
+  const stats = {
+    total: allCountQuery.meta?.total ?? 0,
+    activeCount: activeCountQuery.meta?.total ?? 0,
+    inactiveCount: inactiveCountQuery.meta?.total ?? 0,
+    posCount: posCountQuery.meta?.total ?? 0,
+  };
+
   const list = rawSuppliers as unknown as Supplier[];
   const loading = isFirstLoad;
   const listMeta = meta ?? {
@@ -538,6 +553,15 @@ const Suppliers: React.FC = () => {
     setPaymentNotes("");
     setPaymentKind("settle");
   };
+
+  useEffect(() => {
+    if (paymentKind !== "settle") return;
+    const due = Number(ledgerSummary?.balanceDue || 0);
+    if (due <= 0) return;
+    setPaymentAmount((prev) =>
+      prev === "" ? String(Number(due.toFixed(2))) : prev,
+    );
+  }, [paymentKind, ledgerSummary?.balanceDue]);
 
   const openDetail = (s: Supplier, tab: DetailTab = "overview") => {
     setCurrent(s);
@@ -747,18 +771,6 @@ const Suppliers: React.FC = () => {
     );
   };
 
-  const stats = useMemo(() => {
-    const activeCount = list.filter(isActiveSupplier).length;
-    const inactiveCount = list.length - activeCount;
-    const posCount = list.filter((s) => s.display_on_pos).length;
-    return {
-      activeCount,
-      inactiveCount,
-      posCount,
-      total: listMeta.total,
-    };
-  }, [list, listMeta.total]);
-
   const filtered = list;
   const totalPages = Math.max(1, listMeta.totalPages);
   const pageSafe = Math.min(page, totalPages);
@@ -771,7 +783,7 @@ const Suppliers: React.FC = () => {
     label: string;
     count: number;
   }> = [
-    { key: "all", label: "All", count: listMeta.total },
+    { key: "all", label: "All", count: stats.total },
     { key: "active", label: "Active", count: stats.activeCount },
     { key: "inactive", label: "Inactive", count: stats.inactiveCount },
     { key: "pos", label: "On POS", count: stats.posCount },
@@ -806,7 +818,7 @@ const Suppliers: React.FC = () => {
       <PageBody className="space-y-5">
         <InventoryKpiGrid
           columns={4}
-          loading={loading && list.length === 0}
+          loading={statsLoading}
           items={[
             {
               label: "Total Suppliers",
@@ -871,7 +883,11 @@ const Suppliers: React.FC = () => {
                 )}
               >
                 {chip.label}
-                <span className="nums text-muted-foreground">{chip.count}</span>
+                {statsLoading ? (
+                  <span className="inline-block h-3 w-5 animate-pulse rounded-full bg-muted" />
+                ) : (
+                  <span className="nums text-muted-foreground">{chip.count}</span>
+                )}
               </button>
             ))}
           </div>
@@ -929,7 +945,7 @@ const Suppliers: React.FC = () => {
               <p className="text-sm font-semibold text-foreground">
                 Supplier List{" "}
                 <span className="font-normal text-muted-foreground">
-                  ({listMeta.total})
+                  {loading ? "(loading…)" : `(${listMeta.total})`}
                 </span>
               </p>
               {isRefreshing && (
@@ -937,7 +953,7 @@ const Suppliers: React.FC = () => {
               )}
             </div>
 
-            {loading && list.length === 0 ? (
+            {loading ? (
               <div className="space-y-2 p-4">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div
@@ -1691,8 +1707,8 @@ const Suppliers: React.FC = () => {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="space-y-1">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1 min-w-0">
                     <Label className={supplierFieldLabelClass}>
                       Amount <span className="text-destructive">*</span>
                     </Label>
@@ -1702,11 +1718,11 @@ const Suppliers: React.FC = () => {
                       step="0.01"
                       value={paymentAmount}
                       onChange={(e) => setPaymentAmount(e.target.value)}
-                      placeholder="0.00"
+                      placeholder="Enter amount"
                       className={cn(supplierFieldControlClass, "nums")}
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className={supplierFieldLabelClass}>Date</Label>
                     <Popover>
                       <PopoverTrigger asChild>
@@ -1715,14 +1731,16 @@ const Suppliers: React.FC = () => {
                           variant="outline"
                           className={cn(
                             supplierFieldControlClass,
-                            "w-full justify-start px-3 font-normal",
+                            "w-full min-w-0 justify-start px-3 font-normal overflow-hidden",
                             !paymentDate && "text-muted-foreground",
                           )}
                         >
-                          <CalendarIcon className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                          {paymentDate
-                            ? format(paymentDate, "PPP")
-                            : "Pick date"}
+                          <CalendarIcon className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="truncate">
+                            {paymentDate
+                              ? format(paymentDate, "MMM d, yyyy")
+                              : "Pick date"}
+                          </span>
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">
@@ -1735,7 +1753,7 @@ const Suppliers: React.FC = () => {
                       </PopoverContent>
                     </Popover>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className={supplierFieldLabelClass}>Method</Label>
                     <Select
                       value={paymentMethod}
@@ -1757,7 +1775,7 @@ const Suppliers: React.FC = () => {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className={supplierFieldLabelClass}>Reference</Label>
                     <Input
                       value={paymentReference}

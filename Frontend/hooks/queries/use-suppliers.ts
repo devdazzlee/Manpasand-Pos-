@@ -38,8 +38,8 @@ export function useSuppliers(params: SupplierQuery, options?: { enabled?: boolea
     ...query,
     suppliers: query.data?.data ?? EMPTY,
     meta: query.data?.meta ?? null,
-    isFirstLoad: query.isLoading,
-    isRefreshing: query.isFetching && !query.isLoading,
+    isFirstLoad: query.isPending || query.isPlaceholderData,
+    isRefreshing: query.isFetching && !query.isPending && !query.isPlaceholderData,
   };
 }
 

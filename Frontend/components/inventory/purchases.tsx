@@ -28,12 +28,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format } from "date-fns";
@@ -1786,18 +1785,16 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
       />
 
       {/* Detail dialog */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="w-[min(96vw,720px)] max-w-[720px] sm:max-w-[720px] max-h-[90vh] overflow-y-auto border border-gray-200 p-0 gap-0 bg-white">
-          <DialogHeader className="px-6 py-4 border-b border-gray-200">
-            <DialogTitle className="text-lg font-bold text-black">
-              Purchase detail
-            </DialogTitle>
-            <DialogDescription className="text-sm text-gray-600">
-              {purchaseDetail?.product?.name
-                ? `${purchaseDetail.product.name} · supplier receipt`
-                : "Stock In receipt details"}
-            </DialogDescription>
-          </DialogHeader>
+      <DetailSheet open={detailOpen} onOpenChange={setDetailOpen} size="lg">
+        <DetailSheetHeader
+          title="Purchase detail"
+          subtitle={
+            purchaseDetail?.product?.name
+              ? `${purchaseDetail.product.name} · supplier receipt`
+              : "Stock In receipt details"
+          }
+        />
+        <DetailSheetBody>
 
           {detailLoading ? (
             <div className="flex flex-col items-center justify-center py-20 px-6 gap-3">
@@ -1950,8 +1947,13 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
               <p className="text-sm font-medium">Failed to retrieve details</p>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setDetailOpen(false)}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
     </div>
   );
 }

@@ -7,13 +7,6 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -395,18 +388,19 @@ const Units: React.FC = () => {
         </Card>
       </PageBody>
 
-      {/* Add / Edit — 2 fields, stays a Dialog (guide §2). */}
-      <Dialog
+      <DetailSheet
         open={addOpen || editOpen}
         onOpenChange={(open) => {
           if (!open) closeForm();
         }}
+        size="md"
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>{editOpen ? "Edit unit" : "New unit"}</DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-1">
+        <DetailSheetHeader
+          title={editOpen ? "Edit unit" : "New unit"}
+          subtitle={editOpen ? "Update this unit" : "Add a unit to the catalog"}
+          icon={<Scale className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="unit-name" className="text-xs font-medium text-foreground">
                 Name<span className="text-destructive"> *</span>
@@ -443,8 +437,8 @@ const Units: React.FC = () => {
                 {formError}
               </p>
             )}
-          </div>
-          <DialogFooter>
+        </DetailSheetBody>
+        <DetailSheetFooter>
             <Button variant="outline" onClick={closeForm} disabled={submitting}>
               Cancel
             </Button>
@@ -452,9 +446,8 @@ const Units: React.FC = () => {
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editOpen ? "Update unit" : "Create unit"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </DetailSheetFooter>
+      </DetailSheet>
 
       {/* View unit — record detail, so a DetailSheet (guide §2). */}
       <DetailSheet

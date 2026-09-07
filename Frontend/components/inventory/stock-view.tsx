@@ -20,12 +20,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
 import {
   Search,
   AlertTriangle,
@@ -856,9 +855,15 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
         </div>
 
         <p className="text-xs text-gray-500">
-          Showing {stockMeta.total.toLocaleString()} rows ·{" "}
-          {formatQty(stockMeta.totalQuantity)} units · value{" "}
-          {formatMoney(stockMeta.totalInventoryValue)}
+          {!hasStockMeta && loading ? (
+            "Loading totals…"
+          ) : (
+            <>
+              Showing {stockMeta.total.toLocaleString()} rows ·{" "}
+              {formatQty(stockMeta.totalQuantity)} units · value{" "}
+              {formatMoney(stockMeta.totalInventoryValue)}
+            </>
+          )}
         </p>
       </div>
 
@@ -1120,21 +1125,22 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
       </Card>
 
       {/* Row details */}
-      <Dialog
+      <DetailSheet
         open={!!detailRow}
         onOpenChange={(open) => {
           if (!open) closeDetail();
         }}
+        size="xl"
       >
-        <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto border border-gray-200 p-0 gap-0">
-          <DialogHeader className="px-6 py-4 border-b border-gray-200">
-            <DialogTitle className="text-lg font-bold text-black">
-              Stock details
-            </DialogTitle>
-            <DialogDescription className="text-sm text-gray-600">
-              {detailRow?.product?.name} at {detailRow?.branch?.name}
-            </DialogDescription>
-          </DialogHeader>
+        <DetailSheetHeader
+          title="Stock details"
+          subtitle={
+            detailRow
+              ? `${detailRow.product?.name} at ${detailRow.branch?.name}`
+              : undefined
+          }
+        />
+        <DetailSheetBody>
           {detailLoading ? (
             <div className="flex flex-col items-center justify-center py-20 px-6 gap-3">
               <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
@@ -1352,8 +1358,13 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
               </div>
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={closeDetail}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
     </div>
   );
 }

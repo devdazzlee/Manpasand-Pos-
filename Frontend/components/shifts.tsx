@@ -1,18 +1,12 @@
 "use client";
 
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import apiClient from "@/lib/apiClient";
+import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Card, CardContent } from "@/components/ui/card";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -43,6 +37,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
+import { PageHeader, PageBody } from "@/components/ui/page-header";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import {
@@ -59,9 +60,9 @@ import {
   Sunset,
   CheckCircle2,
   Activity,
+  Loader2,
+  RefreshCcw,
 } from "lucide-react";
-import { toast } from "sonner";
-import { PageLoader } from "@/components/ui/page-loader";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
 import {
@@ -70,49 +71,18 @@ import {
 } from "@/components/inventory/stock-ops/export-utils";
 import { cn } from "@/lib/utils";
 import { z } from "zod";
+import { useToast } from "@/hooks/use-toast";
+import { extractApiError } from "@/lib/api/errors";
+import { useEmployees } from "@/hooks/queries/use-employees";
+import {
+  useShiftAssignments,
+  useShiftAssignmentMutations,
+} from "@/hooks/queries/use-shift-assignments";
+import type { ShiftAssignmentRecord } from "@/lib/api/shift-assignments";
 
 type StatusFilter = "all" | "active" | "scheduled" | "completed";
 type PeriodFilter = "all" | "today" | "week" | "month";
-
-interface EmployeeOption {
-  id: string;
-  name: string;
-  employee_code?: string | null;
-  status?: string;
-}
-
-interface ShiftRow {
-  id: string;
-  employee_id: string;
-  employee?: {
-    id: string;
-    name: string;
-    employee_code?: string | null;
-    department?: { id: string; name: string } | null;
-    employee_type?: { id: string; name: string } | null;
-  } | null;
-  shift_time: string;
-  start_date: string;
-  end_date?: string | null;
-  sales: number;
-  break_time?: string | null;
-  start_time?: string;
-  end_time?: string;
-  break_hours?: number;
-  total_hours?: number;
-  status?: "scheduled" | "active" | "completed";
-}
-
-interface Summary {
-  total: number;
-  active: number;
-  scheduled: number;
-  completed: number;
-  today: number;
-  todayHours: number;
-  todaySales: number;
-  totalSales: number;
-}
+type ShiftRow = ShiftAssignmentRecord;
 
 interface FormState {
   employee_id: string;
@@ -127,10 +97,8 @@ interface FormState {
 
 const PAGE_SIZE = 20;
 
-const dialogClass =
-  "grid w-[min(96vw,640px)] max-w-[640px] sm:max-w-[640px] gap-4 p-5";
-const fieldLabel = "text-xs font-medium text-gray-900";
-const fieldControl = "h-9 rounded-md border-gray-200 text-sm";
+const fieldLabel = "text-xs font-medium text-foreground";
+const fieldControl = "h-9 text-sm";
 
 const shiftFormSchema = z.object({
   employee_id: z.string().min(1, "Select an employee"),
@@ -141,49 +109,11 @@ const shiftFormSchema = z.object({
 });
 
 const SHIFT_PRESETS = [
-  {
-    id: "morning" as const,
-    name: "Morning",
-    time: "9:00 AM – 5:00 PM",
-    start: "09:00",
-    end: "17:00",
-    icon: Sun,
-  },
-  {
-    id: "evening" as const,
-    name: "Evening",
-    time: "1:00 PM – 9:00 PM",
-    start: "13:00",
-    end: "21:00",
-    icon: Sunset,
-  },
-  {
-    id: "night" as const,
-    name: "Night",
-    time: "9:00 PM – 5:00 AM",
-    start: "21:00",
-    end: "05:00",
-    icon: Moon,
-  },
-  {
-    id: "custom" as const,
-    name: "Custom",
-    time: "Set your own hours",
-    start: "09:00",
-    end: "17:00",
-    icon: Clock,
-  },
+  { id: "morning" as const, name: "Morning", time: "9:00 AM – 5:00 PM", start: "09:00", end: "17:00", icon: Sun },
+  { id: "evening" as const, name: "Evening", time: "1:00 PM – 9:00 PM", start: "13:00", end: "21:00", icon: Sunset },
+  { id: "night" as const, name: "Night", time: "9:00 PM – 5:00 AM", start: "21:00", end: "05:00", icon: Moon },
+  { id: "custom" as const, name: "Custom", time: "Set your own hours", start: "09:00", end: "17:00", icon: Clock },
 ];
-
-const extractApiError = (err: any, fallback: string) => {
-  const data = err?.response?.data;
-  if (data?.errors?.length) {
-    const first = data.errors[0];
-    if (typeof first === "string") return first;
-    if (first?.message) return first.message;
-  }
-  return data?.message || err?.message || fallback;
-};
 
 const toUtcMidnightIso = (d: Date) => {
   const y = d.getFullYear();
@@ -209,10 +139,7 @@ const formatDate = (value?: string | null) => {
 
 const formatTimeTo12Hour = (timeStr?: string) => {
   if (!timeStr) return "—";
-  if (
-    timeStr.toUpperCase().includes("AM") ||
-    timeStr.toUpperCase().includes("PM")
-  ) {
+  if (timeStr.toUpperCase().includes("AM") || timeStr.toUpperCase().includes("PM")) {
     return timeStr;
   }
   const [hStr, mStr] = timeStr.split(":");
@@ -238,11 +165,7 @@ const parseTimeToDecimal = (timeStr: string) => {
   return h + m / 60;
 };
 
-const calculateHours = (
-  startTime: string,
-  endTime: string,
-  breakHours: number,
-) => {
+const calculateHours = (startTime: string, endTime: string, breakHours: number) => {
   let diff = parseTimeToDecimal(endTime) - parseTimeToDecimal(startTime);
   if (diff < 0) diff += 24;
   return Math.max(0, diff - breakHours);
@@ -287,29 +210,19 @@ function TimePicker({
 
   const { hour, minute, ampm } = parseTime(value);
 
-  const handleTimeChange = (
-    newHour: string,
-    newMinute: string,
-    newAmpm: string,
-  ) => {
+  const handleTimeChange = (newHour: string, newMinute: string, newAmpm: string) => {
     let hNum = parseInt(newHour, 10);
     if (newAmpm === "PM" && hNum < 12) hNum += 12;
     else if (newAmpm === "AM" && hNum === 12) hNum = 0;
     onChange(`${String(hNum).padStart(2, "0")}:${newMinute}`);
   };
 
-  const hours = Array.from({ length: 12 }, (_, i) =>
-    String(i + 1).padStart(2, "0"),
-  );
+  const hours = Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, "0"));
   const minutes = ["00", "15", "30", "45"];
 
   return (
-    <div className="flex w-full items-center gap-1 rounded-md border border-gray-200 bg-white p-1">
-      <Select
-        disabled={disabled}
-        value={hour}
-        onValueChange={(val) => handleTimeChange(val, minute, ampm)}
-      >
+    <div className="flex w-full items-center gap-1 rounded-md border border-border bg-background p-1">
+      <Select disabled={disabled} value={hour} onValueChange={(val) => handleTimeChange(val, minute, ampm)}>
         <SelectTrigger className="h-8 w-[62px] border-none bg-transparent px-2 shadow-none focus:ring-0">
           <SelectValue placeholder="HH" />
         </SelectTrigger>
@@ -321,7 +234,7 @@ function TimePicker({
           ))}
         </SelectContent>
       </Select>
-      <span className="text-gray-400 select-none">:</span>
+      <span className="select-none text-muted-foreground">:</span>
       <Select
         disabled={disabled}
         value={minutes.includes(minute) ? minute : "00"}
@@ -338,11 +251,7 @@ function TimePicker({
           ))}
         </SelectContent>
       </Select>
-      <Select
-        disabled={disabled}
-        value={ampm}
-        onValueChange={(val) => handleTimeChange(hour, minute, val)}
-      >
+      <Select disabled={disabled} value={ampm} onValueChange={(val) => handleTimeChange(hour, minute, val)}>
         <SelectTrigger className="h-8 w-[72px] border-none bg-transparent px-2 shadow-none focus:ring-0">
           <SelectValue />
         </SelectTrigger>
@@ -358,13 +267,13 @@ function TimePicker({
 function statusBadgeClass(status?: string) {
   switch (status) {
     case "active":
-      return "bg-emerald-50 text-emerald-800 border-emerald-200";
+      return "border-green-200 bg-green-50 text-green-800";
     case "scheduled":
-      return "bg-blue-50 text-blue-800 border-blue-200";
+      return "border-blue-200 bg-blue-50 text-blue-800";
     case "completed":
-      return "bg-gray-100 text-gray-700 border-gray-200";
+      return "border-border bg-muted text-muted-foreground";
     default:
-      return "bg-gray-50 text-gray-600 border-gray-200";
+      return "border-border bg-muted/50 text-muted-foreground";
   }
 }
 
@@ -382,25 +291,12 @@ function statusLabel(status?: string) {
 }
 
 export function Shifts() {
-  const [rows, setRows] = useState<ShiftRow[]>([]);
-  const [listMeta, setListMeta] = useState({ total: 0, totalPages: 1 });
-  const [summary, setSummary] = useState<Summary>({
-    total: 0,
-    active: 0,
-    scheduled: 0,
-    completed: 0,
-    today: 0,
-    todayHours: 0,
-    todaySales: 0,
-    totalSales: 0,
-  });
-  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
+  const { toast } = useToast();
 
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<StatusFilter>("all");
-  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("today");
+  const [periodFilter, setPeriodFilter] = useState<PeriodFilter>("all");
   const [employeeFilter, setEmployeeFilter] = useState("all");
   const [dateFrom, setDateFrom] = useState<Date | undefined>();
   const [dateTo, setDateTo] = useState<Date | undefined>();
@@ -411,99 +307,101 @@ export function Shifts() {
   const [editing, setEditing] = useState<ShiftRow | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [formError, setFormError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
 
   const [detail, setDetail] = useState<ShiftRow | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
   const [endTarget, setEndTarget] = useState<ShiftRow | null>(null);
   const [endSales, setEndSales] = useState("");
-  const [ending, setEnding] = useState(false);
 
   const [deleteTarget, setDeleteTarget] = useState<ShiftRow | null>(null);
-  const [deleting, setDeleting] = useState(false);
-  const [actionId, setActionId] = useState<string | null>(null);
-
-  const loadEmployees = useCallback(async () => {
-    try {
-      const res = await apiClient.get("/employee", {
-        params: { page: 1, limit: 100 },
-      });
-      const list = (res.data?.data || []) as EmployeeOption[];
-      setEmployees(
-        list.filter((e) => (e.status || "ACTIVE") !== "TERMINATED"),
-      );
-    } catch {
-      setEmployees([]);
-    }
-  }, []);
-
-  const fetchShifts = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: Record<string, string> = {
-        page: String(page),
-        limit: String(PAGE_SIZE),
-      };
-      if (search.trim()) params.search = search.trim();
-      if (statusFilter !== "all") params.status = statusFilter;
-      if (periodFilter !== "all" && !dateFrom && !dateTo) {
-        params.period = periodFilter;
-      }
-      if (employeeFilter !== "all") params.employee_id = employeeFilter;
-      if (dateFrom) params.date_from = format(dateFrom, "yyyy-MM-dd");
-      if (dateTo) params.date_to = format(dateTo, "yyyy-MM-dd");
-
-      const res = await apiClient.get("/shift-assignment", { params });
-      setRows(res.data?.data || []);
-      setListMeta({
-        total: Number(res.data?.meta?.total) || (res.data?.data || []).length,
-        totalPages: Math.max(1, Number(res.data?.meta?.totalPages) || 1),
-      });
-      const s = res.data?.meta?.summary;
-      setSummary({
-        total: Number(s?.total) || 0,
-        active: Number(s?.active) || 0,
-        scheduled: Number(s?.scheduled) || 0,
-        completed: Number(s?.completed) || 0,
-        today: Number(s?.today) || 0,
-        todayHours: Number(s?.todayHours) || 0,
-        todaySales: Number(s?.todaySales) || 0,
-        totalSales: Number(s?.totalSales) || 0,
-      });
-    } catch (e: any) {
-      toast.error(extractApiError(e, "Failed to load shifts"));
-      setRows([]);
-    } finally {
-      setLoading(false);
-      setInitialLoading(false);
-    }
-  }, [
-    page,
-    search,
-    statusFilter,
-    periodFilter,
-    employeeFilter,
-    dateFrom,
-    dateTo,
-  ]);
 
   useEffect(() => {
-    loadEmployees();
-  }, [loadEmployees]);
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(t);
+  }, [search]);
+
+  const { employees: employeeRows } = useEmployees({ limit: 100 });
+  const employees = useMemo(
+    () =>
+      (employeeRows as Array<{ id: string; name: string; employee_code?: string | null; status?: string }>).filter(
+        (e) => (e.status || "ACTIVE") !== "TERMINATED",
+      ),
+    [employeeRows],
+  );
+
+  const listParams = useMemo(
+    () => ({
+      page,
+      limit: PAGE_SIZE,
+      search: debouncedSearch || undefined,
+      status: statusFilter !== "all" ? statusFilter : undefined,
+      period:
+        periodFilter !== "all" && !dateFrom && !dateTo ? periodFilter : undefined,
+      employeeId: employeeFilter !== "all" ? employeeFilter : undefined,
+      dateFrom: dateFrom ? format(dateFrom, "yyyy-MM-dd") : undefined,
+      dateTo: dateTo ? format(dateTo, "yyyy-MM-dd") : undefined,
+    }),
+    [
+      page,
+      debouncedSearch,
+      statusFilter,
+      periodFilter,
+      employeeFilter,
+      dateFrom,
+      dateTo,
+    ],
+  );
+
+  const {
+    shiftAssignments: rows,
+    meta,
+    isFirstLoad,
+    isRefreshing,
+    refetch,
+    error: listError,
+  } = useShiftAssignments(listParams);
+
+  const directoryQuery = useShiftAssignments({ page: 1, limit: 1 });
+  const statsLoading =
+    directoryQuery.isPending || directoryQuery.isPlaceholderData;
+  const rawSummary = directoryQuery.summary;
+
+  const summary = rawSummary ?? {
+    total: 0,
+    active: 0,
+    scheduled: 0,
+    completed: 0,
+    today: 0,
+    todayHours: 0,
+    todaySales: 0,
+    totalSales: 0,
+  };
+  const listMeta = meta ?? { total: 0, page: 1, limit: PAGE_SIZE, totalPages: 1 };
+
+  const { create, update, endShift, remove } = useShiftAssignmentMutations();
+  const submitting = create.isPending || update.isPending;
+  const ending = endShift.isPending;
+  const deleting = remove.isPending;
 
   useEffect(() => {
-    fetchShifts();
-  }, [fetchShifts]);
+    if (listError) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load shifts",
+        description: extractApiError(listError, "Failed to load shifts"),
+      });
+    }
+  }, [listError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = Math.max(1, listMeta.totalPages);
   const pageSafe = Math.min(page, totalPages);
-  const pageRows = rows;
+  const pageRows = rows as ShiftRow[];
 
   const hasFilters =
     Boolean(search.trim()) ||
     statusFilter !== "all" ||
-    periodFilter !== "today" ||
+    periodFilter !== "all" ||
     employeeFilter !== "all" ||
     !!dateFrom ||
     !!dateTo;
@@ -511,7 +409,7 @@ export function Shifts() {
   const clearFilters = () => {
     setSearch("");
     setStatusFilter("all");
-    setPeriodFilter("today");
+    setPeriodFilter("all");
     setEmployeeFilter("all");
     setDateFrom(undefined);
     setDateTo(undefined);
@@ -519,12 +417,7 @@ export function Shifts() {
   };
 
   const previewHours = useMemo(
-    () =>
-      calculateHours(
-        form.startTime,
-        form.endTime,
-        Number(form.breakHours) || 0,
-      ),
+    () => calculateHours(form.startTime, form.endTime, Number(form.breakHours) || 0),
     [form.startTime, form.endTime, form.breakHours],
   );
 
@@ -536,10 +429,8 @@ export function Shifts() {
   };
 
   const openEdit = (row: ShiftRow) => {
-    const start =
-      row.start_time || row.shift_time?.split("-")[0]?.trim() || "09:00";
-    const end =
-      row.end_time || row.shift_time?.split("-")[1]?.trim() || "17:00";
+    const start = row.start_time || row.shift_time?.split("-")[0]?.trim() || "09:00";
+    const end = row.end_time || row.shift_time?.split("-")[1]?.trim() || "17:00";
     const breakRaw = row.break_time || String(row.break_hours ?? 1);
     const breakHours = String(parseFloat(breakRaw) || 0);
     const preset = SHIFT_PRESETS.find(
@@ -577,7 +468,7 @@ export function Shifts() {
     }));
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     const parsed = shiftFormSchema.safeParse({
       employee_id: form.employee_id,
       date: form.date,
@@ -588,42 +479,50 @@ export function Shifts() {
     if (!parsed.success) {
       const msg = parsed.error.errors[0]?.message || "Fix the form fields";
       setFormError(msg);
-      toast.error(msg);
+      toast({ variant: "destructive", title: msg });
       return;
     }
     setFormError("");
-    setSubmitting(true);
-    try {
-      const breakVal = Number(form.breakHours) || 0;
-      const break_time = `${breakVal} hour${breakVal === 1 ? "" : "s"}`;
-      const shift_time = `${form.startTime} - ${form.endTime}`;
-      const payload: Record<string, unknown> = {
-        shift_time,
-        start_date: toUtcMidnightIso(parsed.data.date),
-        break_time,
-        sales: form.sales === "" ? 0 : Number(form.sales) || 0,
-      };
 
-      if (editing) {
-        payload.end_date = form.markCompleted
-          ? new Date().toISOString()
-          : null;
-        await apiClient.patch(`/shift-assignment/${editing.id}`, payload);
-        toast.success("Shift updated");
-      } else {
-        payload.employee_id = parsed.data.employee_id;
-        if (form.markCompleted) {
-          payload.end_date = new Date().toISOString();
-        }
-        await apiClient.post("/shift-assignment", payload);
-        toast.success("Shift scheduled");
-      }
-      setFormOpen(false);
-      await fetchShifts();
-    } catch (e: any) {
-      toast.error(extractApiError(e, "Failed to save shift"));
-    } finally {
-      setSubmitting(false);
+    const breakVal = Number(form.breakHours) || 0;
+    const break_time = `${breakVal} hour${breakVal === 1 ? "" : "s"}`;
+    const shift_time = `${form.startTime} - ${form.endTime}`;
+    const payload: Record<string, unknown> = {
+      shift_time,
+      start_date: toUtcMidnightIso(parsed.data.date),
+      break_time,
+      sales: form.sales === "" ? 0 : Number(form.sales) || 0,
+    };
+
+    const onError = (e: unknown) =>
+      toast({
+        variant: "destructive",
+        title: "Could not save shift",
+        description: extractApiError(e, "Failed to save shift"),
+      });
+
+    if (editing) {
+      payload.end_date = form.markCompleted ? new Date().toISOString() : null;
+      update.mutate(
+        { id: editing.id, body: payload },
+        {
+          onSuccess: () => {
+            toast({ title: "Shift updated" });
+            setFormOpen(false);
+          },
+          onError,
+        },
+      );
+    } else {
+      payload.employee_id = parsed.data.employee_id;
+      if (form.markCompleted) payload.end_date = new Date().toISOString();
+      create.mutate(payload, {
+        onSuccess: () => {
+          toast({ title: "Shift scheduled" });
+          setFormOpen(false);
+        },
+        onError,
+      });
     }
   };
 
@@ -632,49 +531,54 @@ export function Shifts() {
     setEndSales(row.sales ? String(row.sales) : "");
   };
 
-  const handleEndShift = async () => {
+  const handleEndShift = () => {
     if (!endTarget) return;
-    setEnding(true);
-    try {
-      await apiClient.patch(`/shift-assignment/${endTarget.id}/end`, {
-        sales: endSales === "" ? 0 : Number(endSales) || 0,
-      });
-      toast.success("Shift ended");
-      setEndTarget(null);
-      if (detail?.id === endTarget.id) {
-        setDetailOpen(false);
-        setDetail(null);
-      }
-      await fetchShifts();
-    } catch (e: any) {
-      toast.error(extractApiError(e, "Failed to end shift"));
-    } finally {
-      setEnding(false);
-    }
+    const target = endTarget;
+    endShift.mutate(
+      { id: target.id, body: { sales: endSales === "" ? 0 : Number(endSales) || 0 } },
+      {
+        onSuccess: () => {
+          toast({ title: "Shift ended" });
+          setEndTarget(null);
+          if (detail?.id === target.id) {
+            setDetailOpen(false);
+            setDetail(null);
+          }
+        },
+        onError: (e) =>
+          toast({
+            variant: "destructive",
+            title: "Could not end shift",
+            description: extractApiError(e, "Failed to end shift"),
+          }),
+      },
+    );
   };
 
-  const handleDelete = async () => {
+  const handleDelete = () => {
     if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await apiClient.delete(`/shift-assignment/${deleteTarget.id}`);
-      toast.success("Shift deleted");
-      setDeleteTarget(null);
-      if (detail?.id === deleteTarget.id) {
-        setDetailOpen(false);
-        setDetail(null);
-      }
-      await fetchShifts();
-    } catch (e: any) {
-      toast.error(extractApiError(e, "Failed to delete shift"));
-    } finally {
-      setDeleting(false);
-    }
+    const target = deleteTarget;
+    remove.mutate(target.id, {
+      onSuccess: () => {
+        toast({ title: "Shift deleted" });
+        setDeleteTarget(null);
+        if (detail?.id === target.id) {
+          setDetailOpen(false);
+          setDetail(null);
+        }
+      },
+      onError: (e) =>
+        toast({
+          variant: "destructive",
+          title: "Could not delete shift",
+          description: extractApiError(e, "Failed to delete shift"),
+        }),
+    });
   };
 
   const handleExport = () => {
     if (rows.length === 0) {
-      toast.error("Nothing to export");
+      toast({ variant: "destructive", title: "Nothing to export" });
       return;
     }
     downloadExcel(
@@ -694,7 +598,7 @@ export function Shifts() {
         "Sales",
         "Ended",
       ],
-      rows.map((r) => [
+      (rows as ShiftRow[]).map((r) => [
         r.employee?.name || "",
         r.employee?.employee_code || "",
         r.employee?.employee_type?.name || "",
@@ -711,11 +615,7 @@ export function Shifts() {
     );
   };
 
-  const statusChips: Array<{
-    key: StatusFilter;
-    label: string;
-    count: number;
-  }> = [
+  const statusChips: Array<{ key: StatusFilter; label: string; count: number }> = [
     { key: "all", label: "All", count: summary.total },
     { key: "active", label: "Active", count: summary.active },
     { key: "scheduled", label: "Scheduled", count: summary.scheduled },
@@ -729,12 +629,8 @@ export function Shifts() {
     { key: "all", label: "All dates" },
   ];
 
-  if (initialLoading) {
-    return <PageLoader message="Loading shifts..." />;
-  }
-
   const renderActions = (row: ShiftRow) => (
-    <div className="flex justify-end gap-1.5 flex-wrap">
+    <div className="flex flex-wrap justify-end gap-1.5">
       <Button
         size="sm"
         variant="outline"
@@ -756,12 +652,7 @@ export function Shifts() {
           size="sm"
           variant="outline"
           className="h-8 px-2.5 text-xs"
-          disabled={actionId === row.id}
-          onClick={() => {
-            setActionId(row.id);
-            openEnd(row);
-            setActionId(null);
-          }}
+          onClick={() => openEnd(row)}
         >
           End
         </Button>
@@ -769,7 +660,7 @@ export function Shifts() {
       <Button
         size="sm"
         variant="outline"
-        className="h-8 px-2.5 text-xs text-red-600 hover:text-red-700 hover:bg-red-50 border-red-100"
+        className="h-8 px-2.5 text-xs text-destructive hover:text-destructive"
         onClick={() => setDeleteTarget(row)}
       >
         Delete
@@ -778,814 +669,788 @@ export function Shifts() {
   );
 
   return (
-    <div className="p-4 md:p-6 space-y-5 text-black min-w-0">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between pb-1 border-b border-gray-100">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-blue-600 mb-1">
-            <Clock className="h-4 w-4" />
-            <span className="text-xs font-semibold uppercase tracking-wide">
-              Staff
-            </span>
-          </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight">
-            Shift Management
-          </h1>
-          <p className="text-sm text-gray-600 mt-0.5">
-            Schedule staff shifts, track active coverage, and close completed
-            days
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9"
-            onClick={handleExport}
-          >
-            Export Excel
-          </Button>
-          <Button className="h-9" onClick={openCreate}>
-            <Plus className="h-4 w-4 mr-2" />
-            Schedule Shift
-          </Button>
-        </div>
-      </div>
-
-      <InventoryKpiGrid
-        columns={4}
-        loading={loading && rows.length === 0}
-        items={[
-          {
-            label: "Active now",
-            value: summary.active.toLocaleString(),
-            icon: Activity,
-            tone: "success",
-            hint: "Open shifts not yet ended",
-            onClick: () => {
-              setStatusFilter("active");
-              setPeriodFilter("all");
-              setPage(1);
-            },
-          },
-          {
-            label: "Today's shifts",
-            value: summary.today.toLocaleString(),
-            icon: Sun,
-            hint: `${summary.todayHours.toFixed(1)}h scheduled today`,
-            onClick: () => {
-              setPeriodFilter("today");
-              setStatusFilter("all");
-              setDateFrom(undefined);
-              setDateTo(undefined);
-              setPage(1);
-            },
-          },
-          {
-            label: "Today's sales",
-            value: formatMoney(summary.todaySales),
-            icon: DollarSign,
-            hint: "Sales recorded on today's shifts",
-          },
-          {
-            label: "Scheduled ahead",
-            value: summary.scheduled.toLocaleString(),
-            icon: Users,
-            tone: "warning",
-            hint: `${summary.completed} completed overall`,
-            onClick: () => {
-              setStatusFilter("scheduled");
-              setPeriodFilter("all");
-              setPage(1);
-            },
-          },
-        ]}
+    <>
+      <PageHeader
+        title="Shift Management"
+        description="Schedule staff shifts, track active coverage, and close completed days"
+        actions={
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              disabled={isRefreshing}
+              title="Refresh"
+            >
+              <RefreshCcw
+                className={cn("h-4 w-4", isRefreshing && "animate-spin")}
+              />
+            </Button>
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              Export Excel
+            </Button>
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Schedule shift
+            </Button>
+          </>
+        }
       />
 
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap gap-2">
-          {statusChips.map((chip) => (
-            <button
-              key={chip.key}
-              type="button"
-              onClick={() => {
-                setStatusFilter(chip.key);
+      <PageBody className="space-y-5">
+        <InventoryKpiGrid
+          columns={4}
+          loading={statsLoading}
+          items={[
+            {
+              label: "Active now",
+              value: summary.active.toLocaleString(),
+              icon: Activity,
+              tone: "success",
+              hint: "Open shifts not yet ended",
+              onClick: () => {
+                setStatusFilter("active");
+                setPeriodFilter("all");
                 setPage(1);
-              }}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-                statusFilter === chip.key
-                  ? "border-blue-300 bg-blue-50 text-blue-800"
-                  : "border-gray-200 bg-white text-gray-700 hover:border-gray-300",
-              )}
-            >
-              {chip.label}
-              <span className="tabular-nums text-gray-500">{chip.count}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {periodChips.map((chip) => (
-            <button
-              key={chip.key}
-              type="button"
-              onClick={() => {
-                setPeriodFilter(chip.key);
+              },
+            },
+            {
+              label: "Today's shifts",
+              value: summary.today.toLocaleString(),
+              icon: Sun,
+              hint: `${summary.todayHours.toFixed(1)}h scheduled today`,
+              onClick: () => {
+                setPeriodFilter("today");
+                setStatusFilter("all");
                 setDateFrom(undefined);
                 setDateTo(undefined);
                 setPage(1);
-              }}
-              className={cn(
-                "inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-                periodFilter === chip.key && !dateFrom && !dateTo
-                  ? "border-gray-900 bg-gray-900 text-white"
-                  : "border-gray-200 bg-white text-gray-700 hover:border-gray-300",
-              )}
-            >
-              {chip.label}
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-col xl:flex-row gap-2 xl:items-center">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
-            <Input
-              placeholder="Search employee name or code"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
+              },
+            },
+            {
+              label: "Today's sales",
+              value: formatMoney(summary.todaySales),
+              icon: DollarSign,
+              hint: "Sales recorded on today's shifts",
+            },
+            {
+              label: "Scheduled ahead",
+              value: summary.scheduled.toLocaleString(),
+              icon: Users,
+              tone: "warning",
+              hint: `${summary.completed} completed overall`,
+              onClick: () => {
+                setStatusFilter("scheduled");
+                setPeriodFilter("all");
                 setPage(1);
-              }}
-              className="pl-10 h-9"
-            />
-          </div>
+              },
+            },
+          ]}
+        />
 
-          <Select
-            value={employeeFilter}
-            onValueChange={(v) => {
-              setEmployeeFilter(v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="h-9 w-full sm:w-[180px] text-sm">
-              <SelectValue placeholder="Employee" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All employees</SelectItem>
-              {employees.map((emp) => (
-                <SelectItem key={emp.id} value={emp.id}>
-                  {emp.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
-                className={cn(
-                  "h-9 justify-start text-left font-normal w-full sm:w-[150px]",
-                  !dateFrom && "text-muted-foreground",
-                )}
-              >
-                <CalendarIcon className="mr-2 h-3.5 w-3.5" />
-                {dateFrom ? format(dateFrom, "MMM d") : "From date"}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={dateFrom}
-                onSelect={(d) => {
-                  setDateFrom(d);
-                  setPeriodFilter("all");
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2">
+            {statusChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => {
+                  setStatusFilter(chip.key);
                   setPage(1);
                 }}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
-
-          <Popover>
-            <PopoverTrigger asChild>
-              <Button
-                variant="outline"
                 className={cn(
-                  "h-9 justify-start text-left font-normal w-full sm:w-[150px]",
-                  !dateTo && "text-muted-foreground",
+                  "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                  statusFilter === chip.key
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-background text-foreground hover:bg-muted/50",
                 )}
               >
-                <CalendarIcon className="mr-2 h-3.5 w-3.5" />
-                {dateTo ? format(dateTo, "MMM d") : "To date"}
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent className="w-auto p-0" align="start">
-              <Calendar
-                mode="single"
-                selected={dateTo}
-                onSelect={(d) => {
-                  setDateTo(d);
-                  setPeriodFilter("all");
-                  setPage(1);
-                }}
-                initialFocus
-              />
-            </PopoverContent>
-          </Popover>
-
-          {hasFilters && (
-            <Button
-              type="button"
-              variant="ghost"
-              className="h-9 text-red-600 hover:text-red-700 hover:bg-red-50"
-              onClick={clearFilters}
-            >
-              Clear
-            </Button>
-          )}
-
-          <div className="flex items-center gap-1 ml-auto">
-            <Button
-              type="button"
-              size="icon"
-              variant={viewMode === "table" ? "secondary" : "ghost"}
-              className="h-9 w-9"
-              onClick={() => setViewMode("table")}
-            >
-              <List className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              size="icon"
-              variant={viewMode === "grid" ? "secondary" : "ghost"}
-              className="h-9 w-9"
-              onClick={() => setViewMode("grid")}
-            >
-              <LayoutGrid className="h-4 w-4" />
-            </Button>
-          </div>
-        </div>
-      </div>
-
-      <div className="min-h-[240px]">
-        {loading && rows.length === 0 ? (
-          <div className="flex items-center justify-center py-16 text-sm text-gray-500">
-            Loading shifts…
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-16 text-center border border-dashed border-gray-200 rounded-lg">
-            <Clock className="h-8 w-8 text-gray-300 mb-2" />
-            <p className="font-medium text-gray-800">No shifts found</p>
-            <p className="text-sm text-gray-500 mt-1 max-w-sm">
-              Adjust filters or schedule a new shift for your staff.
-            </p>
-            <Button className="mt-4 h-9" onClick={openCreate}>
-              <Plus className="h-4 w-4 mr-2" />
-              Schedule Shift
-            </Button>
-          </div>
-        ) : viewMode === "table" ? (
-          <div className="overflow-x-auto">
-            <Table>
-              <TableHeader>
-                <TableRow className="hover:bg-transparent">
-                  <TableHead>Employee</TableHead>
-                  <TableHead>Date</TableHead>
-                  <TableHead>Time</TableHead>
-                  <TableHead className="text-right">Hours</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Sales</TableHead>
-                  <TableHead className="text-right min-w-[260px]">
-                    Actions
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {pageRows.map((row) => (
-                  <TableRow key={row.id} className="hover:bg-gray-50/80">
-                    <TableCell>
-                      <div className="min-w-0">
-                        <p className="font-medium text-gray-900">
-                          {row.employee?.name || "—"}
-                        </p>
-                        <p className="text-xs text-gray-500 font-mono">
-                          {row.employee?.employee_code || "—"}
-                          {row.employee?.employee_type?.name
-                            ? ` · ${row.employee.employee_type.name}`
-                            : ""}
-                        </p>
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
-                      {formatDate(row.start_date)}
-                    </TableCell>
-                    <TableCell className="text-sm whitespace-nowrap">
-                      {formatTimeTo12Hour(row.start_time)} –{" "}
-                      {formatTimeTo12Hour(row.end_time)}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums font-medium">
-                      {(row.total_hours ?? 0).toFixed(1)}h
-                    </TableCell>
-                    <TableCell>
-                      <Badge
-                        variant="outline"
-                        className={statusBadgeClass(row.status)}
-                      >
-                        {statusLabel(row.status)}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">
-                      {formatMoney(row.sales || 0)}
-                    </TableCell>
-                    <TableCell>{renderActions(row)}</TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-        ) : (
-          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3">
-            {pageRows.map((row) => (
-              <div
-                key={row.id}
-                className="border border-gray-200 rounded-lg p-4 bg-white space-y-3"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="font-semibold text-gray-900 truncate">
-                      {row.employee?.name || "—"}
-                    </p>
-                    <p className="text-xs text-gray-500">
-                      {formatDate(row.start_date)}
-                    </p>
-                  </div>
-                  <Badge
-                    variant="outline"
-                    className={statusBadgeClass(row.status)}
-                  >
-                    {statusLabel(row.status)}
-                  </Badge>
-                </div>
-                <div className="text-sm text-gray-700">
-                  {formatTimeTo12Hour(row.start_time)} –{" "}
-                  {formatTimeTo12Hour(row.end_time)}
-                  <span className="text-gray-400 mx-1.5">·</span>
-                  {(row.total_hours ?? 0).toFixed(1)}h
-                </div>
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-gray-500">Sales</span>
-                  <span className="font-semibold tabular-nums">
-                    {formatMoney(row.sales || 0)}
-                  </span>
-                </div>
-                {renderActions(row)}
-              </div>
+                {chip.label}
+                {statsLoading ? (
+                  <span className="inline-block h-3 w-5 animate-pulse rounded-full bg-muted" />
+                ) : (
+                  <span className="nums text-muted-foreground">{chip.count}</span>
+                )}
+              </button>
             ))}
           </div>
-        )}
 
-        {listMeta.total > PAGE_SIZE && (
-          <div className="flex items-center justify-between pt-4">
-            <p className="text-xs text-gray-500">
-              Showing {(pageSafe - 1) * PAGE_SIZE + 1}–
-              {Math.min(pageSafe * PAGE_SIZE, rows.length)} of {rows.length}
-            </p>
-            <div className="flex gap-2">
+          <div className="flex flex-wrap gap-2">
+            {periodChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => {
+                  setPeriodFilter(chip.key);
+                  setDateFrom(undefined);
+                  setDateTo(undefined);
+                  setPage(1);
+                }}
+                className={cn(
+                  "inline-flex items-center rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                  periodFilter === chip.key && !dateFrom && !dateTo
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border bg-background text-foreground hover:bg-muted/50",
+                )}
+              >
+                {chip.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-2 xl:flex-row xl:items-center">
+            <div className="relative max-w-md flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search employee name or code"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                className="h-9 pl-9"
+              />
+            </div>
+
+            <Select
+              value={employeeFilter}
+              onValueChange={(v) => {
+                setEmployeeFilter(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-9 w-full text-sm sm:w-[180px]">
+                <SelectValue placeholder="Employee" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All employees</SelectItem>
+                {employees.map((emp) => (
+                  <SelectItem key={emp.id} value={emp.id}>
+                    {emp.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "h-9 w-full justify-start text-left font-normal sm:w-[150px]",
+                    !dateFrom && "text-muted-foreground",
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+                  {dateFrom ? format(dateFrom, "MMM d") : "From date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={dateFrom}
+                  onSelect={(d) => {
+                    setDateFrom(d);
+                    setPeriodFilter("all");
+                    setPage(1);
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "h-9 w-full justify-start text-left font-normal sm:w-[150px]",
+                    !dateTo && "text-muted-foreground",
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-3.5 w-3.5" />
+                  {dateTo ? format(dateTo, "MMM d") : "To date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={dateTo}
+                  onSelect={(d) => {
+                    setDateTo(d);
+                    setPeriodFilter("all");
+                    setPage(1);
+                  }}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+
+            {hasFilters && (
               <Button
+                type="button"
                 variant="outline"
                 size="sm"
-                className="h-8"
-                disabled={pageSafe <= 1}
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                className="h-9"
+                onClick={clearFilters}
               >
-                Previous
+                Clear
+              </Button>
+            )}
+
+            <div className="ml-auto flex items-center gap-1 rounded-md border border-border p-0.5">
+              <Button
+                type="button"
+                size="sm"
+                variant={viewMode === "table" ? "secondary" : "ghost"}
+                className="h-8 px-2.5"
+                onClick={() => setViewMode("table")}
+              >
+                <List className="h-4 w-4" />
               </Button>
               <Button
-                variant="outline"
+                type="button"
                 size="sm"
-                className="h-8"
-                disabled={pageSafe >= totalPages}
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                variant={viewMode === "grid" ? "secondary" : "ghost"}
+                className="h-8 px-2.5"
+                onClick={() => setViewMode("grid")}
               >
-                Next
+                <LayoutGrid className="h-4 w-4" />
               </Button>
             </div>
           </div>
-        )}
-      </div>
+        </div>
 
-      {/* Create / Edit */}
-      <Dialog
+        <Card>
+          <CardContent className="p-0">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <p className="text-sm font-semibold text-foreground">
+                Shifts{" "}
+                <span className="font-normal text-muted-foreground">
+                  {isFirstLoad ? "(loading…)" : `(${listMeta.total})`}
+                </span>
+              </p>
+              {isRefreshing && (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+              )}
+            </div>
+
+            {isFirstLoad ? (
+              <div className="space-y-2 p-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-11 w-full" />
+                ))}
+              </div>
+            ) : rows.length === 0 ? (
+              <div className="m-4 flex flex-col items-center gap-2 rounded-lg border border-dashed py-12">
+                <Clock className="h-8 w-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">
+                  {periodFilter === "today" && summary.total > 0
+                    ? "No shifts scheduled for today"
+                    : "No shifts found"}
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {periodFilter === "today" && summary.total > 0
+                    ? "Switch to All dates to see upcoming or completed shifts."
+                    : "Adjust filters or schedule a new shift for your staff."}
+                </p>
+              </div>
+            ) : viewMode === "table" ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-xs uppercase tracking-wide">Employee</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">Date</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">Time</TableHead>
+                      <TableHead className="text-right text-xs uppercase tracking-wide">Hours</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">Status</TableHead>
+                      <TableHead className="text-right text-xs uppercase tracking-wide">Sales</TableHead>
+                      <TableHead className="min-w-[260px] text-right text-xs uppercase tracking-wide">
+                        Actions
+                      </TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {pageRows.map((row) => (
+                      <TableRow key={row.id} className="h-11 hover:bg-muted/50">
+                        <TableCell>
+                          <div className="min-w-0">
+                            <p className="font-medium text-foreground">
+                              {row.employee?.name || "—"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {row.employee?.employee_code || "—"}
+                              {row.employee?.employee_type?.name
+                                ? ` · ${row.employee.employee_type.name}`
+                                : ""}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">
+                          {formatDate(row.start_date)}
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">
+                          {formatTimeTo12Hour(row.start_time)} –{" "}
+                          {formatTimeTo12Hour(row.end_time)}
+                        </TableCell>
+                        <TableCell className="text-right font-medium nums">
+                          {(row.total_hours ?? 0).toFixed(1)}h
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={statusBadgeClass(row.status)}>
+                            {statusLabel(row.status)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="text-right nums">
+                          {formatMoney(row.sales || 0)}
+                        </TableCell>
+                        <TableCell>{renderActions(row)}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                {pageRows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="space-y-3 rounded-lg border border-border bg-background p-4"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-foreground">
+                          {row.employee?.name || "—"}
+                        </p>
+                        <p className="text-xs text-muted-foreground">
+                          {formatDate(row.start_date)}
+                        </p>
+                      </div>
+                      <Badge variant="outline" className={statusBadgeClass(row.status)}>
+                        {statusLabel(row.status)}
+                      </Badge>
+                    </div>
+                    <div className="text-sm text-foreground">
+                      {formatTimeTo12Hour(row.start_time)} –{" "}
+                      {formatTimeTo12Hour(row.end_time)}
+                      <span className="mx-1.5 text-muted-foreground">·</span>
+                      {(row.total_hours ?? 0).toFixed(1)}h
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Sales</span>
+                      <span className="font-semibold nums">
+                        {formatMoney(row.sales || 0)}
+                      </span>
+                    </div>
+                    {renderActions(row)}
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {listMeta.total > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+                <p className="text-xs text-muted-foreground">
+                  Page {pageSafe} of {totalPages}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    disabled={pageSafe <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    disabled={pageSafe >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </PageBody>
+
+      {/* Schedule / Edit — >6 fields (employee, date, shift type, start, end,
+          break, sales, completed), so a DetailSheet with the form in the body. */}
+      <DetailSheet
         open={formOpen}
         onOpenChange={(open) => {
-          setFormOpen(open);
           if (!open) {
+            setFormOpen(false);
             setEditing(null);
             setFormError("");
           }
         }}
+        size="lg"
       >
-        <DialogContent className={dialogClass}>
-          <DialogHeader>
-            <DialogTitle>
-              {editing ? "Edit shift" : "Schedule shift"}
-            </DialogTitle>
-            <DialogDescription>
-              {editing
-                ? "Update hours, break, sales, or completion status"
-                : "Assign a shift to an employee for a specific date"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            {!editing && (
-              <div className="space-y-1.5">
-                <Label className={fieldLabel}>Employee</Label>
-                <Select
-                  value={form.employee_id}
-                  onValueChange={(v) =>
-                    setForm((prev) => ({ ...prev, employee_id: v }))
-                  }
-                >
-                  <SelectTrigger className={fieldControl}>
-                    <SelectValue placeholder="Select employee" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {employees.map((emp) => (
-                      <SelectItem key={emp.id} value={emp.id}>
-                        {emp.name}
-                        {emp.employee_code ? ` (${emp.employee_code})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
-
-            {editing && (
-              <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-sm">
-                <p className="font-medium text-gray-900">
-                  {editing.employee?.name || "Employee"}
-                </p>
-                <p className="text-xs text-gray-500">
-                  {editing.employee?.employee_code || "—"}
-                </p>
-              </div>
-            )}
-
+        <DetailSheetHeader
+          title={editing ? "Edit shift" : "Schedule shift"}
+          subtitle={
+            editing
+              ? "Update hours, break, sales, or completion status"
+              : "Assign a shift to an employee for a specific date"
+          }
+          icon={<Clock className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-4">
+          {!editing && (
             <div className="space-y-1.5">
-              <Label className={fieldLabel}>Date</Label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button
-                    variant="outline"
+              <Label className={fieldLabel}>Employee</Label>
+              <Select
+                value={form.employee_id}
+                onValueChange={(v) =>
+                  setForm((prev) => ({ ...prev, employee_id: v }))
+                }
+              >
+                <SelectTrigger className={fieldControl}>
+                  <SelectValue placeholder="Select employee" />
+                </SelectTrigger>
+                <SelectContent>
+                  {employees.map((emp) => (
+                    <SelectItem key={emp.id} value={emp.id}>
+                      {emp.name}
+                      {emp.employee_code ? ` (${emp.employee_code})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+
+          {editing && (
+            <div className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+              <p className="font-medium text-foreground">
+                {editing.employee?.name || "Employee"}
+              </p>
+              <p className="text-xs text-muted-foreground">
+                {editing.employee?.employee_code || "—"}
+              </p>
+            </div>
+          )}
+
+          <div className="space-y-1.5">
+            <Label className={fieldLabel}>Date</Label>
+            <Popover>
+              <PopoverTrigger asChild>
+                <Button
+                  variant="outline"
+                  className={cn(
+                    "h-9 w-full justify-start text-left font-normal",
+                    !form.date && "text-muted-foreground",
+                  )}
+                >
+                  <CalendarIcon className="mr-2 h-4 w-4" />
+                  {form.date ? format(form.date, "PPP") : "Pick a date"}
+                </Button>
+              </PopoverTrigger>
+              <PopoverContent className="w-auto p-0" align="start">
+                <Calendar
+                  mode="single"
+                  selected={form.date}
+                  onSelect={(d) => setForm((prev) => ({ ...prev, date: d }))}
+                  initialFocus
+                />
+              </PopoverContent>
+            </Popover>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className={fieldLabel}>Shift type</Label>
+            <div className="grid grid-cols-2 gap-2">
+              {SHIFT_PRESETS.map((type) => {
+                const Icon = type.icon;
+                const selected = form.shiftType === type.id;
+                return (
+                  <button
+                    key={type.id}
+                    type="button"
+                    onClick={() => applyPreset(type.id)}
                     className={cn(
-                      "w-full justify-start text-left font-normal h-9",
-                      !form.date && "text-muted-foreground",
+                      "flex items-start gap-2 rounded-md border p-2.5 text-left transition-colors",
+                      selected
+                        ? "border-primary bg-primary/10"
+                        : "border-border bg-background hover:bg-muted/50",
                     )}
                   >
-                    <CalendarIcon className="mr-2 h-4 w-4" />
-                    {form.date ? format(form.date, "PPP") : "Pick a date"}
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent className="w-auto p-0" align="start">
-                  <Calendar
-                    mode="single"
-                    selected={form.date}
-                    onSelect={(d) =>
-                      setForm((prev) => ({ ...prev, date: d }))
-                    }
-                    initialFocus
-                  />
-                </PopoverContent>
-              </Popover>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className={fieldLabel}>Shift type</Label>
-              <div className="grid grid-cols-2 gap-2">
-                {SHIFT_PRESETS.map((type) => {
-                  const Icon = type.icon;
-                  const selected = form.shiftType === type.id;
-                  return (
-                    <button
-                      key={type.id}
-                      type="button"
-                      onClick={() => applyPreset(type.id)}
-                      className={cn(
-                        "flex items-start gap-2 rounded-md border p-2.5 text-left transition-colors",
-                        selected
-                          ? "border-blue-400 bg-blue-50/50"
-                          : "border-gray-200 bg-white hover:border-gray-300",
-                      )}
-                    >
-                      <Icon className="h-4 w-4 text-gray-500 mt-0.5 shrink-0" />
-                      <span>
-                        <span className="block text-xs font-semibold text-gray-900">
-                          {type.name}
-                        </span>
-                        <span className="block text-[10px] text-gray-500">
-                          {type.time}
-                        </span>
+                    <Icon className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
+                    <span>
+                      <span className="block text-xs font-semibold text-foreground">
+                        {type.name}
                       </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className={fieldLabel}>Start time</Label>
-                <TimePicker
-                  value={form.startTime}
-                  onChange={(val) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      startTime: val,
-                      shiftType: "custom",
-                    }))
-                  }
-                  disabled={submitting}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className={fieldLabel}>End time</Label>
-                <TimePicker
-                  value={form.endTime}
-                  onChange={(val) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      endTime: val,
-                      shiftType: "custom",
-                    }))
-                  }
-                  disabled={submitting}
-                />
-              </div>
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1.5">
-                <Label className={fieldLabel}>Break (hours)</Label>
-                <Input
-                  type="number"
-                  step="0.5"
-                  min="0"
-                  value={form.breakHours}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      breakHours: e.target.value,
-                    }))
-                  }
-                  className={cn(
-                    fieldControl,
-                    "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
-                  )}
-                />
-              </div>
-              <div className="space-y-1.5">
-                <Label className={fieldLabel}>Net hours</Label>
-                <div className="h-9 flex items-center rounded-md border border-gray-200 bg-gray-50 px-3 text-sm font-semibold text-gray-900">
-                  {previewHours.toFixed(1)}h
-                </div>
-              </div>
-            </div>
-
-            <div className="space-y-1.5">
-              <Label className={fieldLabel}>Sales (optional)</Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.sales}
-                onChange={(e) =>
-                  setForm((prev) => ({ ...prev, sales: e.target.value }))
-                }
-                placeholder="0"
-                className={cn(
-                  fieldControl,
-                  "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none",
-                )}
-              />
-            </div>
-
-            <label className="flex items-center gap-2 text-sm text-gray-700 cursor-pointer">
-              <input
-                type="checkbox"
-                className="rounded border-gray-300"
-                checked={form.markCompleted}
-                onChange={(e) =>
-                  setForm((prev) => ({
-                    ...prev,
-                    markCompleted: e.target.checked,
-                  }))
-                }
-              />
-              Mark as completed
-            </label>
-
-            {formError ? (
-              <p className="text-xs text-red-600">{formError}</p>
-            ) : null}
-
-            <div className="flex justify-end gap-2 pt-1">
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9"
-                onClick={() => setFormOpen(false)}
-                disabled={submitting}
-              >
-                Cancel
-              </Button>
-              <LoadingButton
-                className="h-9"
-                loading={submitting}
-                loadingText={editing ? "Saving…" : "Scheduling…"}
-                onClick={handleSubmit}
-              >
-                {editing ? "Save changes" : "Schedule shift"}
-              </LoadingButton>
+                      <span className="block text-xs text-muted-foreground">
+                        {type.time}
+                      </span>
+                    </span>
+                  </button>
+                );
+              })}
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className={fieldLabel}>Start time</Label>
+              <TimePicker
+                value={form.startTime}
+                onChange={(val) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    startTime: val,
+                    shiftType: "custom",
+                  }))
+                }
+                disabled={submitting}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={fieldLabel}>End time</Label>
+              <TimePicker
+                value={form.endTime}
+                onChange={(val) =>
+                  setForm((prev) => ({
+                    ...prev,
+                    endTime: val,
+                    shiftType: "custom",
+                  }))
+                }
+                disabled={submitting}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1.5">
+              <Label className={fieldLabel}>Break (hours)</Label>
+              <Input
+                type="number"
+                step="0.5"
+                min="0"
+                value={form.breakHours}
+                onChange={(e) =>
+                  setForm((prev) => ({ ...prev, breakHours: e.target.value }))
+                }
+                className={cn(fieldControl, "nums")}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className={fieldLabel}>Net hours</Label>
+              <div className="flex h-9 items-center rounded-md border border-border bg-muted/40 px-3 text-sm font-semibold text-foreground">
+                {previewHours.toFixed(1)}h
+              </div>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className={fieldLabel}>Sales (optional)</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.sales}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, sales: e.target.value }))
+              }
+              placeholder="0"
+              className={cn(fieldControl, "nums")}
+            />
+          </div>
+
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
+            <input
+              type="checkbox"
+              className="rounded border-border"
+              checked={form.markCompleted}
+              onChange={(e) =>
+                setForm((prev) => ({ ...prev, markCompleted: e.target.checked }))
+              }
+            />
+            Mark as completed
+          </label>
+
+          {formError ? (
+            <p className="text-xs text-destructive">{formError}</p>
+          ) : null}
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button
+            variant="outline"
+            onClick={() => setFormOpen(false)}
+            disabled={submitting}
+          >
+            Cancel
+          </Button>
+          <LoadingButton
+            loading={submitting}
+            loadingText={editing ? "Saving…" : "Scheduling…"}
+            onClick={handleSubmit}
+          >
+            {editing ? "Save changes" : "Schedule shift"}
+          </LoadingButton>
+        </DetailSheetFooter>
+      </DetailSheet>
 
       {/* Detail */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className={dialogClass}>
-          <DialogHeader>
-            <DialogTitle>Shift details</DialogTitle>
-            <DialogDescription>
-              Coverage and sales for this assignment
-            </DialogDescription>
-          </DialogHeader>
+      <DetailSheet
+        open={detailOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetailOpen(false);
+            setDetail(null);
+          }
+        }}
+        size="md"
+      >
+        <DetailSheetHeader
+          title={detail?.employee?.name || "Shift details"}
+          subtitle={
+            detail
+              ? `${detail.employee?.employee_code || "—"}${
+                  detail.employee?.department?.name
+                    ? ` · ${detail.employee.department.name}`
+                    : ""
+                }`
+              : undefined
+          }
+          icon={<Clock className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-4">
           {detail && (
-            <div className="space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-lg font-semibold text-gray-900">
-                    {detail.employee?.name || "—"}
-                  </p>
-                  <p className="text-xs text-gray-500 font-mono">
-                    {detail.employee?.employee_code || "—"}
-                    {detail.employee?.department?.name
-                      ? ` · ${detail.employee.department.name}`
-                      : ""}
-                  </p>
-                </div>
-                <Badge
-                  variant="outline"
-                  className={statusBadgeClass(detail.status)}
-                >
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <span className="text-sm text-muted-foreground">
+                  {formatDate(detail.start_date)}
+                </span>
+                <Badge variant="outline" className={statusBadgeClass(detail.status)}>
                   {statusLabel(detail.status)}
                 </Badge>
               </div>
-
               <div className="grid grid-cols-2 gap-3 text-sm">
-                <div className="rounded-md border border-gray-100 p-3">
-                  <p className="text-xs text-gray-500">Date</p>
-                  <p className="font-medium mt-0.5">
-                    {formatDate(detail.start_date)}
-                  </p>
-                </div>
-                <div className="rounded-md border border-gray-100 p-3">
-                  <p className="text-xs text-gray-500">Hours</p>
-                  <p className="font-medium mt-0.5">
+                <div className="rounded-md border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Hours</p>
+                  <p className="mt-0.5 font-medium nums">
                     {(detail.total_hours ?? 0).toFixed(1)}h
                   </p>
                 </div>
-                <div className="rounded-md border border-gray-100 p-3">
-                  <p className="text-xs text-gray-500">Start</p>
-                  <p className="font-medium mt-0.5">
-                    {formatTimeTo12Hour(detail.start_time)}
-                  </p>
-                </div>
-                <div className="rounded-md border border-gray-100 p-3">
-                  <p className="text-xs text-gray-500">End</p>
-                  <p className="font-medium mt-0.5">
-                    {formatTimeTo12Hour(detail.end_time)}
-                  </p>
-                </div>
-                <div className="rounded-md border border-gray-100 p-3">
-                  <p className="text-xs text-gray-500">Break</p>
-                  <p className="font-medium mt-0.5">
-                    {detail.break_time ||
-                      `${detail.break_hours ?? 0} hour(s)`}
-                  </p>
-                </div>
-                <div className="rounded-md border border-gray-100 p-3">
-                  <p className="text-xs text-gray-500">Sales</p>
-                  <p className="font-semibold mt-0.5 tabular-nums">
+                <div className="rounded-md border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Sales</p>
+                  <p className="mt-0.5 font-semibold nums">
                     {formatMoney(detail.sales || 0)}
                   </p>
                 </div>
+                <div className="rounded-md border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Start</p>
+                  <p className="mt-0.5 font-medium">
+                    {formatTimeTo12Hour(detail.start_time)}
+                  </p>
+                </div>
+                <div className="rounded-md border border-border p-3">
+                  <p className="text-xs text-muted-foreground">End</p>
+                  <p className="mt-0.5 font-medium">
+                    {formatTimeTo12Hour(detail.end_time)}
+                  </p>
+                </div>
+                <div className="col-span-2 rounded-md border border-border p-3">
+                  <p className="text-xs text-muted-foreground">Break</p>
+                  <p className="mt-0.5 font-medium">
+                    {detail.break_time || `${detail.break_hours ?? 0} hour(s)`}
+                  </p>
+                </div>
               </div>
-
-              <div className="flex flex-wrap justify-end gap-2">
-                {detail.status !== "completed" && (
-                  <Button
-                    variant="outline"
-                    className="h-9"
-                    onClick={() => {
-                      setDetailOpen(false);
-                      openEnd(detail);
-                    }}
-                  >
-                    End shift
-                  </Button>
-                )}
+            </>
+          )}
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          {detail && (
+            <>
+              {detail.status !== "completed" && (
                 <Button
                   variant="outline"
-                  className="h-9"
                   onClick={() => {
                     setDetailOpen(false);
-                    openEdit(detail);
+                    openEnd(detail);
                   }}
                 >
-                  Edit
+                  End shift
                 </Button>
-                <Button
-                  className="h-9"
-                  onClick={() => setDetailOpen(false)}
-                >
-                  Close
-                </Button>
-              </div>
-            </div>
+              )}
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDetailOpen(false);
+                  openEdit(detail);
+                }}
+              >
+                Edit
+              </Button>
+              <Button onClick={() => setDetailOpen(false)}>Close</Button>
+            </>
           )}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetFooter>
+      </DetailSheet>
 
-      {/* End shift */}
-      <Dialog
+      {/* End shift confirm */}
+      <AlertDialog
         open={!!endTarget}
         onOpenChange={(open) => {
-          if (!open) setEndTarget(null);
+          if (!open && !ending) setEndTarget(null);
         }}
       >
-        <DialogContent className="grid w-[min(96vw,440px)] max-w-[440px] sm:max-w-[440px] gap-4 p-5">
-          <DialogHeader>
-            <DialogTitle>End shift</DialogTitle>
-            <DialogDescription>
-              Close this shift and record final sales
-            </DialogDescription>
-          </DialogHeader>
-          {endTarget && (
-            <div className="space-y-4">
-              <div className="rounded-md border border-gray-100 bg-gray-50 px-3 py-2 text-sm">
-                <p className="font-medium">{endTarget.employee?.name}</p>
-                <p className="text-xs text-gray-500 mt-0.5">
-                  {formatDate(endTarget.start_date)} ·{" "}
-                  {formatTimeTo12Hour(endTarget.start_time)} –{" "}
-                  {formatTimeTo12Hour(endTarget.end_time)}
-                </p>
-              </div>
-              <div className="space-y-1.5">
-                <Label className={fieldLabel}>Final sales amount</Label>
-                <Input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={endSales}
-                  onChange={(e) => setEndSales(e.target.value)}
-                  placeholder="0"
-                  className={fieldControl}
-                />
-              </div>
-              <div className="flex justify-end gap-2">
-                <Button
-                  variant="outline"
-                  className="h-9"
-                  onClick={() => setEndTarget(null)}
-                  disabled={ending}
-                >
-                  Cancel
-                </Button>
-                <LoadingButton
-                  className="h-9"
-                  loading={ending}
-                  loadingText="Ending…"
-                  onClick={handleEndShift}
-                >
-                  <CheckCircle2 className="h-4 w-4 mr-1.5" />
-                  End shift
-                </LoadingButton>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>End shift?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {endTarget
+                ? `Close the shift for ${endTarget.employee?.name || "this employee"} on ${formatDate(endTarget.start_date)} and record final sales.`
+                : "Close this shift and record final sales."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="space-y-1.5 py-1">
+            <Label className={fieldLabel}>Final sales amount</Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={endSales}
+              onChange={(e) => setEndSales(e.target.value)}
+              placeholder="0"
+              className={cn(fieldControl, "nums")}
+            />
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={ending}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault();
+                handleEndShift();
+              }}
+              disabled={ending}
+            >
+              {ending ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <CheckCircle2 className="mr-1.5 h-4 w-4" />
+              )}
+              End shift
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-      {/* Delete */}
+      {/* Delete confirm */}
       <AlertDialog
         open={!!deleteTarget}
         onOpenChange={(open) => {
-          if (!open) setDeleteTarget(null);
+          if (!open && !deleting) setDeleteTarget(null);
         }}
       >
         <AlertDialogContent>
@@ -1600,11 +1465,11 @@ export function Shifts() {
           <AlertDialogFooter>
             <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-red-600 hover:bg-red-700"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
               disabled={deleting}
               onClick={(e) => {
                 e.preventDefault();
-                void handleDelete();
+                handleDelete();
               }}
             >
               {deleting ? "Deleting…" : "Delete"}
@@ -1612,6 +1477,6 @@ export function Shifts() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

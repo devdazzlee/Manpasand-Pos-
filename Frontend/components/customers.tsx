@@ -384,10 +384,6 @@ function monthStartDate() {
   return d;
 }
 
-function isNewThisMonth(c: Customer) {
-  return new Date(c.created_at) >= monthStartDate();
-}
-
 interface CustomerFormFieldsProps {
   idPrefix: string;
   values: CustomerFormValues;
@@ -702,6 +698,25 @@ export function Customers() {
     error: listError,
   } = useCustomers(listParams);
 
+  const allCountQuery = useCustomers({ page: 1, limit: 1 });
+  const activeCountQuery = useCustomers({ page: 1, limit: 1, isActive: true });
+  const inactiveCountQuery = useCustomers({ page: 1, limit: 1, isActive: false });
+  const newCountQuery = useCustomers({
+    page: 1,
+    limit: 1,
+    createdAfter: monthStartDate().toISOString(),
+  });
+  const statsLoading =
+    allCountQuery.isPending ||
+    activeCountQuery.isPending ||
+    inactiveCountQuery.isPending;
+  const stats = {
+    total: allCountQuery.meta?.total ?? 0,
+    activeCount: activeCountQuery.meta?.total ?? 0,
+    inactiveCount: inactiveCountQuery.meta?.total ?? 0,
+    newCount: newCountQuery.meta?.total ?? 0,
+  };
+
   const list = rawCustomers as unknown as Customer[];
   const loading = isFirstLoad;
   const listMeta = meta ?? {
@@ -829,6 +844,15 @@ export function Customers() {
     setPaymentNotes("");
     setPaymentKind("settle");
   };
+
+  useEffect(() => {
+    if (paymentKind !== "settle") return;
+    const due = Number(ledgerSummary?.balanceDue || 0);
+    if (due <= 0) return;
+    setPaymentAmount((prev) =>
+      prev === "" ? String(Number(due.toFixed(2))) : prev,
+    );
+  }, [paymentKind, ledgerSummary?.balanceDue]);
 
   const openDetail = (c: Customer, tab: DetailTab = "overview") => {
     setCurrent(c);
@@ -999,18 +1023,6 @@ export function Customers() {
     );
   };
 
-  const stats = useMemo(() => {
-    const activeCount = list.filter((c) => c.is_active).length;
-    const inactiveCount = list.length - activeCount;
-    const newCount = list.filter(isNewThisMonth).length;
-    return {
-      activeCount,
-      inactiveCount,
-      newCount,
-      total: listMeta.total,
-    };
-  }, [list, listMeta.total]);
-
   const filtered = list;
   const totalPages = Math.max(1, listMeta.totalPages);
   const pageSafe = Math.min(page, totalPages);
@@ -1023,7 +1035,7 @@ export function Customers() {
     label: string;
     count: number;
   }> = [
-    { key: "all", label: "All", count: listMeta.total },
+    { key: "all", label: "All", count: stats.total },
     { key: "active", label: "Active", count: stats.activeCount },
     { key: "inactive", label: "Inactive", count: stats.inactiveCount },
   ];
@@ -1099,7 +1111,7 @@ export function Customers() {
       <PageBody className="space-y-5">
         <InventoryKpiGrid
           columns={4}
-          loading={loading && list.length === 0}
+          loading={statsLoading}
           items={[
             {
               label: "Total Customers",
@@ -1167,7 +1179,11 @@ export function Customers() {
                 )}
               >
                 {chip.label}
-                <span className="nums text-muted-foreground">{chip.count}</span>
+                {statsLoading ? (
+                  <span className="inline-block h-3 w-5 animate-pulse rounded-full bg-muted" />
+                ) : (
+                  <span className="nums text-muted-foreground">{chip.count}</span>
+                )}
               </button>
             ))}
             {statusFilter === "new" && (
@@ -1240,7 +1256,7 @@ export function Customers() {
               <p className="text-sm font-semibold text-foreground">
                 Customer List{" "}
                 <span className="font-normal text-muted-foreground">
-                  ({listMeta.total})
+                  {loading ? "(loading…)" : `(${listMeta.total})`}
                 </span>
               </p>
               {isRefreshing && (
@@ -1248,7 +1264,7 @@ export function Customers() {
               )}
             </div>
 
-            {loading && list.length === 0 ? (
+            {loading ? (
               <div className="space-y-2 p-4">
                 {Array.from({ length: 6 }).map((_, i) => (
                   <div
@@ -2140,8 +2156,8 @@ export function Customers() {
                   </button>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                  <div className="space-y-1">
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1 min-w-0">
                     <Label className={customerFieldLabelClass}>
                       Amount <span className="text-destructive">*</span>
                     </Label>
@@ -2151,11 +2167,11 @@ export function Customers() {
                       step="0.01"
                       value={paymentAmount}
                       onChange={(e) => setPaymentAmount(e.target.value)}
-                      placeholder="0.00"
+                      placeholder="Enter amount"
                       className={cn(customerFieldControlClass, "nums")}
                     />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className={customerFieldLabelClass}>Date</Label>
                     <Popover>
                       <PopoverTrigger asChild>
@@ -2164,14 +2180,16 @@ export function Customers() {
                           variant="outline"
                           className={cn(
                             customerFieldControlClass,
-                            "w-full justify-start px-3 font-normal",
+                            "w-full min-w-0 justify-start px-3 font-normal overflow-hidden",
                             !paymentDate && "text-muted-foreground",
                           )}
                         >
-                          <CalendarIcon className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
-                          {paymentDate
-                            ? format(paymentDate, "PPP")
-                            : "Pick date"}
+                          <CalendarIcon className="mr-2 h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                          <span className="truncate">
+                            {paymentDate
+                              ? format(paymentDate, "MMM d, yyyy")
+                              : "Pick date"}
+                          </span>
                         </Button>
                       </PopoverTrigger>
                       <PopoverContent className="w-auto p-0" align="start">
@@ -2184,7 +2202,7 @@ export function Customers() {
                       </PopoverContent>
                     </Popover>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className={customerFieldLabelClass}>Method</Label>
                     <Select
                       value={paymentMethod}
@@ -2206,7 +2224,7 @@ export function Customers() {
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1 min-w-0">
                     <Label className={customerFieldLabelClass}>Reference</Label>
                     <Input
                       value={paymentReference}

@@ -19,12 +19,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
 import {
   Search,
   Activity,
@@ -1053,16 +1052,12 @@ export function StockMovementLog() {
       </Card>
 
       {/* Detail dialog */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="sm:max-w-[560px] border border-gray-200">
-          <DialogHeader>
-            <DialogTitle className="text-lg font-semibold text-black">
-              Movement detail
-            </DialogTitle>
-            <DialogDescription className="text-sm text-gray-500">
-              Full audit record for this stock activity
-            </DialogDescription>
-          </DialogHeader>
+      <DetailSheet open={detailOpen} onOpenChange={setDetailOpen} size="md">
+        <DetailSheetHeader
+          title="Movement detail"
+          subtitle="Full audit record for this stock activity"
+        />
+        <DetailSheetBody>
 
           {detailRow ? (
             <div className="space-y-4 pt-1">
@@ -1178,8 +1173,13 @@ export function StockMovementLog() {
               )}
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setDetailOpen(false)}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
     </div>
   );
 }

@@ -6,12 +6,11 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -1479,8 +1478,14 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         </div>
 
         <p className="text-xs text-gray-500">
-          Showing {totalStocks.toLocaleString()} rows · {formatQty(stockMeta.totalQuantity || 0)} units · value{" "}
-          {formatMoney(stockMeta.totalInventoryValue || 0)}
+          {statsLoading || (isLoading && !hasStockMeta) ? (
+            "Loading totals…"
+          ) : (
+            <>
+              Showing {totalStocks.toLocaleString()} rows · {formatQty(stockMeta.totalQuantity || 0)} units · value{" "}
+              {formatMoney(stockMeta.totalInventoryValue || 0)}
+            </>
+          )}
         </p>
       </div>
 
@@ -1531,7 +1536,9 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                 <div>
                   <CardTitle className="text-sm font-semibold text-gray-900">Inventory List</CardTitle>
                   <p className="text-xs text-gray-500 mt-0.5">
-                    {totalStocks.toLocaleString()} stock records
+                    {isLoading && allStocks.length === 0
+                      ? "Loading records…"
+                      : `${totalStocks.toLocaleString()} stock records`}
                   </p>
                 </div>
               </div>
@@ -2018,21 +2025,22 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         </TabsContent>
       </Tabs>
 
-      <Dialog
+      <DetailSheet
         open={viewOpen}
         onOpenChange={(open) => {
           if (!open) closeStockView();
         }}
+        size="xl"
       >
-        <DialogContent className={DLG.content}>
-          <DialogHeader className={DLG.header}>
-            <DialogTitle className={DLG.title}>Stock details</DialogTitle>
-            <DialogDescription className={DLG.desc}>
-              {viewRow
-                ? `${viewRow.product?.name ?? "Product"} | ${viewRow.branch?.name ?? "Branch"}`
-                : "Product and branch stock information"}
-            </DialogDescription>
-          </DialogHeader>
+        <DetailSheetHeader
+          title="Stock details"
+          subtitle={
+            viewRow
+              ? `${viewRow.product?.name ?? "Product"} | ${viewRow.branch?.name ?? "Branch"}`
+              : "Product and branch stock information"
+          }
+        />
+        <DetailSheetBody>
 
           {viewLoading ? (
             <div className="flex flex-col items-center justify-center py-16 px-5 gap-3">
@@ -2150,16 +2158,13 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
               )}
             </div>
           ) : null}
-
-          {!viewLoading && !viewError && viewRow && (
-            <div className={DLG.footer}>
-              <Button variant="outline" size="sm" className="text-sm text-black" onClick={closeStockView}>
-                Close
-              </Button>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={closeStockView}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
 
       <style>{`
         input::-webkit-outer-spin-button,

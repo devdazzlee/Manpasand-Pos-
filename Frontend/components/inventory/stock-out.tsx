@@ -28,12 +28,11 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Calendar as CalendarComponent } from "@/components/ui/calendar";
 import { format } from "date-fns";
@@ -852,9 +851,18 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
               )}
             >
               All
-              <span className="ml-1.5 tabular-nums opacity-70">
-                {monthStats.totalDispatches}
-              </span>
+              {statsLoading ? (
+                <span
+                  className={cn(
+                    "ml-1.5 inline-block h-3 w-5 animate-pulse rounded-full",
+                    filterReason === "all" ? "bg-white/30" : "bg-gray-200",
+                  )}
+                />
+              ) : (
+                <span className="ml-1.5 tabular-nums opacity-70">
+                  {monthStats.totalDispatches}
+                </span>
+              )}
             </button>
             {REASON_OPTIONS.map((r) => {
               const count = monthStats.byReason[r.value] || 0;
@@ -874,7 +882,16 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                   )}
                 >
                   {r.label}
-                  <span className="ml-1.5 tabular-nums opacity-70">{count}</span>
+                  {statsLoading ? (
+                    <span
+                      className={cn(
+                        "ml-1.5 inline-block h-3 w-5 animate-pulse rounded-full",
+                        filterReason === r.value ? "bg-white/30" : "bg-gray-200",
+                      )}
+                    />
+                  ) : (
+                    <span className="ml-1.5 tabular-nums opacity-70">{count}</span>
+                  )}
                 </button>
               );
             })}
@@ -900,7 +917,7 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                   setPage(1);
                 }}
               >
-                <SelectTrigger className="h-10 text-sm text-black">
+                <SelectTrigger className="h-10 min-w-0 text-sm text-black">
                   <SelectValue placeholder="All reasons" />
                 </SelectTrigger>
                 <SelectContent>
@@ -1003,12 +1020,18 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
             </div>
 
             <p className="text-xs text-gray-500">
-              Showing {filteredRows.length.toLocaleString()} of {total.toLocaleString()}{" "}
-              records
-              {searchQuery.trim() ? " (client search on this page)" : ""}
-              {" · "}
-              Page qty {formatQty(pageTotals.units)} · Page value{" "}
-              {formatMoney(pageTotals.value)}
+              {historyLoading && rows.length === 0 ? (
+                "Loading records…"
+              ) : (
+                <>
+                  Showing {filteredRows.length.toLocaleString()} of {total.toLocaleString()}{" "}
+                  records
+                  {searchQuery.trim() ? " (client search on this page)" : ""}
+                  {" · "}
+                  Page qty {formatQty(pageTotals.units)} · Page value{" "}
+                  {formatMoney(pageTotals.value)}
+                </>
+              )}
             </p>
           </div>
 
@@ -1600,14 +1623,12 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
       </Tabs>
 
       {/* Detail dialog */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="text-base">Dispatch detail</DialogTitle>
-            <DialogDescription className="text-xs">
-              Outbound stock movement record
-            </DialogDescription>
-          </DialogHeader>
+      <DetailSheet open={detailOpen} onOpenChange={setDetailOpen} size="md">
+        <DetailSheetHeader
+          title="Dispatch detail"
+          subtitle="Outbound stock movement record"
+        />
+        <DetailSheetBody>
           {detailRow ? (
             <div className="space-y-4 text-sm">
               <div className="flex flex-wrap items-center gap-2">
@@ -1703,8 +1724,13 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
               ) : null}
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setDetailOpen(false)}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
 
       <ExcelUploadDialog
         open={excelDialogOpen}

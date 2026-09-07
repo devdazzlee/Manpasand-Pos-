@@ -7,13 +7,6 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   AlertDialog,
   AlertDialogAction,
   AlertDialogCancel,
@@ -350,20 +343,19 @@ const Subcategories: React.FC = () => {
         </Card>
       </PageBody>
 
-      {/* Add / Edit — 3 fields, stays a Dialog (guide §2). */}
-      <Dialog
+      <DetailSheet
         open={addOpen || editOpen}
         onOpenChange={(open) => {
           if (!open) closeForm();
         }}
+        size="md"
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>
-              {editOpen ? "Edit subcategory" : "New subcategory"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4 py-1">
+        <DetailSheetHeader
+          title={editOpen ? "Edit subcategory" : "New subcategory"}
+          subtitle={editOpen ? "Update this subcategory" : "Add a subcategory"}
+          icon={<Layers className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="subcat-name" className="text-xs font-medium text-foreground">
                 Name<span className="text-destructive"> *</span>
@@ -416,8 +408,8 @@ const Subcategories: React.FC = () => {
                 {formError}
               </p>
             )}
-          </div>
-          <DialogFooter>
+        </DetailSheetBody>
+        <DetailSheetFooter>
             <Button variant="outline" onClick={closeForm} disabled={submitting}>
               Cancel
             </Button>
@@ -425,9 +417,8 @@ const Subcategories: React.FC = () => {
               {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {editOpen ? "Update subcategory" : "Create subcategory"}
             </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        </DetailSheetFooter>
+      </DetailSheet>
 
       {/* View subcategory — record detail, so a DetailSheet (guide §2). */}
       <DetailSheet

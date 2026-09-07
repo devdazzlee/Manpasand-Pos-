@@ -55,16 +55,18 @@ Delete the old `fetchList()` + manual `setState(res.data.data)` entirely.
 
 ---
 
-## 2. Modals — the rule
+## 2. Overlays — the rule
 
-A `<Dialog>` is allowed **only** for:
+**Do not use a centered `<Dialog>` for create, edit, or view of a business record.**
 
-- a destructive confirm (`<AlertDialog>`), or
-- a short single-purpose form: **≤ 6 fields, no tabs, no table, no pagination.**
+Use one of these, in this order:
 
-Everything else that currently opens in a `<Dialog>` becomes a **`DetailSheet`**
-(`components/ui/detail-sheet.tsx`) — a right-docked panel with a light scrim that
-leaves the list visible.
+1. **In-tab full page** — multi-line workflows: product form, stock in/out/transfer/adjust, process return/exchange, edit sale. The list is replaced by the form; Cancel returns to the list.
+2. **`DetailSheet`** (`components/ui/detail-sheet.tsx`) — create, edit, and view of a record. Right-docked, light scrim, list stays visible. Tiny 2-field forms use `size="md"`; larger forms use `lg` / `xl`.
+3. **`<AlertDialog>`** — destructive or irreversible confirms only (delete, cancel sale, end shift).
+4. **`<Dialog>`** — only payment tender, print/success, file upload, and other short secondary tools that are not record CRUD.
+
+Never open a catalog/master/party/stock/sale record in a centered modal.
 
 ### Converting a detail modal → DetailSheet
 
@@ -108,8 +110,8 @@ After:
 - Detail-tab data loads through its own `useQuery` hook keyed by the record id,
   **gated on the sheet being open** (`enabled: detailOpen && !!id`). No more
   imperative `loadPurchases()` / `loadLedger()` on open.
-- Keep add/edit forms as `<Dialog>` if they fit the ≤6-field rule; otherwise they
-  become their own `DetailSheet` with a single form in the body.
+- Add/edit forms are always a `DetailSheet` (or an in-tab page for multi-line
+  workflows). They are never a centered `<Dialog>`.
 
 ---
 
@@ -145,8 +147,9 @@ After:
 
 - [ ] No `apiClient.*` call in a `useEffect`; list data comes from a query hook
 - [ ] No `usePosData` / `useStore` server-data reads
-- [ ] Detail/record modals converted to `DetailSheet`; only confirms + tiny forms
-      remain as `Dialog`/`AlertDialog`
+- [ ] No record create/edit/view uses `<Dialog>`; those are `DetailSheet` or an
+      in-tab page. Only confirms, payment, print, and upload remain as
+      `Dialog`/`AlertDialog`
 - [ ] `<PageHeader>` + `<PageBody>` in place
 - [ ] No sub-12px text, no `h-6`/`h-7` controls, no emoji, no `...`
 - [ ] `npx tsc --noEmit` reports no new top-level errors

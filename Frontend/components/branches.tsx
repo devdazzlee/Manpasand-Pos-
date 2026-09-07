@@ -6,7 +6,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogFooter } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
@@ -29,10 +28,27 @@ import {
   CheckCircle2,
   XCircle,
   KeyRound,
+  Eye,
 } from "lucide-react"
 import { toast } from "sonner"
 import apiClient from "@/lib/apiClient"
 import { PageLoader } from "@/components/ui/page-loader"
+import {
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 
 interface Branch {
   id: string
@@ -91,6 +107,7 @@ export function Branches() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Branch | null>(null)
+  const [viewTarget, setViewTarget] = useState<Branch | null>(null)
 
   // Loading States
   const [loading, setLoading] = useState(false)
@@ -418,138 +435,10 @@ export function Branches() {
           <h1 className="text-2xl md:text-3xl font-bold text-gray-900">Branch Management</h1>
           <p className="text-sm md:text-base text-gray-600">Manage your store locations and warehouses</p>
         </div>
-        <Dialog
-          open={isAddDialogOpen}
-          onOpenChange={(open) => {
-            if (!open) {
-              setAddErrors({})
-              setAddLoginEmail("")
-              setAddLoginPassword("")
-            }
-            setIsAddDialogOpen(open)
-          }}
-        >
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Branch
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add New Branch</DialogTitle>
-            </DialogHeader>
-            <div className="space-y-4">
-              <div>
-                <Label htmlFor="name">Branch Name *</Label>
-                <Input
-                  id="name"
-                  value={newBranch.name}
-                  onChange={(e) => {
-                    setNewBranch({ ...newBranch, name: e.target.value })
-                    if (addErrors.name) setAddErrors((p) => ({ ...p, name: undefined }))
-                  }}
-                  placeholder="Enter branch name"
-                  aria-invalid={!!addErrors.name}
-                  className={addErrors.name ? "border-red-500 focus-visible:ring-red-500" : ""}
-                />
-                {addErrors.name && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{addErrors.name}</p>
-                )}
-              </div>
-
-              <div>
-                <Label htmlFor="address">Address</Label>
-                <Textarea
-                  id="address"
-                  value={newBranch.address || ""}
-                  onChange={(e) => {
-                    setNewBranch({ ...newBranch, address: e.target.value })
-                    if (addErrors.address) setAddErrors((p) => ({ ...p, address: undefined }))
-                  }}
-                  placeholder="Enter branch address"
-                  rows={3}
-                  aria-invalid={!!addErrors.address}
-                  className={addErrors.address ? "border-red-500 focus-visible:ring-red-500" : ""}
-                />
-                {addErrors.address && (
-                  <p className="text-sm text-red-600 mt-1" role="alert">{addErrors.address}</p>
-                )}
-              </div>
-              
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select
-                  value={newBranch.branch_type || "BRANCH"}
-                  onValueChange={(v: "WAREHOUSE" | "BRANCH") =>
-                    setNewBranch({ ...newBranch, branch_type: v })
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="BRANCH">Branch</SelectItem>
-                    <SelectItem value="WAREHOUSE">Warehouse</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-
-              <div className="flex items-center justify-between rounded-xl border border-gray-100 p-4 bg-gray-50/50">
-                <div className="space-y-0.5">
-                  <Label htmlFor="is_active" className="text-base font-bold text-gray-900">Active Status</Label>
-                  <p className="text-xs text-gray-500 font-medium">Enable or disable this branch/location for system operations</p>
-                </div>
-                <Switch
-                  id="is_active"
-                  checked={newBranch.is_active}
-                  onCheckedChange={(checked) => setNewBranch({ ...newBranch, is_active: checked })}
-                />
-              </div>
-
-              <div className="space-y-3 rounded-xl border border-blue-100 bg-blue-50/40 p-4">
-                <div className="flex items-center gap-2">
-                  <KeyRound className="h-4 w-4 text-blue-600" />
-                  <Label className="text-sm font-bold text-gray-900">Branch Login (optional)</Label>
-                </div>
-                <p className="text-xs text-gray-500 -mt-1">
-                  Give this branch its own sign-in now, or set it up later from Edit.
-                </p>
-                <div>
-                  <Label htmlFor="add-login-email">Username / Email</Label>
-                  <Input
-                    id="add-login-email"
-                    type="email"
-                    value={addLoginEmail}
-                    onChange={(e) => setAddLoginEmail(e.target.value)}
-                    placeholder="branch@manpasand.com"
-                  />
-                </div>
-                <div>
-                  <Label htmlFor="add-login-password">Password</Label>
-                  <Input
-                    id="add-login-password"
-                    type="password"
-                    value={addLoginPassword}
-                    onChange={(e) => setAddLoginPassword(e.target.value)}
-                    placeholder="Minimum 6 characters"
-                  />
-                </div>
-              </div>
-
-              <Button onClick={handleAddBranch} className="w-full" disabled={actionLoading}>
-                {actionLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Creating...
-                  </>
-                ) : (
-                  "Add Branch"
-                )}
-              </Button>
-            </div>
-          </DialogContent>
-        </Dialog>
+        <Button onClick={() => setIsAddDialogOpen(true)}>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Branch
+        </Button>
       </div>
 
       {/* Stats Cards */}
@@ -693,6 +582,15 @@ export function Branches() {
                   <Button
                     size="sm"
                     variant="outline"
+                    onClick={() => setViewTarget(branch)}
+                    title="View location"
+                  >
+                    <Eye className="h-4 w-4 mr-1.5" />
+                    View
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => handleEditDialogOpen(branch)}
                     title="Edit Location"
                   >
@@ -758,14 +656,143 @@ export function Branches() {
         </div>
       )}
 
-      {/* Edit Branch Dialog */}
-      <Dialog open={!!editingBranch} onOpenChange={handleEditDialogClose}>
-        <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Edit Branch</DialogTitle>
-          </DialogHeader>
+      <DetailSheet
+        open={isAddDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setAddErrors({})
+            setAddLoginEmail("")
+            setAddLoginPassword("")
+          }
+          setIsAddDialogOpen(open)
+        }}
+        size="lg"
+      >
+        <DetailSheetHeader
+          title="Add branch"
+          subtitle="Create a store or warehouse location"
+          icon={<Building2 className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-4">
+          <div>
+            <Label htmlFor="name">Branch name *</Label>
+            <Input
+              id="name"
+              value={newBranch.name}
+              onChange={(e) => {
+                setNewBranch({ ...newBranch, name: e.target.value })
+                if (addErrors.name) setAddErrors((p) => ({ ...p, name: undefined }))
+              }}
+              placeholder="Enter branch name"
+              aria-invalid={!!addErrors.name}
+              className={addErrors.name ? "border-red-500 focus-visible:ring-red-500" : ""}
+            />
+            {addErrors.name && (
+              <p className="text-sm text-red-600 mt-1" role="alert">{addErrors.name}</p>
+            )}
+          </div>
+          <div>
+            <Label htmlFor="address">Address</Label>
+            <Textarea
+              id="address"
+              value={newBranch.address || ""}
+              onChange={(e) => {
+                setNewBranch({ ...newBranch, address: e.target.value })
+                if (addErrors.address) setAddErrors((p) => ({ ...p, address: undefined }))
+              }}
+              placeholder="Enter branch address"
+              rows={3}
+              aria-invalid={!!addErrors.address}
+              className={addErrors.address ? "border-red-500 focus-visible:ring-red-500" : ""}
+            />
+            {addErrors.address && (
+              <p className="text-sm text-red-600 mt-1" role="alert">{addErrors.address}</p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label>Type</Label>
+            <Select
+              value={newBranch.branch_type || "BRANCH"}
+              onValueChange={(v: "WAREHOUSE" | "BRANCH") =>
+                setNewBranch({ ...newBranch, branch_type: v })
+              }
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="BRANCH">Branch</SelectItem>
+                <SelectItem value="WAREHOUSE">Warehouse</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="is_active">Active status</Label>
+              <p className="text-xs text-muted-foreground">Enable this location for operations</p>
+            </div>
+            <Switch
+              id="is_active"
+              checked={newBranch.is_active}
+              onCheckedChange={(checked) => setNewBranch({ ...newBranch, is_active: checked })}
+            />
+          </div>
+          <div className="space-y-3 rounded-lg border p-4">
+            <div className="flex items-center gap-2">
+              <KeyRound className="h-4 w-4" />
+              <Label>Branch login (optional)</Label>
+            </div>
+            <p className="text-xs text-muted-foreground">
+              Give this branch its own sign-in now, or set it up later from Edit.
+            </p>
+            <div>
+              <Label htmlFor="add-login-email">Username / Email</Label>
+              <Input
+                id="add-login-email"
+                type="email"
+                value={addLoginEmail}
+                onChange={(e) => setAddLoginEmail(e.target.value)}
+                placeholder="branch@manpasand.com"
+              />
+            </div>
+            <div>
+              <Label htmlFor="add-login-password">Password</Label>
+              <Input
+                id="add-login-password"
+                type="password"
+                value={addLoginPassword}
+                onChange={(e) => setAddLoginPassword(e.target.value)}
+                placeholder="Minimum 6 characters"
+              />
+            </div>
+          </div>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setIsAddDialogOpen(false)} disabled={actionLoading}>
+            Cancel
+          </Button>
+          <Button onClick={handleAddBranch} disabled={actionLoading}>
+            {actionLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Add branch
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
+
+      <DetailSheet
+        open={!!editingBranch}
+        onOpenChange={(open) => {
+          if (!open) handleEditDialogClose()
+        }}
+        size="lg"
+      >
+        <DetailSheetHeader
+          title="Edit branch"
+          subtitle={editingBranch?.code}
+          icon={<Building2 className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-4">
           {editingBranch && (
-            <div className="space-y-4">
+            <>
               <div>
                 <Label htmlFor="edit-name">Branch Name *</Label>
                 <Input
@@ -880,88 +907,96 @@ export function Branches() {
                   </>
                 )}
               </div>
-
-              <Button onClick={handleEditBranch} className="w-full" disabled={actionLoading}>
-                {actionLoading ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Updating...
-                  </>
-                ) : (
-                  "Update Branch"
-                )}
-              </Button>
-            </div>
+            </>
           )}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={handleEditDialogClose} disabled={actionLoading}>
+            Cancel
+          </Button>
+          <Button onClick={handleEditBranch} disabled={actionLoading}>
+            {actionLoading && <Loader2 className="h-4 w-4 mr-2 animate-spin" />}
+            Update branch
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
 
-      {/* Delete Confirmation Dialog */}
-      <Dialog
+      <DetailSheet
+        open={!!viewTarget}
+        onOpenChange={(open) => !open && setViewTarget(null)}
+        size="md"
+      >
+        <DetailSheetHeader
+          title={viewTarget?.name ?? "Branch"}
+          subtitle={viewTarget?.code}
+          icon={
+            viewTarget?.branch_type === "WAREHOUSE" ? (
+              <Warehouse className="h-5 w-5" />
+            ) : (
+              <Building2 className="h-5 w-5" />
+            )
+          }
+        />
+        <DetailSheetBody className="space-y-4">
+          <div className="grid grid-cols-2 gap-3 text-sm">
+            <div>
+              <p className="text-xs text-muted-foreground">Type</p>
+              <p className="font-medium">{viewTarget?.branch_type === "WAREHOUSE" ? "Warehouse" : "Branch"}</p>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Status</p>
+              <p className="font-medium">{viewTarget?.is_active ? "Active" : "Inactive"}</p>
+            </div>
+          </div>
+          <div>
+            <p className="text-xs text-muted-foreground">Address</p>
+            <p className="text-sm mt-1">{viewTarget?.address || "No address registered"}</p>
+          </div>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setViewTarget(null)}>
+            Close
+          </Button>
+          <Button
+            onClick={() => {
+              if (!viewTarget) return
+              setViewTarget(null)
+              handleEditDialogOpen(viewTarget)
+            }}
+          >
+            Edit
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
+
+      <AlertDialog
         open={!!deleteTarget}
         onOpenChange={(open) => {
           if (!open && !actionLoading) setDeleteTarget(null)
         }}
       >
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-red-600">
-              <AlertTriangle className="h-5 w-5 animate-bounce" />
-              Delete Location / Branch?
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="rounded-lg border border-red-200 bg-red-50 p-4 text-sm text-red-800">
-              <p className="font-semibold">
-                Are you sure you want to permanently delete this branch?
-              </p>
-              <p className="mt-2 text-xs leading-relaxed opacity-90">
-                This will permanently remove the branch and all linked records for this location, including stock, sales, purchases, transfers, and cash drawer history. This action cannot be undone.
-              </p>
-            </div>
-
-            {/* Target Branch Summary Card */}
-            {deleteTarget && (
-              <div className="rounded-xl border border-gray-200 p-4 bg-gray-50 flex items-center space-x-3.5 shadow-sm">
-                <div className={`w-12 h-12 rounded-xl flex items-center justify-center border shadow-sm ${
-                  deleteTarget.branch_type === "WAREHOUSE"
-                    ? "bg-purple-100 text-purple-700 border-purple-200"
-                    : "bg-indigo-100 text-indigo-700 border-indigo-200"
-                }`}>
-                  {deleteTarget.branch_type === "WAREHOUSE" ? <Warehouse className="h-6 w-6" /> : <Building2 className="h-6 w-6" />}
-                </div>
-                <div className="flex-1 min-w-0">
-                  <h4 className="font-bold text-gray-900 truncate">{deleteTarget.name}</h4>
-                  <p className="text-xs font-mono text-gray-500 truncate mt-0.5">Code: {deleteTarget.code}</p>
-                </div>
-              </div>
-            )}
-          </div>
-          <DialogFooter className="gap-2 sm:gap-0">
-            <Button
-              variant="outline"
-              onClick={() => setDeleteTarget(null)}
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.name}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This permanently removes the branch and linked records for this location, including stock, sales, purchases, transfers, and cash drawer history. This cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={actionLoading}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={(e) => {
+                e.preventDefault()
+                handleDeleteBranch()
+              }}
               disabled={actionLoading}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
-              Cancel
-            </Button>
-            <Button
-              onClick={handleDeleteBranch}
-              disabled={actionLoading}
-              className="bg-red-600 hover:bg-red-700 text-white"
-            >
-              {actionLoading ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deleting...
-                </>
-              ) : (
-                "Delete Branch"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+              {actionLoading ? "Deleting…" : "Delete branch"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   )
 }

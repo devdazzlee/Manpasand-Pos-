@@ -1,7 +1,6 @@
 "use client";
 
-import React, { useCallback, useEffect, useState } from "react";
-import apiClient from "@/lib/apiClient";
+import React, { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -9,13 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Select,
   SelectContent,
@@ -46,6 +39,13 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover";
+import {
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
+import { PageHeader, PageBody } from "@/components/ui/page-header";
 import { Calendar } from "@/components/ui/calendar";
 import { format } from "date-fns";
 import {
@@ -61,9 +61,8 @@ import {
   X,
   CalendarIcon,
   Wallet,
+  RefreshCcw,
 } from "lucide-react";
-import { toast } from "sonner";
-import { PageLoader } from "@/components/ui/page-loader";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
 import {
@@ -72,6 +71,11 @@ import {
 } from "@/components/inventory/stock-ops/export-utils";
 import { cn } from "@/lib/utils";
 import { z } from "zod";
+import { useToast } from "@/hooks/use-toast";
+import { extractApiError } from "@/lib/api/errors";
+import { useEmployees } from "@/hooks/queries/use-employees";
+import { useSalaries, useSalaryMutations } from "@/hooks/queries/use-salaries";
+import type { SalaryRecord } from "@/lib/api/salaries";
 
 const MONTHS = [
   "January",
@@ -90,40 +94,6 @@ const MONTHS = [
 
 type PaidFilter = "all" | "paid" | "unpaid";
 
-interface EmployeeOption {
-  id: string;
-  name: string;
-  employee_code?: string | null;
-  status?: string;
-}
-
-interface SalaryRow {
-  id: string;
-  employee_id: string;
-  employee?: {
-    id: string;
-    name: string;
-    employee_code?: string | null;
-    department?: { id: string; name: string } | null;
-    employee_type?: { id: string; name: string } | null;
-  } | null;
-  month: number;
-  year: number;
-  amount: number;
-  is_paid: boolean;
-  paid_date?: string | null;
-  notes?: string | null;
-  created_at?: string;
-}
-
-interface Summary {
-  totalAmount: number;
-  paidAmount: number;
-  unpaidAmount: number;
-  paidCount: number;
-  unpaidCount: number;
-}
-
 interface FormState {
   employee_id: string;
   month: number;
@@ -138,10 +108,8 @@ const PAGE_SIZE = 20;
 const currentYear = new Date().getFullYear();
 const YEARS = Array.from({ length: 8 }, (_, i) => currentYear - i);
 
-const dialogClass =
-  "grid w-[min(96vw,560px)] max-w-[560px] sm:max-w-[560px] gap-4 p-5";
-const fieldLabel = "text-xs font-medium text-gray-900";
-const fieldControl = "h-9 rounded-md border-gray-200 text-sm";
+const fieldLabel = "text-xs font-medium text-foreground";
+const fieldControl = "h-9 text-sm";
 
 const salaryFormSchema = z.object({
   employee_id: z.string().min(1, "Select an employee"),
@@ -151,16 +119,6 @@ const salaryFormSchema = z.object({
   is_paid: z.boolean(),
   notes: z.string().optional(),
 });
-
-const extractApiError = (err: any, fallback: string) => {
-  const data = err?.response?.data;
-  if (data?.errors?.length) {
-    const first = data.errors[0];
-    if (typeof first === "string") return first;
-    if (first?.message) return first.message;
-  }
-  return data?.message || err?.message || fallback;
-};
 
 const emptyForm = (): FormState => ({
   employee_id: "",
@@ -183,21 +141,10 @@ const formatDate = (value?: string | null) => {
 };
 
 export function Salaries() {
-  const [rows, setRows] = useState<SalaryRow[]>([]);
-  const [listMeta, setListMeta] = useState({ total: 0, totalPages: 1 });
-  const [summary, setSummary] = useState<Summary>({
-    totalAmount: 0,
-    paidAmount: 0,
-    unpaidAmount: 0,
-    paidCount: 0,
-    unpaidCount: 0,
-  });
-  const [employees, setEmployees] = useState<EmployeeOption[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [metaLoading, setMetaLoading] = useState(true);
+  const { toast } = useToast();
 
   const [search, setSearch] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [paidFilter, setPaidFilter] = useState<PaidFilter>("all");
   const [monthFilter, setMonthFilter] = useState<string>("all");
   const [yearFilter, setYearFilter] = useState<string>(String(currentYear));
@@ -206,83 +153,96 @@ export function Salaries() {
   const [page, setPage] = useState(1);
 
   const [formOpen, setFormOpen] = useState(false);
-  const [editing, setEditing] = useState<SalaryRow | null>(null);
+  const [editing, setEditing] = useState<SalaryRecord | null>(null);
   const [form, setForm] = useState<FormState>(emptyForm());
   const [formError, setFormError] = useState("");
-  const [submitting, setSubmitting] = useState(false);
 
-  const [detail, setDetail] = useState<SalaryRow | null>(null);
+  const [detail, setDetail] = useState<SalaryRecord | null>(null);
   const [detailOpen, setDetailOpen] = useState(false);
 
-  const [deleteTarget, setDeleteTarget] = useState<SalaryRow | null>(null);
-  const [deleting, setDeleting] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<SalaryRecord | null>(null);
   const [actionId, setActionId] = useState<string | null>(null);
 
-  const loadEmployees = useCallback(async () => {
-    setMetaLoading(true);
-    try {
-      const res = await apiClient.get("/employee", {
-        params: { page: 1, limit: 100 },
-      });
-      const list = (res.data?.data || []) as EmployeeOption[];
-      setEmployees(
-        list.filter((e) => (e.status || "ACTIVE") !== "TERMINATED"),
-      );
-    } catch {
-      setEmployees([]);
-    } finally {
-      setMetaLoading(false);
-    }
-  }, []);
+  useEffect(() => {
+    const t = window.setTimeout(() => setDebouncedSearch(search.trim()), 250);
+    return () => window.clearTimeout(t);
+  }, [search]);
 
-  const fetchSalaries = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params: Record<string, string> = {
-        page: String(page),
-        limit: String(PAGE_SIZE),
-      };
-      if (search.trim()) params.search = search.trim();
-      if (paidFilter === "paid") params.is_paid = "true";
-      if (paidFilter === "unpaid") params.is_paid = "false";
-      if (monthFilter !== "all") params.month = monthFilter;
-      if (yearFilter !== "all") params.year = yearFilter;
-      if (employeeFilter !== "all") params.employee_id = employeeFilter;
+  const { employees: employeeRows } = useEmployees({ limit: 100 });
+  const employees = useMemo(
+    () =>
+      (employeeRows as Array<{ id: string; name: string; employee_code?: string | null; status?: string }>).filter(
+        (e) => (e.status || "ACTIVE") !== "TERMINATED",
+      ),
+    [employeeRows],
+  );
 
-      const res = await apiClient.get("/salaries", { params });
-      setRows(res.data?.data || []);
-      setListMeta({
-        total: Number(res.data?.meta?.total) || (res.data?.data || []).length,
-        totalPages: Math.max(1, Number(res.data?.meta?.totalPages) || 1),
-      });
-      const s = res.data?.meta?.summary;
-      setSummary({
-        totalAmount: Number(s?.totalAmount) || 0,
-        paidAmount: Number(s?.paidAmount) || 0,
-        unpaidAmount: Number(s?.unpaidAmount) || 0,
-        paidCount: Number(s?.paidCount) || 0,
-        unpaidCount: Number(s?.unpaidCount) || 0,
-      });
-    } catch (e: any) {
-      toast.error(extractApiError(e, "Failed to load salaries"));
-      setRows([]);
-    } finally {
-      setLoading(false);
-      setInitialLoading(false);
-    }
-  }, [page, search, paidFilter, monthFilter, yearFilter, employeeFilter]);
+  const listParams = useMemo(
+    () => ({
+      page,
+      limit: PAGE_SIZE,
+      search: debouncedSearch || undefined,
+      isPaid:
+        paidFilter === "paid" ? true : paidFilter === "unpaid" ? false : undefined,
+      month: monthFilter !== "all" ? monthFilter : undefined,
+      year: yearFilter !== "all" ? yearFilter : undefined,
+      employeeId: employeeFilter !== "all" ? employeeFilter : undefined,
+    }),
+    [page, debouncedSearch, paidFilter, monthFilter, yearFilter, employeeFilter],
+  );
+
+  const {
+    salaries: rows,
+    meta,
+    isFirstLoad,
+    isRefreshing,
+    refetch,
+    error: listError,
+  } = useSalaries(listParams);
+
+  const directoryParams = useMemo(
+    () => ({
+      page: 1,
+      limit: 1,
+      month: monthFilter !== "all" ? monthFilter : undefined,
+      year: yearFilter !== "all" ? yearFilter : undefined,
+      employeeId: employeeFilter !== "all" ? employeeFilter : undefined,
+    }),
+    [monthFilter, yearFilter, employeeFilter],
+  );
+  const directoryQuery = useSalaries(directoryParams);
+  const statsLoading =
+    directoryQuery.isPending || directoryQuery.isPlaceholderData;
+  const rawSummary = directoryQuery.summary;
+
+  const summary = rawSummary ?? {
+    totalAmount: 0,
+    paidAmount: 0,
+    unpaidAmount: 0,
+    paidCount: 0,
+    unpaidCount: 0,
+  };
+  const listMeta = meta ?? { total: 0, page: 1, limit: PAGE_SIZE, totalPages: 1 };
+  const directoryTotal =
+    directoryQuery.meta?.total ?? summary.paidCount + summary.unpaidCount;
+
+  const { create, update, remove, markPaid, markUnpaid } = useSalaryMutations();
+  const submitting = create.isPending || update.isPending;
+  const deleting = remove.isPending;
 
   useEffect(() => {
-    loadEmployees();
-  }, [loadEmployees]);
-
-  useEffect(() => {
-    fetchSalaries();
-  }, [fetchSalaries]);
+    if (listError) {
+      toast({
+        variant: "destructive",
+        title: "Failed to load salaries",
+        description: extractApiError(listError, "Failed to load salaries"),
+      });
+    }
+  }, [listError]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const totalPages = Math.max(1, listMeta.totalPages);
   const pageSafe = Math.min(page, totalPages);
-  const pageRows = rows;
+  const pageRows = rows as SalaryRecord[];
 
   const hasFilters =
     Boolean(search.trim()) ||
@@ -307,7 +267,7 @@ export function Salaries() {
     setFormOpen(true);
   };
 
-  const openEdit = (row: SalaryRow) => {
+  const openEdit = (row: SalaryRecord) => {
     setEditing(row);
     setForm({
       employee_id: row.employee_id,
@@ -322,12 +282,12 @@ export function Salaries() {
     setFormOpen(true);
   };
 
-  const openDetail = (row: SalaryRow) => {
+  const openDetail = (row: SalaryRecord) => {
     setDetail(row);
     setDetailOpen(true);
   };
 
-  const handleSubmit = async () => {
+  const handleSubmit = () => {
     const parsed = salaryFormSchema.safeParse({
       employee_id: form.employee_id,
       month: form.month,
@@ -339,102 +299,121 @@ export function Salaries() {
     if (!parsed.success) {
       const msg = parsed.error.errors[0]?.message || "Fix the form fields";
       setFormError(msg);
-      toast.error(msg);
+      toast({ variant: "destructive", title: msg });
       return;
     }
     setFormError("");
-    setSubmitting(true);
-    try {
-      const payload: Record<string, unknown> = {
-        employee_id: parsed.data.employee_id,
-        month: parsed.data.month,
-        year: parsed.data.year,
-        amount: parsed.data.amount,
-        is_paid: parsed.data.is_paid,
-        notes: parsed.data.notes || null,
-      };
-      if (parsed.data.is_paid) {
-        payload.paid_date = (form.paid_date || new Date()).toISOString();
-      } else {
-        payload.paid_date = null;
-      }
 
-      if (editing) {
-        await apiClient.put(`/salaries/${editing.id}`, payload);
-        toast.success("Salary record updated");
-      } else {
-        await apiClient.post("/salaries", payload);
-        toast.success("Salary record created");
-      }
-      setFormOpen(false);
-      await fetchSalaries();
-    } catch (e: any) {
-      toast.error(extractApiError(e, "Failed to save salary"));
-    } finally {
-      setSubmitting(false);
-    }
-  };
+    const payload: Record<string, unknown> = {
+      employee_id: parsed.data.employee_id,
+      month: parsed.data.month,
+      year: parsed.data.year,
+      amount: parsed.data.amount,
+      is_paid: parsed.data.is_paid,
+      notes: parsed.data.notes || null,
+      paid_date: parsed.data.is_paid
+        ? (form.paid_date || new Date()).toISOString()
+        : null,
+    };
 
-  const handleMarkPaid = async (row: SalaryRow) => {
-    setActionId(row.id);
-    try {
-      await apiClient.patch(`/salaries/${row.id}/mark-paid`, {
-        paid_date: new Date().toISOString(),
+    const onError = (e: unknown) =>
+      toast({
+        variant: "destructive",
+        title: "Could not save salary",
+        description: extractApiError(e, "Failed to save salary"),
       });
-      toast.success("Marked as paid");
-      await fetchSalaries();
-      if (detail?.id === row.id) {
-        setDetail({
-          ...row,
-          is_paid: true,
-          paid_date: new Date().toISOString(),
-        });
-      }
-    } catch (e: any) {
-      toast.error(extractApiError(e, "Failed to mark paid"));
-    } finally {
-      setActionId(null);
+
+    if (editing) {
+      update.mutate(
+        { id: editing.id, body: payload },
+        {
+          onSuccess: () => {
+            toast({ title: "Salary record updated" });
+            setFormOpen(false);
+          },
+          onError,
+        },
+      );
+    } else {
+      create.mutate(payload, {
+        onSuccess: () => {
+          toast({ title: "Salary record created" });
+          setFormOpen(false);
+        },
+        onError,
+      });
     }
   };
 
-  const handleMarkUnpaid = async (row: SalaryRow) => {
+  const handleMarkPaid = (row: SalaryRecord) => {
     setActionId(row.id);
-    try {
-      await apiClient.patch(`/salaries/${row.id}/mark-unpaid`);
-      toast.success("Marked as unpaid");
-      await fetchSalaries();
-      if (detail?.id === row.id) {
-        setDetail({ ...row, is_paid: false, paid_date: null });
-      }
-    } catch (e: any) {
-      toast.error(extractApiError(e, "Failed to mark unpaid"));
-    } finally {
-      setActionId(null);
-    }
+    markPaid.mutate(
+      { id: row.id, body: { paid_date: new Date().toISOString() } },
+      {
+        onSuccess: () => {
+          toast({ title: "Marked as paid" });
+          if (detail?.id === row.id) {
+            setDetail({
+              ...row,
+              is_paid: true,
+              paid_date: new Date().toISOString(),
+            });
+          }
+        },
+        onError: (e) =>
+          toast({
+            variant: "destructive",
+            title: "Could not mark paid",
+            description: extractApiError(e, "Failed to mark paid"),
+          }),
+        onSettled: () => setActionId(null),
+      },
+    );
   };
 
-  const handleDelete = async () => {
+  const handleMarkUnpaid = (row: SalaryRecord) => {
+    setActionId(row.id);
+    markUnpaid.mutate(row.id, {
+      onSuccess: () => {
+        toast({ title: "Marked as unpaid" });
+        if (detail?.id === row.id) {
+          setDetail({ ...row, is_paid: false, paid_date: null });
+        }
+      },
+      onError: (e) =>
+        toast({
+          variant: "destructive",
+          title: "Could not mark unpaid",
+          description: extractApiError(e, "Failed to mark unpaid"),
+        }),
+      onSettled: () => setActionId(null),
+    });
+  };
+
+  const handleDelete = () => {
     if (!deleteTarget) return;
-    setDeleting(true);
-    try {
-      await apiClient.delete(`/salaries/${deleteTarget.id}`);
-      toast.success("Salary record deleted");
-      setDeleteTarget(null);
-      if (detail?.id === deleteTarget.id) {
-        setDetailOpen(false);
-        setDetail(null);
-      }
-      await fetchSalaries();
-    } catch (e: any) {
-      toast.error(extractApiError(e, "Failed to delete"));
-    } finally {
-      setDeleting(false);
-    }
+    const target = deleteTarget;
+    remove.mutate(target.id, {
+      onSuccess: () => {
+        toast({ title: "Salary record deleted" });
+        setDeleteTarget(null);
+        if (detail?.id === target.id) {
+          setDetailOpen(false);
+          setDetail(null);
+        }
+      },
+      onError: (e) =>
+        toast({
+          variant: "destructive",
+          title: "Could not delete",
+          description: extractApiError(e, "Failed to delete"),
+        }),
+    });
   };
 
   const handleExport = () => {
     if (rows.length === 0) {
-      toast.error("Nothing to export");
+      toast({ variant: "destructive", title: "Nothing to export" });
       return;
     }
     downloadExcel(
@@ -451,7 +430,7 @@ export function Salaries() {
         "Paid date",
         "Notes",
       ],
-      rows.map((r) => [
+      (rows as SalaryRecord[]).map((r) => [
         r.employee?.name || "",
         r.employee?.employee_code || "",
         r.employee?.employee_type?.name || "",
@@ -466,743 +445,765 @@ export function Salaries() {
   };
 
   const paidChips: Array<{ key: PaidFilter; label: string; count: number }> = [
-    { key: "all", label: "All", count: rows.length },
+    { key: "all", label: "All", count: directoryTotal },
     { key: "paid", label: "Paid", count: summary.paidCount },
     { key: "unpaid", label: "Unpaid", count: summary.unpaidCount },
   ];
 
-  if (initialLoading) {
-    return <PageLoader message="Loading salaries..." />;
-  }
-
   return (
-    <div className="p-4 md:p-6 space-y-5 text-black min-w-0">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between pb-1 border-b border-gray-100">
-        <div className="min-w-0">
-          <div className="flex items-center gap-2 text-blue-600 mb-1">
-            <Wallet className="h-4 w-4" />
-            <span className="text-xs font-semibold uppercase tracking-wide">
-              Staff
-            </span>
-          </div>
-          <h1 className="text-2xl md:text-3xl font-bold text-gray-900 tracking-tight">
-            Salaries
-          </h1>
-          <p className="text-sm text-gray-600 mt-0.5">
-            Record monthly pay, track paid vs unpaid, and export payroll history
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button
-            type="button"
-            variant="outline"
-            className="h-9"
-            onClick={handleExport}
-          >
-            Export Excel
-          </Button>
-          <Button className="h-9" onClick={openCreate}>
-            <Plus className="h-4 w-4 mr-2" />
-            Add Salary
-          </Button>
-        </div>
-      </div>
-
-      <InventoryKpiGrid
-        columns={4}
-        loading={loading && rows.length === 0}
-        items={[
-          {
-            label: "Total payroll",
-            value: formatMoney(summary.totalAmount),
-            icon: DollarSign,
-            hint: `${rows.length} record${rows.length === 1 ? "" : "s"} in view`,
-          },
-          {
-            label: "Paid",
-            value: formatMoney(summary.paidAmount),
-            icon: CheckCircle2,
-            tone: "success",
-            hint: `${summary.paidCount} paid`,
-            onClick: () => {
-              setPaidFilter("paid");
-              setPage(1);
-            },
-          },
-          {
-            label: "Unpaid",
-            value: formatMoney(summary.unpaidAmount),
-            icon: XCircle,
-            tone: "danger",
-            hint: `${summary.unpaidCount} unpaid`,
-            onClick: () => {
-              setPaidFilter("unpaid");
-              setPage(1);
-            },
-          },
-          {
-            label: "Employees listed",
-            value: new Set(rows.map((r) => r.employee_id)).size.toLocaleString(),
-            icon: Users,
-            hint: "Distinct staff in current filters",
-          },
-        ]}
-      />
-
-      <div className="flex flex-col gap-3">
-        <div className="flex flex-wrap gap-2">
-          {paidChips.map((chip) => (
-            <button
-              key={chip.key}
-              type="button"
-              onClick={() => {
-                setPaidFilter(chip.key);
-                setPage(1);
-              }}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
-                paidFilter === chip.key
-                  ? "border-blue-300 bg-blue-50 text-blue-800"
-                  : "border-gray-200 bg-white text-gray-700 hover:border-gray-300",
-              )}
-            >
-              {chip.label}
-              <span className="tabular-nums text-gray-500">{chip.count}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="flex flex-col xl:flex-row gap-2 xl:items-center">
-          <div className="relative flex-1 max-w-md">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
-            <Input
-              placeholder="Search employee name or code"
-              value={search}
-              onChange={(e) => {
-                setSearch(e.target.value);
-                setPage(1);
-              }}
-              className="pl-10 h-9"
-            />
-          </div>
-          <Select
-            value={monthFilter}
-            onValueChange={(v) => {
-              setMonthFilter(v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="h-9 w-full sm:w-[140px] text-sm">
-              <SelectValue placeholder="Month" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All months</SelectItem>
-              {MONTHS.map((m, i) => (
-                <SelectItem key={m} value={String(i + 1)}>
-                  {m}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={yearFilter}
-            onValueChange={(v) => {
-              setYearFilter(v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="h-9 w-full sm:w-[120px] text-sm">
-              <SelectValue placeholder="Year" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All years</SelectItem>
-              {YEARS.map((y) => (
-                <SelectItem key={y} value={String(y)}>
-                  {y}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={employeeFilter}
-            onValueChange={(v) => {
-              setEmployeeFilter(v);
-              setPage(1);
-            }}
-          >
-            <SelectTrigger className="h-9 w-full sm:w-[180px] text-sm">
-              <SelectValue placeholder="Employee" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All employees</SelectItem>
-              {employees.map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          {hasFilters && (
+    <>
+      <PageHeader
+        title="Salaries"
+        description="Record monthly pay, track paid vs unpaid, and export payroll history"
+        actions={
+          <>
             <Button
-              type="button"
               variant="outline"
               size="sm"
-              className="h-9 text-red-600 border-red-200 hover:bg-red-50"
-              onClick={clearFilters}
+              onClick={() => refetch()}
+              disabled={isRefreshing}
+              title="Refresh"
             >
-              <X className="h-3.5 w-3.5 mr-1.5" />
-              Clear
+              <RefreshCcw
+                className={cn("h-4 w-4", isRefreshing && "animate-spin")}
+              />
             </Button>
-          )}
-          <div className="flex items-center gap-1 xl:ml-auto border border-gray-200 rounded-md p-0.5 bg-white">
-            <Button
-              type="button"
-              size="sm"
-              variant={viewMode === "table" ? "secondary" : "ghost"}
-              className="h-8 px-2.5"
-              onClick={() => setViewMode("table")}
+            <Button variant="outline" size="sm" onClick={handleExport}>
+              Export Excel
+            </Button>
+            <Button size="sm" onClick={openCreate}>
+              <Plus className="mr-1.5 h-4 w-4" />
+              Add salary
+            </Button>
+          </>
+        }
+      />
+
+      <PageBody className="space-y-5">
+        <InventoryKpiGrid
+          columns={4}
+          loading={statsLoading}
+          items={[
+            {
+              label: "Total payroll",
+              value: formatMoney(summary.totalAmount),
+              icon: DollarSign,
+              hint: `${directoryTotal} record${directoryTotal === 1 ? "" : "s"} in period`,
+            },
+            {
+              label: "Paid",
+              value: formatMoney(summary.paidAmount),
+              icon: CheckCircle2,
+              tone: "success",
+              hint: `${summary.paidCount} paid`,
+              onClick: () => {
+                setPaidFilter("paid");
+                setPage(1);
+              },
+            },
+            {
+              label: "Unpaid",
+              value: formatMoney(summary.unpaidAmount),
+              icon: XCircle,
+              tone: "danger",
+              hint: `${summary.unpaidCount} unpaid`,
+              onClick: () => {
+                setPaidFilter("unpaid");
+                setPage(1);
+              },
+            },
+            {
+              label: "Employees listed",
+              value: new Set(
+                (rows as SalaryRecord[]).map((r) => r.employee_id),
+              ).size.toLocaleString(),
+              icon: Users,
+              hint: "Distinct staff in current filters",
+            },
+          ]}
+        />
+
+        <div className="flex flex-col gap-3">
+          <div className="flex flex-wrap gap-2">
+            {paidChips.map((chip) => (
+              <button
+                key={chip.key}
+                type="button"
+                onClick={() => {
+                  setPaidFilter(chip.key);
+                  setPage(1);
+                }}
+                className={cn(
+                  "inline-flex items-center gap-1.5 rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                  paidFilter === chip.key
+                    ? "border-primary bg-primary/10 text-primary"
+                    : "border-border bg-background text-foreground hover:bg-muted/50",
+                )}
+              >
+                {chip.label}
+                {statsLoading ? (
+                  <span className="inline-block h-3 w-5 animate-pulse rounded-full bg-muted" />
+                ) : (
+                  <span className="nums text-muted-foreground">{chip.count}</span>
+                )}
+              </button>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-2 xl:flex-row xl:flex-wrap xl:items-center">
+            <div className="relative max-w-md min-w-0 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                placeholder="Search employee name or code"
+                value={search}
+                onChange={(e) => {
+                  setSearch(e.target.value);
+                  setPage(1);
+                }}
+                className="h-9 pl-9"
+              />
+            </div>
+            <Select
+              value={monthFilter}
+              onValueChange={(v) => {
+                setMonthFilter(v);
+                setPage(1);
+              }}
             >
-              <List className="h-4 w-4" />
-            </Button>
-            <Button
-              type="button"
-              size="sm"
-              variant={viewMode === "grid" ? "secondary" : "ghost"}
-              className="h-8 px-2.5"
-              onClick={() => setViewMode("grid")}
+              <SelectTrigger className="h-9 w-full min-w-0 text-sm sm:w-[140px]">
+                <SelectValue placeholder="Month" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All months</SelectItem>
+                {MONTHS.map((m, i) => (
+                  <SelectItem key={m} value={String(i + 1)}>
+                    {m}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={yearFilter}
+              onValueChange={(v) => {
+                setYearFilter(v);
+                setPage(1);
+              }}
             >
-              <LayoutGrid className="h-4 w-4" />
-            </Button>
+              <SelectTrigger className="h-9 w-full min-w-0 text-sm sm:w-[120px]">
+                <SelectValue placeholder="Year" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All years</SelectItem>
+                {YEARS.map((y) => (
+                  <SelectItem key={y} value={String(y)}>
+                    {y}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select
+              value={employeeFilter}
+              onValueChange={(v) => {
+                setEmployeeFilter(v);
+                setPage(1);
+              }}
+            >
+              <SelectTrigger className="h-9 w-full min-w-0 text-sm sm:max-w-[220px] sm:w-[220px]">
+                <SelectValue placeholder="Employee" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All employees</SelectItem>
+                {employees.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {hasFilters && (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className="h-9"
+                onClick={clearFilters}
+              >
+                <X className="mr-1.5 h-3.5 w-3.5" />
+                Clear
+              </Button>
+            )}
+            <div className="flex items-center gap-1 rounded-md border border-border p-0.5 xl:ml-auto">
+              <Button
+                type="button"
+                size="sm"
+                variant={viewMode === "table" ? "secondary" : "ghost"}
+                className="h-8 px-2.5"
+                onClick={() => setViewMode("table")}
+              >
+                <List className="h-4 w-4" />
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={viewMode === "grid" ? "secondary" : "ghost"}
+                className="h-8 px-2.5"
+                onClick={() => setViewMode("grid")}
+              >
+                <LayoutGrid className="h-4 w-4" />
+              </Button>
+            </div>
           </div>
         </div>
-      </div>
 
-      <Card className="border-gray-200 shadow-sm">
-        <CardContent className="p-0">
-          <div className="px-4 py-3 border-b border-gray-100">
-            <p className="text-sm font-semibold text-gray-900">
-              Salary records{" "}
-              <span className="font-normal text-gray-500">({rows.length})</span>
-            </p>
-          </div>
-
-          {loading && rows.length === 0 ? (
-            <div className="py-16">
-              <PageLoader message="Loading salaries..." />
-            </div>
-          ) : rows.length === 0 ? (
-            <div className="text-center py-14 px-4">
-              <Wallet className="h-10 w-10 text-gray-300 mx-auto mb-3" />
-              <p className="text-sm font-medium text-gray-900">
-                No salary records found
+        <Card>
+          <CardContent className="p-0">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <p className="text-sm font-semibold text-foreground">
+                Salary records{" "}
+                <span className="font-normal text-muted-foreground">
+                  {isFirstLoad ? "(loading…)" : `(${listMeta.total})`}
+                </span>
               </p>
-              <p className="text-xs text-gray-500 mt-1">
-                {hasFilters
-                  ? "Try clearing filters or add a new salary entry."
-                  : "Add the first monthly salary for an employee."}
-              </p>
-              {!hasFilters && (
-                <Button className="mt-4 h-9" onClick={openCreate}>
-                  <Plus className="h-4 w-4 mr-2" />
-                  Add Salary
-                </Button>
+              {isRefreshing && (
+                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
               )}
             </div>
-          ) : viewMode === "table" ? (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="hover:bg-transparent">
-                    <TableHead>Employee</TableHead>
-                    <TableHead>Period</TableHead>
-                    <TableHead className="text-right">Amount</TableHead>
-                    <TableHead>Status</TableHead>
-                    <TableHead>Paid date</TableHead>
-                    <TableHead className="text-right min-w-[280px]">
-                      Actions
-                    </TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {pageRows.map((row) => (
-                    <TableRow key={row.id} className="hover:bg-gray-50/80">
-                      <TableCell>
-                        <div className="min-w-0">
-                          <p className="font-medium text-gray-900">
-                            {row.employee?.name || "—"}
-                          </p>
-                          <p className="text-xs text-gray-500 font-mono">
-                            {row.employee?.employee_code || "—"}
-                            {row.employee?.employee_type?.name
-                              ? ` · ${row.employee.employee_type.name}`
-                              : ""}
-                          </p>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm whitespace-nowrap">
-                        {formatPeriod(row.month, row.year)}
-                      </TableCell>
-                      <TableCell className="text-right tabular-nums font-semibold">
-                        {formatMoney(row.amount)}
-                      </TableCell>
-                      <TableCell>
-                        <Badge
-                          variant="outline"
-                          className={
-                            row.is_paid
-                              ? "bg-green-100 text-green-800 border-green-200"
-                              : "bg-amber-50 text-amber-800 border-amber-200"
-                          }
-                        >
-                          {row.is_paid ? "Paid" : "Unpaid"}
-                        </Badge>
-                      </TableCell>
-                      <TableCell className="text-sm text-gray-600 whitespace-nowrap">
-                        {formatDate(row.paid_date)}
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex justify-end gap-1.5 flex-wrap">
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 px-2.5 text-xs"
-                            onClick={() => openDetail(row)}
-                          >
-                            View
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 px-2.5 text-xs"
-                            onClick={() => openEdit(row)}
-                          >
-                            Edit
-                          </Button>
-                          {row.is_paid ? (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-8 px-2.5 text-xs"
-                              disabled={actionId === row.id}
-                              onClick={() => handleMarkUnpaid(row)}
-                            >
-                              {actionId === row.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                "Mark unpaid"
-                              )}
-                            </Button>
-                          ) : (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              className="h-8 px-2.5 text-xs"
-                              disabled={actionId === row.id}
-                              onClick={() => handleMarkPaid(row)}
-                            >
-                              {actionId === row.id ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                "Mark paid"
-                              )}
-                            </Button>
-                          )}
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-8 px-2.5 text-xs text-red-600"
-                            onClick={() => setDeleteTarget(row)}
-                          >
-                            Delete
-                          </Button>
-                        </div>
-                      </TableCell>
+
+            {isFirstLoad ? (
+              <div className="space-y-2 p-4">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="h-11 w-full" />
+                ))}
+              </div>
+            ) : rows.length === 0 ? (
+              <div className="m-4 flex flex-col items-center gap-2 rounded-lg border border-dashed py-12">
+                <Wallet className="h-8 w-8 text-muted-foreground/50" />
+                <p className="text-sm text-muted-foreground">
+                  No salary records found
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  {hasFilters
+                    ? "Try clearing filters or add a new salary entry."
+                    : "Add the first monthly salary for an employee."}
+                </p>
+              </div>
+            ) : viewMode === "table" ? (
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-xs uppercase tracking-wide">
+                        Employee
+                      </TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">
+                        Period
+                      </TableHead>
+                      <TableHead className="text-right text-xs uppercase tracking-wide">
+                        Amount
+                      </TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">
+                        Status
+                      </TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">
+                        Paid date
+                      </TableHead>
+                      <TableHead className="min-w-[280px] text-right text-xs uppercase tracking-wide">
+                        Actions
+                      </TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-3 p-4">
-              {pageRows.map((row) => (
-                <div
-                  key={row.id}
-                  className="rounded-lg border border-gray-200 bg-white p-4 space-y-3"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-semibold text-gray-900 truncate">
-                        {row.employee?.name || "—"}
-                      </p>
-                      <p className="text-xs text-gray-500 mt-0.5">
-                        {formatPeriod(row.month, row.year)}
-                      </p>
+                  </TableHeader>
+                  <TableBody>
+                    {pageRows.map((row) => (
+                      <TableRow key={row.id} className="h-11 hover:bg-muted/50">
+                        <TableCell>
+                          <div className="min-w-0">
+                            <p className="font-medium text-foreground">
+                              {row.employee?.name || "—"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">
+                              {row.employee?.employee_code || "—"}
+                              {row.employee?.employee_type?.name
+                                ? ` · ${row.employee.employee_type.name}`
+                                : ""}
+                            </p>
+                          </div>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm">
+                          {formatPeriod(row.month, row.year)}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold nums">
+                          {formatMoney(row.amount)}
+                        </TableCell>
+                        <TableCell>
+                          <Badge
+                            variant="outline"
+                            className={
+                              row.is_paid
+                                ? "border-green-200 bg-green-100 text-green-800"
+                                : "border-amber-200 bg-amber-50 text-amber-800"
+                            }
+                          >
+                            {row.is_paid ? "Paid" : "Unpaid"}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="whitespace-nowrap text-sm text-muted-foreground">
+                          {formatDate(row.paid_date)}
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex flex-wrap justify-end gap-1.5">
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 px-2.5 text-xs"
+                              onClick={() => openDetail(row)}
+                            >
+                              View
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 px-2.5 text-xs"
+                              onClick={() => openEdit(row)}
+                            >
+                              Edit
+                            </Button>
+                            {row.is_paid ? (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2.5 text-xs"
+                                disabled={actionId === row.id}
+                                onClick={() => handleMarkUnpaid(row)}
+                              >
+                                {actionId === row.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  "Mark unpaid"
+                                )}
+                              </Button>
+                            ) : (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2.5 text-xs"
+                                disabled={actionId === row.id}
+                                onClick={() => handleMarkPaid(row)}
+                              >
+                                {actionId === row.id ? (
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  "Mark paid"
+                                )}
+                              </Button>
+                            )}
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="h-8 px-2.5 text-xs text-destructive hover:text-destructive"
+                              onClick={() => setDeleteTarget(row)}
+                            >
+                              Delete
+                            </Button>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">
+                {pageRows.map((row) => (
+                  <div
+                    key={row.id}
+                    className="space-y-3 rounded-lg border border-border bg-background p-4"
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="min-w-0">
+                        <p className="truncate font-semibold text-foreground">
+                          {row.employee?.name || "—"}
+                        </p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {formatPeriod(row.month, row.year)}
+                        </p>
+                      </div>
+                      <Badge
+                        variant="outline"
+                        className={
+                          row.is_paid
+                            ? "border-green-200 bg-green-100 text-green-800"
+                            : "border-amber-200 bg-amber-50 text-amber-800"
+                        }
+                      >
+                        {row.is_paid ? "Paid" : "Unpaid"}
+                      </Badge>
                     </div>
-                    <Badge
-                      variant="outline"
-                      className={
-                        row.is_paid
-                          ? "bg-green-100 text-green-800 border-green-200"
-                          : "bg-amber-50 text-amber-800 border-amber-200"
-                      }
-                    >
-                      {row.is_paid ? "Paid" : "Unpaid"}
-                    </Badge>
-                  </div>
-                  <p className="text-lg font-bold tabular-nums">
-                    {formatMoney(row.amount)}
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() => openDetail(row)}
-                    >
-                      View
-                    </Button>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="h-8 text-xs"
-                      onClick={() => openEdit(row)}
-                    >
-                      Edit
-                    </Button>
-                    {!row.is_paid && (
+                    <p className="text-lg font-bold nums">
+                      {formatMoney(row.amount)}
+                    </p>
+                    <div className="flex flex-wrap gap-1.5">
                       <Button
                         size="sm"
                         variant="outline"
                         className="h-8 text-xs"
-                        onClick={() => handleMarkPaid(row)}
+                        onClick={() => openDetail(row)}
                       >
-                        Mark paid
+                        View
                       </Button>
-                    )}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {listMeta.total > PAGE_SIZE && (
-            <div className="flex items-center justify-between gap-3 px-4 py-3 border-t border-gray-100">
-              <p className="text-xs text-gray-500">
-                Page {pageSafe} of {totalPages}
-              </p>
-              <div className="flex gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8"
-                  disabled={pageSafe <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}
-                >
-                  Previous
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-8"
-                  disabled={pageSafe >= totalPages}
-                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                >
-                  Next
-                </Button>
-              </div>
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Create / Edit */}
-      <Dialog open={formOpen} onOpenChange={setFormOpen}>
-        <DialogContent className={dialogClass}>
-          <DialogHeader className="space-y-0">
-            <DialogTitle className="text-base font-semibold text-gray-900">
-              {editing ? "Edit Salary" : "Add Salary"}
-            </DialogTitle>
-          </DialogHeader>
-
-          <div className="space-y-4">
-            <div className="space-y-1">
-              <Label className={fieldLabel}>
-                Employee <span className="text-red-500">*</span>
-              </Label>
-              {metaLoading ? (
-                <div className="h-9 rounded-md border border-gray-200 bg-gray-50 flex items-center px-3 text-xs text-gray-500">
-                  Loading employees…
-                </div>
-              ) : (
-                <Select
-                  value={form.employee_id}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, employee_id: v }))
-                  }
-                >
-                  <SelectTrigger className={fieldControl}>
-                    <SelectValue placeholder="Select employee" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {employees.map((e) => (
-                      <SelectItem key={e.id} value={e.id}>
-                        {e.name}
-                        {e.employee_code ? ` (${e.employee_code})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
-
-            <div className="grid grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <Label className={fieldLabel}>Month</Label>
-                <Select
-                  value={String(form.month)}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, month: Number(v) }))
-                  }
-                >
-                  <SelectTrigger className={fieldControl}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MONTHS.map((m, i) => (
-                      <SelectItem key={m} value={String(i + 1)}>
-                        {m}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label className={fieldLabel}>Year</Label>
-                <Select
-                  value={String(form.year)}
-                  onValueChange={(v) =>
-                    setForm((f) => ({ ...f, year: Number(v) }))
-                  }
-                >
-                  <SelectTrigger className={fieldControl}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {YEARS.map((y) => (
-                      <SelectItem key={y} value={String(y)}>
-                        {y}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-
-            <div className="space-y-1">
-              <Label className={fieldLabel}>
-                Amount <span className="text-red-500">*</span>
-              </Label>
-              <Input
-                type="number"
-                min="0"
-                step="0.01"
-                value={form.amount}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, amount: e.target.value }))
-                }
-                placeholder="0.00"
-                className={fieldControl}
-              />
-            </div>
-
-            <div className="flex items-center justify-between rounded-md border border-gray-200 px-3 py-2.5">
-              <div>
-                <p className="text-xs font-semibold text-gray-900">
-                  Mark as paid
-                </p>
-                <p className="text-[11px] text-gray-500">
-                  Turn on if payment was already made
-                </p>
-              </div>
-              <Switch
-                checked={form.is_paid}
-                onCheckedChange={(checked) =>
-                  setForm((f) => ({
-                    ...f,
-                    is_paid: checked,
-                    paid_date: checked ? f.paid_date || new Date() : undefined,
-                  }))
-                }
-              />
-            </div>
-
-            {form.is_paid && (
-              <div className="space-y-1">
-                <Label className={fieldLabel}>Paid date</Label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className={cn(
-                        fieldControl,
-                        "w-full justify-start font-normal px-3",
-                        !form.paid_date && "text-muted-foreground",
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        className="h-8 text-xs"
+                        onClick={() => openEdit(row)}
+                      >
+                        Edit
+                      </Button>
+                      {!row.is_paid && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 text-xs"
+                          disabled={actionId === row.id}
+                          onClick={() => handleMarkPaid(row)}
+                        >
+                          Mark paid
+                        </Button>
                       )}
-                    >
-                      <CalendarIcon className="mr-2 h-3.5 w-3.5 text-gray-500" />
-                      {form.paid_date
-                        ? format(form.paid_date, "PPP")
-                        : "Pick date"}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-auto p-0" align="start">
-                    <Calendar
-                      mode="single"
-                      selected={form.paid_date}
-                      onSelect={(d) =>
-                        setForm((f) => ({ ...f, paid_date: d }))
-                      }
-                      initialFocus
-                    />
-                  </PopoverContent>
-                </Popover>
+                    </div>
+                  </div>
+                ))}
               </div>
             )}
 
-            <div className="space-y-1">
-              <Label className={fieldLabel}>Notes</Label>
-              <Textarea
-                value={form.notes}
-                onChange={(e) =>
-                  setForm((f) => ({ ...f, notes: e.target.value }))
-                }
-                placeholder="Optional notes"
-                className="min-h-[72px] text-sm"
-              />
-            </div>
-
-            {formError && (
-              <p className="text-xs text-red-600" role="alert">
-                {formError}
-              </p>
+            {listMeta.total > PAGE_SIZE && (
+              <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+                <p className="text-xs text-muted-foreground">
+                  Page {pageSafe} of {totalPages}
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    disabled={pageSafe <= 1}
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  >
+                    Previous
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    className="h-8"
+                    disabled={pageSafe >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Next
+                  </Button>
+                </div>
+              </div>
             )}
+          </CardContent>
+        </Card>
+      </PageBody>
 
-            <LoadingButton
-              onClick={handleSubmit}
-              loading={submitting}
-              className="h-10 w-full"
-              disabled={submitting}
+      {/* Create / Edit — 7 fields (employee, month, year, amount, paid toggle,
+          paid date, notes), so a DetailSheet with the form in the body. */}
+      <DetailSheet
+        open={formOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setFormOpen(false);
+            setEditing(null);
+            setFormError("");
+          }
+        }}
+        size="lg"
+      >
+        <DetailSheetHeader
+          title={editing ? "Edit salary" : "Add salary"}
+          subtitle="Monthly pay record for an employee"
+          icon={<Wallet className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-4">
+          <div className="space-y-1">
+            <Label className={fieldLabel}>
+              Employee <span className="text-destructive">*</span>
+            </Label>
+            <Select
+              value={form.employee_id}
+              onValueChange={(v) => setForm((f) => ({ ...f, employee_id: v }))}
             >
-              {editing ? "Update Salary" : "Create Salary"}
-            </LoadingButton>
+              <SelectTrigger className={fieldControl}>
+                <SelectValue placeholder="Select employee" />
+              </SelectTrigger>
+              <SelectContent>
+                {employees.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.name}
+                    {e.employee_code ? ` (${e.employee_code})` : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
-        </DialogContent>
-      </Dialog>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className={fieldLabel}>Month</Label>
+              <Select
+                value={String(form.month)}
+                onValueChange={(v) =>
+                  setForm((f) => ({ ...f, month: Number(v) }))
+                }
+              >
+                <SelectTrigger className={fieldControl}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {MONTHS.map((m, i) => (
+                    <SelectItem key={m} value={String(i + 1)}>
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label className={fieldLabel}>Year</Label>
+              <Select
+                value={String(form.year)}
+                onValueChange={(v) => setForm((f) => ({ ...f, year: Number(v) }))}
+              >
+                <SelectTrigger className={fieldControl}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {YEARS.map((y) => (
+                    <SelectItem key={y} value={String(y)}>
+                      {y}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-1">
+            <Label className={fieldLabel}>
+              Amount <span className="text-destructive">*</span>
+            </Label>
+            <Input
+              type="number"
+              min="0"
+              step="0.01"
+              value={form.amount}
+              onChange={(e) =>
+                setForm((f) => ({ ...f, amount: e.target.value }))
+              }
+              placeholder="0.00"
+              className={cn(fieldControl, "nums")}
+            />
+          </div>
+
+          <div className="flex items-center justify-between rounded-md border border-border px-3 py-2.5">
+            <div>
+              <p className="text-xs font-semibold text-foreground">
+                Mark as paid
+              </p>
+              <p className="text-xs text-muted-foreground">
+                Turn on if payment was already made
+              </p>
+            </div>
+            <Switch
+              checked={form.is_paid}
+              onCheckedChange={(checked) =>
+                setForm((f) => ({
+                  ...f,
+                  is_paid: checked,
+                  paid_date: checked ? f.paid_date || new Date() : undefined,
+                }))
+              }
+            />
+          </div>
+
+          {form.is_paid && (
+            <div className="space-y-1">
+              <Label className={fieldLabel}>Paid date</Label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className={cn(
+                      fieldControl,
+                      "w-full justify-start px-3 font-normal",
+                      !form.paid_date && "text-muted-foreground",
+                    )}
+                  >
+                    <CalendarIcon className="mr-2 h-3.5 w-3.5 text-muted-foreground" />
+                    {form.paid_date
+                      ? format(form.paid_date, "PPP")
+                      : "Pick date"}
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-auto p-0" align="start">
+                  <Calendar
+                    mode="single"
+                    selected={form.paid_date}
+                    onSelect={(d) => setForm((f) => ({ ...f, paid_date: d }))}
+                    initialFocus
+                  />
+                </PopoverContent>
+              </Popover>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <Label className={fieldLabel}>Notes</Label>
+            <Textarea
+              value={form.notes}
+              onChange={(e) => setForm((f) => ({ ...f, notes: e.target.value }))}
+              placeholder="Optional notes"
+              className="min-h-[72px] text-sm"
+            />
+          </div>
+
+          {formError && (
+            <p className="text-xs text-destructive" role="alert">
+              {formError}
+            </p>
+          )}
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button
+            variant="outline"
+            onClick={() => setFormOpen(false)}
+            disabled={submitting}
+          >
+            Cancel
+          </Button>
+          <LoadingButton
+            onClick={handleSubmit}
+            loading={submitting}
+            disabled={submitting}
+          >
+            {editing ? "Update salary" : "Create salary"}
+          </LoadingButton>
+        </DetailSheetFooter>
+      </DetailSheet>
 
       {/* Detail */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="w-[min(96vw,560px)] max-w-[560px] sm:max-w-[560px]">
+      <DetailSheet
+        open={detailOpen}
+        onOpenChange={(open) => {
+          if (!open) {
+            setDetailOpen(false);
+            setDetail(null);
+          }
+        }}
+        size="md"
+      >
+        <DetailSheetHeader
+          title={detail?.employee?.name || "Salary"}
+          subtitle={
+            detail ? formatPeriod(detail.month, detail.year) : undefined
+          }
+          icon={<Wallet className="h-5 w-5" />}
+        />
+        <DetailSheetBody className="space-y-4">
           {detail && (
-            <div className="space-y-4">
-              <DialogHeader className="text-left space-y-2">
-                <DialogTitle className="text-xl font-bold text-gray-900">
-                  {detail.employee?.name || "Salary"}
-                </DialogTitle>
-                <DialogDescription className="flex flex-wrap gap-2">
-                  <Badge variant="outline" className="font-normal">
-                    {formatPeriod(detail.month, detail.year)}
-                  </Badge>
-                  <Badge
-                    variant="outline"
-                    className={
-                      detail.is_paid
-                        ? "bg-green-50 text-green-700 border-green-200"
-                        : "bg-amber-50 text-amber-800 border-amber-200"
-                    }
-                  >
-                    {detail.is_paid ? "Paid" : "Unpaid"}
-                  </Badge>
-                </DialogDescription>
-              </DialogHeader>
+            <>
+              <div className="flex flex-wrap gap-2">
+                <Badge variant="outline" className="font-normal">
+                  {formatPeriod(detail.month, detail.year)}
+                </Badge>
+                <Badge
+                  variant="outline"
+                  className={
+                    detail.is_paid
+                      ? "border-green-200 bg-green-50 text-green-700"
+                      : "border-amber-200 bg-amber-50 text-amber-800"
+                  }
+                >
+                  {detail.is_paid ? "Paid" : "Unpaid"}
+                </Badge>
+              </div>
 
-              <div className="rounded-lg border border-gray-200 p-4 space-y-2 text-sm">
+              <div className="space-y-2 rounded-lg border border-border p-4 text-sm">
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Code</span>
-                  <span className="font-mono text-xs">
+                  <span className="text-muted-foreground">Code</span>
+                  <span className="text-xs nums">
                     {detail.employee?.employee_code || "—"}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Designation</span>
+                  <span className="text-muted-foreground">Designation</span>
                   <span>{detail.employee?.employee_type?.name || "—"}</span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Department</span>
+                  <span className="text-muted-foreground">Department</span>
                   <span>{detail.employee?.department?.name || "—"}</span>
                 </div>
-                <div className="flex justify-between border-t border-gray-100 pt-2">
-                  <span className="text-gray-700 font-medium">Amount</span>
-                  <span className="font-bold tabular-nums">
+                <div className="flex justify-between border-t border-border pt-2">
+                  <span className="font-medium text-foreground">Amount</span>
+                  <span className="font-bold nums">
                     {formatMoney(detail.amount)}
                   </span>
                 </div>
                 <div className="flex justify-between">
-                  <span className="text-gray-500">Paid date</span>
+                  <span className="text-muted-foreground">Paid date</span>
                   <span>{formatDate(detail.paid_date)}</span>
                 </div>
                 {detail.notes && (
-                  <div className="pt-2 border-t border-gray-100">
-                    <p className="text-xs text-gray-500 mb-1">Notes</p>
-                    <p className="text-gray-800">{detail.notes}</p>
+                  <div className="border-t border-border pt-2">
+                    <p className="mb-1 text-xs text-muted-foreground">Notes</p>
+                    <p className="text-foreground">{detail.notes}</p>
                   </div>
                 )}
               </div>
-
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-9"
-                  onClick={() => {
-                    setDetailOpen(false);
-                    openEdit(detail);
-                  }}
-                >
-                  Edit
-                </Button>
-                {detail.is_paid ? (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-9"
-                    onClick={() => handleMarkUnpaid(detail)}
-                  >
-                    Mark unpaid
-                  </Button>
-                ) : (
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-9"
-                    onClick={() => handleMarkPaid(detail)}
-                  >
-                    Mark paid
-                  </Button>
-                )}
-                <Button
-                  size="sm"
-                  variant="outline"
-                  className="h-9 text-red-600"
-                  onClick={() => setDeleteTarget(detail)}
-                >
-                  Delete
-                </Button>
-              </div>
-            </div>
+            </>
           )}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          {detail && (
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setDetailOpen(false);
+                  openEdit(detail);
+                }}
+              >
+                Edit
+              </Button>
+              {detail.is_paid ? (
+                <Button
+                  variant="outline"
+                  disabled={actionId === detail.id}
+                  onClick={() => handleMarkUnpaid(detail)}
+                >
+                  Mark unpaid
+                </Button>
+              ) : (
+                <Button
+                  variant="outline"
+                  disabled={actionId === detail.id}
+                  onClick={() => handleMarkPaid(detail)}
+                >
+                  Mark paid
+                </Button>
+              )}
+              <Button
+                variant="outline"
+                className="text-destructive hover:text-destructive"
+                onClick={() => setDeleteTarget(detail)}
+              >
+                Delete
+              </Button>
+            </>
+          )}
+        </DetailSheetFooter>
+      </DetailSheet>
 
       <AlertDialog
         open={!!deleteTarget}
@@ -1235,12 +1236,12 @@ export function Salaries() {
                 handleDelete();
               }}
               disabled={deleting}
-              className="bg-red-600 hover:bg-red-700"
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {deleting ? (
                 <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  Deleting...
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
                 </>
               ) : (
                 "Delete"
@@ -1249,6 +1250,6 @@ export function Salaries() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-    </div>
+    </>
   );
 }

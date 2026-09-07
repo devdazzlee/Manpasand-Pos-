@@ -21,12 +21,11 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
 import {
   Plus,
   Truck,
@@ -1313,14 +1312,12 @@ export function Transfers() {
       </Card>
 
       {/* Detail dialog */}
-      <Dialog open={detailOpen} onOpenChange={setDetailOpen}>
-        <DialogContent className="w-[min(96vw,560px)] max-w-[560px] sm:max-w-[560px]">
-          <DialogHeader>
-            <DialogTitle className="text-base">Transfer detail</DialogTitle>
-            <DialogDescription className="text-xs">
-              {detailRow?.reference_no || "Movement record"}
-            </DialogDescription>
-          </DialogHeader>
+      <DetailSheet open={detailOpen} onOpenChange={setDetailOpen} size="md">
+        <DetailSheetHeader
+          title="Transfer detail"
+          subtitle={detailRow?.reference_no || "Movement record"}
+        />
+        <DetailSheetBody>
           {detailLoading && !detailRow ? (
             <div className="flex justify-center py-10">
               <Loader2 className="h-6 w-6 animate-spin text-gray-400" />
@@ -1390,8 +1387,13 @@ export function Transfers() {
               </div>
             </div>
           ) : null}
-        </DialogContent>
-      </Dialog>
+        </DetailSheetBody>
+        <DetailSheetFooter>
+          <Button variant="outline" onClick={() => setDetailOpen(false)}>
+            Close
+          </Button>
+        </DetailSheetFooter>
+      </DetailSheet>
     </div>
   );
 }

@@ -6,7 +6,6 @@ import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
 import { Badge } from "@/components/ui/badge"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -1655,6 +1654,13 @@ export default function Inventory() {
     setCurrentBranchStocks({})
   }
 
+  const closeProductForm = () => {
+    resetForm()
+    setEditingProduct(null)
+    setIsAddDialogOpen(false)
+    setIsEditDialogOpen(false)
+  }
+
   const openEditDialog = async (product: Product) => {
     // Open the modal in a "loading" state — we DON'T show the form until the
     // canonical record arrives, so the user never sees fields flash from
@@ -1901,6 +1907,73 @@ export default function Inventory() {
     </div>
   )
 
+  if (isAddDialogOpen || isEditDialogOpen) {
+    const isEdit = isEditDialogOpen
+    const formBusy = (isEdit && isLoadingEditProduct) || isFormDropdownsLoading
+    return (
+      <div className="p-4 md:p-6 space-y-4 min-w-0">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between pb-3 border-b">
+          <div>
+            <h1 className="text-2xl font-bold tracking-tight">
+              {isEdit ? "Edit product" : "Add product"}
+            </h1>
+            <p className="text-sm text-muted-foreground mt-1">
+              {isEdit ? "Update catalog details and branch stock." : "Create a product, then return to the catalog."}
+            </p>
+          </div>
+          <Button variant="outline" onClick={closeProductForm} disabled={formLoading}>
+            Cancel
+          </Button>
+        </div>
+        {formBusy ? (
+          <ProductFormSkeleton
+            message={isLoadingEditProduct ? "Loading product details…" : "Preparing form…"}
+          />
+        ) : dropdownsLoadError ? (
+          <Alert variant="destructive">
+            <AlertTriangle className="h-4 w-4" />
+            <AlertTitle>Could not load form options</AlertTitle>
+            <AlertDescription className="mt-3 flex flex-col items-start gap-3">
+              <span>{dropdownsLoadError}</span>
+              <Button type="button" variant="outline" size="sm" onClick={loadDropdownData}>
+                <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
+                Try again
+              </Button>
+            </AlertDescription>
+          </Alert>
+        ) : (
+          <ProductForm
+            onSubmit={isEdit ? handleUpdateProduct : handleCreateProduct}
+            loading={formLoading}
+            submitText={isEdit ? "Update Product" : "Create Product"}
+            formData={formData}
+            formErrors={formErrors}
+            updateFormData={updateFormData}
+            units={units}
+            categories={categoryOptions}
+            subcategories={subcategories}
+            taxes={taxes}
+            suppliers={suppliers}
+            brands={brands}
+            colors={colors}
+            sizes={sizes}
+            imagePreviews={imagePreviews}
+            handleRemoveImage={handleRemoveImage}
+            fileInputRef={fileInputRef}
+            handleImageSelect={handleImageSelect}
+            stockQtyByBranch={stockQtyByBranch}
+            setStockQtyByBranch={setStockQtyByBranch}
+            stockBranchIds={stockBranchIds}
+            setStockBranchIds={setStockBranchIds}
+            branchOptions={posBranches}
+            stockLabel={isEdit ? "Add Stock" : "Initial Stock"}
+            currentBranchStocks={currentBranchStocks}
+          />
+        )}
+      </div>
+    )
+  }
+
   return (
     <div className="p-4 md:p-6 space-y-5 min-w-0">
       {/* Header */}
@@ -1926,80 +1999,18 @@ export default function Inventory() {
           </p>
         </div>
 
-        <Dialog
-          open={isAddDialogOpen}
-          onOpenChange={(open) => {
-            if (open) {
-              resetForm()
-              setEditingProduct(null)
-              loadDropdownData()
-            }
-            setIsAddDialogOpen(open)
+        <Button
+          className="self-start sm:self-auto bg-gray-900 hover:bg-gray-800"
+          onClick={() => {
+            resetForm()
+            setEditingProduct(null)
+            loadDropdownData()
+            setIsAddDialogOpen(true)
           }}
         >
-          <DialogTrigger asChild>
-            <Button
-              className="self-start sm:self-auto bg-gray-900 hover:bg-gray-800"
-              onClick={() => {
-                resetForm()
-                setEditingProduct(null)
-              }}
-            >
-              <Plus className="h-4 w-4 mr-2" />
-              Add Product
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Add New Product</DialogTitle>
-            </DialogHeader>
-            {isFormDropdownsLoading ? (
-              <ProductFormSkeleton />
-            ) : dropdownsLoadError ? (
-              <div className="py-8">
-                <Alert variant="destructive">
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertTitle>Could not load form options</AlertTitle>
-                  <AlertDescription className="mt-3 flex flex-col items-start gap-3">
-                    <span>{dropdownsLoadError}</span>
-                    <Button type="button" variant="outline" size="sm" onClick={loadDropdownData}>
-                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                      Try again
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              </div>
-            ) : (
-              <ProductForm
-                onSubmit={handleCreateProduct}
-                loading={formLoading}
-                submitText="Create Product"
-                formData={formData}
-                formErrors={formErrors}
-                updateFormData={updateFormData}
-                units={units}
-                categories={categoryOptions}
-                subcategories={subcategories}
-                taxes={taxes}
-                suppliers={suppliers}
-                brands={brands}
-                colors={colors}
-                sizes={sizes}
-                imagePreviews={imagePreviews}
-                handleRemoveImage={handleRemoveImage}
-                fileInputRef={fileInputRef}
-                handleImageSelect={handleImageSelect}
-                stockQtyByBranch={stockQtyByBranch}
-                setStockQtyByBranch={setStockQtyByBranch}
-                stockBranchIds={stockBranchIds}
-                setStockBranchIds={setStockBranchIds}
-                branchOptions={posBranches}
-                stockLabel="Initial Stock"
-                currentBranchStocks={currentBranchStocks}
-              />
-            )}
-          </DialogContent>
-        </Dialog>
+          <Plus className="h-4 w-4 mr-2" />
+          Add Product
+        </Button>
       </div>
 
       {/* KPI cards */}
@@ -2559,77 +2570,6 @@ export default function Inventory() {
           )}
         </CardContent>
       </Card>
-
-        {/* Edit Product Dialog */}
-        <Dialog
-          open={isEditDialogOpen}
-          onOpenChange={(open) => {
-            // Wipe form + editingProduct when the Edit dialog closes (Cancel,
-            // ESC, X, click-outside) so the next Add dialog opens empty.
-            if (!open) {
-              resetForm()
-              setEditingProduct(null)
-            }
-            setIsEditDialogOpen(open)
-          }}
-        >
-          <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
-            <DialogHeader>
-              <DialogTitle>Edit Product</DialogTitle>
-            </DialogHeader>
-            {isLoadingEditProduct || isFormDropdownsLoading ? (
-              <ProductFormSkeleton
-                message={
-                  isLoadingEditProduct
-                    ? "Loading product details..."
-                    : "Preparing form..."
-                }
-              />
-            ) : dropdownsLoadError ? (
-              <div className="py-8">
-                <Alert variant="destructive">
-                  <AlertTriangle className="h-4 w-4" />
-                  <AlertTitle>Could not load form options</AlertTitle>
-                  <AlertDescription className="mt-3 flex flex-col items-start gap-3">
-                    <span>{dropdownsLoadError}</span>
-                    <Button type="button" variant="outline" size="sm" onClick={loadDropdownData}>
-                      <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                      Try again
-                    </Button>
-                  </AlertDescription>
-                </Alert>
-              </div>
-            ) : (
-              <ProductForm
-                onSubmit={handleUpdateProduct}
-                loading={formLoading}
-                submitText="Update Product"
-                formData={formData}
-                formErrors={formErrors}
-                updateFormData={updateFormData}
-                units={units}
-                categories={categoryOptions}
-                subcategories={subcategories}
-                taxes={taxes}
-                suppliers={suppliers}
-                brands={brands}
-                colors={colors}
-                sizes={sizes}
-                imagePreviews={imagePreviews}
-                handleRemoveImage={handleRemoveImage}
-                fileInputRef={fileInputRef}
-                handleImageSelect={handleImageSelect}
-                stockQtyByBranch={stockQtyByBranch}
-                setStockQtyByBranch={setStockQtyByBranch}
-                stockBranchIds={stockBranchIds}
-                setStockBranchIds={setStockBranchIds}
-                branchOptions={posBranches}
-                stockLabel="Add Stock"
-                currentBranchStocks={currentBranchStocks}
-              />
-            )}
-          </DialogContent>
-        </Dialog>
 
         {/* Delete-confirmation modal. We don't allow closing while the API
             call is in flight, otherwise the user could fire it twice. */}
