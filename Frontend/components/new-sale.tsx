@@ -64,11 +64,13 @@ import {
   shareReceiptOnWhatsApp,
   formatReceiptQtyParts,
 } from "@/lib/receipt";
-import apiClient from "@/lib/apiClient";
+import { mapApiProductToStoreProduct } from "@/lib/store";
 import { offlineAPIClient } from "@/lib/offline-api-client";
 import { offlineDB } from "@/lib/offline-db";
 import { syncManager } from "@/lib/offline-sync";
-import { usePosData } from "@/hooks/use-pos-data";
+import { useProducts } from "@/hooks/queries/use-products";
+import { useCategories } from "@/hooks/queries/use-categories";
+import { useCustomers } from "@/hooks/queries/use-customers";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import {
   formatMoneyDisplay,
@@ -169,6 +171,7 @@ interface CustomerSearchComboboxProps {
   loading?: boolean;
   value: string | null;
   onChange: (customerId: string | null) => void;
+  onSearch?: (query: string) => void;
   disabled?: boolean;
 }
 
@@ -177,6 +180,7 @@ function CustomerSearchCombobox({
   loading = false,
   value,
   onChange,
+  onSearch,
   disabled = false,
 }: CustomerSearchComboboxProps) {
   const [open, setOpen] = useState(false);
@@ -216,8 +220,11 @@ function CustomerSearchCombobox({
         className="w-[var(--radix-popover-trigger-width)] p-0"
         align="start"
       >
-        <Command>
-          <CommandInput placeholder="Search by name, phone, or email..." />
+        <Command shouldFilter={false}>
+          <CommandInput
+            placeholder="Search by name, phone, or email..."
+            onValueChange={(query) => onSearch?.(query)}
+          />
           <CommandList>
             <CommandEmpty>No customer found.</CommandEmpty>
             <CommandGroup>
@@ -409,6 +416,7 @@ export function NewSale() {
   // Track when user is actively interacting with other inputs (prevent auto-refocus)
   const userInteractionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isUserInteractingRef = useRef<boolean>(false);
+  const customerSearchTimerRef = useRef<number | null>(null);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(
     null
   );
@@ -439,40 +447,42 @@ export function NewSale() {
   const [showDiscountRow, setShowDiscountRow] = useState(false);
   const [priceEditLineId, setPriceEditLineId] = useState<string | null>(null);
 
-  // Global store with custom hook
+  // Debounced search terms — the queries below key off these, so React Query
+  // de-dupes, caches per term, and cancels the previous request automatically.
+  const [debouncedSearch, setDebouncedSearch] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
+
+  useEffect(() => {
+    if (isProcessingScanRef.current) return;
+    const delay = searchTerm.trim() ? 250 : 0;
+    const t = window.setTimeout(() => setDebouncedSearch(searchTerm.trim()), delay);
+    return () => window.clearTimeout(t);
+  }, [searchTerm]);
+
+  const { categories, isLoading: categoriesLoading } = useCategories({ withAll: true });
+
   const {
     products,
-    categories,
-    customers,
-    productsLoading,
-    categoriesLoading,
-    customersLoading,
-    isAnyLoading,
-    fetchProducts,
-    fetchCategories,
-    fetchCustomers,
-  } = usePosData();
-  // Fetch initial data and focus search input
+    isFirstLoad: productsLoading,
+    isRefreshing: productsRefreshing,
+  } = useProducts({
+    search: debouncedSearch || undefined,
+    categoryId: selectedCategory !== "all" ? selectedCategory : undefined,
+    isActive: true,
+    displayOnPos: true,
+    page: 1,
+    limit: 20,
+  });
+
+  const { customers, isLoading: customersLoading } = useCustomers({
+    search: customerSearch || undefined,
+    page: 1,
+    limit: 20,
+  });
+
+  // Clear any pending scan timeout on unmount.
   useEffect(() => {
-    let mounted = true;
-
-    const fetchData = async () => {
-      if (!mounted) return;
-
-      try {
-        await Promise.all([
-          fetchProducts(),
-          fetchCategories(),
-          fetchCustomers(),
-        ]);
-      } catch (error) {
-        // Error loading data - no toast shown
-      }
-    };
-
-    fetchData();
     return () => {
-      mounted = false;
       if (scanTimeoutRef.current) {
         clearTimeout(scanTimeoutRef.current);
         scanTimeoutRef.current = null;
@@ -1890,7 +1900,35 @@ export function NewSale() {
     }
   };
 
+  const lookupProductFromApi = async (code: string): Promise<Product | null> => {
+    try {
+      const res = await apiClient.get("/products", {
+        params: {
+          search: code,
+          limit: 20,
+          is_active: true,
+          display_on_pos: true,
+        },
+      });
+      const raw = Array.isArray(res.data?.data) ? res.data.data : [];
+      const mapped = raw.map(mapApiProductToStoreProduct) as Product[];
+      const key = code.toLowerCase().trim();
+      const exact = mapped.find((item) =>
+        [item.code, item.sku, item.barcode].some(
+          (value) => value?.toLowerCase().trim() === key,
+        ),
+      );
+      return exact || mapped[0] || null;
+    } catch {
+      return null;
+    }
+  };
+
   const handleScannerInput = (scannedValue: string) => {
+    void processScannerInput(scannedValue);
+  };
+
+  const processScannerInput = async (scannedValue: string) => {
     // Prevent duplicate processing of the same scan
     const trimmedValue = scannedValue.trim();
     
@@ -1936,6 +1974,11 @@ export function NewSale() {
     // 1. First try exact match on the full code (highest priority)
     product = findProductByBarcode(codeLower);
     console.log('Step 1 - Exact code match:', codeLower, 'Found:', product?.name || 'NOT FOUND');
+
+    if (!product) {
+      product = await lookupProductFromApi(productCode);
+      console.log('Step 1b - API lookup:', codeLower, 'Found:', product?.name || 'NOT FOUND');
+    }
     
     // 2. If not found and we have a price, try matching by price number in product name
     // This handles cases like "ROA432910-180" where "180" is in product name "Roasted Cashew Nuts (180)"
@@ -2237,6 +2280,14 @@ export function NewSale() {
                 loading={customersLoading}
                 value={selectedCustomer}
                 onChange={setSelectedCustomer}
+                onSearch={(query) => {
+                  if (customerSearchTimerRef.current) {
+                    window.clearTimeout(customerSearchTimerRef.current);
+                  }
+                  customerSearchTimerRef.current = window.setTimeout(() => {
+                    setCustomerSearch(query.trim());
+                  }, 250);
+                }}
                 disabled={paymentLoading}
               />
             </div>
@@ -2557,9 +2608,12 @@ export function NewSale() {
               </div>
             </div>
             <div className="mt-1.5 hidden flex-wrap items-center gap-2 text-sm text-gray-600 sm:mt-3 sm:flex">
-              <span>
+              <span className="flex items-center gap-1.5">
                 {filteredProducts.length} product{filteredProducts.length === 1 ? "" : "s"}
                 {selectedCategory !== "all" ? ` in ${selectedCategoryLabel}` : ""}
+                {productsRefreshing && (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
+                )}
               </span>
               {selectedCategory !== "all" && (
                 <Button
