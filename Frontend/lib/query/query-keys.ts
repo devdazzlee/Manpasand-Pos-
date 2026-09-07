@@ -56,6 +56,26 @@ export const qk = {
     stats: ["dashboard", "stats"] as const,
     recentSales: (params: ListParams = {}) => ["dashboard", "recent-sales", params] as const,
   },
+  brands: {
+    all: ["brands"] as const,
+    list: (params: ListParams = {}) => ["brands", "list", params] as const,
+  },
+  colors: {
+    all: ["colors"] as const,
+    list: (params: ListParams = {}) => ["colors", "list", params] as const,
+  },
+  sizes: {
+    all: ["sizes"] as const,
+    list: (params: ListParams = {}) => ["sizes", "list", params] as const,
+  },
+  units: {
+    all: ["units"] as const,
+    list: (params: ListParams = {}) => ["units", "list", params] as const,
+  },
+  subcategories: {
+    all: ["subcategories"] as const,
+    list: (params: ListParams = {}) => ["subcategories", "list", params] as const,
+  },
 } as const;
 
 /**
