@@ -647,6 +647,7 @@ model Customer {
   ref_contact_number String?
   credit_limit       Decimal?
   previous_credit_balance Decimal?     @default(0)
+  default_discount_percent Decimal?    @default(0)
   orders             Order[]
   sales              Sale[] // NEW: Link to sales
   hold_sales         HoldSale[]

@@ -11,6 +11,8 @@ import {
   updateCustomerByAdmin,
   getCustomerPurchases,
   getCustomerLedger,
+  getCustomerStatement,
+  getCustomerActivity,
   createCustomerPayment,
   deleteCustomerPayment,
 } from '../controllers/customer.controller';
@@ -65,6 +67,8 @@ router.put('/:customerId', validate(customerUpdateSchema), updateCustomerByAdmin
 router.delete('/:customerId', deleteCustomer);
 router.get('/:customerId/purchases', validate(getCustomerParamsSchema), getCustomerPurchases);
 router.get('/:customerId/ledger', validate(getCustomerParamsSchema), getCustomerLedger);
+router.get('/:customerId/statement', validate(getCustomerParamsSchema), getCustomerStatement);
+router.get('/:customerId/activity', validate(getCustomerParamsSchema), getCustomerActivity);
 router.post('/:customerId/payments', validate(createCustomerPaymentSchema), createCustomerPayment);
 router.delete('/:customerId/payments/:paymentId', validate(deleteCustomerPaymentSchema), deleteCustomerPayment);
 router.get('/:customerId', getCustomerById);

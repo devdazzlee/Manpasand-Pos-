@@ -454,6 +454,10 @@ export function NewSale() {
   const [globalDiscountValue, setGlobalDiscountValue] = useState<string>("");
   const [showDiscountRow, setShowDiscountRow] = useState(false);
   const [priceEditLineId, setPriceEditLineId] = useState<string | null>(null);
+  // True once the cashier edits the discount by hand — stops the customer's
+  // default discount from overwriting their change.
+  const discountTouchedRef = useRef(false);
+  const autoDiscountCustomerRef = useRef<string | null>(null);
 
   const [customerSearch, setCustomerSearch] = useState("");
 
@@ -483,6 +487,26 @@ export function NewSale() {
       }
     };
   }, []);
+
+  // Apply the selected customer's default discount automatically (overridable).
+  useEffect(() => {
+    if (discountTouchedRef.current) return;
+    const cust = selectedCustomer
+      ? customers.find((c) => c.id === selectedCustomer)
+      : null;
+    const pct = Number((cust as any)?.default_discount_percent) || 0;
+    if (pct > 0) {
+      setGlobalDiscountType("percentage");
+      setGlobalDiscountValue(String(pct));
+      setShowDiscountRow(true);
+      autoDiscountCustomerRef.current = selectedCustomer;
+    } else if (autoDiscountCustomerRef.current) {
+      // Previous customer's auto-discount no longer applies.
+      setGlobalDiscountValue("");
+      setShowDiscountRow(false);
+      autoDiscountCustomerRef.current = null;
+    }
+  }, [selectedCustomer, customers]);
 
   // Load cart duplicated from Sales History
   useEffect(() => {
@@ -1452,6 +1476,8 @@ export function NewSale() {
     setQuantityModes({});
     setGlobalDiscountValue("");
     setShowDiscountRow(false);
+    discountTouchedRef.current = false;
+    autoDiscountCustomerRef.current = null;
     setActiveCartLineId(null);
     setPriceEditLineId(null);
     activeCartLineIdRef.current = null;
@@ -1570,6 +1596,9 @@ export function NewSale() {
     setCompletedCustomerEmail("");
     setCart([]);
     setGlobalDiscountValue("");
+    setShowDiscountRow(false);
+    discountTouchedRef.current = false;
+    autoDiscountCustomerRef.current = null;
     setSelectedCustomer(null);
     if (searchInputRef.current) {
       searchInputRef.current.focus();
@@ -1906,6 +1935,9 @@ export function NewSale() {
         setTimeout(() => {
           setCart([]);
           setGlobalDiscountValue("");
+          setShowDiscountRow(false);
+          discountTouchedRef.current = false;
+          autoDiscountCustomerRef.current = null;
         }, 300);
 
         return true;
@@ -3353,7 +3385,10 @@ export function NewSale() {
                 {!showDiscountRow && globalDiscountAmount === 0 ? (
                   <button
                     type="button"
-                    onClick={() => setShowDiscountRow(true)}
+                    onClick={() => {
+                      discountTouchedRef.current = true;
+                      setShowDiscountRow(true);
+                    }}
                     className="text-[11px] font-medium text-blue-600 hover:text-blue-700"
                   >
                     + Add discount
@@ -3364,9 +3399,10 @@ export function NewSale() {
                     <div className="flex h-8 w-[9.5rem] shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/15">
                       <Select
                         value={globalDiscountType}
-                        onValueChange={(value) =>
-                          setGlobalDiscountType(value as "percentage" | "fixed")
-                        }
+                        onValueChange={(value) => {
+                          discountTouchedRef.current = true;
+                          setGlobalDiscountType(value as "percentage" | "fixed");
+                        }}
                       >
                         <SelectTrigger
                           data-discount-select="true"
@@ -3388,7 +3424,10 @@ export function NewSale() {
                         min="0"
                         placeholder="0"
                         value={globalDiscountValue}
-                        onChange={(e) => setGlobalDiscountValue(e.target.value)}
+                        onChange={(e) => {
+                          discountTouchedRef.current = true;
+                          setGlobalDiscountValue(e.target.value);
+                        }}
                         data-amount-input="true"
                         className="h-8 flex-1 rounded-none border-0 bg-transparent px-2.5 text-right text-xs font-medium tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
                       />

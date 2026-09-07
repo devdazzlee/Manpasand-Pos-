@@ -18,6 +18,15 @@ const optionalMoney = z.preprocess(
         .optional(),
 );
 
+const optionalPercent = z.preprocess(
+    (v) => (v === '' || v === null || v === undefined ? undefined : Number(v)),
+    z
+        .number({ invalid_type_error: 'Must be a valid number' })
+        .min(0, 'Discount cannot be negative')
+        .max(100, 'Discount cannot exceed 100%')
+        .optional(),
+);
+
 // Customer self-registration — only email is required (the password is
 // generated / sent separately in the existing flow).
 const cusRegisterationSchema = z.object({
@@ -49,6 +58,7 @@ const customerCreateByAdminSchema = z.object({
         billing_address: z.string().trim().optional(),
         credit_limit: optionalMoney,
         previous_credit_balance: optionalMoney,
+        default_discount_percent: optionalPercent,
         is_active: z.boolean().optional(),
     }),
 });
@@ -77,6 +87,12 @@ const customerUpdateSchema = z.object({
         previous_credit_balance: z
             .number()
             .nonnegative('Previous credit balance cannot be negative')
+            .nullable()
+            .optional(),
+        default_discount_percent: z
+            .number()
+            .min(0, 'Discount cannot be negative')
+            .max(100, 'Discount cannot exceed 100%')
             .nullable()
             .optional(),
         is_active: z.boolean().optional(),

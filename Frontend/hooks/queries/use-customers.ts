@@ -13,6 +13,8 @@ import {
   fetchCustomers,
   fetchCustomerLedger,
   fetchCustomerPurchases,
+  fetchCustomerStatement,
+  fetchCustomerActivity,
   createCustomer,
   updateCustomer,
   deleteCustomer,
@@ -21,6 +23,7 @@ import {
   type CustomerPayload,
   type CustomerQuery,
   type Customer,
+  type StatementRange,
 } from "@/lib/api/customers";
 
 const EMPTY: Customer[] = [];
@@ -59,6 +62,29 @@ export function useCustomerLedger(id: string | null) {
     queryFn: ({ signal }) => fetchCustomerLedger(id as string, signal),
     staleTime: STALE_TIME.volatile,
     enabled: Boolean(id),
+  });
+}
+
+/** Date-ranged printable statement. Only fetched while the statement view is open. */
+export function useCustomerStatement(
+  id: string | null,
+  range: StatementRange,
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: [...qk.customers.detail(id ?? ""), "statement", range] as const,
+    queryFn: ({ signal }) => fetchCustomerStatement(id as string, range, signal),
+    staleTime: STALE_TIME.volatile,
+    enabled: Boolean(id) && (options?.enabled ?? true),
+  });
+}
+
+export function useCustomerActivity(id: string | null, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...qk.customers.detail(id ?? ""), "activity"] as const,
+    queryFn: ({ signal }) => fetchCustomerActivity(id as string, signal),
+    staleTime: STALE_TIME.volatile,
+    enabled: Boolean(id) && (options?.enabled ?? true),
   });
 }
 

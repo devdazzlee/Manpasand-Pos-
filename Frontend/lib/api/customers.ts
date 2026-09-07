@@ -42,6 +42,26 @@ export async function fetchCustomerLedger(id: string, signal?: AbortSignal) {
   return getOne<any>(`/customer/${id}/ledger`, { signal });
 }
 
+export interface StatementRange {
+  from?: string;
+  to?: string;
+}
+
+export async function fetchCustomerStatement(
+  id: string,
+  range: StatementRange = {},
+  signal?: AbortSignal,
+) {
+  return getOne<any>(`/customer/${id}/statement`, {
+    params: cleanParams({ from: range.from, to: range.to }),
+    signal,
+  });
+}
+
+export async function fetchCustomerActivity(id: string, signal?: AbortSignal) {
+  return getOne<any>(`/customer/${id}/activity`, { params: { limit: 50 }, signal });
+}
+
 /** Mutation payloads are screen-shaped; keep them loose but explicit. */
 export type CustomerPayload = Record<string, unknown>;
 

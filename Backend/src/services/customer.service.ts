@@ -8,6 +8,26 @@ import { asNumber } from '../utils/helpers';
 import { CreateCustomerPaymentInput } from '../validations/customer.validation';
 import { parsePagination, paginationMeta } from '../utils/pagination';
 
+type LedgerType =
+    | 'OPENING'
+    | 'SALE'
+    | 'SALE_PAYMENT'
+    | 'RETURN'
+    | 'EXCHANGE'
+    | 'PAYMENT';
+
+type LedgerEntry = {
+    id: string;
+    date: Date;
+    type: LedgerType;
+    description: string;
+    reference: string | null;
+    debit: number;
+    credit: number;
+    balance: number;
+    meta?: Record<string, unknown>;
+};
+
 class CustomerService {
     private generateToken(cusId: Customer['id'], email: Customer['email']): string {
         const token = jwt.sign(
@@ -59,6 +79,7 @@ class CustomerService {
     public async createShopCustomer(data: Partial<Customer> & {
         credit_limit?: number | null;
         previous_credit_balance?: number | null;
+        default_discount_percent?: number | null;
     }) {
         const email = this.resolveCustomerEmail(data.email, data.phone_number);
         const customerExists = await this.verifyCustomerExistance(email);
@@ -76,6 +97,7 @@ class CustomerService {
                 is_active: data.is_active ?? true,
                 credit_limit: data.credit_limit ?? null,
                 previous_credit_balance: data.previous_credit_balance ?? 0,
+                default_discount_percent: data.default_discount_percent ?? 0,
             },
         });
 
@@ -451,16 +473,31 @@ class CustomerService {
         };
     }
 
-    public async getCustomerLedger(customerId: string) {
+    /**
+     * Builds the full chronological ledger for a customer: opening balance,
+     * every completed sale (debit) with its at-sale payment (credit), every
+     * return/exchange child sale (credit when money flows back to the customer,
+     * debit when they owe an exchange difference), and every manual payment
+     * (credit). Shared by the live ledger view and the printable statement.
+     */
+    private async computeLedger(customerId: string) {
         const customer = await this.getCustomerById(customerId);
 
-        const [sales, payments] = await Promise.all([
+        const [sales, returns, payments] = await Promise.all([
             prisma.sale.findMany({
                 where: {
                     customer_id: customerId,
                     status: 'COMPLETED',
                     original_sale_id: null,
                 },
+                orderBy: { sale_date: 'asc' },
+            }),
+            prisma.sale.findMany({
+                where: {
+                    customer_id: customerId,
+                    original_sale_id: { not: null },
+                },
+                include: { original_sale: { select: { sale_number: true, invoice_number: true } } },
                 orderBy: { sale_date: 'asc' },
             }),
             prisma.customerPayment.findMany({
@@ -470,24 +507,13 @@ class CustomerService {
             }),
         ]);
 
-        type LedgerType = 'OPENING' | 'SALE' | 'SALE_PAYMENT' | 'PAYMENT';
-        type LedgerEntry = {
-            id: string;
-            date: Date;
-            type: LedgerType;
-            description: string;
-            reference: string | null;
-            debit: number;
-            credit: number;
-            balance: number;
-            meta?: Record<string, unknown>;
-        };
-
         const typeOrder: Record<LedgerType, number> = {
             OPENING: 0,
             SALE: 1,
             SALE_PAYMENT: 2,
-            PAYMENT: 3,
+            RETURN: 3,
+            EXCHANGE: 3,
+            PAYMENT: 4,
         };
 
         const raw: Omit<LedgerEntry, 'balance'>[] = [];
@@ -542,6 +568,53 @@ class CustomerService {
             }
         }
 
+        for (const ret of returns) {
+            // Return line totals are recorded negative and exchange replacements
+            // positive, so `total_amount` is the net effect on what the customer
+            // owes: negative => credit them back, positive => exchange difference.
+            const net = asNumber(ret.total_amount);
+            const ref =
+                ret.original_sale?.invoice_number ||
+                ret.original_sale?.sale_number ||
+                ret.sale_number;
+            if (net < 0) {
+                raw.push({
+                    id: `return-${ret.id}`,
+                    date: ret.sale_date,
+                    type: 'RETURN',
+                    description: `Return · ${ref}`,
+                    reference: ref,
+                    debit: 0,
+                    credit: Math.abs(net),
+                    meta: { returnSaleId: ret.id, refundMethod: ret.payment_method },
+                });
+            } else if (net > 0) {
+                raw.push({
+                    id: `exchange-${ret.id}`,
+                    date: ret.sale_date,
+                    type: 'EXCHANGE',
+                    description: `Exchange difference · ${ref}`,
+                    reference: ref,
+                    debit: net,
+                    credit: 0,
+                    meta: { returnSaleId: ret.id },
+                });
+                const recv = asNumber(ret.payment_received);
+                if (recv > 0) {
+                    raw.push({
+                        id: `exchange-payment-${ret.id}`,
+                        date: ret.sale_date,
+                        type: 'SALE_PAYMENT',
+                        description: `Exchange payment · ${ref}`,
+                        reference: ref,
+                        debit: 0,
+                        credit: recv,
+                        meta: { returnSaleId: ret.id, paymentMethod: ret.payment_method },
+                    });
+                }
+            }
+        }
+
         for (const pay of payments) {
             raw.push({
                 id: `payment-${pay.id}`,
@@ -571,12 +644,30 @@ class CustomerService {
             return { ...e, balance: running };
         });
 
-        const totalPaid = entries.reduce((acc, e) => acc + e.credit, 0);
-        const balanceDue = Math.max(0, running);
         const creditLimit =
             customer.credit_limit === null || customer.credit_limit === undefined
                 ? null
                 : asNumber(customer.credit_limit);
+
+        return {
+            customer,
+            entries,
+            opening,
+            closingBalance: running,
+            creditLimit,
+            saleCount: sales.length,
+            returnCount: returns.length,
+            paymentCount: payments.length,
+            payments,
+        };
+    }
+
+    public async getCustomerLedger(customerId: string) {
+        const { entries, opening, closingBalance, creditLimit, saleCount, paymentCount, payments } =
+            await this.computeLedger(customerId);
+
+        const totalPaid = entries.reduce((acc, e) => acc + e.credit, 0);
+        const balanceDue = Math.max(0, closingBalance);
         const creditAvailable =
             creditLimit === null ? null : Math.max(0, creditLimit - balanceDue);
 
@@ -587,10 +678,10 @@ class CustomerService {
                 creditLimit,
                 creditAvailable,
                 openingBalance: opening,
-                saleCount: sales.length,
-                paymentCount: payments.length,
+                saleCount,
+                paymentCount,
             },
-            entries: entries.reverse(),
+            entries: [...entries].reverse(),
             payments: payments
                 .map((p) => ({
                     id: p.id,
@@ -604,6 +695,158 @@ class CustomerService {
                 }))
                 .reverse(),
         };
+    }
+
+    /**
+     * A printable account statement for a date range: opening balance carried
+     * forward to `from`, the entries that fall within [from, to], and the
+     * closing balance.
+     */
+    public async getCustomerStatement(
+        customerId: string,
+        range: { from?: string; to?: string } = {},
+    ) {
+        const { customer, entries, creditLimit } = await this.computeLedger(customerId);
+
+        const fromDate = range.from ? new Date(range.from) : null;
+        const toDate = range.to ? new Date(range.to) : null;
+        const validFrom = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : null;
+        // Include the whole "to" day.
+        const validTo =
+            toDate && !Number.isNaN(toDate.getTime())
+                ? new Date(toDate.getFullYear(), toDate.getMonth(), toDate.getDate(), 23, 59, 59, 999)
+                : null;
+
+        let openingBalance = 0;
+        const windowEntries: typeof entries = [];
+        for (const e of entries) {
+            if (validFrom && e.date < validFrom) {
+                openingBalance = e.balance;
+                continue;
+            }
+            if (validTo && e.date > validTo) continue;
+            windowEntries.push(e);
+        }
+
+        const totalDebit = windowEntries.reduce((acc, e) => acc + e.debit, 0);
+        const totalCredit = windowEntries.reduce((acc, e) => acc + e.credit, 0);
+        const closingBalance = openingBalance + totalDebit - totalCredit;
+
+        return {
+            customer: {
+                id: customer.id,
+                name: customer.name,
+                phone_number: customer.phone_number,
+                email: customer.email,
+                address: customer.address,
+                credit_limit: creditLimit,
+            },
+            period: {
+                from: validFrom ? validFrom.toISOString() : null,
+                to: validTo ? validTo.toISOString() : null,
+            },
+            summary: {
+                openingBalance,
+                totalDebit,
+                totalCredit,
+                closingBalance,
+                entryCount: windowEntries.length,
+            },
+            entries: windowEntries,
+        };
+    }
+
+    /**
+     * Reverse-chronological activity feed derived from existing records —
+     * profile create/update, sales, returns/exchanges and payments. No new
+     * tables; this is a read-only projection.
+     */
+    public async getCustomerActivity(customerId: string, limit = 50) {
+        const customer = await this.getCustomerById(customerId);
+
+        const [sales, payments] = await Promise.all([
+            prisma.sale.findMany({
+                where: { customer_id: customerId },
+                orderBy: { sale_date: 'desc' },
+                take: 200,
+                select: {
+                    id: true,
+                    sale_number: true,
+                    invoice_number: true,
+                    total_amount: true,
+                    sale_date: true,
+                    original_sale_id: true,
+                    payment_method: true,
+                },
+            }),
+            prisma.customerPayment.findMany({
+                where: { customer_id: customerId },
+                orderBy: { payment_date: 'desc' },
+                take: 200,
+                include: { user: { select: { email: true } } },
+            }),
+        ]);
+
+        type Activity = {
+            id: string;
+            date: Date;
+            kind: 'CREATED' | 'UPDATED' | 'SALE' | 'RETURN' | 'PAYMENT';
+            title: string;
+            amount: number | null;
+            meta?: Record<string, unknown>;
+        };
+
+        const items: Activity[] = [];
+
+        items.push({
+            id: `created-${customer.id}`,
+            date: customer.created_at,
+            kind: 'CREATED',
+            title: 'Customer profile created',
+            amount: null,
+        });
+        if (
+            customer.updated_at &&
+            customer.updated_at.getTime() - customer.created_at.getTime() > 1000
+        ) {
+            items.push({
+                id: `updated-${customer.id}`,
+                date: customer.updated_at,
+                kind: 'UPDATED',
+                title: 'Profile last updated',
+                amount: null,
+            });
+        }
+
+        for (const sale of sales) {
+            const isReturn = Boolean(sale.original_sale_id);
+            const amount = asNumber(sale.total_amount);
+            items.push({
+                id: `sale-${sale.id}`,
+                date: sale.sale_date,
+                kind: isReturn ? 'RETURN' : 'SALE',
+                title: isReturn
+                    ? `Return / exchange · ${sale.invoice_number || sale.sale_number}`
+                    : `Sale · ${sale.invoice_number || sale.sale_number}`,
+                amount,
+                meta: { saleId: sale.id, paymentMethod: sale.payment_method },
+            });
+        }
+
+        for (const pay of payments) {
+            items.push({
+                id: `payment-${pay.id}`,
+                date: pay.payment_date,
+                kind: 'PAYMENT',
+                title: `Payment received · ${pay.method}`,
+                amount: asNumber(pay.amount),
+                meta: { paymentId: pay.id, by: pay.user?.email || null },
+            });
+        }
+
+        items.sort((a, b) => b.date.getTime() - a.date.getTime());
+
+        return { items: items.slice(0, Math.max(1, Math.min(limit, 200))) };
     }
 
     public async createCustomerPayment(

@@ -72,6 +72,20 @@ export const getCustomerLedger = asyncHandler(async (req: Request, res: Response
     new ApiResponse(data, 'Customer ledger retrieved').send(res);
 });
 
+export const getCustomerStatement = asyncHandler(async (req: Request, res: Response) => {
+    const data = await customerService.getCustomerStatement(req.params.customerId, {
+        from: req.query.from as string | undefined,
+        to: req.query.to as string | undefined,
+    });
+    new ApiResponse(data, 'Customer statement retrieved').send(res);
+});
+
+export const getCustomerActivity = asyncHandler(async (req: Request, res: Response) => {
+    const limit = req.query.limit ? Number(req.query.limit) : 50;
+    const data = await customerService.getCustomerActivity(req.params.customerId, limit);
+    new ApiResponse(data, 'Customer activity retrieved').send(res);
+});
+
 export const createCustomerPayment = asyncHandler(async (req: Request, res: Response) => {
     const payment = await customerService.createCustomerPayment(
         req.params.customerId,

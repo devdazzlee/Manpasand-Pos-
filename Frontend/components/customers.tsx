@@ -15,6 +15,12 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
 import {
   Table,
@@ -65,6 +71,10 @@ import {
   CalendarIcon,
   CreditCard,
   RefreshCcw,
+  History,
+  FileText,
+  Printer,
+  Percent,
 } from "lucide-react";
 import { z } from "zod";
 import { LoadingButton } from "@/components/ui/loading-button";
@@ -89,6 +99,8 @@ import {
   useCustomers,
   useCustomerPurchases,
   useCustomerLedger,
+  useCustomerActivity,
+  useCustomerStatement,
   useCustomerMutations,
 } from "@/hooks/queries/use-customers";
 
@@ -156,12 +168,20 @@ interface PurchaseOrder {
 interface LedgerEntry {
   id: string;
   date: string;
-  type: "OPENING" | "SALE" | "SALE_PAYMENT" | "PAYMENT";
+  type: "OPENING" | "SALE" | "SALE_PAYMENT" | "RETURN" | "EXCHANGE" | "PAYMENT";
   description: string;
   reference: string | null;
   debit: number;
   credit: number;
   balance: number;
+}
+
+interface ActivityItem {
+  id: string;
+  date: string;
+  kind: "CREATED" | "UPDATED" | "SALE" | "RETURN" | "PAYMENT";
+  title: string;
+  amount: number | null;
 }
 
 interface LedgerSummary {
@@ -198,6 +218,15 @@ const optionalMoneyField = z.preprocess(
     .optional(),
 );
 
+const optionalPercentField = z.preprocess(
+  (v) => (v === "" || v === null || v === undefined ? undefined : Number(v)),
+  z
+    .number({ invalid_type_error: "Must be a valid number" })
+    .min(0, "Discount cannot be negative")
+    .max(100, "Discount cannot exceed 100%")
+    .optional(),
+);
+
 const customerFormSchema = z.object({
   name: z
     .string({ required_error: "Name is required" })
@@ -224,6 +253,7 @@ const customerFormSchema = z.object({
   billing_address: z.string().trim().optional(),
   credit_limit: optionalMoneyField,
   previous_credit_balance: optionalMoneyField,
+  default_discount_percent: optionalPercentField,
 });
 
 type CustomerFormValues = {
@@ -234,6 +264,7 @@ type CustomerFormValues = {
   billing_address: string;
   credit_limit: string;
   previous_credit_balance: string;
+  default_discount_percent: string;
 };
 
 type CustomerFormErrors = Partial<
@@ -251,6 +282,7 @@ const emptyCustomerForm = (): CustomerFormValues => ({
   billing_address: "",
   credit_limit: "",
   previous_credit_balance: "",
+  default_discount_percent: "",
 });
 
 const zodErrorsToMap = (err: z.ZodError): CustomerFormErrors => {
@@ -287,6 +319,12 @@ const toFormValues = (
     customer.previous_credit_balance !== ""
       ? String(customer.previous_credit_balance)
       : "",
+  default_discount_percent:
+    customer?.default_discount_percent != null &&
+    customer.default_discount_percent !== "" &&
+    Number(customer.default_discount_percent) > 0
+      ? String(customer.default_discount_percent)
+      : "",
 });
 
 const buildCreatePayload = (data: z.infer<typeof customerFormSchema>) => ({
@@ -297,6 +335,7 @@ const buildCreatePayload = (data: z.infer<typeof customerFormSchema>) => ({
   billing_address: data.billing_address?.trim() || undefined,
   credit_limit: data.credit_limit ?? null,
   previous_credit_balance: data.previous_credit_balance ?? undefined,
+  default_discount_percent: data.default_discount_percent ?? 0,
   is_active: true,
 });
 
@@ -310,6 +349,7 @@ const buildUpdatePayload = (data: z.infer<typeof customerFormSchema>) => ({
     : null,
   credit_limit: data.credit_limit ?? null,
   previous_credit_balance: data.previous_credit_balance ?? null,
+  default_discount_percent: data.default_discount_percent ?? 0,
 });
 
 const PAYMENT_METHODS = [
@@ -323,7 +363,7 @@ const PAYMENT_METHODS = [
 const PAGE_SIZE = 20;
 
 type StatusFilter = "all" | "active" | "inactive" | "new";
-type DetailTab = "overview" | "purchases" | "ledger";
+type DetailTab = "overview" | "purchases" | "ledger" | "activity";
 
 function formatDate(value?: string | Date | null) {
   if (!value) return "—";
@@ -595,9 +635,48 @@ function CustomerFormFields({
         </div>
       </div>
 
+      <div className="space-y-1">
+        <Label
+          htmlFor={`${idPrefix}-default_discount_percent`}
+          className={customerFieldLabelClass}
+        >
+          Default discount (%) — auto-applied at the till
+        </Label>
+        <Input
+          id={`${idPrefix}-default_discount_percent`}
+          type="number"
+          min="0"
+          max="100"
+          step="0.01"
+          value={values.default_discount_percent}
+          onChange={(e) => {
+            onChange({ default_discount_percent: e.target.value });
+            if (errors.default_discount_percent) {
+              onClearError("default_discount_percent");
+            }
+          }}
+          placeholder="0"
+          disabled={disabled}
+          aria-invalid={errors.default_discount_percent ? true : undefined}
+          className={cn(
+            customerFieldControlClass,
+            "nums",
+            errors.default_discount_percent &&
+              "border-destructive focus-visible:ring-destructive",
+          )}
+        />
+        {errors.default_discount_percent && (
+          <p className="mt-1 text-xs text-destructive" role="alert">
+            {errors.default_discount_percent}
+          </p>
+        )}
+      </div>
+
       <p className="text-xs text-muted-foreground">
-        Use for existing customers who already owed you money before using this
-        software.
+        Credit balance is for existing customers who already owed you money
+        before using this software. Default discount is applied automatically
+        when this customer is selected on the New Sale screen (the cashier can
+        still change it).
       </p>
     </div>
   );
@@ -619,6 +698,16 @@ function ledgerTypeBadge(type: LedgerEntry["type"]) {
       return {
         label: "Sale payment",
         className: "bg-sky-50 text-sky-800 border-sky-200",
+      };
+    case "RETURN":
+      return {
+        label: "Return",
+        className: "bg-rose-50 text-rose-800 border-rose-200",
+      };
+    case "EXCHANGE":
+      return {
+        label: "Exchange",
+        className: "bg-violet-50 text-violet-800 border-violet-200",
       };
     case "PAYMENT":
       return {
@@ -734,8 +823,83 @@ export function Customers() {
   const detailId = detailOpen && current ? current.id : null;
   const purchasesQuery = useCustomerPurchases(detailId);
   const ledgerQuery = useCustomerLedger(detailId);
+  const activityQuery = useCustomerActivity(detailId, {
+    enabled: detailTab === "activity",
+  });
   const purchasesLoading = purchasesQuery.isLoading;
   const ledgerLoading = ledgerQuery.isLoading;
+
+  // ----- statement (its own modal, date-ranged, printable) -----
+  const [statementOpen, setStatementOpen] = useState(false);
+  const monthStart = () => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  };
+  const today = () => new Date().toISOString().slice(0, 10);
+  const [stmtFrom, setStmtFrom] = useState(monthStart);
+  const [stmtTo, setStmtTo] = useState(today);
+  const statementQuery = useCustomerStatement(
+    statementOpen && current ? current.id : null,
+    { from: stmtFrom || undefined, to: stmtTo || undefined },
+    { enabled: statementOpen },
+  );
+
+  const printStatement = () => {
+    const s = statementQuery.data;
+    if (!s) return;
+    const shop = localStorage.getItem("branchName") || "Manpasand";
+    const rows = [
+      `<tr><td>${stmtFrom || "—"}</td><td>Opening balance</td><td></td><td></td><td class="r">${formatMoney(
+        s.summary?.openingBalance || 0,
+      )}</td></tr>`,
+      ...(s.entries as LedgerEntry[]).map(
+        (e) =>
+          `<tr><td>${formatDate(e.date)}</td><td>${e.description}</td><td class="r">${
+            e.debit ? formatMoney(e.debit) : ""
+          }</td><td class="r">${e.credit ? formatMoney(e.credit) : ""}</td><td class="r">${formatMoney(
+            e.balance,
+          )}</td></tr>`,
+      ),
+      `<tr class="tot"><td colspan="2">Closing balance</td><td class="r">${formatMoney(
+        s.summary?.totalDebit || 0,
+      )}</td><td class="r">${formatMoney(s.summary?.totalCredit || 0)}</td><td class="r">${formatMoney(
+        s.summary?.closingBalance || 0,
+      )}</td></tr>`,
+    ].join("");
+    const html = `<!doctype html><html><head><title>Statement</title><style>
+      *{font-family:Arial,Helvetica,sans-serif;font-size:12px}
+      body{margin:16px;color:#111}
+      h1{font-size:15px;margin:0;text-align:center}
+      .sub{text-align:center;color:#666;margin:2px 0 12px}
+      .meta{margin:0 0 12px}.meta div{display:flex;gap:8px}
+      .meta span:first-child{color:#666;min-width:70px}
+      table{width:100%;border-collapse:collapse}
+      th,td{padding:4px 6px;border-bottom:1px solid #ddd;text-align:left}
+      th{color:#666}.r{text-align:right;font-variant-numeric:tabular-nums}
+      .tot td{font-weight:700;border-top:2px solid #333}
+      @media print{body{margin:0}}
+    </style></head><body>
+      <h1>${shop}</h1><div class="sub">Customer Account Statement</div>
+      <div class="meta">
+        <div><span>Customer</span><b>${s.customer?.name || "—"}</b></div>
+        <div><span>Phone</span>${s.customer?.phone_number || "—"}</div>
+        <div><span>Period</span>${stmtFrom || "—"} to ${stmtTo || "—"}</div>
+      </div>
+      <table><thead><tr><th>Date</th><th>Description</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <script>window.onload=function(){window.print();setTimeout(function(){window.close()},300)}<\/script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=800,height=900");
+    if (!w) {
+      toast({
+        variant: "destructive",
+        title: "Enable pop-ups to print the statement",
+      });
+      return;
+    }
+    w.document.write(html);
+    w.document.close();
+  };
 
   const { orders, productSummary, purchaseSummary } = useMemo(() => {
     const data = (purchasesQuery.data ?? {}) as any;
@@ -1632,6 +1796,7 @@ export function Customers() {
                   { key: "overview", label: "Overview" },
                   { key: "purchases", label: "Purchases" },
                   { key: "ledger", label: "Ledger" },
+                  { key: "activity", label: "Activity" },
                 ] as const
               ).map((t) => (
                 <TabsTrigger
@@ -1716,6 +1881,17 @@ export function Customers() {
                     </span>
                     <span className="nums font-semibold">
                       {previousCreditDisplay}
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="flex items-center gap-1 text-muted-foreground">
+                      <Percent className="h-3.5 w-3.5" />
+                      Default discount
+                    </span>
+                    <span className="nums font-semibold">
+                      {Number(current.default_discount_percent) > 0
+                        ? `${Number(current.default_discount_percent)}%`
+                        : "—"}
                     </span>
                   </div>
                 </div>
@@ -2381,6 +2557,59 @@ export function Customers() {
               )}
             </div>
           )}
+
+          {current && detailTab === "activity" && (
+            <div className="space-y-3">
+              {activityQuery.isLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="h-12 animate-pulse rounded-md bg-muted" />
+                  ))}
+                </div>
+              ) : (activityQuery.data?.items?.length ?? 0) === 0 ? (
+                <div className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed py-10">
+                  <History className="h-7 w-7 text-muted-foreground/50" />
+                  <p className="text-sm text-muted-foreground">No activity yet</p>
+                </div>
+              ) : (
+                <ol className="relative space-y-3 border-l border-border pl-4">
+                  {(activityQuery.data.items as ActivityItem[]).map((a) => {
+                    const dot =
+                      a.kind === "PAYMENT"
+                        ? "bg-green-500"
+                        : a.kind === "RETURN"
+                          ? "bg-rose-500"
+                          : a.kind === "SALE"
+                            ? "bg-amber-500"
+                            : "bg-slate-400";
+                    return (
+                      <li key={a.id} className="relative">
+                        <span
+                          className={cn(
+                            "absolute -left-[21px] top-1.5 h-2.5 w-2.5 rounded-full ring-2 ring-background",
+                            dot,
+                          )}
+                        />
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm text-foreground">{a.title}</p>
+                            <p className="text-xs text-muted-foreground nums">
+                              {formatDate(a.date)}
+                            </p>
+                          </div>
+                          {a.amount != null && (
+                            <span className="shrink-0 text-sm font-medium nums">
+                              {formatMoney(Math.abs(a.amount))}
+                            </span>
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
+          )}
         </DetailSheetBody>
 
         <DetailSheetFooter>
@@ -2394,12 +2623,160 @@ export function Customers() {
           >
             Close
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setStatementOpen(true)}
+            disabled={!current}
+          >
+            <FileText className="mr-1.5 h-4 w-4" />
+            Statement
+          </Button>
           <Button onClick={() => current && openEdit(current)}>
             <Edit className="mr-1.5 h-4 w-4" />
             Edit
           </Button>
         </DetailSheetFooter>
       </DetailSheet>
+
+      {/* Account statement — date-ranged, printable */}
+      <Dialog open={statementOpen} onOpenChange={setStatementOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Account statement</DialogTitle>
+          </DialogHeader>
+
+          <div className="flex flex-wrap items-end gap-3 print:hidden">
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">From</Label>
+              <Input
+                type="date"
+                value={stmtFrom}
+                max={stmtTo || undefined}
+                onChange={(e) => setStmtFrom(e.target.value)}
+                className="h-9 w-40"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">To</Label>
+              <Input
+                type="date"
+                value={stmtTo}
+                min={stmtFrom || undefined}
+                onChange={(e) => setStmtTo(e.target.value)}
+                className="h-9 w-40"
+              />
+            </div>
+            <Button
+              variant="outline"
+              className="h-9"
+              onClick={printStatement}
+              disabled={statementQuery.isLoading || !statementQuery.data}
+            >
+              <Printer className="mr-1.5 h-4 w-4" />
+              Print
+            </Button>
+          </div>
+
+          <div
+            id="customer-statement-print"
+            className="max-h-[60vh] overflow-y-auto rounded-lg border border-border p-4 text-sm print:max-h-none print:overflow-visible print:border-0 print:p-0"
+          >
+            {statementQuery.isLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="h-6 animate-pulse rounded bg-muted" />
+                ))}
+              </div>
+            ) : statementQuery.data ? (
+              (() => {
+                const s = statementQuery.data;
+                return (
+                  <>
+                    <div className="mb-4 text-center">
+                      <p className="text-base font-semibold">
+                        {localStorage.getItem("branchName") || "Manpasand"}
+                      </p>
+                      <p className="text-xs text-muted-foreground">
+                        Customer Account Statement
+                      </p>
+                    </div>
+                    <div className="mb-4 grid grid-cols-2 gap-x-6 gap-y-1 text-xs">
+                      <span className="text-muted-foreground">Customer</span>
+                      <span className="font-medium">{s.customer?.name || "—"}</span>
+                      <span className="text-muted-foreground">Phone</span>
+                      <span>{s.customer?.phone_number || "—"}</span>
+                      <span className="text-muted-foreground">Period</span>
+                      <span className="nums">
+                        {stmtFrom || "—"} to {stmtTo || "—"}
+                      </span>
+                    </div>
+                    <table className="w-full border-collapse text-xs">
+                      <thead>
+                        <tr className="border-b border-border text-left text-muted-foreground">
+                          <th className="py-1.5 pr-2 font-medium">Date</th>
+                          <th className="py-1.5 pr-2 font-medium">Description</th>
+                          <th className="py-1.5 pr-2 text-right font-medium">Debit</th>
+                          <th className="py-1.5 pr-2 text-right font-medium">Credit</th>
+                          <th className="py-1.5 text-right font-medium">Balance</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        <tr className="border-b border-border/60">
+                          <td className="py-1.5 pr-2 nums">{stmtFrom || "—"}</td>
+                          <td className="py-1.5 pr-2 font-medium">Opening balance</td>
+                          <td className="py-1.5 pr-2" />
+                          <td className="py-1.5 pr-2" />
+                          <td className="py-1.5 text-right nums">
+                            {formatMoney(s.summary?.openingBalance || 0)}
+                          </td>
+                        </tr>
+                        {(s.entries as LedgerEntry[]).map((e) => (
+                          <tr key={e.id} className="border-b border-border/60">
+                            <td className="py-1.5 pr-2 nums">{formatDate(e.date)}</td>
+                            <td className="py-1.5 pr-2">{e.description}</td>
+                            <td className="py-1.5 pr-2 text-right nums">
+                              {e.debit ? formatMoney(e.debit) : ""}
+                            </td>
+                            <td className="py-1.5 pr-2 text-right nums">
+                              {e.credit ? formatMoney(e.credit) : ""}
+                            </td>
+                            <td className="py-1.5 text-right nums">
+                              {formatMoney(e.balance)}
+                            </td>
+                          </tr>
+                        ))}
+                        <tr className="font-semibold">
+                          <td className="py-1.5 pr-2" colSpan={2}>
+                            Closing balance
+                          </td>
+                          <td className="py-1.5 pr-2 text-right nums">
+                            {formatMoney(s.summary?.totalDebit || 0)}
+                          </td>
+                          <td className="py-1.5 pr-2 text-right nums">
+                            {formatMoney(s.summary?.totalCredit || 0)}
+                          </td>
+                          <td className="py-1.5 text-right nums">
+                            {formatMoney(s.summary?.closingBalance || 0)}
+                          </td>
+                        </tr>
+                      </tbody>
+                    </table>
+                    {s.entries.length === 0 && (
+                      <p className="mt-3 text-center text-xs text-muted-foreground">
+                        No transactions in this period.
+                      </p>
+                    )}
+                  </>
+                );
+              })()
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                Could not load the statement.
+              </p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={!!deleteTarget}
