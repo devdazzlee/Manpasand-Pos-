@@ -1357,7 +1357,11 @@ export default function Inventory() {
     selectedSubcategory !== "__all__" ||
     statusFilter !== "ALL"
 
-  const isCatalogLoading = productsLoading && globalProducts.length === 0
+  // "Loading" = a fetch is in flight, or none has completed yet (no meta), and
+  // we still have nothing to show. Prevents the counts/stats flashing 0 before
+  // the first response lands.
+  const isCatalogLoading =
+    (productsLoading || !productsMeta) && globalProducts.length === 0
 
   const catalogStats = useMemo(() => {
     let active = 0
@@ -2115,11 +2119,20 @@ export default function Inventory() {
                 {chip.label}
                 <span
                   className={cn(
-                    "inline-flex min-w-[1.25rem] justify-center rounded-full px-1 text-[10px] tabular-nums",
+                    "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-[10px] tabular-nums",
                     active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500",
                   )}
                 >
-                  {chip.count}
+                  {isCatalogLoading ? (
+                    <span
+                      className={cn(
+                        "my-[3px] h-2 w-3 animate-pulse rounded-full",
+                        active ? "bg-white/50" : "bg-gray-300",
+                      )}
+                    />
+                  ) : (
+                    chip.count
+                  )}
                 </span>
               </button>
             )
