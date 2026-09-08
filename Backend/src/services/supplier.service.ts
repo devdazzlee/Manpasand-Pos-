@@ -8,6 +8,7 @@ import {
     CreateSupplierPaymentInput,
 } from '../validations/supplier.validation';
 import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
+import { PurchaseInvoiceService } from './purchaseInvoice.service';
 
 export class SupplierService {
     async createSupplier(data: CreateSupplierInput) {
@@ -257,11 +258,15 @@ export class SupplierService {
     private async computeSupplierLedger(supplierId: string) {
         await this.getSupplierById(supplierId);
 
-        const [purchases, returns, payments] = await Promise.all([
+        const [purchases, invoices, returns, payments] = await Promise.all([
             prisma.purchase.findMany({
                 where: { supplier_id: supplierId },
                 include: { product: { select: { id: true, name: true, sku: true } } },
                 orderBy: { purchase_date: 'asc' },
+            }),
+            prisma.purchaseInvoice.findMany({
+                where: { supplier_id: supplierId },
+                orderBy: { invoice_date: 'asc' },
             }),
             prisma.purchaseReturn.findMany({
                 where: { supplier_id: supplierId, status: 'COMPLETED' },
@@ -274,7 +279,7 @@ export class SupplierService {
             }),
         ]);
 
-        type LedgerType = 'PURCHASE' | 'RETURN' | 'PAYMENT';
+        type LedgerType = 'PURCHASE' | 'INVOICE' | 'RETURN' | 'PAYMENT';
         type LedgerEntry = {
             id: string;
             date: Date;
@@ -286,20 +291,41 @@ export class SupplierService {
             balance: number;
             meta?: Record<string, unknown>;
         };
-        const order: Record<LedgerType, number> = { PURCHASE: 0, RETURN: 1, PAYMENT: 2 };
+        const order: Record<LedgerType, number> = {
+            PURCHASE: 0,
+            INVOICE: 0,
+            RETURN: 1,
+            PAYMENT: 2,
+        };
 
         const raw: Omit<LedgerEntry, 'balance'>[] = [];
 
+        // An invoiced delivery's liability is carried by the invoice, not the raw
+        // receipt — otherwise it would be counted twice.
         for (const p of purchases) {
+            if (p.purchase_invoice_id) continue;
             raw.push({
                 id: `purchase-${p.id}`,
                 date: p.purchase_date,
                 type: 'PURCHASE',
-                description: `Purchase · ${p.product?.name || 'Product'} × ${asNumber(p.quantity)}`,
+                description: `Goods received · ${p.product?.name || 'Product'} × ${asNumber(p.quantity)}`,
                 reference: p.invoice_ref,
                 debit: asNumber(p.quantity) * asNumber(p.cost_price),
                 credit: 0,
                 meta: { purchaseId: p.id, productId: p.product_id },
+            });
+        }
+
+        for (const inv of invoices) {
+            raw.push({
+                id: `invoice-${inv.id}`,
+                date: inv.invoice_date,
+                type: 'INVOICE',
+                description: `Purchase invoice · ${inv.invoice_number}`,
+                reference: inv.invoice_number,
+                debit: asNumber(inv.total_amount),
+                credit: 0,
+                meta: { invoiceId: inv.id, status: inv.status, dueDate: inv.due_date },
             });
         }
 
@@ -345,16 +371,17 @@ export class SupplierService {
             return { ...e, balance: running };
         });
 
-        return { entries, purchases, returns, payments, closingBalance: running };
+        return { entries, purchases, invoices, returns, payments, closingBalance: running };
     }
 
     async getSupplierLedger(supplierId: string) {
-        const { entries, purchases, returns, payments } =
+        const { entries, purchases, invoices, returns, payments } =
             await this.computeSupplierLedger(supplierId);
 
         const totalPurchased = entries.reduce((acc, e) => acc + e.debit, 0);
         const totalPaid = payments.reduce((acc, p) => acc + asNumber(p.amount), 0);
         const totalReturned = returns.reduce((acc, r) => acc + asNumber(r.total_amount), 0);
+        const uninvoicedPurchases = purchases.filter((p) => !p.purchase_invoice_id).length;
 
         return {
             summary: {
@@ -363,6 +390,8 @@ export class SupplierService {
                 totalReturned,
                 balanceDue: totalPurchased - totalPaid - totalReturned,
                 purchaseCount: purchases.length,
+                invoiceCount: invoices.length,
+                uninvoicedPurchases,
                 returnCount: returns.length,
                 paymentCount: payments.length,
             },
@@ -481,6 +510,17 @@ export class SupplierService {
     ) {
         await this.getSupplierById(supplierId);
 
+        let invoiceId: string | null = null;
+        if (data.purchaseInvoiceId) {
+            const invoice = await prisma.purchaseInvoice.findFirst({
+                where: { id: data.purchaseInvoiceId, supplier_id: supplierId },
+            });
+            if (!invoice) {
+                throw new AppError(400, 'That invoice does not belong to this supplier');
+            }
+            invoiceId = invoice.id;
+        }
+
         const payment = await prisma.supplierPayment.create({
             data: {
                 supplier_id: supplierId,
@@ -491,10 +531,15 @@ export class SupplierService {
                 method: data.method || 'CASH',
                 reference: data.reference || null,
                 notes: data.notes || null,
+                purchase_invoice_id: invoiceId,
                 created_by: createdBy,
             },
             include: { user: { select: { email: true } } },
         });
+
+        if (invoiceId) {
+            await PurchaseInvoiceService.recompute(invoiceId);
+        }
 
         return {
             id: payment.id,
@@ -503,6 +548,7 @@ export class SupplierService {
             method: payment.method,
             reference: payment.reference,
             notes: payment.notes,
+            purchase_invoice_id: payment.purchase_invoice_id,
             created_at: payment.created_at,
             user: payment.user,
         };
@@ -513,7 +559,11 @@ export class SupplierService {
             where: { id: paymentId, supplier_id: supplierId },
         });
         if (!payment) throw new AppError(404, 'Payment not found');
+        const invoiceId = payment.purchase_invoice_id;
         await prisma.supplierPayment.delete({ where: { id: paymentId } });
+        if (invoiceId) {
+            await PurchaseInvoiceService.recompute(invoiceId);
+        }
         return { message: 'Payment deleted successfully' };
     }
 }

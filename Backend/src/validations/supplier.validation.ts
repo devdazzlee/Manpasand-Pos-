@@ -71,6 +71,7 @@ export const createSupplierPaymentSchema = z.object({
             .default('CASH'),
         reference: z.string().optional(),
         notes: z.string().optional(),
+        purchaseInvoiceId: z.string().uuid().nullable().optional(),
     }),
 });
 

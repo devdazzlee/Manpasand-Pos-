@@ -34,6 +34,7 @@ model User {
   expenses_approved Expense[]         @relation("ExpenseApprover")
   recurring_expenses RecurringExpense[] @relation("RecurringExpenseCreator")
   purchase_returns  PurchaseReturn[]  @relation("PurchaseReturnCreator")
+  purchase_invoices PurchaseInvoice[] @relation("PurchaseInvoiceCreator")
 
   @@index([email])
 }
@@ -71,6 +72,7 @@ model Branch {
   expenses              Expense[]
   recurring_expenses    RecurringExpense[]
   purchase_returns      PurchaseReturn[]  @relation("PurchaseReturnBranch")
+  purchase_invoices     PurchaseInvoice[] @relation("PurchaseInvoiceBranch")
 
   // Relations
   category           Category[]
@@ -212,6 +214,7 @@ model Supplier {
   purchase_orders PurchaseOrder[]
   purchases       Purchase[]
   purchase_returns PurchaseReturn[]
+  purchase_invoices PurchaseInvoice[]
   payments        SupplierPayment[]
   created_at      DateTime        @default(now())
   updated_at      DateTime        @default(now()) @updatedAt
@@ -230,13 +233,56 @@ model SupplierPayment {
   method       String   @default("CASH")
   reference    String?
   notes        String?
+  purchase_invoice_id String?
+  purchase_invoice    PurchaseInvoice? @relation(fields: [purchase_invoice_id], references: [id])
   created_by   String
   user         User     @relation(fields: [created_by], references: [id])
   created_at   DateTime @default(now())
 
   @@index([supplier_id])
   @@index([payment_date])
+  @@index([purchase_invoice_id])
   @@index([created_by])
+}
+
+enum PurchaseInvoiceStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+}
+
+/// The supplier's bill for one or more received deliveries (GRN lines). This is
+/// the tracked payable document — payments settle against it and it ages.
+model PurchaseInvoice {
+  id                String                @id @default(uuid())
+  invoice_number    String
+  supplier_id       String
+  supplier          Supplier              @relation(fields: [supplier_id], references: [id])
+  branch_id         String?
+  branch            Branch?               @relation("PurchaseInvoiceBranch", fields: [branch_id], references: [id])
+  purchase_order_id String?
+  purchase_order    PurchaseOrder?        @relation(fields: [purchase_order_id], references: [id])
+  invoice_date      DateTime              @default(now())
+  due_date          DateTime?
+  subtotal          Decimal               @default(0)
+  tax_amount        Decimal               @default(0)
+  discount_amount   Decimal               @default(0)
+  total_amount      Decimal               @default(0)
+  amount_paid       Decimal               @default(0)
+  status            PurchaseInvoiceStatus @default(UNPAID)
+  notes             String?
+  created_by        String
+  user              User                  @relation("PurchaseInvoiceCreator", fields: [created_by], references: [id])
+  purchases         Purchase[]
+  payments          SupplierPayment[]
+  created_at        DateTime              @default(now())
+  updated_at        DateTime              @default(now()) @updatedAt
+
+  @@unique([supplier_id, invoice_number])
+  @@index([supplier_id])
+  @@index([branch_id])
+  @@index([status])
+  @@index([due_date])
 }
 
 model Tax {
@@ -424,6 +470,8 @@ model Purchase {
   delivery_status    PurchaseDeliveryStatus  @default(COMPLETE)
   purchase_order_id  String?
   purchase_order     PurchaseOrder?          @relation(fields: [purchase_order_id], references: [id])
+  purchase_invoice_id String?
+  purchase_invoice   PurchaseInvoice?        @relation(fields: [purchase_invoice_id], references: [id])
   return_items       PurchaseReturnItem[]
   created_by         String
   user               User                   @relation(fields: [created_by], references: [id])
@@ -434,6 +482,7 @@ model Purchase {
   @@index([warehouse_branch_id])
   @@index([purchase_date])
   @@index([purchase_order_id])
+  @@index([purchase_invoice_id])
   @@index([created_by])
 }
 
@@ -602,6 +651,7 @@ model PurchaseOrder {
   purchase_order_items PurchaseOrderItem[]
   purchases            Purchase[]
   purchase_returns     PurchaseReturn[]
+  purchase_invoices    PurchaseInvoice[]
   created_at           DateTime            @default(now())
   updated_at           DateTime            @default(now()) @updatedAt
 

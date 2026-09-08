@@ -52,6 +52,11 @@ export const getProduct = asyncHandler(async (req: Request, res: Response) => {
     new ApiResponse(product, 'Product retrieved successfully').send(res);
 });
 
+export const getProductCostHistory = asyncHandler(async (req: Request, res: Response) => {
+    const data = await productService.getProductCostHistory(req.params.id);
+    new ApiResponse(data, 'Product cost history retrieved').send(res);
+});
+
 export const updateProduct = asyncHandler(async (req: Request, res: Response) => {
     // Separate image fields from product data
     const { new_images, existing_images, images, ...updateData } = req.body;

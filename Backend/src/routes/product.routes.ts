@@ -14,6 +14,7 @@ import {
   deleteProduct,
   uploadProductImage,
   getPosCatalog,
+  getProductCostHistory,
 } from '../controllers/product.controller';
 import {
   createProductSchema,
@@ -47,6 +48,7 @@ router.get('/pos-catalog', authenticate, getPosCatalog);
 router.get('/export/excel', exportProductsToExcel);
 router.get('/featured', getFeaturedProducts);
 router.get('/best-selling', authenticate, getBestSellingProducts);
+router.get('/:id/cost-history', validate(getProductSchema), getProductCostHistory);
 router.get('/:id', validate(getProductSchema), getProduct);
 router.patch('/:id', validate(updateProductSchema), updateProduct);
 router.patch('/:id/toggle-status', validate(getProductSchema), toggleProductStatus);

@@ -1267,6 +1267,67 @@ export class ProductService {
         return { data, meta: { total: data.length } };
     }
 
+    /**
+     * Cost history for one product from its purchase (goods-received) records,
+     * with a running weighted-average cost after each receipt. This is the
+     * "what have we been paying for this" view.
+     */
+    async getProductCostHistory(productId: string) {
+        const product = await prisma.product.findUnique({
+            where: { id: productId },
+            select: { id: true, name: true, sku: true, code: true, purchase_rate: true },
+        });
+        if (!product) throw new AppError(404, 'Product not found');
+
+        const purchases = await prisma.purchase.findMany({
+            where: { product_id: productId },
+            orderBy: { purchase_date: 'asc' },
+            include: {
+                supplier: { select: { id: true, name: true } },
+                warehouse_branch: { select: { id: true, name: true } },
+            },
+        });
+
+        let runningQty = 0;
+        let runningValue = 0;
+        const entries = purchases.map((p) => {
+            const qty = asNumber(p.quantity);
+            const unitCost = asNumber(p.cost_price);
+            runningQty += qty;
+            runningValue += qty * unitCost;
+            const avg = runningQty > 0 ? runningValue / runningQty : unitCost;
+            return {
+                id: p.id,
+                purchase_date: p.purchase_date,
+                supplier: p.supplier,
+                branch: p.warehouse_branch,
+                quantity: qty,
+                unit_cost: unitCost,
+                line_total: qty * unitCost,
+                invoice_ref: p.invoice_ref,
+                running_qty: runningQty,
+                weighted_avg_cost: avg,
+            };
+        });
+
+        const last = entries[entries.length - 1];
+        const first = entries[0];
+        return {
+            product: { ...product, purchase_rate: asNumber(product.purchase_rate) },
+            summary: {
+                receiptCount: entries.length,
+                totalQty: runningQty,
+                totalValue: runningValue,
+                latestCost: last ? last.unit_cost : asNumber(product.purchase_rate),
+                weightedAvgCost: last ? last.weighted_avg_cost : asNumber(product.purchase_rate),
+                minCost: entries.length ? Math.min(...entries.map((e) => e.unit_cost)) : 0,
+                maxCost: entries.length ? Math.max(...entries.map((e) => e.unit_cost)) : 0,
+                firstCost: first ? first.unit_cost : 0,
+            },
+            entries: entries.reverse(),
+        };
+    }
+
     async getFeaturedProducts() {
         // Fetch featured products from the database
         let featuredProducts = await prisma.product.findMany({
