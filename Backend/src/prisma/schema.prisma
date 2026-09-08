@@ -30,6 +30,9 @@ model User {
   stock_adjustments StockAdjustment[]
   supplier_payments SupplierPayment[]
   customer_payments CustomerPayment[]
+  expenses_created  Expense[]         @relation("ExpenseCreator")
+  expenses_approved Expense[]         @relation("ExpenseApprover")
+  recurring_expenses RecurringExpense[] @relation("RecurringExpenseCreator")
 
   @@index([email])
 }
@@ -64,6 +67,8 @@ model Branch {
   created_at            DateTime    @default(now())
   updated_at            DateTime    @default(now()) @updatedAt
   cashflows             CashFlow[]
+  expenses              Expense[]
+  recurring_expenses    RecurringExpense[]
 
   // Relations
   category           Category[]
@@ -833,14 +838,115 @@ enum PurchaseOrderStatus {
   CANCELLED
 }
 
+enum ExpensePaymentMethod {
+  CASH
+  BANK
+  CARD
+  MOBILE_MONEY
+  CHEQUE
+  OTHER
+}
+
+enum ExpenseStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum RecurringFrequency {
+  DAILY
+  WEEKLY
+  MONTHLY
+  QUARTERLY
+  YEARLY
+}
+
+model ExpenseCategory {
+  id          String   @id @default(uuid())
+  name        String   @unique
+  description String?
+  is_active   Boolean  @default(true)
+  created_at  DateTime @default(now())
+  updated_at  DateTime @default(now()) @updatedAt
+
+  expenses  Expense[]
+  recurring RecurringExpense[]
+}
+
 model Expense {
   id         String   @id @default(uuid())
   particular String
   amount     Decimal
   created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
 
   cashflow_id String?
   cashflow    CashFlow? @relation(fields: [cashflow_id], references: [id])
+
+  category_id String?
+  category    ExpenseCategory? @relation(fields: [category_id], references: [id])
+
+  payment_method   ExpensePaymentMethod @default(CASH)
+  bank_account     String?
+  reference        String?
+  vendor           String?
+  notes            String?
+  expense_date     DateTime            @default(now())
+
+  status           ExpenseStatus @default(PENDING)
+  approved_by      String?
+  approver         User?         @relation("ExpenseApprover", fields: [approved_by], references: [id])
+  approved_at      DateTime?
+  rejection_reason String?
+
+  branch_id String?
+  branch    Branch? @relation(fields: [branch_id], references: [id])
+
+  created_by String?
+  creator    User?   @relation("ExpenseCreator", fields: [created_by], references: [id])
+
+  recurring_id String?
+  recurring    RecurringExpense? @relation(fields: [recurring_id], references: [id])
+
+  @@index([status])
+  @@index([expense_date])
+  @@index([category_id])
+  @@index([branch_id])
+}
+
+model RecurringExpense {
+  id             String              @id @default(uuid())
+  particular     String
+  amount         Decimal
+  payment_method ExpensePaymentMethod @default(CASH)
+  bank_account   String?
+  vendor         String?
+  notes          String?
+
+  category_id String?
+  category    ExpenseCategory? @relation(fields: [category_id], references: [id])
+
+  branch_id String?
+  branch    Branch? @relation(fields: [branch_id], references: [id])
+
+  frequency     RecurringFrequency @default(MONTHLY)
+  interval      Int                @default(1)
+  start_date    DateTime           @default(now())
+  end_date      DateTime?
+  next_run_date DateTime
+  last_run_date DateTime?
+  is_active     Boolean            @default(true)
+  auto_approve  Boolean            @default(false)
+
+  created_by String?
+  creator    User?   @relation("RecurringExpenseCreator", fields: [created_by], references: [id])
+
+  created_at DateTime  @default(now())
+  updated_at DateTime  @default(now()) @updatedAt
+  generated  Expense[]
+
+  @@index([is_active])
+  @@index([next_run_date])
 }
 
 model CashFlow {

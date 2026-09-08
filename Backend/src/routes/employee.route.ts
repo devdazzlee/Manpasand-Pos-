@@ -38,7 +38,7 @@ import {
   getEmployeeTypes,
   toggleEmployeeType,
   updateEmployeeType,
-} from '../controllers/expense.controller';
+} from '../controllers/employee.controller';
 
 const router = express.Router();
 

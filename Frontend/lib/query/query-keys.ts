@@ -63,6 +63,14 @@ export const qk = {
     list: (params: ListParams = {}) => ["websiteOrders", "list", params] as const,
     detail: (id: string) => ["websiteOrders", "detail", id] as const,
   },
+  expenses: {
+    all: ["expenses"] as const,
+    list: (params: ListParams = {}) => ["expenses", "list", params] as const,
+    detail: (id: string) => ["expenses", "detail", id] as const,
+    report: (params: ListParams = {}) => ["expenses", "report", params] as const,
+    categories: ["expense-categories"] as const,
+    recurring: ["recurring-expenses"] as const,
+  },
   dashboard: {
     stats: ["dashboard", "stats"] as const,
     recentSales: (params: ListParams = {}) => ["dashboard", "recent-sales", params] as const,

@@ -1,10 +1,12 @@
 import { Request, Response } from 'express';
 import { EmployeeStatus, EmploymentType } from '@prisma/client';
 import { EmployeeService } from '../services/employee.service';
+import { EmployeeTypeService } from '../services/employeeType.service';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 
 const employeeService = new EmployeeService();
+const employeeTypeService = new EmployeeTypeService();
 
 export const createEmployee = asyncHandler(async (req: Request, res: Response) => {
   const employee = await employeeService.createEmployee(req.body, req.user?.branch_id!);
@@ -90,4 +92,40 @@ export const deleteDepartment = asyncHandler(async (req: Request, res: Response)
 export const importEmployees = asyncHandler(async (req: Request, res: Response) => {
   const result = await employeeService.importEmployees(req.body.rows, req.user?.branch_id!);
   new ApiResponse(result, 'Employee import completed', 200).send(res);
+});
+
+/* --------------------- employee types / designations --------------------- */
+
+export const createEmployeeType = asyncHandler(async (req: Request, res: Response) => {
+  const data = await employeeTypeService.create(req.body);
+  new ApiResponse(data, 'Employee type created successfully', 201).send(res);
+});
+
+export const getEmployeeTypes = asyncHandler(async (req: Request, res: Response) => {
+  const search = req.query.search as string | undefined;
+  const isActiveRaw = req.query.is_active as string | undefined;
+  const is_active =
+    isActiveRaw === 'true' ? true : isActiveRaw === 'false' ? false : undefined;
+  const data = await employeeTypeService.getAll({ search, is_active });
+  new ApiResponse(data, 'Employee types retrieved successfully').send(res);
+});
+
+export const getEmployeeTypeById = asyncHandler(async (req: Request, res: Response) => {
+  const data = await employeeTypeService.getById(req.params.id);
+  new ApiResponse(data, 'Employee type retrieved successfully').send(res);
+});
+
+export const updateEmployeeType = asyncHandler(async (req: Request, res: Response) => {
+  const data = await employeeTypeService.update(req.params.id, req.body);
+  new ApiResponse(data, 'Employee type updated successfully').send(res);
+});
+
+export const toggleEmployeeType = asyncHandler(async (req: Request, res: Response) => {
+  const data = await employeeTypeService.toggleActive(req.params.id);
+  new ApiResponse(data, 'Designation status updated successfully').send(res);
+});
+
+export const deleteEmployeeType = asyncHandler(async (req: Request, res: Response) => {
+  const data = await employeeTypeService.delete(req.params.id);
+  new ApiResponse(data, 'Employee type deleted successfully').send(res);
 });

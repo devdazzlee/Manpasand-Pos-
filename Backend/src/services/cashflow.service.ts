@@ -79,6 +79,11 @@ export class CashFlowService {
         particular: data.particular,
         amount: data.amount,
         cashflow_id: data.cashflow_id,
+        // Petty cash already left the drawer — it is not part of the approval
+        // queue in the Expenses module.
+        payment_method: 'CASH',
+        status: 'APPROVED',
+        approved_at: new Date(),
       },
     });
 
