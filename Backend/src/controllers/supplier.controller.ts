@@ -78,6 +78,23 @@ export const getSupplierLedger = asyncHandler(
     },
 );
 
+export const getSupplierStatement = asyncHandler(
+    async (req: Request, res: Response) => {
+        const data = await supplierService.getSupplierStatement(req.params.id, {
+            from: req.query.from as string | undefined,
+            to: req.query.to as string | undefined,
+        });
+        new ApiResponse(data, 'Supplier statement retrieved').send(res);
+    },
+);
+
+export const getSupplierProducts = asyncHandler(
+    async (req: Request, res: Response) => {
+        const data = await supplierService.getSupplierProducts(req.params.id);
+        new ApiResponse(data, 'Supplier products retrieved').send(res);
+    },
+);
+
 export const createSupplierPayment = asyncHandler(
     async (req: Request, res: Response) => {
         const payment = await supplierService.createSupplierPayment(

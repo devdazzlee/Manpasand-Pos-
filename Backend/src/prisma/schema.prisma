@@ -33,6 +33,7 @@ model User {
   expenses_created  Expense[]         @relation("ExpenseCreator")
   expenses_approved Expense[]         @relation("ExpenseApprover")
   recurring_expenses RecurringExpense[] @relation("RecurringExpenseCreator")
+  purchase_returns  PurchaseReturn[]  @relation("PurchaseReturnCreator")
 
   @@index([email])
 }
@@ -69,6 +70,7 @@ model Branch {
   cashflows             CashFlow[]
   expenses              Expense[]
   recurring_expenses    RecurringExpense[]
+  purchase_returns      PurchaseReturn[]  @relation("PurchaseReturnBranch")
 
   // Relations
   category           Category[]
@@ -209,6 +211,7 @@ model Supplier {
   products        Product[]
   purchase_orders PurchaseOrder[]
   purchases       Purchase[]
+  purchase_returns PurchaseReturn[]
   payments        SupplierPayment[]
   created_at      DateTime        @default(now())
   updated_at      DateTime        @default(now()) @updatedAt
@@ -313,6 +316,7 @@ model Product {
   stock_movements      StockMovement[]
   ProductImage         ProductImage[]
   purchases            Purchase[]
+  purchase_return_items PurchaseReturnItem[]
   stock_adjustments    StockAdjustment[]
   transfers            Transfer[]
   created_at           DateTime            @default(now())
@@ -418,6 +422,9 @@ model Purchase {
   invoice_ref        String?
   notes              String?
   delivery_status    PurchaseDeliveryStatus  @default(COMPLETE)
+  purchase_order_id  String?
+  purchase_order     PurchaseOrder?          @relation(fields: [purchase_order_id], references: [id])
+  return_items       PurchaseReturnItem[]
   created_by         String
   user               User                   @relation(fields: [created_by], references: [id])
   created_at         DateTime               @default(now())
@@ -426,6 +433,7 @@ model Purchase {
   @@index([supplier_id])
   @@index([warehouse_branch_id])
   @@index([purchase_date])
+  @@index([purchase_order_id])
   @@index([created_by])
 }
 
@@ -592,6 +600,8 @@ model PurchaseOrder {
   created_by           String
   user                 User                @relation(fields: [created_by], references: [id])
   purchase_order_items PurchaseOrderItem[]
+  purchases            Purchase[]
+  purchase_returns     PurchaseReturn[]
   created_at           DateTime            @default(now())
   updated_at           DateTime            @default(now()) @updatedAt
 
@@ -600,6 +610,54 @@ model PurchaseOrder {
   @@index([supplier_id])
   @@index([status])
   @@index([order_date])
+}
+
+enum PurchaseReturnStatus {
+  PENDING
+  COMPLETED
+  CANCELLED
+}
+
+model PurchaseReturn {
+  id                String               @id @default(uuid())
+  return_number     String               @unique
+  supplier_id       String
+  supplier          Supplier             @relation(fields: [supplier_id], references: [id])
+  branch_id         String
+  branch            Branch               @relation("PurchaseReturnBranch", fields: [branch_id], references: [id])
+  purchase_order_id String?
+  purchase_order    PurchaseOrder?       @relation(fields: [purchase_order_id], references: [id])
+  return_date       DateTime             @default(now())
+  status            PurchaseReturnStatus @default(COMPLETED)
+  reason            String?
+  notes             String?
+  total_amount      Decimal              @default(0)
+  created_by        String
+  user              User                 @relation("PurchaseReturnCreator", fields: [created_by], references: [id])
+  items             PurchaseReturnItem[]
+  created_at        DateTime             @default(now())
+  updated_at        DateTime             @default(now()) @updatedAt
+
+  @@index([supplier_id])
+  @@index([branch_id])
+  @@index([return_date])
+  @@index([status])
+}
+
+model PurchaseReturnItem {
+  id                 String         @id @default(uuid())
+  purchase_return_id String
+  purchase_return    PurchaseReturn @relation(fields: [purchase_return_id], references: [id], onDelete: Cascade)
+  product_id         String
+  product            Product        @relation(fields: [product_id], references: [id])
+  quantity           Decimal
+  unit_cost          Decimal
+  total_cost         Decimal
+  purchase_id        String?
+  purchase           Purchase?      @relation(fields: [purchase_id], references: [id])
+
+  @@index([purchase_return_id])
+  @@index([product_id])
 }
 
 // NEW: Purchase Order Items
@@ -824,6 +882,7 @@ enum StockMovementType {
   TRANSFER_IN
   TRANSFER_OUT
   RETURN
+  PURCHASE_RETURN
   DAMAGE
   EXPIRED
   LOSS

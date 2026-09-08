@@ -8,6 +8,8 @@ import {
     deleteSupplier,
     getSupplierPurchases,
     getSupplierLedger,
+    getSupplierStatement,
+    getSupplierProducts,
     createSupplierPayment,
     deleteSupplierPayment,
 } from '../controllers/supplier.controller';
@@ -31,6 +33,8 @@ router.get('/', validate(listSuppliersSchema), listSuppliers);
 
 router.get('/:id/purchases', validate(getSupplierSchema), getSupplierPurchases);
 router.get('/:id/ledger', validate(getSupplierSchema), getSupplierLedger);
+router.get('/:id/statement', validate(getSupplierSchema), getSupplierStatement);
+router.get('/:id/products', validate(getSupplierSchema), getSupplierProducts);
 router.post(
     '/:id/payments',
     validate(createSupplierPaymentSchema),

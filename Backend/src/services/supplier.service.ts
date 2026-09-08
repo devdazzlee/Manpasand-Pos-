@@ -249,16 +249,23 @@ export class SupplierService {
         };
     }
 
-    async getSupplierLedger(supplierId: string) {
+    /**
+     * Full chronological payable ledger: every purchase (debit), every completed
+     * purchase return (credit — goods went back, so we owe less) and every
+     * supplier payment (credit). Shared by the live ledger and the statement.
+     */
+    private async computeSupplierLedger(supplierId: string) {
         await this.getSupplierById(supplierId);
 
-        const [purchases, payments] = await Promise.all([
+        const [purchases, returns, payments] = await Promise.all([
             prisma.purchase.findMany({
                 where: { supplier_id: supplierId },
-                include: {
-                    product: { select: { id: true, name: true, sku: true } },
-                },
+                include: { product: { select: { id: true, name: true, sku: true } } },
                 orderBy: { purchase_date: 'asc' },
+            }),
+            prisma.purchaseReturn.findMany({
+                where: { supplier_id: supplierId, status: 'COMPLETED' },
+                orderBy: { return_date: 'asc' },
             }),
             prisma.supplierPayment.findMany({
                 where: { supplier_id: supplierId },
@@ -267,10 +274,11 @@ export class SupplierService {
             }),
         ]);
 
+        type LedgerType = 'PURCHASE' | 'RETURN' | 'PAYMENT';
         type LedgerEntry = {
             id: string;
             date: Date;
-            type: 'PURCHASE' | 'PAYMENT';
+            type: LedgerType;
             description: string;
             reference: string | null;
             debit: number;
@@ -278,25 +286,33 @@ export class SupplierService {
             balance: number;
             meta?: Record<string, unknown>;
         };
+        const order: Record<LedgerType, number> = { PURCHASE: 0, RETURN: 1, PAYMENT: 2 };
 
         const raw: Omit<LedgerEntry, 'balance'>[] = [];
 
         for (const p of purchases) {
-            const debit = asNumber(p.quantity) * asNumber(p.cost_price);
             raw.push({
                 id: `purchase-${p.id}`,
                 date: p.purchase_date,
                 type: 'PURCHASE',
                 description: `Purchase · ${p.product?.name || 'Product'} × ${asNumber(p.quantity)}`,
                 reference: p.invoice_ref,
-                debit,
+                debit: asNumber(p.quantity) * asNumber(p.cost_price),
                 credit: 0,
-                meta: {
-                    purchaseId: p.id,
-                    productId: p.product_id,
-                    quantity: asNumber(p.quantity),
-                    costPrice: asNumber(p.cost_price),
-                },
+                meta: { purchaseId: p.id, productId: p.product_id },
+            });
+        }
+
+        for (const r of returns) {
+            raw.push({
+                id: `return-${r.id}`,
+                date: r.return_date,
+                type: 'RETURN',
+                description: `Purchase return · ${r.return_number}`,
+                reference: r.return_number,
+                debit: 0,
+                credit: asNumber(r.total_amount),
+                meta: { returnId: r.id },
             });
         }
 
@@ -320,7 +336,7 @@ export class SupplierService {
         raw.sort((a, b) => {
             const d = a.date.getTime() - b.date.getTime();
             if (d !== 0) return d;
-            return a.type === 'PURCHASE' ? -1 : 1;
+            return order[a.type] - order[b.type];
         });
 
         let running = 0;
@@ -329,18 +345,28 @@ export class SupplierService {
             return { ...e, balance: running };
         });
 
+        return { entries, purchases, returns, payments, closingBalance: running };
+    }
+
+    async getSupplierLedger(supplierId: string) {
+        const { entries, purchases, returns, payments } =
+            await this.computeSupplierLedger(supplierId);
+
         const totalPurchased = entries.reduce((acc, e) => acc + e.debit, 0);
-        const totalPaid = entries.reduce((acc, e) => acc + e.credit, 0);
+        const totalPaid = payments.reduce((acc, p) => acc + asNumber(p.amount), 0);
+        const totalReturned = returns.reduce((acc, r) => acc + asNumber(r.total_amount), 0);
 
         return {
             summary: {
                 totalPurchased,
                 totalPaid,
-                balanceDue: totalPurchased - totalPaid,
+                totalReturned,
+                balanceDue: totalPurchased - totalPaid - totalReturned,
                 purchaseCount: purchases.length,
+                returnCount: returns.length,
                 paymentCount: payments.length,
             },
-            entries: entries.reverse(),
+            entries: [...entries].reverse(),
             payments: payments
                 .map((p) => ({
                     id: p.id,
@@ -354,6 +380,98 @@ export class SupplierService {
                 }))
                 .reverse(),
         };
+    }
+
+    /** Date-ranged printable statement: opening carried to `from`, entries in range, closing. */
+    async getSupplierStatement(supplierId: string, range: { from?: string; to?: string } = {}) {
+        const supplier = await this.getSupplierById(supplierId);
+        const { entries } = await this.computeSupplierLedger(supplierId);
+
+        const fromDate = range.from ? new Date(range.from) : null;
+        const toDateRaw = range.to ? new Date(range.to) : null;
+        const validFrom = fromDate && !Number.isNaN(fromDate.getTime()) ? fromDate : null;
+        const validTo =
+            toDateRaw && !Number.isNaN(toDateRaw.getTime())
+                ? new Date(
+                      toDateRaw.getFullYear(),
+                      toDateRaw.getMonth(),
+                      toDateRaw.getDate(),
+                      23,
+                      59,
+                      59,
+                      999,
+                  )
+                : null;
+
+        let openingBalance = 0;
+        const windowEntries: typeof entries = [];
+        for (const e of entries) {
+            if (validFrom && e.date < validFrom) {
+                openingBalance = e.balance;
+                continue;
+            }
+            if (validTo && e.date > validTo) continue;
+            windowEntries.push(e);
+        }
+
+        const totalDebit = windowEntries.reduce((acc, e) => acc + e.debit, 0);
+        const totalCredit = windowEntries.reduce((acc, e) => acc + e.credit, 0);
+
+        return {
+            supplier: {
+                id: supplier.id,
+                name: supplier.name,
+                code: supplier.code,
+                phone_number: supplier.phone_number,
+                email: supplier.email,
+                address: supplier.address,
+            },
+            period: {
+                from: validFrom ? validFrom.toISOString() : null,
+                to: validTo ? validTo.toISOString() : null,
+            },
+            summary: {
+                openingBalance,
+                totalDebit,
+                totalCredit,
+                closingBalance: openingBalance + totalDebit - totalCredit,
+                entryCount: windowEntries.length,
+            },
+            entries: windowEntries,
+        };
+    }
+
+    /** Products assigned to this supplier (the supplier's catalogue). */
+    async getSupplierProducts(supplierId: string) {
+        await this.getSupplierById(supplierId);
+        const products = await prisma.product.findMany({
+            where: { supplier_id: supplierId },
+            orderBy: { name: 'asc' },
+            select: {
+                id: true,
+                name: true,
+                sku: true,
+                code: true,
+                is_active: true,
+                purchase_rate: true,
+                sales_rate_inc_dis_and_tax: true,
+                category: { select: { id: true, name: true } },
+                unit: { select: { id: true, name: true } },
+                _count: { select: { purchases: true } },
+            },
+        });
+        return products.map((p) => ({
+            id: p.id,
+            name: p.name,
+            sku: p.sku,
+            code: p.code,
+            is_active: p.is_active,
+            purchase_rate: asNumber(p.purchase_rate),
+            sales_rate: asNumber(p.sales_rate_inc_dis_and_tax),
+            category: p.category?.name ?? null,
+            unit: p.unit?.name ?? null,
+            purchase_count: p._count.purchases,
+        }));
     }
 
     async createSupplierPayment(
