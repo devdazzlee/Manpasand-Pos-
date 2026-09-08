@@ -43,6 +43,21 @@ export async function fetchSupplierLedger(id: string, signal?: AbortSignal) {
   return getOne<any>(`/suppliers/${id}/ledger`, { signal });
 }
 
+export async function fetchSupplierStatement(
+  id: string,
+  range: { from?: string; to?: string } = {},
+  signal?: AbortSignal,
+) {
+  return getOne<any>(`/suppliers/${id}/statement`, {
+    params: cleanParams({ from: range.from, to: range.to }),
+    signal,
+  });
+}
+
+export async function fetchSupplierProducts(id: string, signal?: AbortSignal) {
+  return getOne<any[]>(`/suppliers/${id}/products`, { signal });
+}
+
 /** Mutation payloads are screen-shaped; keep them loose but explicit. */
 export type SupplierPayload = Record<string, unknown>;
 

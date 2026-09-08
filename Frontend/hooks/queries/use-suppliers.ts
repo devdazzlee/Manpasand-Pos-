@@ -13,6 +13,8 @@ import {
   fetchSuppliers,
   fetchSupplierLedger,
   fetchSupplierPurchases,
+  fetchSupplierStatement,
+  fetchSupplierProducts,
   createSupplier,
   updateSupplier,
   deleteSupplier,
@@ -58,6 +60,28 @@ export function useSupplierLedger(id: string | null) {
     queryFn: ({ signal }) => fetchSupplierLedger(id as string, signal),
     staleTime: STALE_TIME.volatile,
     enabled: Boolean(id),
+  });
+}
+
+export function useSupplierStatement(
+  id: string | null,
+  range: { from?: string; to?: string },
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: [...qk.suppliers.detail(id ?? ""), "statement", range] as const,
+    queryFn: ({ signal }) => fetchSupplierStatement(id as string, range, signal),
+    staleTime: STALE_TIME.volatile,
+    enabled: Boolean(id) && (options?.enabled ?? true),
+  });
+}
+
+export function useSupplierProducts(id: string | null, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: [...qk.suppliers.detail(id ?? ""), "products"] as const,
+    queryFn: ({ signal }) => fetchSupplierProducts(id as string, signal),
+    staleTime: STALE_TIME.directory,
+    enabled: Boolean(id) && (options?.enabled ?? true),
   });
 }
 

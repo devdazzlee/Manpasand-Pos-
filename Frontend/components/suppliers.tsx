@@ -65,11 +65,19 @@ import {
   Scale,
   CalendarIcon,
   RefreshCcw,
+  FileText,
+  Printer,
 } from "lucide-react";
 import { z } from "zod";
 import { LoadingButton } from "@/components/ui/loading-button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { cn } from "@/lib/utils";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   DetailSheet,
   DetailSheetBody,
@@ -90,6 +98,8 @@ import {
   useSuppliers,
   useSupplierPurchases,
   useSupplierLedger,
+  useSupplierStatement,
+  useSupplierProducts,
   useSupplierMutations,
 } from "@/hooks/queries/use-suppliers";
 
@@ -139,7 +149,7 @@ interface PurchaseRow {
 interface LedgerEntry {
   id: string;
   date: string;
-  type: "PURCHASE" | "PAYMENT";
+  type: "PURCHASE" | "RETURN" | "PAYMENT";
   description: string;
   reference: string | null;
   debit: number;
@@ -150,9 +160,24 @@ interface LedgerEntry {
 interface LedgerSummary {
   totalPurchased: number;
   totalPaid: number;
+  totalReturned?: number;
   balanceDue: number;
   purchaseCount: number;
+  returnCount?: number;
   paymentCount: number;
+}
+
+interface SupplierProductRow {
+  id: string;
+  name: string;
+  sku: string | null;
+  code: string | null;
+  is_active: boolean;
+  purchase_rate: number;
+  sales_rate: number;
+  category: string | null;
+  unit: string | null;
+  purchase_count: number;
 }
 
 interface PaymentRow {
@@ -251,7 +276,7 @@ const supplierFieldLabelClass = "text-xs font-medium text-foreground";
 const supplierFieldControlClass = "h-9 text-sm";
 
 type StatusFilter = "all" | "active" | "inactive" | "pos";
-type DetailTab = "overview" | "purchases" | "ledger";
+type DetailTab = "overview" | "purchases" | "ledger" | "products";
 
 function isActiveSupplier(s: Supplier) {
   return (s.status || "").toLowerCase() === "active";
@@ -479,6 +504,73 @@ const Suppliers: React.FC = () => {
   const detailId = detailOpen && current ? current.id : null;
   const purchasesQuery = useSupplierPurchases(detailId);
   const ledgerQuery = useSupplierLedger(detailId);
+  const productsQuery = useSupplierProducts(detailId, {
+    enabled: detailTab === "products",
+  });
+
+  // ----- statement (its own modal, date-ranged, printable) -----
+  const [statementOpen, setStatementOpen] = useState(false);
+  const stmtMonthStart = () => {
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
+  };
+  const stmtToday = () => new Date().toISOString().slice(0, 10);
+  const [stmtFrom, setStmtFrom] = useState(stmtMonthStart);
+  const [stmtTo, setStmtTo] = useState(stmtToday);
+  const statementQuery = useSupplierStatement(
+    statementOpen && current ? current.id : null,
+    { from: stmtFrom || undefined, to: stmtTo || undefined },
+    { enabled: statementOpen },
+  );
+  const printStatement = () => {
+    const s = statementQuery.data;
+    if (!s) return;
+    const shop = localStorage.getItem("branchName") || "Manpasand";
+    const rows = [
+      `<tr><td>${stmtFrom || "—"}</td><td>Opening balance</td><td></td><td></td><td class="r">${formatMoney(
+        s.summary?.openingBalance || 0,
+      )}</td></tr>`,
+      ...(s.entries as LedgerEntry[]).map(
+        (e) =>
+          `<tr><td>${formatDate(e.date)}</td><td>${e.description}</td><td class="r">${
+            e.debit ? formatMoney(e.debit) : ""
+          }</td><td class="r">${e.credit ? formatMoney(e.credit) : ""}</td><td class="r">${formatMoney(
+            e.balance,
+          )}</td></tr>`,
+      ),
+      `<tr class="tot"><td colspan="2">Closing balance</td><td class="r">${formatMoney(
+        s.summary?.totalDebit || 0,
+      )}</td><td class="r">${formatMoney(s.summary?.totalCredit || 0)}</td><td class="r">${formatMoney(
+        s.summary?.closingBalance || 0,
+      )}</td></tr>`,
+    ].join("");
+    const html = `<!doctype html><html><head><title>Statement</title><style>
+      *{font-family:Arial,Helvetica,sans-serif;font-size:12px}body{margin:16px;color:#111}
+      h1{font-size:15px;margin:0;text-align:center}.sub{text-align:center;color:#666;margin:2px 0 12px}
+      .meta div{display:flex;gap:8px}.meta span:first-child{color:#666;min-width:70px}
+      table{width:100%;border-collapse:collapse}th,td{padding:4px 6px;border-bottom:1px solid #ddd;text-align:left}
+      th{color:#666}.r{text-align:right}.tot td{font-weight:700;border-top:2px solid #333}
+      @media print{body{margin:0}}
+    </style></head><body>
+      <h1>${shop}</h1><div class="sub">Supplier Account Statement</div>
+      <div class="meta">
+        <div><span>Supplier</span><b>${s.supplier?.name || "—"}</b></div>
+        <div><span>Phone</span>${s.supplier?.phone_number || "—"}</div>
+        <div><span>Period</span>${stmtFrom || "—"} to ${stmtTo || "—"}</div>
+      </div>
+      <table><thead><tr><th>Date</th><th>Description</th><th class="r">Debit</th><th class="r">Credit</th><th class="r">Balance</th></tr></thead>
+      <tbody>${rows}</tbody></table>
+      <script>window.onload=function(){window.print();setTimeout(function(){window.close()},300)}<\/script>
+    </body></html>`;
+    const w = window.open("", "_blank", "width=800,height=900");
+    if (!w) {
+      toast({ variant: "destructive", title: "Enable pop-ups to print the statement" });
+      return;
+    }
+    w.document.write(html);
+    w.document.close();
+  };
+
   const purchasesLoading = purchasesQuery.isLoading;
   const ledgerLoading = ledgerQuery.isLoading;
 
@@ -1283,6 +1375,7 @@ const Suppliers: React.FC = () => {
                   { key: "overview", label: "Overview" },
                   { key: "purchases", label: "Purchases" },
                   { key: "ledger", label: "Ledger" },
+                  { key: "products", label: "Products" },
                 ] as const
               ).map((t) => (
                 <TabsTrigger
@@ -1882,12 +1975,16 @@ const Suppliers: React.FC = () => {
                                   className={
                                     e.type === "PURCHASE"
                                       ? "border-amber-200 bg-amber-50 text-amber-800"
-                                      : "border-green-200 bg-green-50 text-green-800"
+                                      : e.type === "RETURN"
+                                        ? "border-violet-200 bg-violet-50 text-violet-800"
+                                        : "border-green-200 bg-green-50 text-green-800"
                                   }
                                 >
                                   {e.type === "PURCHASE"
                                     ? "Purchase"
-                                    : "Payment"}
+                                    : e.type === "RETURN"
+                                      ? "Return"
+                                      : "Payment"}
                                 </Badge>
                               </TableCell>
                               <TableCell className="max-w-[280px] text-sm">
@@ -1937,6 +2034,61 @@ const Suppliers: React.FC = () => {
               )}
             </div>
           )}
+
+          {current && detailTab === "products" && (
+            <div className="space-y-3">
+              {productsQuery.isLoading ? (
+                <div className="space-y-2">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <div key={i} className="h-11 animate-pulse rounded bg-muted" />
+                  ))}
+                </div>
+              ) : (productsQuery.data?.length ?? 0) === 0 ? (
+                <div className="flex flex-col items-center gap-1.5 rounded-lg border border-dashed py-10">
+                  <Package className="h-7 w-7 text-muted-foreground/50" />
+                  <p className="text-sm text-muted-foreground">
+                    No products are assigned to this supplier
+                  </p>
+                </div>
+              ) : (
+                <div className="w-full min-w-0 overflow-x-auto rounded-lg border border-border">
+                  <Table className="min-w-[640px]">
+                    <TableHeader>
+                      <TableRow className="hover:bg-transparent">
+                        <TableHead className="text-xs uppercase tracking-wide">Product</TableHead>
+                        <TableHead className="text-xs uppercase tracking-wide">SKU</TableHead>
+                        <TableHead className="text-xs uppercase tracking-wide">Category</TableHead>
+                        <TableHead className="text-right text-xs uppercase tracking-wide">Buy rate</TableHead>
+                        <TableHead className="text-right text-xs uppercase tracking-wide">Sell rate</TableHead>
+                        <TableHead className="text-right text-xs uppercase tracking-wide">Purchases</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {(productsQuery.data as SupplierProductRow[]).map((p) => (
+                        <TableRow key={p.id} className="h-11">
+                          <TableCell className="font-medium">
+                            {p.name}
+                            {!p.is_active && (
+                              <Badge variant="outline" className="ml-2 border-border text-muted-foreground">
+                                Inactive
+                              </Badge>
+                            )}
+                          </TableCell>
+                          <TableCell className="font-mono text-xs text-muted-foreground">
+                            {p.sku || p.code || "—"}
+                          </TableCell>
+                          <TableCell className="text-sm">{p.category || "—"}</TableCell>
+                          <TableCell className="text-right nums">{formatMoney(p.purchase_rate)}</TableCell>
+                          <TableCell className="text-right nums">{formatMoney(p.sales_rate)}</TableCell>
+                          <TableCell className="text-right text-sm nums">{p.purchase_count}</TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
+            </div>
+          )}
         </DetailSheetBody>
 
         <DetailSheetFooter>
@@ -1950,12 +2102,104 @@ const Suppliers: React.FC = () => {
           >
             Close
           </Button>
+          <Button
+            variant="outline"
+            onClick={() => setStatementOpen(true)}
+            disabled={!current}
+          >
+            <FileText className="mr-1.5 h-4 w-4" />
+            Statement
+          </Button>
           <Button onClick={() => current && openEdit(current)}>
             <Edit className="mr-1.5 h-4 w-4" />
             Edit
           </Button>
         </DetailSheetFooter>
       </DetailSheet>
+
+      {/* Supplier account statement — date-ranged, printable */}
+      <Dialog open={statementOpen} onOpenChange={setStatementOpen}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Account statement</DialogTitle>
+          </DialogHeader>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">From</label>
+              <Input type="date" value={stmtFrom} max={stmtTo || undefined}
+                onChange={(e) => setStmtFrom(e.target.value)} className="h-9 w-40" />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">To</label>
+              <Input type="date" value={stmtTo} min={stmtFrom || undefined}
+                onChange={(e) => setStmtTo(e.target.value)} className="h-9 w-40" />
+            </div>
+            <Button
+              variant="outline"
+              className="h-9"
+              onClick={printStatement}
+              disabled={statementQuery.isLoading || !statementQuery.data}
+            >
+              <Printer className="mr-1.5 h-4 w-4" />
+              Print
+            </Button>
+          </div>
+          <div className="max-h-[60vh] overflow-y-auto rounded-lg border border-border p-4 text-sm">
+            {statementQuery.isLoading ? (
+              <div className="space-y-2">
+                {Array.from({ length: 8 }).map((_, i) => (
+                  <div key={i} className="h-6 animate-pulse rounded bg-muted" />
+                ))}
+              </div>
+            ) : statementQuery.data ? (
+              <table className="w-full border-collapse text-xs">
+                <thead>
+                  <tr className="border-b border-border text-left text-muted-foreground">
+                    <th className="py-1.5 pr-2 font-medium">Date</th>
+                    <th className="py-1.5 pr-2 font-medium">Description</th>
+                    <th className="py-1.5 pr-2 text-right font-medium">Debit</th>
+                    <th className="py-1.5 pr-2 text-right font-medium">Credit</th>
+                    <th className="py-1.5 text-right font-medium">Balance</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr className="border-b border-border/60">
+                    <td className="py-1.5 pr-2 nums">{stmtFrom || "—"}</td>
+                    <td className="py-1.5 pr-2 font-medium">Opening balance</td>
+                    <td /><td />
+                    <td className="py-1.5 text-right nums">
+                      {formatMoney(statementQuery.data.summary?.openingBalance || 0)}
+                    </td>
+                  </tr>
+                  {(statementQuery.data.entries as LedgerEntry[]).map((e) => (
+                    <tr key={e.id} className="border-b border-border/60">
+                      <td className="py-1.5 pr-2 nums">{formatDate(e.date)}</td>
+                      <td className="py-1.5 pr-2">{e.description}</td>
+                      <td className="py-1.5 pr-2 text-right nums">{e.debit ? formatMoney(e.debit) : ""}</td>
+                      <td className="py-1.5 pr-2 text-right nums">{e.credit ? formatMoney(e.credit) : ""}</td>
+                      <td className="py-1.5 text-right nums">{formatMoney(e.balance)}</td>
+                    </tr>
+                  ))}
+                  <tr className="font-semibold">
+                    <td className="py-1.5 pr-2" colSpan={2}>Closing balance</td>
+                    <td className="py-1.5 pr-2 text-right nums">
+                      {formatMoney(statementQuery.data.summary?.totalDebit || 0)}
+                    </td>
+                    <td className="py-1.5 pr-2 text-right nums">
+                      {formatMoney(statementQuery.data.summary?.totalCredit || 0)}
+                    </td>
+                    <td className="py-1.5 text-right nums">
+                      {formatMoney(statementQuery.data.summary?.closingBalance || 0)}
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            ) : (
+              <p className="text-sm text-muted-foreground">Could not load the statement.</p>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog
         open={!!deleteTarget}

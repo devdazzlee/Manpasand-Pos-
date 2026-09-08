@@ -1,1364 +1,1165 @@
-"use client"
+"use client";
 
-import { useState, useMemo, useEffect } from "react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { useEffect, useMemo, useState } from "react";
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-  DialogTrigger,
-} from "@/components/ui/dialog"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Textarea } from "@/components/ui/textarea"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { Plus, Search, Eye, Edit, Send, FileText, Trash2, Package, DollarSign, Clock, CheckCircle, Loader2 } from "lucide-react"
-import { useToast } from "@/hooks/use-toast"
-import apiClient from "@/lib/apiClient"
-import { API_BASE } from "@/config/constants"
-import { usePosData } from "@/hooks/use-pos-data"
-import { PageLoader } from "@/components/ui/page-loader"
-import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
+  Plus,
+  Search,
+  RefreshCcw,
+  Loader2,
+  Trash2,
+  Pencil,
+  Eye,
+  PackageCheck,
+  X,
+  Ban,
+  FileText,
+  Undo2,
+} from "lucide-react";
 
-interface Product {
-  id: string
-  name: string
-  sku?: string
-  purchase_rate?: number
-}
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent } from "@/components/ui/card";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  DetailSheet,
+  DetailSheetBody,
+  DetailSheetFooter,
+  DetailSheetHeader,
+} from "@/components/ui/detail-sheet";
+import { PageHeader, PageBody } from "@/components/ui/page-header";
+import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
+import { formatMoney } from "@/components/inventory/stock-ops/export-utils";
+import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+import { extractApiError } from "@/lib/api/errors";
 
-interface PurchaseOrderItem {
-  id: string
-  product: string
-  quantity: number
-  unitPrice: number
-  total: number
-}
+import { useSuppliers } from "@/hooks/queries/use-suppliers";
+import { useBranches } from "@/hooks/queries/use-branches";
+import { useProducts } from "@/hooks/queries/use-products";
+import {
+  usePurchaseOrders,
+  usePurchaseOrder,
+  usePurchaseOrderMutations,
+} from "@/hooks/queries/use-purchase-orders";
+import { usePurchaseReturns, usePurchaseReturnMutations } from "@/hooks/queries/use-purchase-returns";
+import { PO_STATUSES, type PurchaseOrder, type PurchaseOrderStatus } from "@/lib/api/purchase-orders";
+import { PR_STATUSES, type PurchaseReturn } from "@/lib/api/purchase-returns";
 
-interface PurchaseOrder {
-  id: string
-  supplier: string
-  supplierContact: string
-  date: string
-  expectedDelivery: string
-  status: "draft" | "pending" | "sent" | "confirmed" | "received" | "cancelled"
-  items: PurchaseOrderItem[]
-  subtotal: number
-  tax: number
-  total: number
-  notes: string
-  createdBy: string
-}
+const today = () => new Date().toISOString().slice(0, 10);
+const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : "—");
+const titleCase = (s: string) =>
+  s.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
-interface NewPurchaseOrder {
-  supplier: string
-  expectedDelivery: string
-  notes: string
-}
+const PO_STATUS_STYLE: Record<string, string> = {
+  PENDING: "border-slate-200 bg-slate-50 text-slate-700",
+  APPROVED: "border-sky-200 bg-sky-50 text-sky-800",
+  ORDERED: "border-blue-200 bg-blue-50 text-blue-800",
+  PARTIALLY_RECEIVED: "border-amber-200 bg-amber-50 text-amber-800",
+  RECEIVED: "border-green-200 bg-green-50 text-green-800",
+  CANCELLED: "border-rose-200 bg-rose-50 text-rose-800",
+};
 
-interface NewItem {
-  product: string
-  quantity: string
-  unitPrice: string
-}
+const NEXT_STATUS: Partial<Record<PurchaseOrderStatus, PurchaseOrderStatus>> = {
+  PENDING: "APPROVED",
+  APPROVED: "ORDERED",
+};
+
+type Tab = "orders" | "returns";
+type Toast = ReturnType<typeof useToast>["toast"];
 
 export function PurchaseOrders() {
-  const { toast } = useToast()
-  const today = new Date().toISOString().split("T")[0]
+  const { toast } = useToast();
+  const [tab, setTab] = useState<Tab>("orders");
+  return (
+    <>
+      <PageHeader title="Purchase Orders" description="Order from suppliers, receive stock, and record returns" />
+      <PageBody className="space-y-5">
+        <div className="flex gap-1.5">
+          {(["orders", "returns"] as const).map((k) => (
+            <button
+              key={k}
+              type="button"
+              onClick={() => setTab(k)}
+              className={cn(
+                "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                tab === k
+                  ? "border-primary bg-primary/10 text-primary"
+                  : "border-border bg-background text-foreground hover:bg-muted/50",
+              )}
+            >
+              {k === "orders" ? "Purchase orders" : "Purchase returns"}
+            </button>
+          ))}
+        </div>
+        {tab === "orders" ? <OrdersTab toast={toast} /> : <ReturnsTab toast={toast} />}
+      </PageBody>
+    </>
+  );
+}
 
-  // Global store data
-  const { 
-    products: globalProducts, 
-    isAnyLoading: globalLoading,
-  } = usePosData()
+/* --------------------------- shared: product picker --------------------------- */
 
-  // Product state for searchable dropdown
-  const [productPage, setProductPage] = useState(1)
-  const [productSearch, setProductSearch] = useState("")
-  const [products, setProducts] = useState<Product[]>([])
-  const [totalProducts, setTotalProducts] = useState(0)
-  const [loadingProducts, setLoadingProducts] = useState(false)
-  const [isInitialLoading, setIsInitialLoading] = useState(true)
-
-  const [orders, setOrders] = useState<PurchaseOrder[]>([
-    {
-      id: "PO-001",
-      supplier: "ABC Electronics",
-      supplierContact: "contact@abcelectronics.com",
-      date: "2024-01-15",
-      expectedDelivery: "2024-01-25",
-      status: "pending",
-      items: [
-        {
-          id: "ITEM-001",
-          product: "iPhone 15 Pro",
-          quantity: 10,
-          unitPrice: 120000,
-          total: 1200000,
-        },
-        {
-          id: "ITEM-002",
-          product: "AirPods Pro",
-          quantity: 20,
-          unitPrice: 25000,
-          total: 500000,
-        },
-      ],
-      subtotal: 1700000,
-      tax: 306000,
-      total: 2006000,
-      notes: "Urgent delivery required",
-      createdBy: "Admin",
-    },
-    {
-      id: "PO-002",
-      supplier: "XYZ Supplies",
-      supplierContact: "orders@xyzsupplies.com",
-      date: "2024-01-14",
-      expectedDelivery: "2024-01-20",
-      status: "sent",
-      items: [
-        {
-          id: "ITEM-003",
-          product: "Samsung Galaxy S24",
-          quantity: 15,
-          unitPrice: 80000,
-          total: 1200000,
-        },
-      ],
-      subtotal: 1200000,
-      tax: 216000,
-      total: 1416000,
-      notes: "Standard delivery terms",
-      createdBy: "Manager",
-    },
-    {
-      id: "PO-003",
-      supplier: "Tech Distributors",
-      supplierContact: "sales@techdist.com",
-      date: "2024-01-13",
-      expectedDelivery: "2024-01-18",
-      status: "received",
-      items: [
-        {
-          id: "ITEM-004",
-          product: "MacBook Pro",
-          quantity: 5,
-          unitPrice: 200000,
-          total: 1000000,
-        },
-        {
-          id: "ITEM-005",
-          product: "iPad Pro",
-          quantity: 8,
-          unitPrice: 85000,
-          total: 680000,
-        },
-      ],
-      subtotal: 1680000,
-      tax: 302400,
-      total: 1982400,
-      notes: "All items received in good condition",
-      createdBy: "Admin",
-    },
-    {
-      id: "PO-004",
-      supplier: "Mobile World",
-      supplierContact: "procurement@mobileworld.com",
-      date: "2024-01-12",
-      expectedDelivery: "2024-01-22",
-      status: "draft",
-      items: [
-        {
-          id: "ITEM-006",
-          product: "OnePlus 12",
-          quantity: 12,
-          unitPrice: 65000,
-          total: 780000,
-        },
-      ],
-      subtotal: 780000,
-      tax: 140400,
-      total: 920400,
-      notes: "Draft order - pending approval",
-      createdBy: "Staff",
-    },
-  ])
-
-  const [isCreateOpen, setIsCreateOpen] = useState(false)
-  const [isViewOpen, setIsViewOpen] = useState(false)
-  const [isEditOpen, setIsEditOpen] = useState(false)
-  const [selectedOrder, setSelectedOrder] = useState<PurchaseOrder | null>(null)
-  const [searchTerm, setSearchTerm] = useState("")
-
-  const [newOrder, setNewOrder] = useState<NewPurchaseOrder>({
-    supplier: "",
-    expectedDelivery: "",
-    notes: "",
-  })
-
-  const [orderItems, setOrderItems] = useState<PurchaseOrderItem[]>([])
-  const [newItem, setNewItem] = useState<NewItem>({
-    product: "",
-    quantity: "",
-    unitPrice: "",
-  })
-
-  const suppliers = [
-    { value: "ABC Electronics", label: "ABC Electronics", contact: "contact@abcelectronics.com" },
-    { value: "XYZ Supplies", label: "XYZ Supplies", contact: "orders@xyzsupplies.com" },
-    { value: "Tech Distributors", label: "Tech Distributors", contact: "sales@techdist.com" },
-    { value: "Mobile World", label: "Mobile World", contact: "procurement@mobileworld.com" },
-    { value: "Gadget Hub", label: "Gadget Hub", contact: "orders@gadgethub.com" },
-  ]
-
-  // Fetch products with search and pagination
+function ProductPicker({
+  onPick,
+}: {
+  onPick: (p: { id: string; name: string; price: number }) => void;
+}) {
+  const [q, setQ] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [open, setOpen] = useState(false);
   useEffect(() => {
-    const fetchProducts = async () => {
-      setLoadingProducts(true)
-      try {
-      const params: any = {
-        page: 1,
-        limit: 20,
-        is_active: true,
-      }
-        
-        if (productSearch) {
-          params.search = productSearch
-        }
-
-        const response = await apiClient.get(`${API_BASE}/products`, { params })
-        const data = response.data.data || response.data
-        
-        setProducts(data.products || data)
-        setTotalProducts(data.meta?.total || (data.products || data).length)
-        setIsInitialLoading(false)
-      } catch (e: any) {
-        console.log(e)
-        toast({
-          title: "Error",
-          description: "Failed to load products",
-          variant: "destructive",
-        })
-      } finally {
-        setLoadingProducts(false)
-      }
-    }
-
-    const timer = window.setTimeout(() => {
-      fetchProducts();
-    }, productSearch ? 300 : 0);
-    return () => window.clearTimeout(timer);
-  }, [productSearch]);
-
-  const getStatusColor = (status: string) => {
-    switch (status) {
-      case "draft":
-        return "bg-gray-100 text-gray-800"
-      case "pending":
-        return "bg-yellow-100 text-yellow-800"
-      case "sent":
-        return "bg-blue-100 text-blue-800"
-      case "confirmed":
-        return "bg-green-100 text-green-800"
-      case "received":
-        return "bg-purple-100 text-purple-800"
-      case "cancelled":
-        return "bg-red-100 text-red-800"
-      default:
-        return "bg-gray-100 text-gray-800"
-    }
-  }
-
-  const filteredOrders = useMemo(() => {
-    return orders.filter((order) => {
-      const matchesSearch =
-        order.id.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.supplier.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        order.items.some((item) => item.product.toLowerCase().includes(searchTerm.toLowerCase()))
-
-      return matchesSearch
-    })
-  }, [orders, searchTerm])
-
-  const getFilteredOrdersByStatus = (status: string) => {
-    if (status === "all") return filteredOrders
-    return filteredOrders.filter((order) => order.status === status)
-  }
-
-  // Calculate stats
-  const totalOrders = orders.length
-  const pendingOrders = orders.filter((o) => o.status === "pending").length
-  const totalValue = orders.reduce((sum, o) => sum + o.total, 0)
-  const receivedOrders = orders.filter((o) => o.status === "received").length
-
-  if (isInitialLoading) {
-    return <PageLoader message="Loading purchase orders..." />
-  }
-
-  const generateOrderId = () => {
-    const nextId = orders.length + 1
-    return `PO-${nextId.toString().padStart(3, "0")}`
-  }
-
-  const generateItemId = () => {
-    const allItems = orders.flatMap((o) => o.items)
-    const nextId = allItems.length + orderItems.length + 1
-    return `ITEM-${nextId.toString().padStart(3, "0")}`
-  }
-
-  const calculateTotals = (items: PurchaseOrderItem[]) => {
-    const subtotal = items.reduce((sum, item) => sum + item.total, 0)
-    const tax = subtotal * 0.18 // 18% GST
-    const total = subtotal + tax
-    return { subtotal, tax, total }
-  }
-
-  const loadMoreProducts = () => {
-    setProductPage(prev => prev + 1)
-  }
-
-  const handleProductSearch = (search: string) => {
-    setProductSearch(search)
-    setProductPage(1)
-    setProducts([])
-  }
-
-  const handleAddItem = () => {
-    if (!newItem.product || !newItem.quantity || !newItem.unitPrice) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all item fields.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const quantity = Number.parseInt(newItem.quantity)
-    const unitPrice = Number.parseFloat(newItem.unitPrice)
-
-    if (quantity <= 0 || unitPrice <= 0) {
-      toast({
-        title: "Invalid Values",
-        description: "Quantity and unit price must be greater than 0.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const item: PurchaseOrderItem = {
-      id: generateItemId(),
-      product: newItem.product,
-      quantity: quantity,
-      unitPrice: unitPrice,
-      total: quantity * unitPrice,
-    }
-
-    setOrderItems((prev) => [...prev, item])
-    setNewItem({
-      product: "",
-      quantity: "",
-      unitPrice: "",
-    })
-
-    toast({
-      title: "Item Added",
-      description: `${item.product} has been added to the order.`,
-    })
-  }
-
-  const handleRemoveItem = (itemId: string) => {
-    setOrderItems((prev) => prev.filter((item) => item.id !== itemId))
-    toast({
-      title: "Item Removed",
-      description: "Item has been removed from the order.",
-    })
-  }
-
-  const handleCreateOrder = () => {
-    if (!newOrder.supplier || !newOrder.expectedDelivery) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all required fields.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (orderItems.length === 0) {
-      toast({
-        title: "No Items",
-        description: "Please add at least one item to the order.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const selectedSupplier = suppliers.find((s) => s.value === newOrder.supplier)
-    const { subtotal, tax, total } = calculateTotals(orderItems)
-
-    const order: PurchaseOrder = {
-      id: generateOrderId(),
-      supplier: newOrder.supplier,
-      supplierContact: selectedSupplier?.contact || "",
-      date: today,
-      expectedDelivery: newOrder.expectedDelivery,
-      status: "draft",
-      items: orderItems,
-      subtotal: subtotal,
-      tax: tax,
-      total: total,
-      notes: newOrder.notes,
-      createdBy: "Current User",
-    }
-
-    setOrders((prev) => [order, ...prev])
-    setNewOrder({
-      supplier: "",
-      expectedDelivery: "",
-      notes: "",
-    })
-    setOrderItems([])
-    setIsCreateOpen(false)
-
-    toast({
-      title: "Purchase Order Created",
-      description: `Purchase order ${order.id} has been created successfully.`,
-    })
-  }
-
-  const handleViewOrder = (order: PurchaseOrder) => {
-    setSelectedOrder(order)
-    setIsViewOpen(true)
-  }
-
-  const handleEditOrder = (order: PurchaseOrder) => {
-    setSelectedOrder(order)
-    setNewOrder({
-      supplier: order.supplier,
-      expectedDelivery: order.expectedDelivery,
-      notes: order.notes,
-    })
-    setOrderItems([...order.items])
-    setIsEditOpen(true)
-  }
-
-  const handleUpdateOrder = () => {
-    if (!selectedOrder) return
-
-    if (!newOrder.supplier || !newOrder.expectedDelivery) {
-      toast({
-        title: "Missing Information",
-        description: "Please fill in all required fields.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    if (orderItems.length === 0) {
-      toast({
-        title: "No Items",
-        description: "Please add at least one item to the order.",
-        variant: "destructive",
-      })
-      return
-    }
-
-    const selectedSupplier = suppliers.find((s) => s.value === newOrder.supplier)
-    const { subtotal, tax, total } = calculateTotals(orderItems)
-
-    const updatedOrder: PurchaseOrder = {
-      ...selectedOrder,
-      supplier: newOrder.supplier,
-      supplierContact: selectedSupplier?.contact || "",
-      expectedDelivery: newOrder.expectedDelivery,
-      items: orderItems,
-      subtotal: subtotal,
-      tax: tax,
-      total: total,
-      notes: newOrder.notes,
-    }
-
-    setOrders((prev) => prev.map((order) => (order.id === selectedOrder.id ? updatedOrder : order)))
-    setNewOrder({
-      supplier: "",
-      expectedDelivery: "",
-      notes: "",
-    })
-    setOrderItems([])
-    setIsEditOpen(false)
-
-    toast({
-      title: "Purchase Order Updated",
-      description: `Purchase order ${selectedOrder.id} has been updated successfully.`,
-    })
-  }
-
-  const handleSendOrder = (orderId: string) => {
-    setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, status: "sent" as const } : order)))
-
-    toast({
-      title: "Order Sent",
-      description: `Purchase order ${orderId} has been sent to the supplier.`,
-    })
-  }
-
-  const handleConfirmOrder = (orderId: string) => {
-    setOrders((prev) =>
-      prev.map((order) => (order.id === orderId ? { ...order, status: "confirmed" as const } : order)),
-    )
-
-    toast({
-      title: "Order Confirmed",
-      description: `Purchase order ${orderId} has been confirmed by the supplier.`,
-    })
-  }
-
-  const handleReceiveOrder = (orderId: string) => {
-    setOrders((prev) => prev.map((order) => (order.id === orderId ? { ...order, status: "received" as const } : order)))
-
-    toast({
-      title: "Order Received",
-      description: `Purchase order ${orderId} has been marked as received.`,
-    })
-  }
-
-  const handleCancelOrder = (orderId: string) => {
-    setOrders((prev) =>
-      prev.map((order) => (order.id === orderId ? { ...order, status: "cancelled" as const } : order)),
-    )
-
-    toast({
-      title: "Order Cancelled",
-      description: `Purchase order ${orderId} has been cancelled.`,
-    })
-  }
-
-  const handleGenerateDocument = (order: PurchaseOrder) => {
-    // Generate purchase order document
-    const documentContent = `
-<!DOCTYPE html>
-<html>
-<head>
-    <title>Purchase Order - ${order.id}</title>
-    <style>
-        body { font-family: Arial, sans-serif; margin: 20px; }
-        .header { text-align: center; margin-bottom: 30px; }
-        .company-info { margin-bottom: 20px; }
-        .supplier-info { margin-bottom: 20px; padding: 15px; background-color: #f5f5f5; }
-        table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
-        th { background-color: #f2f2f2; font-weight: bold; }
-        .total-row { font-weight: bold; background-color: #f9f9f9; }
-        .footer { margin-top: 30px; font-size: 12px; color: #666; }
-    </style>
-</head>
-<body>
-    <div class="header">
-        <h1>PURCHASE ORDER</h1>
-        <h2>${order.id}</h2>
-    </div>
-    
-    <div class="company-info">
-        <h3>From:</h3>
-        <p><strong>Your Company Name</strong></p>
-        <p>123 Business Street</p>
-        <p>City, State 12345</p>
-        <p>Phone: (555) 123-4567</p>
-        <p>Email: orders@yourcompany.com</p>
-    </div>
-    
-    <div class="supplier-info">
-        <h3>To:</h3>
-        <p><strong>${order.supplier}</strong></p>
-        <p>Email: ${order.supplierContact}</p>
-    </div>
-    
-    <div>
-        <p><strong>Order Date:</strong> ${order.date}</p>
-        <p><strong>Expected Delivery:</strong> ${order.expectedDelivery}</p>
-        <p><strong>Status:</strong> ${order.status.toUpperCase()}</p>
-    </div>
-    
-    <table>
-        <thead>
-            <tr>
-                <th>Item</th>
-                <th>Quantity</th>
-                <th>Unit Price</th>
-                <th>Total</th>
-            </tr>
-        </thead>
-        <tbody>
-            ${order.items
-        .map(
-          (item) => `
-                <tr>
-                    <td>${item.product}</td>
-                    <td>${item.quantity}</td>
-                    <td>₹${item.unitPrice.toLocaleString()}</td>
-                    <td>₹${item.total.toLocaleString()}</td>
-                </tr>
-            `,
-        )
-        .join("")}
-        </tbody>
-        <tfoot>
-            <tr>
-                <td colspan="3"><strong>Subtotal</strong></td>
-                <td><strong>₹${order.subtotal.toLocaleString()}</strong></td>
-            </tr>
-            <tr>
-                <td colspan="3"><strong>Tax (18%)</strong></td>
-                <td><strong>₹${order.tax.toLocaleString()}</strong></td>
-            </tr>
-            <tr class="total-row">
-                <td colspan="3"><strong>TOTAL</strong></td>
-                <td><strong>₹${order.total.toLocaleString()}</strong></td>
-            </tr>
-        </tfoot>
-    </table>
-    
-    ${order.notes
-        ? `
-    <div style="margin-top: 20px;">
-        <h3>Notes:</h3>
-        <p>${order.notes}</p>
-    </div>
-    `
-        : ""
-      }
-    
-    <div class="footer">
-        <p>This is a computer-generated purchase order.</p>
-        <p>Generated on: ${new Date().toLocaleString()}</p>
-    </div>
-</body>
-</html>`
-
-    // Create blob and download
-    const blob = new Blob([documentContent], { type: "text/html" })
-    const link = document.createElement("a")
-    const url = URL.createObjectURL(blob)
-    link.setAttribute("href", url)
-    link.setAttribute("download", `purchase-order-${order.id}.html`)
-    link.style.visibility = "hidden"
-    document.body.appendChild(link)
-    link.click()
-    document.body.removeChild(link)
-
-    // Also open in new window for printing
-    const printWindow = window.open("", "_blank")
-    if (printWindow) {
-      printWindow.document.write(documentContent)
-      printWindow.document.close()
-      setTimeout(() => {
-        printWindow.print()
-      }, 500)
-    }
-
-    toast({
-      title: "Document Generated",
-      description: `Purchase order document for ${order.id} has been generated and downloaded.`,
-    })
-  }
-
-  const renderOrdersTable = (ordersData: PurchaseOrder[]) => (
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Order ID</TableHead>
-          <TableHead>Supplier</TableHead>
-          <TableHead>Date</TableHead>
-          <TableHead>Expected Delivery</TableHead>
-          <TableHead>Items</TableHead>
-          <TableHead>Total</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Actions</TableHead>
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {ordersData.length === 0 ? (
-          <TableRow>
-            <TableCell colSpan={8} className="text-center py-8 text-gray-500">
-              No purchase orders found
-            </TableCell>
-          </TableRow>
-        ) : (
-          ordersData.map((order) => (
-            <TableRow key={order.id}>
-              <TableCell className="font-medium">{order.id}</TableCell>
-              <TableCell>{order.supplier}</TableCell>
-              <TableCell>{order.date}</TableCell>
-              <TableCell>{order.expectedDelivery}</TableCell>
-              <TableCell>{order.items.length} items</TableCell>
-              <TableCell>₹{order.total.toLocaleString()}</TableCell>
-              <TableCell>
-                <Badge className={getStatusColor(order.status)}>{order.status}</Badge>
-              </TableCell>
-              <TableCell>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={() => handleViewOrder(order)}>
-                    <Eye className="w-4 h-4" />
-                  </Button>
-                  {(order.status === "draft" || order.status === "pending") && (
-                    <Button variant="outline" size="sm" onClick={() => handleEditOrder(order)}>
-                      <Edit className="w-4 h-4" />
-                    </Button>
-                  )}
-                  {order.status === "draft" && (
-                    <Button variant="outline" size="sm" onClick={() => handleSendOrder(order.id)}>
-                      <Send className="w-4 h-4" />
-                    </Button>
-                  )}
-                  <Button variant="outline" size="sm" onClick={() => handleGenerateDocument(order)}>
-                    <FileText className="w-4 h-4" />
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ))
-        )}
-      </TableBody>
-    </Table>
-  )
+    const t = setTimeout(() => setDebounced(q.trim()), 250);
+    return () => clearTimeout(t);
+  }, [q]);
+  const { products, isFetching } = useProducts(
+    { search: debounced || undefined, isActive: true, page: 1, limit: 15 },
+    { enabled: open && debounced.length > 0 },
+  );
 
   return (
-    <div className="p-4 md:p-6 space-y-4 md:space-y-6">
-      <div className="flex justify-between items-center">
-        <div>
-          <h1 className="text-3xl font-bold">Purchase Orders</h1>
-          <p className="text-gray-600">Manage supplier orders and procurement</p>
+    <div className="relative">
+      <div className="relative">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={q}
+          onChange={(e) => {
+            setQ(e.target.value);
+            setOpen(true);
+          }}
+          onFocus={() => setOpen(true)}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Search a product to add…"
+          className="h-9 pl-9"
+        />
+      </div>
+      {open && debounced.length > 0 && (
+        <div className="absolute z-20 mt-1 max-h-60 w-full overflow-y-auto rounded-md border border-border bg-popover shadow-md">
+          {isFetching && products.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-muted-foreground">Searching…</p>
+          ) : products.length === 0 ? (
+            <p className="px-3 py-2 text-xs text-muted-foreground">No matches</p>
+          ) : (
+            products.map((p) => (
+              <button
+                key={p.id}
+                type="button"
+                className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-muted/60"
+                onMouseDown={(e) => {
+                  e.preventDefault();
+                  onPick({ id: p.id, name: p.name, price: Number(p.price) || 0 });
+                  setQ("");
+                  setOpen(false);
+                }}
+              >
+                <span className="truncate">{p.name}</span>
+                <span className="shrink-0 text-xs text-muted-foreground nums">
+                  {formatMoney(Number(p.price) || 0)}
+                </span>
+              </button>
+            ))
+          )}
         </div>
-        <Dialog open={isCreateOpen} onOpenChange={setIsCreateOpen}>
-          <DialogTrigger asChild>
-            <Button>
-              <Plus className="w-4 h-4 mr-2" />
-              New Purchase Order
-            </Button>
-          </DialogTrigger>
-          <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
-            <DialogHeader className="flex-shrink-0">
-              <DialogTitle>Create Purchase Order</DialogTitle>
-              <DialogDescription>Create a new purchase order for suppliers</DialogDescription>
-            </DialogHeader>
-            <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-              <div className="grid grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="supplier">Supplier *</Label>
-                  <Select
-                    value={newOrder.supplier}
-                    onValueChange={(value) => setNewOrder((prev) => ({ ...prev, supplier: value }))}
-                  >
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select supplier" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {suppliers.map((supplier) => (
-                        <SelectItem key={supplier.value} value={supplier.value}>
-                          {supplier.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="delivery-date">Expected Delivery *</Label>
-                  <Input
-                    id="delivery-date"
-                    type="date"
-                    min={today}
-                    value={newOrder.expectedDelivery}
-                    onChange={(e) => setNewOrder((prev) => ({ ...prev, expectedDelivery: e.target.value }))}
-                  />
-                </div>
-              </div>
+      )}
+    </div>
+  );
+}
 
-              <div className="space-y-2">
-                <Label>Items</Label>
-                <div className="border rounded-lg p-4">
-                  <div className="space-y-4 mb-4">
-                    <div>
-                      <Label htmlFor="item-product-search">Search Product</Label>
-                      <div className="relative">
-                        <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                        <Input
-                          id="item-product-search"
-                          placeholder="Search products..."
-                          value={productSearch}
-                          onChange={(e) => handleProductSearch(e.target.value)}
-                          className="pl-10"
-                        />
-                      </div>
-                    </div>
-                    <div className="grid grid-cols-4 gap-2">
-                      <Select
-                        value={newItem.product}
-                        onValueChange={(value) => {
-                          setNewItem((prev) => ({ ...prev, product: value }))
-                          // Auto-fill unit price if product has purchase rate
-                          const selectedProduct = products.find(p => p.name === value)
-                          if (selectedProduct?.purchase_rate) {
-                            setNewItem((prev) => ({ ...prev, unitPrice: selectedProduct.purchase_rate?.toString() || "" }))
-                          }
-                        }}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Select product" />
-                        </SelectTrigger>
-                        <SelectContent className="max-h-[300px]">
-                          {products.map((p) => (
-                            <SelectItem key={p.id} value={p.name}>
-                              {p.name}
-                            </SelectItem>
-                          ))}
-                          {products.length < totalProducts && (
-                            <div className="p-2 text-center">
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                onClick={loadMoreProducts}
-                                disabled={loadingProducts}
-                                className="w-full"
-                              >
-                                {loadingProducts ? (
-                                  <Loader2 className="animate-spin h-4 w-4" />
-                                ) : (
-                                  `Load More (${totalProducts - products.length} remaining)`
-                                )}
-                              </Button>
-                            </div>
-                          )}
-                        </SelectContent>
-                      </Select>
-                      <Input
-                        placeholder="Quantity"
-                        type="number"
-                        value={newItem.quantity}
-                        onChange={(e) => setNewItem((prev) => ({ ...prev, quantity: e.target.value }))}
-                      />
-                      <Input
-                        placeholder="Unit Price"
-                        type="number"
-                        value={newItem.unitPrice}
-                        onChange={(e) => setNewItem((prev) => ({ ...prev, unitPrice: e.target.value }))}
-                      />
-                      <Button variant="outline" onClick={handleAddItem}>
-                        Add Item
-                      </Button>
-                    </div>
-                  </div>
+/* ================================ Orders tab ================================ */
 
-                  {orderItems.length > 0 && (
-                    <div className="space-y-2">
-                      <h4 className="font-medium">Order Items:</h4>
-                      <Table>
-                        <TableHeader>
-                          <TableRow>
-                            <TableHead>Product</TableHead>
-                            <TableHead>Quantity</TableHead>
-                            <TableHead>Unit Price</TableHead>
-                            <TableHead>Total</TableHead>
-                            <TableHead>Actions</TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {orderItems.map((item) => (
-                            <TableRow key={item.id}>
-                              <TableCell>{item.product}</TableCell>
-                              <TableCell>{item.quantity}</TableCell>
-                              <TableCell>₹{item.unitPrice.toLocaleString()}</TableCell>
-                              <TableCell>₹{item.total.toLocaleString()}</TableCell>
-                              <TableCell>
-                                <Button variant="outline" size="sm" onClick={() => handleRemoveItem(item.id)}>
-                                  <Trash2 className="w-4 h-4" />
-                                </Button>
-                              </TableCell>
-                            </TableRow>
-                          ))}
-                        </TableBody>
-                      </Table>
+function OrdersTab({ toast }: { toast: Toast }) {
+  const [search, setSearch] = useState("");
+  const [debounced, setDebounced] = useState("");
+  const [supplierId, setSupplierId] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [page, setPage] = useState(1);
+  useEffect(() => {
+    const t = setTimeout(() => setDebounced(search.trim()), 250);
+    return () => clearTimeout(t);
+  }, [search]);
+  useEffect(() => setPage(1), [debounced, supplierId, status]);
 
-                      <div className="border-t pt-2">
-                        <div className="flex justify-between">
-                          <span>Subtotal:</span>
-                          <span>₹{calculateTotals(orderItems).subtotal.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span>Tax (18%):</span>
-                          <span>₹{calculateTotals(orderItems).tax.toLocaleString()}</span>
-                        </div>
-                        <div className="flex justify-between font-bold">
-                          <span>Total:</span>
-                          <span>₹{calculateTotals(orderItems).total.toLocaleString()}</span>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+  const { suppliers } = useSuppliers({ page: 1, limit: 200, isActive: true });
+  const { purchaseOrders, meta, isFirstLoad, isRefreshing, refetch } = usePurchaseOrders({
+    page,
+    limit: 20,
+    search: debounced || undefined,
+    supplierId: supplierId === "all" ? undefined : supplierId,
+    status: status === "all" ? undefined : (status as PurchaseOrderStatus),
+  });
+  const m = usePurchaseOrderMutations();
 
-              <div className="space-y-2">
-                <Label htmlFor="notes">Notes</Label>
-                <Textarea
-                  id="notes"
-                  placeholder="Additional notes or requirements"
-                  value={newOrder.notes}
-                  onChange={(e) => setNewOrder((prev) => ({ ...prev, notes: e.target.value }))}
-                />
-              </div>
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<PurchaseOrder | null>(null);
+  const [viewId, setViewId] = useState<string | null>(null);
+  const [receiveTarget, setReceiveTarget] = useState<PurchaseOrder | null>(null);
+  const [cancelTarget, setCancelTarget] = useState<PurchaseOrder | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PurchaseOrder | null>(null);
+
+  const err = (e: unknown, t: string) =>
+    toast({ variant: "destructive", title: t, description: extractApiError(e, t) });
+
+  return (
+    <div className="space-y-4">
+      <InventoryKpiGrid
+        columns={2}
+        loading={isFirstLoad}
+        items={[
+          {
+            label: "Outstanding value",
+            value: formatMoney(meta?.summary.outstandingValue ?? 0),
+            icon: FileText,
+            hint: "Open + partially received POs",
+          },
+          { label: "Open orders", value: String(meta?.summary.openCount ?? 0), icon: PackageCheck },
+        ]}
+      />
+
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="relative min-w-[200px] flex-1">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input placeholder="Search PO number or supplier" value={search}
+            onChange={(e) => setSearch(e.target.value)} className="h-9 pl-9" />
+        </div>
+        <Select value={supplierId} onValueChange={setSupplierId}>
+          <SelectTrigger className="h-9 w-[180px]"><SelectValue placeholder="Supplier" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All suppliers</SelectItem>
+            {suppliers.map((s: any) => (
+              <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="h-9 w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            {PO_STATUSES.map((s) => (
+              <SelectItem key={s} value={s}>{titleCase(s)}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" className="h-9" onClick={() => refetch()} disabled={isRefreshing}>
+          <RefreshCcw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+        </Button>
+        <Button size="sm" className="h-9" onClick={() => { setEditing(null); setFormOpen(true); }}>
+          <Plus className="mr-1.5 h-4 w-4" />
+          New order
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {isFirstLoad ? (
+            <div className="space-y-2 p-4">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-11 w-full animate-pulse rounded bg-muted" />
+              ))}
             </div>
-            <DialogFooter className="flex-shrink-0">
-              <Button variant="outline" onClick={() => setIsCreateOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={handleCreateOrder}>Create Order</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-        {isInitialLoading ? (
-          <>
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-            <StatCardSkeleton />
-          </>
-        ) : (
-          <>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Orders</CardTitle>
-                <Package className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{totalOrders}</div>
-                <p className="text-xs text-muted-foreground">All purchase orders</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Pending Orders</CardTitle>
-                <Clock className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{pendingOrders}</div>
-                <p className="text-xs text-muted-foreground">Awaiting processing</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Total Value</CardTitle>
-                <DollarSign className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">₹{totalValue.toLocaleString()}</div>
-                <p className="text-xs text-muted-foreground">All orders combined</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-                <CardTitle className="text-sm font-medium">Received Orders</CardTitle>
-                <CheckCircle className="h-4 w-4 text-muted-foreground" />
-              </CardHeader>
-              <CardContent>
-                <div className="text-2xl font-bold">{receivedOrders}</div>
-                <p className="text-xs text-muted-foreground">Successfully delivered</p>
-              </CardContent>
-            </Card>
-          </>
-        )}
-      </div>
-
-      <Tabs defaultValue="all" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="all">All Orders ({filteredOrders.length})</TabsTrigger>
-          <TabsTrigger value="draft">Draft ({getFilteredOrdersByStatus("draft").length})</TabsTrigger>
-          <TabsTrigger value="pending">Pending ({getFilteredOrdersByStatus("pending").length})</TabsTrigger>
-          <TabsTrigger value="sent">Sent ({getFilteredOrdersByStatus("sent").length})</TabsTrigger>
-          <TabsTrigger value="received">Received ({getFilteredOrdersByStatus("received").length})</TabsTrigger>
-        </TabsList>
-
-        <div className="flex gap-4">
-          <div className="relative flex-1">
-            <Search className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-            <Input
-              placeholder="Search orders..."
-              className="pl-10"
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </div>
-        </div>
-
-        <TabsContent value="all">
-          <Card>
-            <CardHeader>
-              <CardTitle>All Purchase Orders</CardTitle>
-              <CardDescription>Manage all purchase orders</CardDescription>
-            </CardHeader>
-            <CardContent>{renderOrdersTable(getFilteredOrdersByStatus("all"))}</CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="draft">
-          <Card>
-            <CardHeader>
-              <CardTitle>Draft Orders</CardTitle>
-              <CardDescription>Orders that are still being prepared</CardDescription>
-            </CardHeader>
-            <CardContent>{renderOrdersTable(getFilteredOrdersByStatus("draft"))}</CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="pending">
-          <Card>
-            <CardHeader>
-              <CardTitle>Pending Orders</CardTitle>
-              <CardDescription>Orders awaiting supplier confirmation</CardDescription>
-            </CardHeader>
-            <CardContent>{renderOrdersTable(getFilteredOrdersByStatus("pending"))}</CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="sent">
-          <Card>
-            <CardHeader>
-              <CardTitle>Sent Orders</CardTitle>
-              <CardDescription>Orders sent to suppliers</CardDescription>
-            </CardHeader>
-            <CardContent>{renderOrdersTable(getFilteredOrdersByStatus("sent"))}</CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="received">
-          <Card>
-            <CardHeader>
-              <CardTitle>Received Orders</CardTitle>
-              <CardDescription>Orders that have been delivered</CardDescription>
-            </CardHeader>
-            <CardContent>{renderOrdersTable(getFilteredOrdersByStatus("received"))}</CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* View Order Dialog */}
-      <Dialog open={isViewOpen} onOpenChange={setIsViewOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
-          <DialogHeader className="flex-shrink-0">
-            <DialogTitle>Purchase Order Details - {selectedOrder?.id}</DialogTitle>
-          </DialogHeader>
-          {selectedOrder && (
-            <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h3 className="font-medium mb-2">Order Information</h3>
-                  <div className="space-y-1 text-sm">
-                    <div>
-                      <strong>Order ID:</strong> {selectedOrder.id}
-                    </div>
-                    <div>
-                      <strong>Date:</strong> {selectedOrder.date}
-                    </div>
-                    <div>
-                      <strong>Expected Delivery:</strong> {selectedOrder.expectedDelivery}
-                    </div>
-                    <div>
-                      <strong>Created By:</strong> {selectedOrder.createdBy}
-                    </div>
-                  </div>
-                </div>
-                <div>
-                  <h3 className="font-medium mb-2">Supplier Information</h3>
-                  <div className="space-y-1 text-sm">
-                    <div>
-                      <strong>Supplier:</strong> {selectedOrder.supplier}
-                    </div>
-                    <div>
-                      <strong>Contact:</strong> {selectedOrder.supplierContact}
-                    </div>
-                    <div>
-                      <strong>Status:</strong>{" "}
-                      <Badge className={getStatusColor(selectedOrder.status)}>{selectedOrder.status}</Badge>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="font-medium mb-2">Order Items</h3>
-                <div className="border rounded-lg overflow-hidden">
-                  <Table>
-                    <TableHeader>
-                      <TableRow>
-                        <TableHead>Product</TableHead>
-                        <TableHead>Quantity</TableHead>
-                        <TableHead>Unit Price</TableHead>
-                        <TableHead>Total</TableHead>
+          ) : purchaseOrders.length === 0 ? (
+            <div className="m-4 flex flex-col items-center gap-2 rounded-lg border border-dashed py-12">
+              <FileText className="h-8 w-8 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">No purchase orders</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-xs uppercase tracking-wide">PO #</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Supplier</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Date</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Received</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide">Total</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Status</TableHead>
+                    <TableHead className="w-[180px] text-right text-xs uppercase tracking-wide">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {purchaseOrders.map((po) => {
+                    const ordered = po.purchase_order_items.reduce((a, i) => a + i.ordered_quantity, 0);
+                    const received = po.purchase_order_items.reduce((a, i) => a + i.received_quantity, 0);
+                    const canReceive = !["RECEIVED", "CANCELLED"].includes(po.status);
+                    const canEdit = ["PENDING", "APPROVED", "ORDERED"].includes(po.status);
+                    return (
+                      <TableRow key={po.id} className="h-11 hover:bg-muted/50">
+                        <TableCell className="font-mono text-xs">{po.po_number}</TableCell>
+                        <TableCell className="text-sm font-medium">{po.supplier?.name ?? "—"}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground nums">{fmtDate(po.order_date)}</TableCell>
+                        <TableCell className="text-sm nums">
+                          {received} / {ordered}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold nums">{formatMoney(po.total_amount)}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={PO_STATUS_STYLE[po.status]}>
+                            {titleCase(po.status)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-1">
+                            <Button size="icon" variant="ghost" className="h-8 w-8" title="View"
+                              onClick={() => setViewId(po.id)}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {NEXT_STATUS[po.status] && (
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs"
+                                title={`Mark ${titleCase(NEXT_STATUS[po.status]!)}`}
+                                onClick={() =>
+                                  m.setStatus.mutate(
+                                    { id: po.id, status: NEXT_STATUS[po.status]! },
+                                    { onError: (e) => err(e, "Could not update status") },
+                                  )
+                                }
+                              >
+                                {titleCase(NEXT_STATUS[po.status]!)}
+                              </Button>
+                            )}
+                            {canReceive && (
+                              <Button size="icon" variant="ghost" className="h-8 w-8 text-green-700"
+                                title="Receive" onClick={() => setReceiveTarget(po)}>
+                                <PackageCheck className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {canEdit && (
+                              <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit"
+                                onClick={() => { setEditing(po); setFormOpen(true); }}>
+                                <Pencil className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {canReceive && (
+                              <Button size="icon" variant="ghost" className="h-8 w-8 text-rose-700"
+                                title="Cancel" onClick={() => setCancelTarget(po)}>
+                                <Ban className="h-4 w-4" />
+                              </Button>
+                            )}
+                            {po.status === "PENDING" && received === 0 && (
+                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive"
+                                title="Delete" onClick={() => setDeleteTarget(po)}>
+                                <Trash2 className="h-4 w-4" />
+                              </Button>
+                            )}
+                          </div>
+                        </TableCell>
                       </TableRow>
-                    </TableHeader>
-                    <TableBody>
-                      {selectedOrder.items.map((item) => (
-                        <TableRow key={item.id}>
-                          <TableCell>{item.product}</TableCell>
-                          <TableCell>{item.quantity}</TableCell>
-                          <TableCell>₹{item.unitPrice.toLocaleString()}</TableCell>
-                          <TableCell>₹{item.total.toLocaleString()}</TableCell>
-                        </TableRow>
-                      ))}
-                    </TableBody>
-                  </Table>
-                </div>
-              </div>
-
-              <div className="border rounded-lg p-4">
-                <div className="space-y-2">
-                  <div className="flex justify-between">
-                    <span>Subtotal:</span>
-                    <span>₹{selectedOrder.subtotal.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span>Tax (18%):</span>
-                    <span>₹{selectedOrder.tax.toLocaleString()}</span>
-                  </div>
-                  <div className="flex justify-between font-bold text-lg">
-                    <span>Total:</span>
-                    <span>₹{selectedOrder.total.toLocaleString()}</span>
-                  </div>
-                </div>
-              </div>
-
-              {selectedOrder.notes && (
-                <div>
-                  <h3 className="font-medium mb-2">Notes</h3>
-                  <div className="bg-gray-50 p-3 rounded-lg text-sm">{selectedOrder.notes}</div>
-                </div>
-              )}
-
-              <div className="flex space-x-2 pt-4 border-t">
-                {selectedOrder.status === "draft" && (
-                  <Button className="flex-1" onClick={() => handleSendOrder(selectedOrder.id)}>
-                    <Send className="h-4 w-4 mr-2" />
-                    Send to Supplier
-                  </Button>
-                )}
-                {selectedOrder.status === "sent" && (
-                  <Button className="flex-1" onClick={() => handleConfirmOrder(selectedOrder.id)}>
-                    <CheckCircle className="h-4 w-4 mr-2" />
-                    Mark as Confirmed
-                  </Button>
-                )}
-                {selectedOrder.status === "confirmed" && (
-                  <Button className="flex-1" onClick={() => handleReceiveOrder(selectedOrder.id)}>
-                    <Package className="h-4 w-4 mr-2" />
-                    Mark as Received
-                  </Button>
-                )}
-                <Button variant="outline" className="flex-1" onClick={() => handleGenerateDocument(selectedOrder)}>
-                  <FileText className="h-4 w-4 mr-2" />
-                  Generate Document
-                </Button>
-                {selectedOrder.status !== "received" && selectedOrder.status !== "cancelled" && (
-                  <Button variant="outline" onClick={() => handleCancelOrder(selectedOrder.id)}>
-                    Cancel Order
-                  </Button>
-                )}
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          {meta && meta.totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+              <p className="text-xs text-muted-foreground">Page {meta.page} of {meta.totalPages} · {meta.total} total</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="h-8" disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+                <Button size="sm" variant="outline" className="h-8" disabled={page >= meta.totalPages}
+                  onClick={() => setPage((p) => p + 1)}>Next</Button>
               </div>
             </div>
           )}
-        </DialogContent>
-      </Dialog>
+        </CardContent>
+      </Card>
 
-      {/* Edit Order Dialog */}
-      <Dialog open={isEditOpen} onOpenChange={setIsEditOpen}>
-        <DialogContent className="max-w-4xl max-h-[90vh] flex flex-col">
-          <DialogHeader className="flex-shrink-0">
-            <DialogTitle>Edit Purchase Order - {selectedOrder?.id}</DialogTitle>
-            <DialogDescription>Update purchase order details</DialogDescription>
-          </DialogHeader>
-          <div className="flex-1 overflow-y-auto space-y-4 pr-2">
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="edit-supplier">Supplier *</Label>
-                <Select
-                  value={newOrder.supplier}
-                  onValueChange={(value) => setNewOrder((prev) => ({ ...prev, supplier: value }))}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select supplier" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {suppliers.map((supplier) => (
-                      <SelectItem key={supplier.value} value={supplier.value}>
-                        {supplier.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="edit-delivery-date">Expected Delivery *</Label>
-                <Input
-                  id="edit-delivery-date"
-                  type="date"
-                  min={today}
-                  value={newOrder.expectedDelivery}
-                  onChange={(e) => setNewOrder((prev) => ({ ...prev, expectedDelivery: e.target.value }))}
-                />
-              </div>
-            </div>
+      <POFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        editing={editing}
+        suppliers={suppliers}
+        saving={m.create.isPending || m.update.isPending}
+        onSave={(body) => {
+          const opts = {
+            onSuccess: () => { toast({ title: editing ? "Purchase order updated" : "Purchase order created" }); setFormOpen(false); },
+            onError: (e: unknown) => err(e, "Could not save purchase order"),
+          };
+          if (editing) m.update.mutate({ id: editing.id, body }, opts);
+          else m.create.mutate(body, opts);
+        }}
+      />
 
-            <div className="space-y-2">
-              <Label>Items</Label>
-              <div className="border rounded-lg p-4">
-                <div className="space-y-4 mb-4">
-                  <div>
-                    <Label htmlFor="edit-item-product-search">Search Product</Label>
-                    <div className="relative">
-                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-                      <Input
-                        id="edit-item-product-search"
-                        placeholder="Search products..."
-                        value={productSearch}
-                        onChange={(e) => handleProductSearch(e.target.value)}
-                        className="pl-10"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-4 gap-2">
-                    <Select
-                      value={newItem.product}
-                      onValueChange={(value) => {
-                        setNewItem((prev) => ({ ...prev, product: value }))
-                        // Auto-fill unit price if product has purchase rate
-                        const selectedProduct = products.find(p => p.name === value)
-                        if (selectedProduct?.purchase_rate) {
-                          setNewItem((prev) => ({ ...prev, unitPrice: selectedProduct.purchase_rate?.toString() || "" }))
-                        }
-                      }}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="Select product" />
-                      </SelectTrigger>
-                      <SelectContent className="max-h-[300px]">
-                        {products.map((p) => (
-                          <SelectItem key={p.id} value={p.name}>
-                            {p.name}
-                          </SelectItem>
-                        ))}
-                        {products.length < totalProducts && (
-                          <div className="p-2 text-center">
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={loadMoreProducts}
-                              disabled={loadingProducts}
-                              className="w-full"
-                            >
-                              {loadingProducts ? (
-                                <Loader2 className="animate-spin h-4 w-4" />
-                              ) : (
-                                `Load More (${totalProducts - products.length} remaining)`
-                              )}
-                            </Button>
-                          </div>
-                        )}
-                      </SelectContent>
-                    </Select>
-                    <Input
-                      placeholder="Quantity"
-                      type="number"
-                      value={newItem.quantity}
-                      onChange={(e) => setNewItem((prev) => ({ ...prev, quantity: e.target.value }))}
-                    />
-                    <Input
-                      placeholder="Unit Price"
-                      type="number"
-                      value={newItem.unitPrice}
-                      onChange={(e) => setNewItem((prev) => ({ ...prev, unitPrice: e.target.value }))}
-                    />
-                    <Button variant="outline" onClick={handleAddItem}>
-                      Add Item
-                    </Button>
-                  </div>
-                </div>
+      <POViewSheet id={viewId} onClose={() => setViewId(null)} />
 
-                {orderItems.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="font-medium">Order Items:</h4>
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Product</TableHead>
-                          <TableHead>Quantity</TableHead>
-                          <TableHead>Unit Price</TableHead>
-                          <TableHead>Total</TableHead>
-                          <TableHead>Actions</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {orderItems.map((item) => (
-                          <TableRow key={item.id}>
-                            <TableCell>{item.product}</TableCell>
-                            <TableCell>{item.quantity}</TableCell>
-                            <TableCell>₹{item.unitPrice.toLocaleString()}</TableCell>
-                            <TableCell>₹{item.total.toLocaleString()}</TableCell>
-                            <TableCell>
-                              <Button variant="outline" size="sm" onClick={() => handleRemoveItem(item.id)}>
-                                <Trash2 className="w-4 h-4" />
-                              </Button>
-                            </TableCell>
-                          </TableRow>
-                        ))}
-                      </TableBody>
-                    </Table>
+      <ReceiveSheet
+        po={receiveTarget}
+        onClose={() => setReceiveTarget(null)}
+        saving={m.receive.isPending}
+        onReceive={(body) => {
+          if (!receiveTarget) return;
+          m.receive.mutate(
+            { id: receiveTarget.id, body },
+            {
+              onSuccess: () => { toast({ title: "Stock received" }); setReceiveTarget(null); },
+              onError: (e) => err(e, "Could not receive"),
+            },
+          );
+        }}
+      />
 
-                    <div className="border-t pt-2">
-                      <div className="flex justify-between">
-                        <span>Subtotal:</span>
-                        <span>₹{calculateTotals(orderItems).subtotal.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Tax (18%):</span>
-                        <span>₹{calculateTotals(orderItems).tax.toLocaleString()}</span>
-                      </div>
-                      <div className="flex justify-between font-bold">
-                        <span>Total:</span>
-                        <span>₹{calculateTotals(orderItems).total.toLocaleString()}</span>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
+      <AlertDialog open={!!cancelTarget} onOpenChange={(o) => !o && setCancelTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel {cancelTarget?.po_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The order stays on record for history but can no longer receive stock.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (!cancelTarget) return;
+                m.cancel.mutate(cancelTarget.id, {
+                  onSuccess: () => { toast({ title: "Purchase order cancelled" }); setCancelTarget(null); },
+                  onError: (e) => err(e, "Could not cancel"),
+                });
+              }}
+            >
+              Cancel order
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
-            <div className="space-y-2">
-              <Label htmlFor="edit-notes">Notes</Label>
-              <Textarea
-                id="edit-notes"
-                placeholder="Additional notes or requirements"
-                value={newOrder.notes}
-                onChange={(e) => setNewOrder((prev) => ({ ...prev, notes: e.target.value }))}
-              />
-            </div>
-          </div>
-          <DialogFooter className="flex-shrink-0">
-            <Button variant="outline" onClick={() => setIsEditOpen(false)}>
-              Cancel
-            </Button>
-            <Button onClick={handleUpdateOrder}>Update Order</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.po_number}?</AlertDialogTitle>
+            <AlertDialogDescription>This draft order will be permanently removed.</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (!deleteTarget) return;
+                m.remove.mutate(deleteTarget.id, {
+                  onSuccess: () => { toast({ title: "Purchase order deleted" }); setDeleteTarget(null); },
+                  onError: (e) => err(e, "Could not delete"),
+                });
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
-  )
+  );
+}
+
+/* --------------------------- PO create / edit sheet --------------------------- */
+
+type LineDraft = { product_id: string; name: string; ordered_quantity: string; unit_cost: string };
+
+function POFormSheet({
+  open,
+  onOpenChange,
+  editing,
+  suppliers,
+  onSave,
+  saving,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  editing: PurchaseOrder | null;
+  suppliers: any[];
+  onSave: (body: any) => void;
+  saving: boolean;
+}) {
+  const { branches } = useBranches({ isActive: true });
+  const [supplierId, setSupplierId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [orderDate, setOrderDate] = useState(today());
+  const [expected, setExpected] = useState("");
+  const [taxAmount, setTaxAmount] = useState("0");
+  const [notes, setNotes] = useState("");
+  const [lines, setLines] = useState<LineDraft[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    if (editing) {
+      setSupplierId(editing.supplier?.id ?? "");
+      setBranchId(editing.branch?.id ?? "");
+      setOrderDate(editing.order_date.slice(0, 10));
+      setExpected(editing.expected_delivery ? editing.expected_delivery.slice(0, 10) : "");
+      setTaxAmount(String(editing.tax_amount));
+      setNotes(editing.notes ?? "");
+      setLines(
+        editing.purchase_order_items.map((it) => ({
+          product_id: it.product_id,
+          name: it.product?.name ?? "Product",
+          ordered_quantity: String(it.ordered_quantity),
+          unit_cost: String(it.unit_cost),
+        })),
+      );
+    } else {
+      setSupplierId("");
+      setBranchId(branches[0]?.id ?? "");
+      setOrderDate(today());
+      setExpected("");
+      setTaxAmount("0");
+      setNotes("");
+      setLines([]);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, editing]);
+
+  const subtotal = useMemo(
+    () => lines.reduce((a, l) => a + (Number(l.ordered_quantity) || 0) * (Number(l.unit_cost) || 0), 0),
+    [lines],
+  );
+  const total = subtotal + (Number(taxAmount) || 0);
+  const valid =
+    supplierId &&
+    branchId &&
+    lines.length > 0 &&
+    lines.every((l) => l.product_id && Number(l.ordered_quantity) > 0 && Number(l.unit_cost) >= 0);
+
+  return (
+    <DetailSheet open={open} onOpenChange={onOpenChange} size="xl">
+      <DetailSheetHeader
+        title={editing ? `Edit ${editing.po_number}` : "New purchase order"}
+        subtitle="Order goods from a supplier"
+      />
+      <DetailSheetBody className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Supplier</Label>
+            <Select value={supplierId} onValueChange={setSupplierId} disabled={!!editing}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+              <SelectContent>
+                {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Deliver to (warehouse / branch)</Label>
+            <Select value={branchId} onValueChange={setBranchId} disabled={!!editing}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Order date</Label>
+            <Input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="h-9" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Expected delivery</Label>
+            <Input type="date" value={expected} min={orderDate || undefined}
+              onChange={(e) => setExpected(e.target.value)} className="h-9" />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">Line items</Label>
+          <ProductPicker
+            onPick={(p) => {
+              setLines((ls) =>
+                ls.some((l) => l.product_id === p.id)
+                  ? ls
+                  : [...ls, { product_id: p.id, name: p.name, ordered_quantity: "1", unit_cost: String(p.price) }],
+              );
+            }}
+          />
+          {lines.length === 0 ? (
+            <p className="rounded-md border border-dashed py-4 text-center text-xs text-muted-foreground">
+              Search above to add products
+            </p>
+          ) : (
+            <div className="space-y-1.5">
+              {lines.map((l, idx) => (
+                <div key={l.product_id} className="flex items-center gap-2">
+                  <span className="min-w-0 flex-1 truncate text-sm">{l.name}</span>
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={l.ordered_quantity}
+                    onChange={(e) =>
+                      setLines((ls) => ls.map((x, i) => (i === idx ? { ...x, ordered_quantity: e.target.value } : x)))
+                    }
+                    className="h-8 w-20 nums"
+                    aria-label="Quantity"
+                  />
+                  <Input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={l.unit_cost}
+                    onChange={(e) =>
+                      setLines((ls) => ls.map((x, i) => (i === idx ? { ...x, unit_cost: e.target.value } : x)))
+                    }
+                    className="h-8 w-24 nums"
+                    aria-label="Unit cost"
+                  />
+                  <span className="w-24 shrink-0 text-right text-sm nums">
+                    {formatMoney((Number(l.ordered_quantity) || 0) * (Number(l.unit_cost) || 0))}
+                  </span>
+                  <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0"
+                    onClick={() => setLines((ls) => ls.filter((_, i) => i !== idx))}>
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Tax amount</Label>
+            <Input type="number" min="0" step="0.01" value={taxAmount}
+              onChange={(e) => setTaxAmount(e.target.value)} className="h-9 nums" />
+          </div>
+          <div className="flex items-end justify-end pb-1 text-sm">
+            <span className="text-muted-foreground">Subtotal&nbsp;</span>
+            <span className="font-medium nums">{formatMoney(subtotal)}</span>
+            <span className="mx-2 text-muted-foreground">·</span>
+            <span className="text-muted-foreground">Total&nbsp;</span>
+            <span className="font-semibold nums">{formatMoney(total)}</span>
+          </div>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Notes</Label>
+          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[70px] text-sm" />
+        </div>
+      </DetailSheetBody>
+      <DetailSheetFooter>
+        <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+        <Button
+          disabled={!valid || saving}
+          onClick={() =>
+            onSave({
+              supplier_id: supplierId,
+              branch_id: branchId,
+              order_date: orderDate,
+              expected_delivery: expected || null,
+              tax_amount: Number(taxAmount) || 0,
+              notes: notes.trim() || null,
+              items: lines.map((l) => ({
+                product_id: l.product_id,
+                ordered_quantity: Number(l.ordered_quantity),
+                unit_cost: Number(l.unit_cost),
+              })),
+            })
+          }
+        >
+          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {editing ? "Save changes" : "Create order"}
+        </Button>
+      </DetailSheetFooter>
+    </DetailSheet>
+  );
+}
+
+/* ------------------------------- PO view sheet ------------------------------- */
+
+function POViewSheet({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const { data: po, isLoading } = usePurchaseOrder(id, { enabled: !!id });
+  return (
+    <DetailSheet open={!!id} onOpenChange={(o) => !o && onClose()} size="lg">
+      <DetailSheetHeader
+        title={po ? po.po_number : "Purchase order"}
+        subtitle={po ? `${po.supplier?.name} · ${fmtDate(po.order_date)}` : undefined}
+        icon={<FileText className="h-5 w-5" />}
+      />
+      <DetailSheetBody className="space-y-4">
+        {isLoading || !po ? (
+          <div className="space-y-3">
+            <div className="h-20 animate-pulse rounded bg-muted" />
+            <div className="h-40 animate-pulse rounded bg-muted" />
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-2 gap-3 rounded-lg border bg-muted/30 p-3 text-sm">
+              <div><p className="text-xs text-muted-foreground">Status</p><p>{titleCase(po.status)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Deliver to</p><p>{po.branch?.name ?? "—"}</p></div>
+              <div><p className="text-xs text-muted-foreground">Expected</p><p className="nums">{fmtDate(po.expected_delivery)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Received</p><p className="nums">{fmtDate(po.delivery_date)}</p></div>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs uppercase tracking-wide">Product</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-wide">Ordered</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-wide">Received</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-wide">Unit cost</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-wide">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {po.purchase_order_items.map((it) => (
+                  <TableRow key={it.id} className="h-10">
+                    <TableCell className="text-sm">{it.product?.name ?? "—"}</TableCell>
+                    <TableCell className="text-right text-sm nums">{it.ordered_quantity}</TableCell>
+                    <TableCell className="text-right text-sm nums">{it.received_quantity}</TableCell>
+                    <TableCell className="text-right text-sm nums">{formatMoney(it.unit_cost)}</TableCell>
+                    <TableCell className="text-right text-sm nums">{formatMoney(it.total_cost)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <div className="flex justify-end gap-4 text-sm">
+              <span className="text-muted-foreground">Subtotal {formatMoney(po.subtotal)}</span>
+              <span className="text-muted-foreground">Tax {formatMoney(po.tax_amount)}</span>
+              <span className="font-semibold">Total {formatMoney(po.total_amount)}</span>
+            </div>
+            {po.notes && <p className="text-sm text-muted-foreground">{po.notes}</p>}
+          </>
+        )}
+      </DetailSheetBody>
+      <DetailSheetFooter>
+        <Button variant="outline" onClick={onClose}>Close</Button>
+      </DetailSheetFooter>
+    </DetailSheet>
+  );
+}
+
+/* ------------------------------- receive sheet ------------------------------- */
+
+function ReceiveSheet({
+  po,
+  onClose,
+  onReceive,
+  saving,
+}: {
+  po: PurchaseOrder | null;
+  onClose: () => void;
+  onReceive: (body: { invoice_ref?: string; notes?: string; lines: { item_id: string; quantity: number }[] }) => void;
+  saving: boolean;
+}) {
+  const [qty, setQty] = useState<Record<string, string>>({});
+  const [invoiceRef, setInvoiceRef] = useState("");
+  useEffect(() => {
+    if (!po) return;
+    const next: Record<string, string> = {};
+    for (const it of po.purchase_order_items) {
+      const outstanding = it.ordered_quantity - it.received_quantity;
+      next[it.id] = outstanding > 0 ? String(outstanding) : "0";
+    }
+    setQty(next);
+    setInvoiceRef("");
+  }, [po]);
+
+  if (!po) return null;
+  const lines = po.purchase_order_items
+    .map((it) => ({
+      item_id: it.id,
+      outstanding: it.ordered_quantity - it.received_quantity,
+      quantity: Number(qty[it.id]) || 0,
+      name: it.product?.name ?? "Product",
+    }))
+    .filter((l) => l.outstanding > 0);
+  const anything = lines.some((l) => l.quantity > 0);
+  const overReceiving = lines.some((l) => l.quantity > l.outstanding + 1e-9);
+
+  return (
+    <DetailSheet open={!!po} onOpenChange={(o) => !o && onClose()} size="lg">
+      <DetailSheetHeader title={`Receive ${po.po_number}`} subtitle={po.supplier?.name} icon={<PackageCheck className="h-5 w-5" />} />
+      <DetailSheetBody className="space-y-4">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Supplier invoice / GRN reference</Label>
+          <Input value={invoiceRef} onChange={(e) => setInvoiceRef(e.target.value)}
+            placeholder={po.po_number} className="h-9" />
+        </div>
+        {lines.length === 0 ? (
+          <p className="rounded-md border border-dashed py-6 text-center text-sm text-muted-foreground">
+            Everything on this order has already been received.
+          </p>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead className="text-xs uppercase tracking-wide">Product</TableHead>
+                <TableHead className="text-right text-xs uppercase tracking-wide">Outstanding</TableHead>
+                <TableHead className="text-right text-xs uppercase tracking-wide">Receive now</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {lines.map((l) => (
+                <TableRow key={l.item_id} className="h-11">
+                  <TableCell className="text-sm">{l.name}</TableCell>
+                  <TableCell className="text-right text-sm nums">{l.outstanding}</TableCell>
+                  <TableCell className="text-right">
+                    <Input
+                      type="number"
+                      min="0"
+                      max={l.outstanding}
+                      step="0.01"
+                      value={qty[l.item_id] ?? ""}
+                      onChange={(e) => setQty((q) => ({ ...q, [l.item_id]: e.target.value }))}
+                      className="ml-auto h-8 w-24 nums"
+                    />
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+        {overReceiving && (
+          <p className="text-xs text-destructive">One or more quantities exceed what's outstanding.</p>
+        )}
+      </DetailSheetBody>
+      <DetailSheetFooter>
+        <Button variant="outline" onClick={onClose}>Cancel</Button>
+        <Button
+          disabled={!anything || overReceiving || saving}
+          onClick={() =>
+            onReceive({
+              invoice_ref: invoiceRef.trim() || undefined,
+              lines: lines.filter((l) => l.quantity > 0).map((l) => ({ item_id: l.item_id, quantity: l.quantity })),
+            })
+          }
+        >
+          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Receive stock
+        </Button>
+      </DetailSheetFooter>
+    </DetailSheet>
+  );
+}
+
+/* =============================== Returns tab =============================== */
+
+function ReturnsTab({ toast }: { toast: Toast }) {
+  const [supplierId, setSupplierId] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [supplierId, status]);
+
+  const { suppliers } = useSuppliers({ page: 1, limit: 200, isActive: true });
+  const { purchaseReturns, meta, isFirstLoad, isRefreshing, refetch } = usePurchaseReturns({
+    page,
+    limit: 20,
+    supplierId: supplierId === "all" ? undefined : supplierId,
+    status: status === "all" ? undefined : (status as any),
+  });
+  const m = usePurchaseReturnMutations();
+  const [formOpen, setFormOpen] = useState(false);
+  const [cancelTarget, setCancelTarget] = useState<PurchaseReturn | null>(null);
+  const err = (e: unknown, t: string) =>
+    toast({ variant: "destructive", title: t, description: extractApiError(e, t) });
+
+  return (
+    <div className="space-y-4">
+      <InventoryKpiGrid
+        columns={1}
+        loading={isFirstLoad}
+        items={[
+          { label: "Returned to suppliers (filtered)", value: formatMoney(meta?.summary.totalReturned ?? 0), icon: Undo2 },
+        ]}
+      />
+
+      <div className="flex flex-wrap items-end gap-2">
+        <Select value={supplierId} onValueChange={setSupplierId}>
+          <SelectTrigger className="h-9 w-[200px]"><SelectValue placeholder="Supplier" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All suppliers</SelectItem>
+            {suppliers.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="h-9 w-[150px]"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            {PR_STATUSES.map((s) => <SelectItem key={s} value={s}>{titleCase(s)}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Button variant="outline" size="sm" className="h-9" onClick={() => refetch()} disabled={isRefreshing}>
+          <RefreshCcw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+        </Button>
+        <Button size="sm" className="h-9" onClick={() => setFormOpen(true)}>
+          <Plus className="mr-1.5 h-4 w-4" />
+          New return
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {isFirstLoad ? (
+            <div className="space-y-2 p-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-11 w-full animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : purchaseReturns.length === 0 ? (
+            <div className="m-4 flex flex-col items-center gap-2 rounded-lg border border-dashed py-12">
+              <Undo2 className="h-8 w-8 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">No purchase returns</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-xs uppercase tracking-wide">Return #</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Supplier</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Date</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Reason</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide">Amount</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Status</TableHead>
+                    <TableHead className="w-[80px] text-right text-xs uppercase tracking-wide">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {purchaseReturns.map((r) => (
+                    <TableRow key={r.id} className="h-11 hover:bg-muted/50">
+                      <TableCell className="font-mono text-xs">{r.return_number}</TableCell>
+                      <TableCell className="text-sm font-medium">{r.supplier?.name ?? "—"}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground nums">{fmtDate(r.return_date)}</TableCell>
+                      <TableCell className="max-w-[200px] truncate text-sm">{r.reason || "—"}</TableCell>
+                      <TableCell className="text-right font-semibold nums">{formatMoney(r.total_amount)}</TableCell>
+                      <TableCell>
+                        <Badge
+                          variant="outline"
+                          className={
+                            r.status === "COMPLETED"
+                              ? "border-green-200 bg-green-50 text-green-800"
+                              : r.status === "CANCELLED"
+                                ? "border-rose-200 bg-rose-50 text-rose-800"
+                                : "border-amber-200 bg-amber-50 text-amber-800"
+                          }
+                        >
+                          {titleCase(r.status)}
+                        </Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex justify-end">
+                          {r.status === "COMPLETED" && (
+                            <Button size="icon" variant="ghost" className="h-8 w-8 text-rose-700"
+                              title="Cancel return" onClick={() => setCancelTarget(r)}>
+                              <Ban className="h-4 w-4" />
+                            </Button>
+                          )}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          {meta && meta.totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+              <p className="text-xs text-muted-foreground">Page {meta.page} of {meta.totalPages}</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="h-8" disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+                <Button size="sm" variant="outline" className="h-8" disabled={page >= meta.totalPages}
+                  onClick={() => setPage((p) => p + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <ReturnFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        suppliers={suppliers}
+        saving={m.create.isPending}
+        onSave={(body) => {
+          m.create.mutate(body, {
+            onSuccess: () => { toast({ title: "Purchase return recorded" }); setFormOpen(false); },
+            onError: (e) => err(e, "Could not record return"),
+          });
+        }}
+      />
+
+      <AlertDialog open={!!cancelTarget} onOpenChange={(o) => !o && setCancelTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cancel {cancelTarget?.return_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The returned stock will be added back to the branch and the supplier's payable restored.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (!cancelTarget) return;
+                m.cancel.mutate(cancelTarget.id, {
+                  onSuccess: () => { toast({ title: "Return cancelled" }); setCancelTarget(null); },
+                  onError: (e) => err(e, "Could not cancel"),
+                });
+              }}
+            >
+              Cancel return
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function ReturnFormSheet({
+  open,
+  onOpenChange,
+  suppliers,
+  onSave,
+  saving,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  suppliers: any[];
+  onSave: (body: any) => void;
+  saving: boolean;
+}) {
+  const { branches } = useBranches({ isActive: true });
+  const [supplierId, setSupplierId] = useState("");
+  const [branchId, setBranchId] = useState("");
+  const [returnDate, setReturnDate] = useState(today());
+  const [reason, setReason] = useState("");
+  const [lines, setLines] = useState<LineDraft[]>([]);
+
+  useEffect(() => {
+    if (!open) return;
+    setSupplierId("");
+    setBranchId(branches[0]?.id ?? "");
+    setReturnDate(today());
+    setReason("");
+    setLines([]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
+
+  const total = lines.reduce(
+    (a, l) => a + (Number(l.ordered_quantity) || 0) * (Number(l.unit_cost) || 0),
+    0,
+  );
+  const valid =
+    supplierId &&
+    branchId &&
+    lines.length > 0 &&
+    lines.every((l) => l.product_id && Number(l.ordered_quantity) > 0 && Number(l.unit_cost) >= 0);
+
+  return (
+    <DetailSheet open={open} onOpenChange={onOpenChange} size="lg">
+      <DetailSheetHeader title="New purchase return" subtitle="Send goods back to a supplier" />
+      <DetailSheetBody className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Supplier</Label>
+            <Select value={supplierId} onValueChange={setSupplierId}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+              <SelectContent>
+                {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">From branch</Label>
+            <Select value={branchId} onValueChange={setBranchId}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
+              <SelectContent>
+                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Return date</Label>
+            <Input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} className="h-9" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Reason</Label>
+            <Input value={reason} onChange={(e) => setReason(e.target.value)}
+              placeholder="Damaged / wrong item / expired" className="h-9" />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">Items</Label>
+          <ProductPicker
+            onPick={(p) =>
+              setLines((ls) =>
+                ls.some((l) => l.product_id === p.id)
+                  ? ls
+                  : [...ls, { product_id: p.id, name: p.name, ordered_quantity: "1", unit_cost: String(p.price) }],
+              )
+            }
+          />
+          {lines.map((l, idx) => (
+            <div key={l.product_id} className="flex items-center gap-2">
+              <span className="min-w-0 flex-1 truncate text-sm">{l.name}</span>
+              <Input type="number" min="0" step="0.01" value={l.ordered_quantity}
+                onChange={(e) => setLines((ls) => ls.map((x, i) => (i === idx ? { ...x, ordered_quantity: e.target.value } : x)))}
+                className="h-8 w-20 nums" aria-label="Quantity" />
+              <Input type="number" min="0" step="0.01" value={l.unit_cost}
+                onChange={(e) => setLines((ls) => ls.map((x, i) => (i === idx ? { ...x, unit_cost: e.target.value } : x)))}
+                className="h-8 w-24 nums" aria-label="Unit cost" />
+              <span className="w-24 shrink-0 text-right text-sm nums">
+                {formatMoney((Number(l.ordered_quantity) || 0) * (Number(l.unit_cost) || 0))}
+              </span>
+              <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0"
+                onClick={() => setLines((ls) => ls.filter((_, i) => i !== idx))}>
+                <X className="h-4 w-4" />
+              </Button>
+            </div>
+          ))}
+        </div>
+
+        <div className="flex justify-end text-sm">
+          <span className="text-muted-foreground">Total credit&nbsp;</span>
+          <span className="font-semibold nums">{formatMoney(total)}</span>
+        </div>
+      </DetailSheetBody>
+      <DetailSheetFooter>
+        <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+        <Button
+          disabled={!valid || saving}
+          onClick={() =>
+            onSave({
+              supplier_id: supplierId,
+              branch_id: branchId,
+              return_date: returnDate,
+              reason: reason.trim() || null,
+              items: lines.map((l) => ({
+                product_id: l.product_id,
+                quantity: Number(l.ordered_quantity),
+                unit_cost: Number(l.unit_cost),
+              })),
+            })
+          }
+        >
+          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          Record return
+        </Button>
+      </DetailSheetFooter>
+    </DetailSheet>
+  );
 }
