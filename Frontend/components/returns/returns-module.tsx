@@ -92,6 +92,8 @@ interface Sale {
   }
   sale_date: string
   total_amount: number
+  subtotal?: number
+  discount_amount?: number
   sale_items: Array<{
     id: string
     product: {
@@ -224,6 +226,8 @@ const normalizeSaleRecord = (sale: any): Sale => ({
       ? sale.sale_date
       : new Date(sale?.sale_date || Date.now()).toISOString(),
   total_amount: Number(sale?.total_amount || 0),
+  subtotal: Number(sale?.subtotal || 0),
+  discount_amount: Number(sale?.discount_amount || 0),
   sale_items: Array.isArray(sale?.sale_items)
     ? sale.sale_items
         .filter((item: any) => !item?.item_type || item.item_type === "ORIGINAL")
@@ -1600,11 +1604,43 @@ export function ReturnsModule({
     }))
   }
 
-  const returnRefundTotal = useMemo(() => {
-    return selectedReturnItems
+  // Ratio of what the customer actually paid to the pre-order-discount
+  // subtotal. e.g. Rs 430 of goods with a Rs 30 order discount -> 400/430.
+  const orderDiscountFactor = useMemo(() => {
+    if (!selectedSale) return 1
+    const netSubtotal =
+      (selectedSale.sale_items || []).reduce(
+        (s, i) => s + (Number(i.line_total) || 0),
+        0,
+      ) || Number(selectedSale.subtotal) || 0
+    const discount = Number(selectedSale.discount_amount) || 0
+    if (netSubtotal <= 0 || discount <= 0) return 1
+    return Math.max(0, (netSubtotal - discount) / netSubtotal)
+  }, [selectedSale])
+
+  // Returned-items value BEFORE the order discount is prorated out (Rs 430).
+  const returnRefundGross = useMemo(() => {
+    const originalById = new Map(
+      (selectedSale?.sale_items || []).map((i) => [i.product.id, i]),
+    )
+    const gross = selectedReturnItems
       .filter((item) => item.selected && item.returnQuantity > 0)
-      .reduce((sum, item) => sum + item.returnQuantity * item.unitPrice, 0)
-  }, [selectedReturnItems])
+      .reduce((sum, item) => {
+        const orig = originalById.get(item.productId)
+        const perUnit =
+          orig && Number(orig.quantity) > 0
+            ? Number(orig.line_total) / Number(orig.quantity)
+            : item.unitPrice
+        return sum + item.returnQuantity * perUnit
+      }, 0)
+    return Math.round(gross * 100) / 100
+  }, [selectedReturnItems, selectedSale])
+
+  // Actual refund after prorating the original order discount (Rs 400).
+  const returnRefundTotal = useMemo(
+    () => Math.round(returnRefundGross * orderDiscountFactor * 100) / 100,
+    [returnRefundGross, orderDiscountFactor],
+  )
 
   const exchangeTotal = useMemo(() => {
     return exchangeItems.reduce((sum, item) => sum + item.quantity * item.price, 0)
@@ -1645,6 +1681,7 @@ export function ReturnsModule({
       returnScope,
       originalOrderAmount: Math.abs(Number(selectedSale.total_amount)),
       returnedItemsValue: returnRefundTotal,
+      returnedItemsGrossValue: returnRefundGross,
       replacementItemsValue: exchangeTotal,
     })
   }, [
@@ -1652,6 +1689,7 @@ export function ReturnsModule({
     newReturn.returnType,
     returnScope,
     returnRefundTotal,
+    returnRefundGross,
     exchangeTotal,
   ])
 

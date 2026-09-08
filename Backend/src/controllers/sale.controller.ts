@@ -76,6 +76,8 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
     const sortBy = (req.query.sortBy as string | undefined)?.trim() || "sale_date";
     const sortOrderRaw = (req.query.sortOrder as string | undefined)?.trim()?.toLowerCase();
     const sortOrder = sortOrderRaw === "asc" ? "asc" : "desc";
+    const includeReturns =
+      String(req.query.includeReturns ?? "").trim().toLowerCase() === "true";
 
     const parsedStartDate =
       startDateRaw && !Number.isNaN(new Date(startDateRaw).getTime())
@@ -100,6 +102,7 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
         customerId,
         sortBy,
         sortOrder,
+        includeReturns,
     });
 
     console.log(

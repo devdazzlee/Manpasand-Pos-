@@ -171,6 +171,10 @@ export type FinalBalanceType = "refund" | "collect" | "none"
 export interface PaymentSettlementDetails {
   originalOrderAmount: number
   returnedItemsValue: number
+  /** Returned-items value BEFORE the original order discount was prorated out. */
+  returnedItemsGrossValue: number
+  /** Portion of the original order discount that applies to the returned items. */
+  orderDiscountApplied: number
   replacementItemsValue: number
   returnScope: "FULL" | "PARTIAL"
   transactionType: "RETURN" | "EXCHANGE"
@@ -187,6 +191,8 @@ export function computePaymentSettlement(params: {
   originalOrderAmount: number
   returnedItemsValue: number
   replacementItemsValue: number
+  /** Pre-discount value of the returned items; defaults to `returnedItemsValue`. */
+  returnedItemsGrossValue?: number
 }): PaymentSettlementDetails {
   const {
     transactionType,
@@ -195,6 +201,11 @@ export function computePaymentSettlement(params: {
     returnedItemsValue,
     replacementItemsValue,
   } = params
+  const returnedItemsGrossValue =
+    params.returnedItemsGrossValue != null && params.returnedItemsGrossValue > returnedItemsValue
+      ? params.returnedItemsGrossValue
+      : returnedItemsValue
+  const orderDiscountApplied = Math.max(0, returnedItemsGrossValue - returnedItemsValue)
 
   const returnTypeLabel =
     transactionType === "EXCHANGE"
@@ -210,6 +221,8 @@ export function computePaymentSettlement(params: {
     return {
       originalOrderAmount,
       returnedItemsValue,
+      returnedItemsGrossValue,
+      orderDiscountApplied,
       replacementItemsValue: 0,
       returnScope,
       transactionType,
@@ -239,6 +252,8 @@ export function computePaymentSettlement(params: {
   return {
     originalOrderAmount,
     returnedItemsValue,
+    returnedItemsGrossValue,
+    orderDiscountApplied,
     replacementItemsValue,
     returnScope,
     transactionType,

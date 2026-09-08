@@ -1207,10 +1207,15 @@ export function SalesHistory() {
             ) : (
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 p-4">
                 {sales.map((sale) => {
+                  // A refunded ORIGINAL sale is still a sale (shows a REFUNDED
+                  // status badge). "Refund"/"Exchange" here mean the row itself
+                  // is a return/exchange transaction (has an original_sale_id).
+                  const isExchange =
+                    !!sale.original_sale_id && sale.status === "EXCHANGED";
                   const isRefund =
-                    sale.status === "REFUNDED" ||
-                    !!sale.original_sale_id ||
+                    (!!sale.original_sale_id && !isExchange) ||
                     toNumber(sale.total_amount) < 0;
+                  const isNegative = toNumber(sale.total_amount) < 0;
 
                   return (
                     <div
@@ -1234,10 +1239,16 @@ export function SalesHistory() {
                           <div className="min-w-0 flex-1">
                             <div className="flex flex-wrap items-center gap-2">
                               <Badge
-                                variant={isRefund ? "destructive" : "default"}
+                                variant={
+                                  isExchange
+                                    ? "secondary"
+                                    : isRefund
+                                      ? "destructive"
+                                      : "default"
+                                }
                                 className="text-xs uppercase"
                               >
-                                {isRefund ? "Refund" : "Sale"}
+                                {isExchange ? "Exchange" : isRefund ? "Refund" : "Sale"}
                               </Badge>
                               <Badge
                                 variant={statusBadgeVariant(sale.status)}
@@ -1267,7 +1278,7 @@ export function SalesHistory() {
                             <p
                               className={cn(
                                 "text-xl font-bold nums",
-                                isRefund ? "text-red-600" : "text-emerald-700",
+                                isNegative ? "text-red-600" : "text-emerald-700",
                               )}
                             >
                               {formatCurrency(sale.total_amount)}

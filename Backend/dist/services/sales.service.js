@@ -13,7 +13,7 @@ const saleItemProductInclude = {
     },
 };
 class SaleService {
-    async getSales({ branchId, page, limit, search, startDate, endDate, paymentMethod, paymentStatus, status, cashierId, customerId, sortBy = 'sale_date', sortOrder = 'desc', }) {
+    async getSales({ branchId, page, limit, search, startDate, endDate, paymentMethod, paymentStatus, status, cashierId, customerId, sortBy = 'sale_date', sortOrder = 'desc', includeReturns = false, }) {
         const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
         const where = {
             ...(branchId ? { branch_id: branchId } : {}),
@@ -49,6 +49,23 @@ class SaleService {
                 }
                 : {}),
         };
+        // Rows shown in the list / counted as "sales". Pure refund child rows
+        // (`original_sale_id != null` AND status REFUNDED) are hidden by default so
+        // a single return doesn't show up twice in Sales History. Exchange child
+        // rows (status EXCHANGED) are kept — they represent new goods sold / money
+        // collected. `where` (without this restriction) is still used for the
+        // refund aggregate below so "Total Refunds" keeps counting everything.
+        const listWhere = includeReturns
+            ? where
+            : {
+                ...where,
+                NOT: {
+                    AND: [
+                        { original_sale_id: { not: null } },
+                        { status: client_1.SaleStatus.REFUNDED },
+                    ],
+                },
+            };
         const include = {
             sale_items: {
                 include: saleItemProductInclude,
@@ -98,7 +115,7 @@ class SaleService {
         const buildSummary = async () => {
             const [aggregates, orderCount, refundAgg] = await Promise.all([
                 client_2.prisma.sale.aggregate({
-                    where,
+                    where: listWhere,
                     _sum: {
                         total_amount: true,
                         tax_amount: true,
@@ -155,9 +172,9 @@ class SaleService {
         const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
         const skip = (safePage - 1) * safeLimit;
         const [total, data, summary, cashiers] = await Promise.all([
-            client_2.prisma.sale.count({ where }),
+            client_2.prisma.sale.count({ where: listWhere }),
             client_2.prisma.sale.findMany({
-                where,
+                where: listWhere,
                 include,
                 orderBy,
                 skip,
@@ -977,6 +994,18 @@ class SaleService {
                 notes: movementNote,
             });
         };
+        // Prorate the original order-level discount across returned items so the
+        // refund reflects what the customer actually paid, not the pre-discount
+        // line totals. e.g. sold Rs 430 of goods with a Rs 30 order discount ->
+        // customer paid Rs 400, so a full return must refund Rs 400 (not Rs 430).
+        let originalNetSubtotal = new client_1.Prisma.Decimal(originalSale.subtotal || 0);
+        if (!originalNetSubtotal.greaterThan(0)) {
+            originalNetSubtotal = originalSale.sale_items.reduce((sum, item) => sum.plus(new client_1.Prisma.Decimal(item.line_total)), new client_1.Prisma.Decimal(0));
+        }
+        const originalOrderDiscount = new client_1.Prisma.Decimal(originalSale.discount_amount || 0);
+        const discountFactor = originalNetSubtotal.greaterThan(0) && originalOrderDiscount.greaterThan(0)
+            ? originalNetSubtotal.minus(originalOrderDiscount).div(originalNetSubtotal)
+            : new client_1.Prisma.Decimal(1);
         for (const ret of returnedItems) {
             const originalItem = originalSale.sale_items.find((item) => item.product_id === ret.productId);
             if (!originalItem) {
@@ -985,7 +1014,13 @@ class SaleService {
             const disposition = ret.disposition || 'RESTOCK';
             itemDispositions[ret.productId] = disposition;
             const returnQuantity = new client_1.Prisma.Decimal(ret.quantity);
-            const lineTotal = new client_1.Prisma.Decimal(originalItem.unit_price).mul(returnQuantity).mul(-1);
+            // Effective per-unit price the customer actually paid: the original line
+            // net (after any per-line discount) prorated for the order-level discount.
+            const originalQty = new client_1.Prisma.Decimal(originalItem.quantity);
+            const perUnitPaid = originalQty.greaterThan(0)
+                ? new client_1.Prisma.Decimal(originalItem.line_total).div(originalQty).mul(discountFactor)
+                : new client_1.Prisma.Decimal(originalItem.unit_price).mul(discountFactor);
+            const lineTotal = perUnitPaid.mul(returnQuantity).mul(-1);
             total = total.plus(lineTotal);
             returnValue = returnValue.plus(lineTotal.abs());
             if (disposition === 'RESTOCK') {
@@ -1000,7 +1035,7 @@ class SaleService {
             saleItems.push({
                 product_id: ret.productId,
                 quantity: returnQuantity.mul(-1),
-                unit_price: originalItem.unit_price,
+                unit_price: perUnitPaid,
                 tax_rate: originalItem.tax_rate,
                 discount_rate: originalItem.discount_rate,
                 tax_amount: new client_1.Prisma.Decimal(0),

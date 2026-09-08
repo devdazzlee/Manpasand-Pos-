@@ -64,8 +64,8 @@ import {
   shareReceiptOnWhatsApp,
   formatReceiptQtyParts,
 } from "@/lib/receipt";
+import apiClient from "@/lib/apiClient";
 import { mapApiProductToStoreProduct } from "@/lib/store";
-import { offlineAPIClient } from "@/lib/offline-api-client";
 import { offlineDB } from "@/lib/offline-db";
 import { syncManager } from "@/lib/offline-sync";
 import { useVirtualizer } from "@tanstack/react-virtual";
@@ -418,6 +418,11 @@ export function NewSale() {
   const lastProcessedScanRef = useRef<string>('');
   const isProcessingScanRef = useRef<boolean>(false);
   const enterKeyPressedRef = useRef<boolean>(false);
+  // Synchronous guard against duplicate sale submissions. `paymentLoading` is
+  // React state and updates a tick late, so a stuck Enter key / barcode
+  // scanner can fire handlePayment many times before the button disables,
+  // creating a burst of identical sales. This ref blocks re-entry immediately.
+  const saleInFlightRef = useRef<boolean>(false);
   // Track when user is actively interacting with other inputs (prevent auto-refocus)
   const userInteractionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isUserInteractingRef = useRef<boolean>(false);
@@ -1739,9 +1744,18 @@ export function NewSale() {
     amountPaid: number,
     changeAmount: number
   ) => {
+    // Block re-entry synchronously — a stuck Enter / scanner can call this
+    // several times before `paymentLoading` re-renders the buttons disabled.
+    if (saleInFlightRef.current) {
+      console.warn("Sale submission already in progress — ignoring duplicate");
+      return false;
+    }
+    saleInFlightRef.current = true;
+
     const cartSnapshot = cart.map((item) => ({ ...item }));
 
-    return await withPaymentLoading(async () => {
+    try {
+      return await withPaymentLoading(async () => {
       try {
         // Prepare items for API
         const saleItems = cartSnapshot.map((item) => {
@@ -1816,11 +1830,8 @@ export function NewSale() {
               synced: false,
               discountAmount: globalDiscountAmount,
             });
-            
-            // Queue the API request for when online
-            await offlineAPIClient.post("/sale", payload, {
-              priority: 10 // High priority for sales
-            });
+            // Synced later by syncManager.syncSales() — do NOT also queue via
+            // offlineAPIClient.post, that made every offline sale post twice.
           }
         } else {
           // Offline: Generate local sale ID and save to IndexedDB
@@ -1849,12 +1860,9 @@ export function NewSale() {
             synced: false,
             discountAmount: globalDiscountAmount,
           });
-          
-          // Also queue the API request for when online
-          await offlineAPIClient.post("/sale", payload, {
-            priority: 10 // High priority for sales
-          });
-          
+          // Synced later by syncManager.syncSales() — do NOT also queue via
+          // offlineAPIClient.post, that made every offline sale post twice.
+
           console.log("💾 Sale saved offline, will sync when connection restored");
         }
         const receiptData = generateReceiptData(
@@ -1946,7 +1954,10 @@ export function NewSale() {
         // Payment failed - no toast shown
         return false;
       }
-    });
+      });
+    } finally {
+      saleInFlightRef.current = false;
+    }
   };
 
   // Create optimized lookup maps for O(1) product access

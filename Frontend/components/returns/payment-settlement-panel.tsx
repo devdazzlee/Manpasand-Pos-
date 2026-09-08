@@ -38,6 +38,8 @@ export function PaymentSettlementPanel({
   const {
     originalOrderAmount,
     returnedItemsValue,
+    returnedItemsGrossValue,
+    orderDiscountApplied,
     replacementItemsValue,
     transactionType,
     returnTypeLabel,
@@ -46,6 +48,8 @@ export function PaymentSettlementPanel({
     finalBalanceAmount,
     balanceDue,
   } = settlement
+
+  const hasProratedDiscount = (orderDiscountApplied ?? 0) > 0.005
 
   const finalBoxClass =
     finalBalanceType === "refund"
@@ -68,18 +72,32 @@ export function PaymentSettlementPanel({
         </div>
 
         {returnedItemsValue > 0.005 && (
-          <div className="flex items-center justify-between px-1">
-            <span className="text-gray-600">
-              {transactionType === "EXCHANGE"
-                ? "Value of items returned"
-                : settlement.returnScope === "FULL"
-                  ? "Full return value"
-                  : "Partial return value"}
-            </span>
-            <span className="font-semibold text-red-600">
-              {formatMoney(returnedItemsValue)}
-            </span>
-          </div>
+          <>
+            <div className="flex items-center justify-between px-1">
+              <span className="text-gray-600">
+                {transactionType === "EXCHANGE"
+                  ? "Value of items returned"
+                  : settlement.returnScope === "FULL"
+                    ? "Full return value"
+                    : "Partial return value"}
+              </span>
+              <span className="font-semibold text-red-600">
+                {formatMoney(
+                  hasProratedDiscount ? returnedItemsGrossValue : returnedItemsValue,
+                )}
+              </span>
+            </div>
+            {hasProratedDiscount && (
+              <div className="flex items-center justify-between px-1">
+                <span className="text-gray-600">
+                  Less discount given on original sale
+                </span>
+                <span className="font-semibold text-gray-600">
+                  − {formatMoney(orderDiscountApplied)}
+                </span>
+              </div>
+            )}
+          </>
         )}
 
         {transactionType === "RETURN" && returnedItemsValue > 0.005 && (

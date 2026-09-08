@@ -52,6 +52,7 @@ class SaleService {
     customerId,
     sortBy = 'sale_date',
     sortOrder = 'desc',
+    includeReturns = false,
   }: {
     branchId?: string;
     page?: number;
@@ -66,6 +67,13 @@ class SaleService {
     customerId?: string;
     sortBy?: string;
     sortOrder?: 'asc' | 'desc';
+    /**
+     * By default the list is real sales only. Return/exchange child rows
+     * (`original_sale_id != null`, the `RTN-*` transactions) are excluded so a
+     * single return doesn't show up as two rows in Sales History. Pass `true`
+     * to include them.
+     */
+    includeReturns?: boolean;
   }) {
     const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
 
@@ -103,6 +111,24 @@ class SaleService {
           }
         : {}),
     };
+
+    // Rows shown in the list / counted as "sales". Pure refund child rows
+    // (`original_sale_id != null` AND status REFUNDED) are hidden by default so
+    // a single return doesn't show up twice in Sales History. Exchange child
+    // rows (status EXCHANGED) are kept — they represent new goods sold / money
+    // collected. `where` (without this restriction) is still used for the
+    // refund aggregate below so "Total Refunds" keeps counting everything.
+    const listWhere: Prisma.SaleWhereInput = includeReturns
+      ? where
+      : {
+          ...where,
+          NOT: {
+            AND: [
+              { original_sale_id: { not: null } },
+              { status: SaleStatus.REFUNDED },
+            ],
+          },
+        };
 
     const include = {
       sale_items: {
@@ -155,7 +181,7 @@ class SaleService {
     const buildSummary = async () => {
       const [aggregates, orderCount, refundAgg] = await Promise.all([
         prisma.sale.aggregate({
-          where,
+          where: listWhere,
           _sum: {
             total_amount: true,
             tax_amount: true,
@@ -217,9 +243,9 @@ class SaleService {
     const skip = (safePage - 1) * safeLimit;
 
     const [total, data, summary, cashiers] = await Promise.all([
-      prisma.sale.count({ where }),
+      prisma.sale.count({ where: listWhere }),
       prisma.sale.findMany({
-        where,
+        where: listWhere,
         include,
         orderBy,
         skip,
@@ -1276,6 +1302,23 @@ class SaleService {
       });
     };
 
+    // Prorate the original order-level discount across returned items so the
+    // refund reflects what the customer actually paid, not the pre-discount
+    // line totals. e.g. sold Rs 430 of goods with a Rs 30 order discount ->
+    // customer paid Rs 400, so a full return must refund Rs 400 (not Rs 430).
+    let originalNetSubtotal = new Prisma.Decimal(originalSale.subtotal || 0);
+    if (!originalNetSubtotal.greaterThan(0)) {
+      originalNetSubtotal = originalSale.sale_items.reduce(
+        (sum, item) => sum.plus(new Prisma.Decimal(item.line_total)),
+        new Prisma.Decimal(0),
+      );
+    }
+    const originalOrderDiscount = new Prisma.Decimal(originalSale.discount_amount || 0);
+    const discountFactor =
+      originalNetSubtotal.greaterThan(0) && originalOrderDiscount.greaterThan(0)
+        ? originalNetSubtotal.minus(originalOrderDiscount).div(originalNetSubtotal)
+        : new Prisma.Decimal(1);
+
     for (const ret of returnedItems) {
       const originalItem = originalSale.sale_items.find((item) => item.product_id === ret.productId);
       if (!originalItem) {
@@ -1286,7 +1329,13 @@ class SaleService {
       itemDispositions[ret.productId] = disposition;
 
       const returnQuantity = new Prisma.Decimal(ret.quantity);
-      const lineTotal = new Prisma.Decimal(originalItem.unit_price).mul(returnQuantity).mul(-1);
+      // Effective per-unit price the customer actually paid: the original line
+      // net (after any per-line discount) prorated for the order-level discount.
+      const originalQty = new Prisma.Decimal(originalItem.quantity);
+      const perUnitPaid = originalQty.greaterThan(0)
+        ? new Prisma.Decimal(originalItem.line_total).div(originalQty).mul(discountFactor)
+        : new Prisma.Decimal(originalItem.unit_price).mul(discountFactor);
+      const lineTotal = perUnitPaid.mul(returnQuantity).mul(-1);
       total = total.plus(lineTotal);
       returnValue = returnValue.plus(lineTotal.abs());
 
@@ -1303,7 +1352,7 @@ class SaleService {
       saleItems.push({
         product_id: ret.productId,
         quantity: returnQuantity.mul(-1),
-        unit_price: originalItem.unit_price,
+        unit_price: perUnitPaid,
         tax_rate: originalItem.tax_rate,
         discount_rate: originalItem.discount_rate,
         tax_amount: new Prisma.Decimal(0),

@@ -70,6 +70,7 @@ const getSalesController = (0, asyncHandler_1.default)(async (req, res) => {
     const sortBy = req.query.sortBy?.trim() || "sale_date";
     const sortOrderRaw = req.query.sortOrder?.trim()?.toLowerCase();
     const sortOrder = sortOrderRaw === "asc" ? "asc" : "desc";
+    const includeReturns = String(req.query.includeReturns ?? "").trim().toLowerCase() === "true";
     const parsedStartDate = startDateRaw && !Number.isNaN(new Date(startDateRaw).getTime())
         ? new Date(startDateRaw)
         : undefined;
@@ -90,6 +91,7 @@ const getSalesController = (0, asyncHandler_1.default)(async (req, res) => {
         customerId,
         sortBy,
         sortOrder,
+        includeReturns,
     });
     console.log(`Returning ${result.data.length} sales for branchId: ${branchId || 'ALL'} (page: ${result.meta?.page}, total: ${result.meta?.total})`);
     new apiResponse_1.ApiResponse(result.data, "Sales fetched successfully", 200, true, result.meta).send(res);

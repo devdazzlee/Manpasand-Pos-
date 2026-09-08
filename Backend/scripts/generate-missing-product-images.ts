@@ -181,6 +181,40 @@ function appendLog(event: Record<string, unknown>) {
 function photographyStyle(category: string, productName = ''): string {
   const c = category.toLowerCase();
   const n = productName.toLowerCase();
+  if (/hair color|hair colour|henna|mehndi/.test(n)) {
+    return [
+      'Professional beauty-product photography of a hair dye / hair color kit.',
+      'Show one realistic unlabeled tube or carton of hair color on a seamless white background, optionally with a small swirl of colored cream beside it matching a natural hair-dye shade (not neon).',
+      'Studio catalog lighting, no people, no hair models, no fake brand logos or readable text.',
+    ].join(' ');
+  }
+  if (/chikki/.test(n)) {
+    return [
+      'Professional confectionery photography of Indian/Pakistani chikki (brittle).',
+      n.includes('peanut')
+        ? 'Show golden-brown peanut brittle pieces with visible roasted peanuts, broken into snack-size slabs on a small plate.'
+        : n.includes('sesome') || n.includes('sesame')
+          ? 'Show sesame-seed chikki (til chikki): thin golden brittle packed with toasted white sesame seeds.'
+          : 'Show mixed-seed chikki: golden brittle with visible sesame, melon, and mixed seeds.',
+      'Appetizing warm light, clean light background, no packaging, no fake labels.',
+    ].join(' ');
+  }
+  if (/imli|tamarind/.test(n)) {
+    return [
+      'Professional confectionery photography of Racket Imli: a classic South Asian tamarind candy on a small paddle / racket-shaped stick.',
+      'Show 2–3 reddish-brown sticky tamarind-imlis candies on wooden paddle sticks, glossy and appetizing.',
+      'Clean white background, catalog lighting, no fake brand wrappers or readable text.',
+    ].join(' ');
+  }
+  if (/sandal powder|sandalwood|sattawar|shatavari/.test(n)) {
+    return [
+      'Professional herbal powder photography for a South Asian grocery / Unani shop.',
+      n.includes('sandal')
+        ? 'Show fine pale-cream sandalwood powder heaped in a small ceramic bowl, with a pinch of the powder beside it to show texture.'
+        : 'Show off-white to light beige Sattawar (Shatavari) herbal powder in a simple unlabeled bowl.',
+      'Clean white background, soft studio light, no people, no fake labels.',
+    ].join(' ');
+  }
   if (
     /neela tota|phitkari|nowshadar|suhaga|camphor|gandak|fine coal|surma|sindhoor|silver warq/.test(n)
   ) {
