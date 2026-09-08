@@ -102,6 +102,8 @@ import {
   useSupplierProducts,
   useSupplierMutations,
 } from "@/hooks/queries/use-suppliers";
+import { usePurchaseInvoices } from "@/hooks/queries/use-purchase-invoices";
+import { useProductCostHistory } from "@/hooks/queries/use-products";
 
 interface Supplier {
   id: string;
@@ -149,7 +151,7 @@ interface PurchaseRow {
 interface LedgerEntry {
   id: string;
   date: string;
-  type: "PURCHASE" | "RETURN" | "PAYMENT";
+  type: "PURCHASE" | "INVOICE" | "RETURN" | "PAYMENT";
   description: string;
   reference: string | null;
   debit: number;
@@ -434,10 +436,13 @@ const Suppliers: React.FC = () => {
     useState<(typeof PAYMENT_METHODS)[number]>("CASH");
   const [paymentReference, setPaymentReference] = useState("");
   const [paymentNotes, setPaymentNotes] = useState("");
+  const [paymentInvoiceId, setPaymentInvoiceId] = useState("");
   const [paymentKind, setPaymentKind] = useState<"settle" | "upfront">(
     "settle",
   );
   const [paymentDeleteId, setPaymentDeleteId] = useState<string | null>(null);
+  // Cost-history dialog (from the Products tab)
+  const [costProductId, setCostProductId] = useState<string | null>(null);
 
   useScrollToTopOnPageChange(page);
 
@@ -506,6 +511,17 @@ const Suppliers: React.FC = () => {
   const ledgerQuery = useSupplierLedger(detailId);
   const productsQuery = useSupplierProducts(detailId, {
     enabled: detailTab === "products",
+  });
+  const openInvoicesQuery = usePurchaseInvoices(
+    { supplierId: detailId ?? undefined, limit: 100 },
+    { enabled: !!detailId && detailTab === "ledger" },
+  );
+  const openInvoices = useMemo(
+    () => (openInvoicesQuery.data?.data ?? []).filter((i) => i.status !== "PAID"),
+    [openInvoicesQuery.data],
+  );
+  const costHistoryQuery = useProductCostHistory(costProductId, {
+    enabled: !!costProductId,
   });
 
   // ----- statement (its own modal, date-ranged, printable) -----
@@ -643,6 +659,7 @@ const Suppliers: React.FC = () => {
     setPaymentMethod("CASH");
     setPaymentReference("");
     setPaymentNotes("");
+    setPaymentInvoiceId("");
     setPaymentKind("settle");
   };
 
@@ -819,6 +836,7 @@ const Suppliers: React.FC = () => {
           paymentDate: paymentDate ? paymentDate.toISOString() : undefined,
           method: paymentMethod,
           reference: paymentReference.trim() || undefined,
+          purchaseInvoiceId: paymentInvoiceId || undefined,
           notes:
             [kindNote, paymentNotes.trim()].filter(Boolean).join(" · ") ||
             undefined,
@@ -1879,6 +1897,36 @@ const Suppliers: React.FC = () => {
                   </div>
                 </div>
                 <div className="space-y-1">
+                  <Label className={supplierFieldLabelClass}>
+                    Against invoice (optional)
+                  </Label>
+                  <Select
+                    value={paymentInvoiceId || "none"}
+                    onValueChange={(v) =>
+                      setPaymentInvoiceId(v === "none" ? "" : v)
+                    }
+                  >
+                    <SelectTrigger className={supplierFieldControlClass}>
+                      <SelectValue placeholder="Not linked to an invoice" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">
+                        Not linked to an invoice
+                      </SelectItem>
+                      {openInvoices.map((inv) => (
+                        <SelectItem key={inv.id} value={inv.id}>
+                          {inv.invoice_number} · bal {formatMoney(inv.balance_due)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {openInvoices.length === 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      No open invoices — the payment lands on the running balance.
+                    </p>
+                  )}
+                </div>
+                <div className="space-y-1">
                   <Label className={supplierFieldLabelClass}>Notes</Label>
                   <Textarea
                     value={paymentNotes}
@@ -1975,16 +2023,20 @@ const Suppliers: React.FC = () => {
                                   className={
                                     e.type === "PURCHASE"
                                       ? "border-amber-200 bg-amber-50 text-amber-800"
-                                      : e.type === "RETURN"
-                                        ? "border-violet-200 bg-violet-50 text-violet-800"
-                                        : "border-green-200 bg-green-50 text-green-800"
+                                      : e.type === "INVOICE"
+                                        ? "border-sky-200 bg-sky-50 text-sky-800"
+                                        : e.type === "RETURN"
+                                          ? "border-violet-200 bg-violet-50 text-violet-800"
+                                          : "border-green-200 bg-green-50 text-green-800"
                                   }
                                 >
                                   {e.type === "PURCHASE"
-                                    ? "Purchase"
-                                    : e.type === "RETURN"
-                                      ? "Return"
-                                      : "Payment"}
+                                    ? "Goods received"
+                                    : e.type === "INVOICE"
+                                      ? "Invoice"
+                                      : e.type === "RETURN"
+                                        ? "Return"
+                                        : "Payment"}
                                 </Badge>
                               </TableCell>
                               <TableCell className="max-w-[280px] text-sm">
@@ -2065,7 +2117,12 @@ const Suppliers: React.FC = () => {
                     </TableHeader>
                     <TableBody>
                       {(productsQuery.data as SupplierProductRow[]).map((p) => (
-                        <TableRow key={p.id} className="h-11">
+                        <TableRow
+                          key={p.id}
+                          className="h-11 cursor-pointer hover:bg-muted/50"
+                          onClick={() => setCostProductId(p.id)}
+                          title="View cost history"
+                        >
                           <TableCell className="font-medium">
                             {p.name}
                             {!p.is_active && (
@@ -2198,6 +2255,79 @@ const Suppliers: React.FC = () => {
               <p className="text-sm text-muted-foreground">Could not load the statement.</p>
             )}
           </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Product cost history — opened from the Products tab */}
+      <Dialog open={!!costProductId} onOpenChange={(o) => !o && setCostProductId(null)}>
+        <DialogContent className="max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>
+              Cost history
+              {costHistoryQuery.data ? ` · ${costHistoryQuery.data.product.name}` : ""}
+            </DialogTitle>
+          </DialogHeader>
+          {costHistoryQuery.isLoading || !costHistoryQuery.data ? (
+            <div className="space-y-2">
+              {Array.from({ length: 6 }).map((_, i) => (
+                <div key={i} className="h-6 animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-4 gap-2 text-sm">
+                {(
+                  [
+                    ["Latest", costHistoryQuery.data.summary.latestCost],
+                    ["Weighted avg", costHistoryQuery.data.summary.weightedAvgCost],
+                    ["Lowest", costHistoryQuery.data.summary.minCost],
+                    ["Highest", costHistoryQuery.data.summary.maxCost],
+                  ] as const
+                ).map(([label, val]) => (
+                  <div key={label} className="rounded-md border border-border p-2">
+                    <p className="text-xs text-muted-foreground">{label}</p>
+                    <p className="font-semibold nums">{formatMoney(val)}</p>
+                  </div>
+                ))}
+              </div>
+              <div className="max-h-[50vh] overflow-y-auto rounded-lg border border-border">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="text-xs uppercase tracking-wide">Date</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">Supplier</TableHead>
+                      <TableHead className="text-right text-xs uppercase tracking-wide">Qty</TableHead>
+                      <TableHead className="text-right text-xs uppercase tracking-wide">Unit cost</TableHead>
+                      <TableHead className="text-right text-xs uppercase tracking-wide">Avg after</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {costHistoryQuery.data.entries.length === 0 ? (
+                      <TableRow>
+                        <TableCell colSpan={5} className="py-6 text-center text-sm text-muted-foreground">
+                          No purchases recorded for this product yet.
+                        </TableCell>
+                      </TableRow>
+                    ) : (
+                      costHistoryQuery.data.entries.map((e) => (
+                        <TableRow key={e.id} className="h-10">
+                          <TableCell className="text-sm text-muted-foreground nums">
+                            {formatDate(e.purchase_date)}
+                          </TableCell>
+                          <TableCell className="text-sm">{e.supplier?.name ?? "—"}</TableCell>
+                          <TableCell className="text-right text-sm nums">{e.quantity}</TableCell>
+                          <TableCell className="text-right text-sm nums">{formatMoney(e.unit_cost)}</TableCell>
+                          <TableCell className="text-right text-sm font-medium nums">
+                            {formatMoney(e.weighted_avg_cost)}
+                          </TableCell>
+                        </TableRow>
+                      ))
+                    )}
+                  </TableBody>
+                </Table>
+              </div>
+            </>
+          )}
         </DialogContent>
       </Dialog>
 

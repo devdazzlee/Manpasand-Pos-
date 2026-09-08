@@ -9,11 +9,22 @@ import {
   fetchProducts,
   fetchAllPosProducts,
   readPosCatalogCache,
+  fetchProductCostHistory,
   type ProductQuery,
   type PosProduct,
 } from "@/lib/api/products";
 
 const EMPTY: PosProduct[] = [];
+
+/** Cost history + running weighted-average cost for one product. */
+export function useProductCostHistory(id: string | null, options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: ["products", "cost-history", id ?? ""] as const,
+    queryFn: ({ signal }) => fetchProductCostHistory(id as string, signal),
+    staleTime: STALE_TIME.volatile,
+    enabled: Boolean(id) && (options?.enabled ?? true),
+  });
+}
 
 /**
  * Paginated / filtered product list for the POS grid.

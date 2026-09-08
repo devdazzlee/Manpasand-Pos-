@@ -46,6 +46,36 @@ export async function fetchProductById(id: string, signal?: AbortSignal): Promis
   return mapApiProductToStoreProduct(raw);
 }
 
+export interface ProductCostHistory {
+  product: { id: string; name: string; sku: string | null; code: string | null; purchase_rate: number };
+  summary: {
+    receiptCount: number;
+    totalQty: number;
+    totalValue: number;
+    latestCost: number;
+    weightedAvgCost: number;
+    minCost: number;
+    maxCost: number;
+    firstCost: number;
+  };
+  entries: {
+    id: string;
+    purchase_date: string;
+    supplier: { id: string; name: string } | null;
+    branch: { id: string; name: string } | null;
+    quantity: number;
+    unit_cost: number;
+    line_total: number;
+    invoice_ref: string | null;
+    running_qty: number;
+    weighted_avg_cost: number;
+  }[];
+}
+
+export function fetchProductCostHistory(id: string, signal?: AbortSignal) {
+  return getOne<ProductCostHistory>(`/products/${id}/cost-history`, { signal });
+}
+
 /**
  * The whole sellable POS catalog (active + display-on-pos), fetched once and
  * cached for the session. The selling screen filters this in memory so search

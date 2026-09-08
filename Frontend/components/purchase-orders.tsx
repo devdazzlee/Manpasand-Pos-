@@ -69,8 +69,19 @@ import {
   usePurchaseOrderMutations,
 } from "@/hooks/queries/use-purchase-orders";
 import { usePurchaseReturns, usePurchaseReturnMutations } from "@/hooks/queries/use-purchase-returns";
+import {
+  usePurchaseInvoices,
+  usePurchaseInvoice,
+  useUninvoicedPurchases,
+  usePurchaseInvoiceMutations,
+} from "@/hooks/queries/use-purchase-invoices";
 import { PO_STATUSES, type PurchaseOrder, type PurchaseOrderStatus } from "@/lib/api/purchase-orders";
 import { PR_STATUSES, type PurchaseReturn } from "@/lib/api/purchase-returns";
+import {
+  PI_STATUSES,
+  type PurchaseInvoice,
+  type PurchaseInvoiceStatus,
+} from "@/lib/api/purchase-invoices";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : "—");
@@ -91,18 +102,27 @@ const NEXT_STATUS: Partial<Record<PurchaseOrderStatus, PurchaseOrderStatus>> = {
   APPROVED: "ORDERED",
 };
 
-type Tab = "orders" | "returns";
+type Tab = "orders" | "invoices" | "returns";
 type Toast = ReturnType<typeof useToast>["toast"];
+
+const TAB_LABEL: Record<Tab, string> = {
+  orders: "Purchase orders",
+  invoices: "Invoices",
+  returns: "Purchase returns",
+};
 
 export function PurchaseOrders() {
   const { toast } = useToast();
   const [tab, setTab] = useState<Tab>("orders");
   return (
     <>
-      <PageHeader title="Purchase Orders" description="Order from suppliers, receive stock, and record returns" />
+      <PageHeader
+        title="Purchase Management"
+        description="PO → goods received → invoice → payable → payment"
+      />
       <PageBody className="space-y-5">
         <div className="flex gap-1.5">
-          {(["orders", "returns"] as const).map((k) => (
+          {(["orders", "invoices", "returns"] as const).map((k) => (
             <button
               key={k}
               type="button"
@@ -114,11 +134,13 @@ export function PurchaseOrders() {
                   : "border-border bg-background text-foreground hover:bg-muted/50",
               )}
             >
-              {k === "orders" ? "Purchase orders" : "Purchase returns"}
+              {TAB_LABEL[k]}
             </button>
           ))}
         </div>
-        {tab === "orders" ? <OrdersTab toast={toast} /> : <ReturnsTab toast={toast} />}
+        {tab === "orders" && <OrdersTab toast={toast} />}
+        {tab === "invoices" && <InvoicesTab toast={toast} />}
+        {tab === "returns" && <ReturnsTab toast={toast} />}
       </PageBody>
     </>
   );
@@ -1159,6 +1181,480 @@ function ReturnFormSheet({
           {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           Record return
         </Button>
+      </DetailSheetFooter>
+    </DetailSheet>
+  );
+}
+
+/* =============================== Invoices tab =============================== */
+
+const PI_STATUS_STYLE: Record<string, string> = {
+  UNPAID: "border-rose-200 bg-rose-50 text-rose-800",
+  PARTIALLY_PAID: "border-amber-200 bg-amber-50 text-amber-800",
+  PAID: "border-green-200 bg-green-50 text-green-800",
+};
+
+function InvoicesTab({ toast }: { toast: Toast }) {
+  const [supplierId, setSupplierId] = useState("all");
+  const [status, setStatus] = useState("all");
+  const [overdue, setOverdue] = useState(false);
+  const [page, setPage] = useState(1);
+  useEffect(() => setPage(1), [supplierId, status, overdue]);
+
+  const { suppliers } = useSuppliers({ page: 1, limit: 200, isActive: true });
+  const { invoices, meta, isFirstLoad, isRefreshing, refetch } = usePurchaseInvoices({
+    page,
+    limit: 20,
+    supplierId: supplierId === "all" ? undefined : supplierId,
+    status: status === "all" ? undefined : (status as PurchaseInvoiceStatus),
+    overdue: overdue || undefined,
+  });
+  const m = usePurchaseInvoiceMutations();
+  const [formOpen, setFormOpen] = useState(false);
+  const [editing, setEditing] = useState<PurchaseInvoice | null>(null);
+  const [viewId, setViewId] = useState<string | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<PurchaseInvoice | null>(null);
+  const err = (e: unknown, t: string) =>
+    toast({ variant: "destructive", title: t, description: extractApiError(e, t) });
+  const aging = meta?.summary.aging;
+
+  return (
+    <div className="space-y-4">
+      <InventoryKpiGrid
+        columns={4}
+        loading={isFirstLoad}
+        items={[
+          { label: "Outstanding payable", value: formatMoney(meta?.summary.outstanding ?? 0), icon: FileText },
+          { label: "Current", value: formatMoney(aging?.current ?? 0), icon: PackageCheck },
+          { label: "1–60 days", value: formatMoney((aging?.d1_30 ?? 0) + (aging?.d31_60 ?? 0)), icon: PackageCheck, tone: "warning" },
+          { label: "60+ days", value: formatMoney(aging?.d60_plus ?? 0), icon: Ban, tone: "danger" },
+        ]}
+      />
+
+      <div className="flex flex-wrap items-end gap-2">
+        <Select value={supplierId} onValueChange={setSupplierId}>
+          <SelectTrigger className="h-9 w-[200px]"><SelectValue placeholder="Supplier" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All suppliers</SelectItem>
+            {suppliers.map((s: any) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <Select value={status} onValueChange={setStatus}>
+          <SelectTrigger className="h-9 w-[160px]"><SelectValue placeholder="Status" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All statuses</SelectItem>
+            {PI_STATUSES.map((s) => <SelectItem key={s} value={s}>{titleCase(s)}</SelectItem>)}
+          </SelectContent>
+        </Select>
+        <label className="flex items-center gap-1.5 text-xs text-muted-foreground">
+          <input type="checkbox" checked={overdue} onChange={(e) => setOverdue(e.target.checked)} />
+          Overdue only
+        </label>
+        <Button variant="outline" size="sm" className="h-9" onClick={() => refetch()} disabled={isRefreshing}>
+          <RefreshCcw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+        </Button>
+        <Button size="sm" className="h-9" onClick={() => { setEditing(null); setFormOpen(true); }}>
+          <Plus className="mr-1.5 h-4 w-4" />
+          New invoice
+        </Button>
+      </div>
+
+      <Card>
+        <CardContent className="p-0">
+          {isFirstLoad ? (
+            <div className="space-y-2 p-4">
+              {Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="h-11 w-full animate-pulse rounded bg-muted" />
+              ))}
+            </div>
+          ) : invoices.length === 0 ? (
+            <div className="m-4 flex flex-col items-center gap-2 rounded-lg border border-dashed py-12">
+              <FileText className="h-8 w-8 text-muted-foreground/50" />
+              <p className="text-sm text-muted-foreground">No purchase invoices</p>
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="text-xs uppercase tracking-wide">Invoice #</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Supplier</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Date</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Due</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide">Total</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide">Balance</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Status</TableHead>
+                    <TableHead className="w-[110px] text-right text-xs uppercase tracking-wide">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {invoices.map((inv) => {
+                    const overdueRow =
+                      inv.status !== "PAID" && inv.due_date && new Date(inv.due_date) < new Date();
+                    return (
+                      <TableRow key={inv.id} className="h-11 hover:bg-muted/50">
+                        <TableCell className="font-mono text-xs">{inv.invoice_number}</TableCell>
+                        <TableCell className="text-sm font-medium">{inv.supplier?.name ?? "—"}</TableCell>
+                        <TableCell className="text-sm text-muted-foreground nums">{fmtDate(inv.invoice_date)}</TableCell>
+                        <TableCell className={cn("text-sm nums", overdueRow ? "font-semibold text-rose-700" : "text-muted-foreground")}>
+                          {fmtDate(inv.due_date)}
+                        </TableCell>
+                        <TableCell className="text-right font-semibold nums">{formatMoney(inv.total_amount)}</TableCell>
+                        <TableCell className="text-right nums">{formatMoney(inv.balance_due)}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline" className={PI_STATUS_STYLE[inv.status]}>
+                            {titleCase(inv.status)}
+                          </Badge>
+                        </TableCell>
+                        <TableCell>
+                          <div className="flex justify-end gap-1">
+                            <Button size="icon" variant="ghost" className="h-8 w-8" title="View"
+                              onClick={() => setViewId(inv.id)}>
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            {inv.amount_paid === 0 && (
+                              <>
+                                <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit"
+                                  onClick={() => { setEditing(inv); setFormOpen(true); }}>
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive"
+                                  title="Delete" onClick={() => setDeleteTarget(inv)}>
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </>
+                            )}
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+          {meta && meta.totalPages > 1 && (
+            <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+              <p className="text-xs text-muted-foreground">Page {meta.page} of {meta.totalPages}</p>
+              <div className="flex gap-2">
+                <Button size="sm" variant="outline" className="h-8" disabled={page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
+                <Button size="sm" variant="outline" className="h-8" disabled={page >= meta.totalPages}
+                  onClick={() => setPage((p) => p + 1)}>Next</Button>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <InvoiceFormSheet
+        open={formOpen}
+        onOpenChange={setFormOpen}
+        editing={editing}
+        suppliers={suppliers}
+        saving={m.create.isPending || m.update.isPending}
+        onSave={(body) => {
+          const opts = {
+            onSuccess: () => { toast({ title: editing ? "Invoice updated" : "Invoice created" }); setFormOpen(false); },
+            onError: (e: unknown) => err(e, "Could not save invoice"),
+          };
+          if (editing) m.update.mutate({ id: editing.id, body }, opts);
+          else m.create.mutate(body, opts);
+        }}
+      />
+
+      <InvoiceViewSheet id={viewId} onClose={() => setViewId(null)} />
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete invoice {deleteTarget?.invoice_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The linked deliveries return to "uninvoiced". Only possible while no payment is recorded.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={() => {
+                if (!deleteTarget) return;
+                m.remove.mutate(deleteTarget.id, {
+                  onSuccess: () => { toast({ title: "Invoice deleted" }); setDeleteTarget(null); },
+                  onError: (e) => err(e, "Could not delete"),
+                });
+              }}
+            >
+              Delete
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </div>
+  );
+}
+
+function InvoiceFormSheet({
+  open,
+  onOpenChange,
+  editing,
+  suppliers,
+  onSave,
+  saving,
+}: {
+  open: boolean;
+  onOpenChange: (v: boolean) => void;
+  editing: PurchaseInvoice | null;
+  suppliers: any[];
+  onSave: (body: any) => void;
+  saving: boolean;
+}) {
+  const [supplierId, setSupplierId] = useState("");
+  const [invoiceNumber, setInvoiceNumber] = useState("");
+  const [invoiceDate, setInvoiceDate] = useState(today());
+  const [dueDate, setDueDate] = useState("");
+  const [taxAmount, setTaxAmount] = useState("0");
+  const [discountAmount, setDiscountAmount] = useState("0");
+  const [notes, setNotes] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    if (!open) return;
+    if (editing) {
+      setSupplierId(editing.supplier?.id ?? "");
+      setInvoiceNumber(editing.invoice_number);
+      setInvoiceDate(editing.invoice_date.slice(0, 10));
+      setDueDate(editing.due_date ? editing.due_date.slice(0, 10) : "");
+      setTaxAmount(String(editing.tax_amount));
+      setDiscountAmount(String(editing.discount_amount));
+      setNotes(editing.notes ?? "");
+      setPicked(new Set(editing.purchases.map((p) => p.id)));
+    } else {
+      setSupplierId("");
+      setInvoiceNumber("");
+      setInvoiceDate(today());
+      setDueDate("");
+      setTaxAmount("0");
+      setDiscountAmount("0");
+      setNotes("");
+      setPicked(new Set());
+    }
+  }, [open, editing]);
+
+  const { data: uninvoiced = [], isLoading } = useUninvoicedPurchases(supplierId || null, {
+    enabled: open && !!supplierId,
+  });
+  // In edit mode the invoice's own deliveries are already linked, so also list them.
+  const rows = useMemo(() => {
+    if (!editing) return uninvoiced;
+    const own = editing.purchases.map((p) => ({
+      id: p.id,
+      product: p.product,
+      quantity: p.quantity,
+      cost_price: p.cost_price,
+      line_total: p.line_total,
+      purchase_date: p.purchase_date,
+      invoice_ref: null,
+      po_number: null,
+    }));
+    const seen = new Set(own.map((r) => r.id));
+    return [...own, ...uninvoiced.filter((r) => !seen.has(r.id))];
+  }, [editing, uninvoiced]);
+
+  const subtotal = rows
+    .filter((r) => picked.has(r.id))
+    .reduce((a, r) => a + r.line_total, 0);
+  const total = subtotal + (Number(taxAmount) || 0) - (Number(discountAmount) || 0);
+  const valid = supplierId && invoiceNumber.trim() && picked.size > 0 && total >= 0;
+
+  const toggle = (id: string) =>
+    setPicked((s) => {
+      const next = new Set(s);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+
+  return (
+    <DetailSheet open={open} onOpenChange={onOpenChange} size="xl">
+      <DetailSheetHeader
+        title={editing ? `Edit invoice ${editing.invoice_number}` : "New purchase invoice"}
+        subtitle="Bill the supplier for received deliveries"
+      />
+      <DetailSheetBody className="space-y-4">
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Supplier</Label>
+            <Select value={supplierId} onValueChange={(v) => { setSupplierId(v); setPicked(new Set()); }} disabled={!!editing}>
+              <SelectTrigger className="h-9"><SelectValue placeholder="Select supplier" /></SelectTrigger>
+              <SelectContent>
+                {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Supplier invoice number</Label>
+            <Input value={invoiceNumber} onChange={(e) => setInvoiceNumber(e.target.value)} className="h-9" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Invoice date</Label>
+            <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className="h-9" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Due date</Label>
+            <Input type="date" value={dueDate} min={invoiceDate || undefined}
+              onChange={(e) => setDueDate(e.target.value)} className="h-9" />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <Label className="text-xs text-muted-foreground">Deliveries to bill</Label>
+          {!supplierId ? (
+            <p className="rounded-md border border-dashed py-4 text-center text-xs text-muted-foreground">
+              Pick a supplier first
+            </p>
+          ) : isLoading ? (
+            <div className="h-24 animate-pulse rounded bg-muted" />
+          ) : rows.length === 0 ? (
+            <p className="rounded-md border border-dashed py-4 text-center text-xs text-muted-foreground">
+              No uninvoiced deliveries for this supplier
+            </p>
+          ) : (
+            <div className="max-h-64 overflow-y-auto rounded-md border border-border">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-10" />
+                    <TableHead className="text-xs uppercase tracking-wide">Product</TableHead>
+                    <TableHead className="text-xs uppercase tracking-wide">Received</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide">Qty</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide">Cost</TableHead>
+                    <TableHead className="text-right text-xs uppercase tracking-wide">Total</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {rows.map((r) => (
+                    <TableRow key={r.id} className="h-10 cursor-pointer" onClick={() => toggle(r.id)}>
+                      <TableCell>
+                        <input type="checkbox" checked={picked.has(r.id)} readOnly />
+                      </TableCell>
+                      <TableCell className="text-sm">{r.product?.name ?? "—"}</TableCell>
+                      <TableCell className="text-xs text-muted-foreground nums">{fmtDate(r.purchase_date)}</TableCell>
+                      <TableCell className="text-right text-sm nums">{r.quantity}</TableCell>
+                      <TableCell className="text-right text-sm nums">{formatMoney(r.cost_price)}</TableCell>
+                      <TableCell className="text-right text-sm nums">{formatMoney(r.line_total)}</TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </div>
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Tax</Label>
+            <Input type="number" min="0" step="0.01" value={taxAmount}
+              onChange={(e) => setTaxAmount(e.target.value)} className="h-9 nums" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Discount</Label>
+            <Input type="number" min="0" step="0.01" value={discountAmount}
+              onChange={(e) => setDiscountAmount(e.target.value)} className="h-9 nums" />
+          </div>
+        </div>
+        <div className="flex justify-end gap-4 text-sm">
+          <span className="text-muted-foreground">Subtotal {formatMoney(subtotal)}</span>
+          <span className="font-semibold">Total {formatMoney(total)}</span>
+        </div>
+
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Notes</Label>
+          <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} className="min-h-[60px] text-sm" />
+        </div>
+      </DetailSheetBody>
+      <DetailSheetFooter>
+        <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+        <Button
+          disabled={!valid || saving}
+          onClick={() =>
+            onSave({
+              supplier_id: supplierId,
+              invoice_number: invoiceNumber.trim(),
+              invoice_date: invoiceDate,
+              due_date: dueDate || null,
+              tax_amount: Number(taxAmount) || 0,
+              discount_amount: Number(discountAmount) || 0,
+              notes: notes.trim() || null,
+              purchase_ids: [...picked],
+            })
+          }
+        >
+          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {editing ? "Save changes" : "Create invoice"}
+        </Button>
+      </DetailSheetFooter>
+    </DetailSheet>
+  );
+}
+
+function InvoiceViewSheet({ id, onClose }: { id: string | null; onClose: () => void }) {
+  const { data: inv, isLoading } = usePurchaseInvoice(id, { enabled: !!id });
+  return (
+    <DetailSheet open={!!id} onOpenChange={(o) => !o && onClose()} size="lg">
+      <DetailSheetHeader
+        title={inv ? inv.invoice_number : "Invoice"}
+        subtitle={inv ? `${inv.supplier?.name} · ${fmtDate(inv.invoice_date)}` : undefined}
+        icon={<FileText className="h-5 w-5" />}
+      />
+      <DetailSheetBody className="space-y-4">
+        {isLoading || !inv ? (
+          <div className="space-y-3">
+            <div className="h-20 animate-pulse rounded bg-muted" />
+            <div className="h-40 animate-pulse rounded bg-muted" />
+          </div>
+        ) : (
+          <>
+            <div className="grid grid-cols-3 gap-3 rounded-lg border bg-muted/30 p-3 text-sm">
+              <div><p className="text-xs text-muted-foreground">Status</p><p>{titleCase(inv.status)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Due</p><p className="nums">{fmtDate(inv.due_date)}</p></div>
+              <div><p className="text-xs text-muted-foreground">Balance</p><p className="font-semibold nums">{formatMoney(inv.balance_due)}</p></div>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="text-xs uppercase tracking-wide">Product</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-wide">Qty</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-wide">Cost</TableHead>
+                  <TableHead className="text-right text-xs uppercase tracking-wide">Total</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {inv.purchases.map((p) => (
+                  <TableRow key={p.id} className="h-10">
+                    <TableCell className="text-sm">{p.product?.name ?? "—"}</TableCell>
+                    <TableCell className="text-right text-sm nums">{p.quantity}</TableCell>
+                    <TableCell className="text-right text-sm nums">{formatMoney(p.cost_price)}</TableCell>
+                    <TableCell className="text-right text-sm nums">{formatMoney(p.line_total)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <div className="flex flex-col items-end gap-0.5 text-sm">
+              <span className="text-muted-foreground">Subtotal {formatMoney(inv.subtotal)}</span>
+              <span className="text-muted-foreground">Tax {formatMoney(inv.tax_amount)}</span>
+              <span className="text-muted-foreground">Discount {formatMoney(inv.discount_amount)}</span>
+              <span className="font-semibold">Total {formatMoney(inv.total_amount)}</span>
+              <span className="text-green-700">Paid {formatMoney(inv.amount_paid)}</span>
+            </div>
+            {inv.notes && <p className="text-sm text-muted-foreground">{inv.notes}</p>}
+            <p className="text-xs text-muted-foreground">
+              Record payments against this invoice from the supplier's Ledger tab.
+            </p>
+          </>
+        )}
+      </DetailSheetBody>
+      <DetailSheetFooter>
+        <Button variant="outline" onClick={onClose}>Close</Button>
       </DetailSheetFooter>
     </DetailSheet>
   );

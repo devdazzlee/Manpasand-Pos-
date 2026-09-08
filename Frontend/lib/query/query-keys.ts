@@ -81,6 +81,12 @@ export const qk = {
     list: (params: ListParams = {}) => ["purchase-returns", "list", params] as const,
     detail: (id: string) => ["purchase-returns", "detail", id] as const,
   },
+  purchaseInvoices: {
+    all: ["purchase-invoices"] as const,
+    list: (params: ListParams = {}) => ["purchase-invoices", "list", params] as const,
+    detail: (id: string) => ["purchase-invoices", "detail", id] as const,
+    uninvoiced: (supplierId: string) => ["purchase-invoices", "uninvoiced", supplierId] as const,
+  },
   dashboard: {
     stats: ["dashboard", "stats"] as const,
     recentSales: (params: ListParams = {}) => ["dashboard", "recent-sales", params] as const,
