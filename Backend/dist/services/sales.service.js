@@ -150,31 +150,9 @@ class SaleService {
             orderBy: { email: 'asc' },
             take: 200,
         });
-        // Backward-compatible behavior: when pagination is not requested, return all rows.
-        if (!page || !limit) {
-            const [data, summary, cashiers] = await Promise.all([
-                client_2.prisma.sale.findMany({
-                    where,
-                    include,
-                    orderBy,
-                }),
-                buildSummary(),
-                cashiersPromise,
-            ]);
-            return {
-                data,
-                meta: {
-                    total: data.length,
-                    page: 1,
-                    limit: data.length,
-                    totalPages: 1,
-                    summary,
-                    cashiers,
-                },
-            };
-        }
+        // Always paginate — never return the full sales table.
         const safePage = Math.max(1, Number(page) || 1);
-        const safeLimit = Math.max(1, Math.min(200, Number(limit) || 10));
+        const safeLimit = Math.max(1, Math.min(100, Number(limit) || 20));
         const skip = (safePage - 1) * safeLimit;
         const [total, data, summary, cashiers] = await Promise.all([
             client_2.prisma.sale.count({ where }),

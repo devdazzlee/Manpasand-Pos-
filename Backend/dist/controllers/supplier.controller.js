@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteSupplierPayment = exports.createSupplierPayment = exports.getSupplierLedger = exports.getSupplierPurchases = exports.listSuppliers = exports.deleteSupplier = exports.toggleSupplierStatus = exports.updateSupplier = exports.getSupplier = exports.createSupplier = void 0;
+exports.deleteSupplierPayment = exports.createSupplierPayment = exports.getSupplierProducts = exports.getSupplierStatement = exports.getSupplierLedger = exports.getSupplierPurchases = exports.listSuppliers = exports.deleteSupplier = exports.toggleSupplierStatus = exports.updateSupplier = exports.getSupplier = exports.createSupplier = void 0;
 const supplier_service_1 = require("../services/supplier.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -59,6 +59,17 @@ exports.getSupplierPurchases = (0, asyncHandler_1.default)(async (req, res) => {
 exports.getSupplierLedger = (0, asyncHandler_1.default)(async (req, res) => {
     const data = await supplierService.getSupplierLedger(req.params.id);
     new apiResponse_1.ApiResponse(data, 'Supplier ledger retrieved').send(res);
+});
+exports.getSupplierStatement = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await supplierService.getSupplierStatement(req.params.id, {
+        from: req.query.from,
+        to: req.query.to,
+    });
+    new apiResponse_1.ApiResponse(data, 'Supplier statement retrieved').send(res);
+});
+exports.getSupplierProducts = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await supplierService.getSupplierProducts(req.params.id);
+    new apiResponse_1.ApiResponse(data, 'Supplier products retrieved').send(res);
 });
 exports.createSupplierPayment = (0, asyncHandler_1.default)(async (req, res) => {
     const payment = await supplierService.createSupplierPayment(req.params.id, req.body, req.user.id);

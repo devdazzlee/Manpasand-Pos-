@@ -56,7 +56,7 @@ class SalaryService {
     }
     async listSalaries(params) {
         const page = params.page || 1;
-        const limit = params.fetch_all ? 2000 : params.limit || 20;
+        const limit = params.fetch_all ? 100 : params.limit || 20;
         const skip = params.fetch_all ? 0 : (page - 1) * limit;
         const where = {};
         if (params.employee_id)

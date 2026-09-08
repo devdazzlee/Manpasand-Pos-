@@ -78,8 +78,8 @@ const getSalesController = (0, asyncHandler_1.default)(async (req, res) => {
         : undefined;
     const result = await saleService.getSales({
         branchId,
-        page: Number.isFinite(page) && page > 0 ? page : undefined,
-        limit: Number.isFinite(limit) && limit > 0 ? limit : undefined,
+        page: Number.isFinite(page) && page > 0 ? page : 1,
+        limit: Number.isFinite(limit) && limit > 0 ? limit : 20,
         search,
         startDate: parsedStartDate,
         endDate: parsedEndDate,

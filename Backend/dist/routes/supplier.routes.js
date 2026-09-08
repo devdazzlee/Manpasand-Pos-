@@ -14,6 +14,8 @@ router.post('/', (0, validation_middleware_1.validate)(supplier_validation_1.cre
 router.get('/', (0, validation_middleware_1.validate)(supplier_validation_1.listSuppliersSchema), supplier_controller_1.listSuppliers);
 router.get('/:id/purchases', (0, validation_middleware_1.validate)(supplier_validation_1.getSupplierSchema), supplier_controller_1.getSupplierPurchases);
 router.get('/:id/ledger', (0, validation_middleware_1.validate)(supplier_validation_1.getSupplierSchema), supplier_controller_1.getSupplierLedger);
+router.get('/:id/statement', (0, validation_middleware_1.validate)(supplier_validation_1.getSupplierSchema), supplier_controller_1.getSupplierStatement);
+router.get('/:id/products', (0, validation_middleware_1.validate)(supplier_validation_1.getSupplierSchema), supplier_controller_1.getSupplierProducts);
 router.post('/:id/payments', (0, validation_middleware_1.validate)(supplier_validation_1.createSupplierPaymentSchema), supplier_controller_1.createSupplierPayment);
 router.delete('/:id/payments/:paymentId', (0, validation_middleware_1.validate)(supplier_validation_1.deleteSupplierPaymentSchema), supplier_controller_1.deleteSupplierPayment);
 router.get('/:id', (0, validation_middleware_1.validate)(supplier_validation_1.getSupplierSchema), supplier_controller_1.getSupplier);

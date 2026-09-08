@@ -133,7 +133,7 @@ class EmployeeService {
                 { employee_code: { contains: q, mode: 'insensitive' } },
             ];
         }
-        const take = fetch_all ? 1000 : limit;
+        const take = fetch_all ? Math.min(100, Math.max(limit, 1)) : limit;
         const skip = fetch_all ? 0 : (page - 1) * limit;
         const [employees, total] = await Promise.all([
             client_2.prisma.employee.findMany({
@@ -350,10 +350,10 @@ class EmployeeService {
             throw err;
         }
     }
-    async listDepartments(fetch_all = true) {
+    async listDepartments(fetch_all = false) {
         const departments = await client_2.prisma.department.findMany({
             orderBy: { name: 'asc' },
-            take: fetch_all ? undefined : 100,
+            take: fetch_all ? 100 : 20,
             include: {
                 _count: { select: { employees: true } },
             },

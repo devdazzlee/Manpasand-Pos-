@@ -1,12 +1,11 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.CategoryService = void 0;
-exports.invalidateWebCategoryCache = invalidateWebCategoryCache;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const cloudinaryService_1 = require("./common/cloudinaryService");
 const catalog_defaults_service_1 = require("./catalog-defaults.service");
-const webCache_1 = require("../utils/webCache");
+const pagination_1 = require("../utils/pagination");
 const CATEGORY_CLOUDINARY_FOLDER = 'manpasand/categories';
 const CATEGORY_IMAGE_INCLUDE = {
     CategoryImages: {
@@ -19,13 +18,6 @@ const CATEGORY_IMAGE_INCLUDE = {
 /** Single source of truth: CategoryImages table (Cloudinary URLs). */
 function resolveCategoryImage(category) {
     return category.CategoryImages?.[0]?.image ?? null;
-}
-async function invalidateWebCategoryCache() {
-    await Promise.all([
-        (0, webCache_1.invalidatePattern)('home:'),
-        (0, webCache_1.invalidatePattern)('categories:'),
-        (0, webCache_1.invalidatePattern)('category:'),
-    ]);
 }
 class CategoryService {
     async createCategory(data) {
@@ -63,20 +55,18 @@ class CategoryService {
             where: { id },
             include: {
                 branch: true,
-                products: {
-                    where: { is_active: true },
-                    select: { id: true, name: true },
-                },
+                _count: { select: { products: true } },
                 ...CATEGORY_IMAGE_INCLUDE,
             },
         });
         if (!category) {
             throw new apiError_1.AppError(404, 'Category not found');
         }
-        const { CategoryImages, ...rest } = category;
+        const { CategoryImages, _count, ...rest } = category;
         return {
             ...rest,
             image: resolveCategoryImage(category),
+            product_count: _count.products,
         };
     }
     async updateCategory(id, data) {
@@ -126,12 +116,15 @@ class CategoryService {
         if (branch_id) {
             where.branch_id = branch_id;
         }
-        const shouldPaginate = typeof limit === 'number' && Number.isFinite(limit) && limit > 0;
+        const { page: safePage, limit: safeLimit, skip } = (0, pagination_1.parsePagination)({
+            page,
+            limit: limit ?? 20,
+        });
         const [categories, total] = await Promise.all([
             client_1.prisma.category.findMany({
                 where,
-                skip: shouldPaginate ? (page - 1) * limit : undefined,
-                take: shouldPaginate ? limit : undefined,
+                skip,
+                take: safeLimit,
                 orderBy: { created_at: 'desc' },
                 include: {
                     branch: {
@@ -154,12 +147,7 @@ class CategoryService {
                     product_count: _count.products,
                 };
             }),
-            meta: {
-                total,
-                page,
-                limit: shouldPaginate ? limit : total,
-                totalPages: shouldPaginate ? Math.ceil(total / limit) : 1,
-            },
+            meta: (0, pagination_1.paginationMeta)(total, safePage, safeLimit),
         };
     }
     async getCategories() {

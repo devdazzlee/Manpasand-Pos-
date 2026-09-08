@@ -36,12 +36,13 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteAllProducts = exports.bulkUploadProducts = exports.importProductRow = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.exportProductsToExcel = exports.listProducts = exports.deleteProduct = exports.toggleProductStatus = exports.updateProduct = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
+exports.deleteAllProducts = exports.bulkUploadProducts = exports.importProductRow = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.exportProductsToExcel = exports.getPosCatalog = exports.listProducts = exports.deleteProduct = exports.toggleProductStatus = exports.updateProduct = exports.getProductCostHistory = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
 const product_service_1 = require("../services/product.service");
 const reports_service_1 = require("../services/reports.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const resolveBranchId_1 = require("../utils/resolveBranchId");
+const webCache_1 = require("../utils/webCache");
 const sync_1 = require("csv-parse/sync");
 const xlsx_1 = __importDefault(require("xlsx"));
 const path_1 = __importDefault(require("path"));
@@ -70,18 +71,23 @@ exports.createProduct = (0, asyncHandler_1.default)(async (req, res) => {
     if (req.files?.length) {
         await productService.processProductImages(product.id, req.files);
     }
+    await (0, webCache_1.invalidateWebCatalogCache)();
     new apiResponse_1.ApiResponse(product, 'Product created successfully', 201).send(res);
 });
 exports.getProduct = (0, asyncHandler_1.default)(async (req, res) => {
     const product = await productService.getProductById(req.params.id);
     new apiResponse_1.ApiResponse(product, 'Product retrieved successfully').send(res);
 });
+exports.getProductCostHistory = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await productService.getProductCostHistory(req.params.id);
+    new apiResponse_1.ApiResponse(data, 'Product cost history retrieved').send(res);
+});
 exports.updateProduct = (0, asyncHandler_1.default)(async (req, res) => {
     // Separate image fields from product data
     const { new_images, existing_images, images, ...updateData } = req.body;
     const product = await productService.updateProduct(req.params.id, updateData);
-    // Send response IMMEDIATELY — don't make the client wait for Cloudinary
     new apiResponse_1.ApiResponse(product, 'Product updated successfully').send(res);
+    void (0, webCache_1.invalidateWebCatalogCache)();
     // Process images in the background AFTER response is sent
     let base64Images = [];
     if (Array.isArray(new_images) && new_images.length > 0) {
@@ -101,20 +107,26 @@ exports.updateProduct = (0, asyncHandler_1.default)(async (req, res) => {
     const hasExistingImagesField = existing_images !== undefined || Array.isArray(images);
     if (hasNewImages || hasExistingImagesField) {
         productService.updateProductImagesFromBase64(product.id, base64Images, keepImages)
-            .then(() => console.log(`✅ Images updated for product ${product.id}`))
+            .then(() => {
+            console.log(`✅ Images updated for product ${product.id}`);
+            return (0, webCache_1.invalidateWebCatalogCache)();
+        })
             .catch((err) => console.error(`❌ Image update failed for product ${product.id}:`, err));
     }
 });
 exports.toggleProductStatus = (0, asyncHandler_1.default)(async (req, res) => {
     await productService.toggleProductStatus(req.params.id);
+    await (0, webCache_1.invalidateWebCatalogCache)();
     new apiResponse_1.ApiResponse(null, 'Product status changed successfully').send(res);
 });
 exports.deleteProduct = (0, asyncHandler_1.default)(async (req, res) => {
     const product = await productService.deleteProduct(req.params.id);
+    await (0, webCache_1.invalidateWebCatalogCache)();
     new apiResponse_1.ApiResponse(product, 'Product deleted successfully').send(res);
 });
 exports.listProducts = (0, asyncHandler_1.default)(async (req, res) => {
-    const { page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, branch_id, fetch_all, } = req.query;
+    const { page = 1, limit = 20, search, category_id, subcategory_id, is_active, display_on_pos, is_featured, stock_status, branch_id, fetch_all, } = req.query;
+    const stockStatus = stock_status === 'out' || stock_status === 'low' ? stock_status : undefined;
     const result = await productService.listProducts({
         page: Number(page),
         limit: Number(limit),
@@ -123,11 +135,17 @@ exports.listProducts = (0, asyncHandler_1.default)(async (req, res) => {
         subcategory_id: subcategory_id,
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
+        is_featured: is_featured ? is_featured === 'true' : undefined,
+        stock_status: stockStatus,
         branch_id: branch_id,
         fetchAll: fetch_all ? fetch_all === 'true' : false,
     });
-    console.log(result);
     new apiResponse_1.ApiResponse(result.data, 'Products retrieved successfully', 200, true, result.meta).send(res);
+});
+exports.getPosCatalog = (0, asyncHandler_1.default)(async (req, res) => {
+    const branchId = (0, resolveBranchId_1.resolveBranchId)(req) || req.query.branch_id;
+    const result = await productService.getPosCatalog({ branch_id: branchId });
+    new apiResponse_1.ApiResponse(result.data, 'POS catalog retrieved successfully', 200, true, result.meta).send(res);
 });
 exports.exportProductsToExcel = (0, asyncHandler_1.default)(async (req, res) => {
     const { search, category_id, subcategory_id, supplier_id, brand_id, is_active, display_on_pos, } = req.query;
@@ -393,6 +411,7 @@ exports.importProductRow = (0, asyncHandler_1.default)(async (req, res) => {
     const createdBy = req.user?.id;
     try {
         const created = await productService.createProductFromBulkUpload(enhancedProd, createdBy);
+        await (0, webCache_1.invalidateWebCatalogCache)();
         new apiResponse_1.ApiResponse({
             id: created.id,
             name: created.name,
@@ -463,10 +482,12 @@ exports.bulkUploadProducts = (0, asyncHandler_1.default)(async (req, res) => {
     if (products.length > 0 && results.length === 0) {
         return new apiResponse_1.ApiResponse(results, 'No data rows found. Use the downloaded template headers (Product Name, Purchase Rate, Sales Rate, Stock, etc.).', 400, false).send(res);
     }
+    await (0, webCache_1.invalidateWebCatalogCache)();
     new apiResponse_1.ApiResponse(results, 'Bulk upload completed').send(res);
 });
 exports.deleteAllProducts = (0, asyncHandler_1.default)(async (req, res) => {
     const result = await productService.deleteAllProducts();
+    await (0, webCache_1.invalidateWebCatalogCache)();
     new apiResponse_1.ApiResponse(result, `Successfully deleted ${result.deletedCount} products, ${result.deletedImages} product images, ${result.deletedStocks} stock records, ${result.deletedStockMovements} stock movements, ${result.deletedSaleItems} sale items, ${result.deletedPurchaseOrderItems} purchase order items, and ${result.deletedOrderItems} order items`, 200).send(res);
 });
 //# sourceMappingURL=product.controller.js.map

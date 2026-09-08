@@ -10,6 +10,7 @@ const cloudinaryService_1 = require("./common/cloudinaryService");
 const crypto_1 = require("crypto");
 const helpers_1 = require("../utils/helpers");
 const numericBarcodeSku_1 = require("../utils/numericBarcodeSku");
+const pagination_1 = require("../utils/pagination");
 class ProductService {
     async getProductsForExcelExport(filters) {
         const where = {};
@@ -855,12 +856,13 @@ class ProductService {
         }, { maxWait: 20000, timeout: 30000 });
         return product;
     }
-    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, branch_id, fetchAll = false, }) {
+    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, is_featured, stock_status, branch_id, fetchAll = false, }) {
         const where = {};
         if (search) {
             where.OR = [
                 { name: { contains: search, mode: 'insensitive' } },
                 { sku: { contains: search, mode: 'insensitive' } },
+                { code: { contains: search, mode: 'insensitive' } },
                 { description: { contains: search, mode: 'insensitive' } },
             ];
         }
@@ -876,18 +878,35 @@ class ProductService {
         if (display_on_pos !== undefined) {
             where.display_on_pos = display_on_pos;
         }
-        const normalizedLimit = limit && limit > 0 ? limit : 10;
-        const pageSize = fetchAll ? 100 : normalizedLimit;
+        if (is_featured !== undefined) {
+            where.is_featured = is_featured;
+        }
+        if (stock_status === 'out') {
+            where.NOT = { stock: { some: { current_quantity: { gt: 0 } } } };
+        }
+        else if (stock_status === 'low') {
+            where.stock = {
+                some: {
+                    current_quantity: { gt: 0 },
+                    minimum_quantity: { gt: 0 },
+                },
+            };
+        }
+        const { page: pageNumber, limit: normalizedLimit } = (0, pagination_1.parsePagination)({ page, limit });
+        const pageSize = fetchAll ? pagination_1.MAX_LIMIT : normalizedLimit;
         const minimalSelect = {
             id: true,
             name: true,
             sku: true,
+            code: true,
+            pct_or_hs_code: true,
             purchase_rate: true,
             sales_rate_exc_dis_and_tax: true,
             sales_rate_inc_dis_and_tax: true,
             discount_amount: true,
             is_active: true,
             display_on_pos: true,
+            is_featured: true,
             created_at: true,
             updated_at: true,
             category: {
@@ -987,11 +1006,7 @@ class ProductService {
             select,
         });
         const total = await client_2.prisma.product.count({ where });
-        const chunkPageCount = Math.max(1, Math.ceil(total / pageSize));
-        const paginatedTotalPages = Math.max(1, Math.ceil(total / Math.max(normalizedLimit, 1)));
-        const pagesToFetch = fetchAll ? Array.from({ length: chunkPageCount }, (_, i) => i + 1) : [page];
-        const pageResults = await Promise.all(pagesToFetch.map((pageNumber) => fetchPage(pageNumber)));
-        const products = fetchAll ? pageResults.flat() : pageResults[0] || [];
+        const products = await fetchPage(fetchAll ? 1 : pageNumber);
         const mapped = products.map((p) => {
             let currentStock = new client_1.Prisma.Decimal(0);
             let reservedStock = new client_1.Prisma.Decimal(0);
@@ -1027,12 +1042,148 @@ class ProductService {
         return {
             data: mapped,
             meta: {
-                total,
-                page: fetchAll ? 1 : page,
-                limit: fetchAll ? mapped.length : normalizedLimit,
-                totalPages: fetchAll ? 1 : paginatedTotalPages,
-                fetchAll,
+                ...(0, pagination_1.paginationMeta)(total, fetchAll ? 1 : pageNumber, pageSize),
+                fetchAll: false,
             },
+        };
+    }
+    /**
+     * Slim, unpaginated catalog for the POS selling screen.
+     *
+     * Returns only the fields the sale grid + add-to-cart need — no images,
+     * description, brand/supplier/color/size/tax joins or order counts. This is
+     * fetched once per session by the client and filtered in memory, so keeping
+     * the row small keeps the whole-catalog payload cheap.
+     */
+    async getPosCatalog({ branch_id } = {}) {
+        const rows = await client_2.prisma.product.findMany({
+            where: { is_active: true, display_on_pos: true },
+            orderBy: { name: 'asc' },
+            select: {
+                id: true,
+                name: true,
+                code: true,
+                sku: true,
+                purchase_rate: true,
+                sales_rate_exc_dis_and_tax: true,
+                sales_rate_inc_dis_and_tax: true,
+                discount_amount: true,
+                min_qty: true,
+                max_qty: true,
+                is_active: true,
+                display_on_pos: true,
+                is_batch: true,
+                non_inventory_item: true,
+                is_deal: true,
+                is_featured: true,
+                is_loose_item: true,
+                updated_at: true,
+                category: { select: { id: true, name: true } },
+                subcategory: { select: { id: true, name: true } },
+                unit: { select: { id: true, name: true } },
+                stock: branch_id
+                    ? {
+                        where: { branch_id },
+                        select: {
+                            current_quantity: true,
+                            reserved_quantity: true,
+                            minimum_quantity: true,
+                            maximum_quantity: true,
+                        },
+                    }
+                    : {
+                        select: {
+                            current_quantity: true,
+                            reserved_quantity: true,
+                            minimum_quantity: true,
+                            maximum_quantity: true,
+                            branch_id: true,
+                        },
+                    },
+            },
+        });
+        const data = rows.map((p) => {
+            let current = new client_1.Prisma.Decimal(0);
+            let reserved = new client_1.Prisma.Decimal(0);
+            let minimum = new client_1.Prisma.Decimal(0);
+            let maximum = new client_1.Prisma.Decimal(0);
+            const stock = p.stock;
+            if (Array.isArray(stock)) {
+                for (const s of stock) {
+                    current = current.plus(s.current_quantity || 0);
+                    reserved = reserved.plus(s.reserved_quantity || 0);
+                    minimum = minimum.plus(s.minimum_quantity || 0);
+                    maximum = maximum.plus(s.maximum_quantity || 0);
+                }
+            }
+            const { stock: _drop, ...rest } = p;
+            return {
+                ...rest,
+                current_stock: (0, helpers_1.asNumber)(current),
+                reserved_stock: (0, helpers_1.asNumber)(reserved),
+                available_stock: (0, helpers_1.asNumber)(current.minus(reserved)),
+                minimum_stock: (0, helpers_1.asNumber)(minimum),
+                maximum_stock: (0, helpers_1.asNumber)(maximum),
+            };
+        });
+        return { data, meta: { total: data.length } };
+    }
+    /**
+     * Cost history for one product from its purchase (goods-received) records,
+     * with a running weighted-average cost after each receipt. This is the
+     * "what have we been paying for this" view.
+     */
+    async getProductCostHistory(productId) {
+        const product = await client_2.prisma.product.findUnique({
+            where: { id: productId },
+            select: { id: true, name: true, sku: true, code: true, purchase_rate: true },
+        });
+        if (!product)
+            throw new apiError_1.AppError(404, 'Product not found');
+        const purchases = await client_2.prisma.purchase.findMany({
+            where: { product_id: productId },
+            orderBy: { purchase_date: 'asc' },
+            include: {
+                supplier: { select: { id: true, name: true } },
+                warehouse_branch: { select: { id: true, name: true } },
+            },
+        });
+        let runningQty = 0;
+        let runningValue = 0;
+        const entries = purchases.map((p) => {
+            const qty = (0, helpers_1.asNumber)(p.quantity);
+            const unitCost = (0, helpers_1.asNumber)(p.cost_price);
+            runningQty += qty;
+            runningValue += qty * unitCost;
+            const avg = runningQty > 0 ? runningValue / runningQty : unitCost;
+            return {
+                id: p.id,
+                purchase_date: p.purchase_date,
+                supplier: p.supplier,
+                branch: p.warehouse_branch,
+                quantity: qty,
+                unit_cost: unitCost,
+                line_total: qty * unitCost,
+                invoice_ref: p.invoice_ref,
+                running_qty: runningQty,
+                weighted_avg_cost: avg,
+            };
+        });
+        const last = entries[entries.length - 1];
+        const first = entries[0];
+        return {
+            product: { ...product, purchase_rate: (0, helpers_1.asNumber)(product.purchase_rate) },
+            summary: {
+                receiptCount: entries.length,
+                totalQty: runningQty,
+                totalValue: runningValue,
+                latestCost: last ? last.unit_cost : (0, helpers_1.asNumber)(product.purchase_rate),
+                weightedAvgCost: last ? last.weighted_avg_cost : (0, helpers_1.asNumber)(product.purchase_rate),
+                minCost: entries.length ? Math.min(...entries.map((e) => e.unit_cost)) : 0,
+                maxCost: entries.length ? Math.max(...entries.map((e) => e.unit_cost)) : 0,
+                firstCost: first ? first.unit_cost : 0,
+            },
+            entries: entries.reverse(),
         };
     }
     async getFeaturedProducts() {

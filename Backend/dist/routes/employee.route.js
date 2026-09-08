@@ -8,16 +8,16 @@ const employee_controller_1 = require("../controllers/employee.controller");
 const employee_validation_1 = require("../validations/employee.validation");
 const validation_middleware_1 = require("../middleware/validation.middleware");
 const auth_middleware_1 = require("../middleware/auth.middleware");
-const expense_controller_1 = require("../controllers/expense.controller");
+const employee_controller_2 = require("../controllers/employee.controller");
 const router = express_1.default.Router();
 router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['ADMIN', 'SUPER_ADMIN']));
 // Employee types (must be before /:id)
-router.post('/type', (0, validation_middleware_1.validate)(employee_validation_1.createEmployeeTypeSchema), expense_controller_1.createEmployeeType);
-router.get('/types', expense_controller_1.getEmployeeTypes);
-router.get('/type/:id', expense_controller_1.getEmployeeTypeById);
-router.put('/type/:id', (0, validation_middleware_1.validate)(employee_validation_1.updateEmployeeTypeSchema), expense_controller_1.updateEmployeeType);
-router.patch('/type/:id/toggle-status', expense_controller_1.toggleEmployeeType);
-router.delete('/type/:id', expense_controller_1.deleteEmployeeType);
+router.post('/type', (0, validation_middleware_1.validate)(employee_validation_1.createEmployeeTypeSchema), employee_controller_2.createEmployeeType);
+router.get('/types', employee_controller_2.getEmployeeTypes);
+router.get('/type/:id', employee_controller_2.getEmployeeTypeById);
+router.put('/type/:id', (0, validation_middleware_1.validate)(employee_validation_1.updateEmployeeTypeSchema), employee_controller_2.updateEmployeeType);
+router.patch('/type/:id/toggle-status', employee_controller_2.toggleEmployeeType);
+router.delete('/type/:id', employee_controller_2.deleteEmployeeType);
 // Departments
 router.post('/departments', (0, validation_middleware_1.validate)(employee_validation_1.createDepartmentSchema), employee_controller_1.createDepartment);
 router.get('/departments', (0, validation_middleware_1.validate)(employee_validation_1.listDepartmentsSchema), employee_controller_1.listDepartments);

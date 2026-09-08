@@ -57,12 +57,14 @@ exports.getProductSchema = zod_1.z.object({
 exports.listProductsSchema = zod_1.z.object({
     query: zod_1.z.object({
         page: zod_1.z.string().optional().default('1'),
-        limit: zod_1.z.string().optional().default('10'),
+        limit: zod_1.z.string().optional().default('20'),
         search: zod_1.z.string().optional(),
         category_id: zod_1.z.string().optional(),
         subcategory_id: zod_1.z.string().optional(),
         is_active: zod_1.z.string().optional(),
         display_on_pos: zod_1.z.string().optional(),
+        is_featured: zod_1.z.string().optional(),
+        stock_status: zod_1.z.enum(['out', 'low']).optional(),
         branch_id: zod_1.z.string().optional(),
         fetch_all: zod_1.z.string().optional(),
     }),

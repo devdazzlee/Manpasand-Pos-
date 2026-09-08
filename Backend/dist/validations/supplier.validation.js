@@ -67,6 +67,7 @@ exports.createSupplierPaymentSchema = zod_1.z.object({
             .default('CASH'),
         reference: zod_1.z.string().optional(),
         notes: zod_1.z.string().optional(),
+        purchaseInvoiceId: zod_1.z.string().uuid().nullable().optional(),
     }),
 });
 exports.deleteSupplierPaymentSchema = zod_1.z.object({

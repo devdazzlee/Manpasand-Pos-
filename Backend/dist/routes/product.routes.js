@@ -19,9 +19,11 @@ router.post('/bulk-upload', uploadBulk_1.default.single('file'), product_control
 router.post('/import-row', product_controller_1.importProductRow);
 router.delete('/all', product_controller_1.deleteAllProducts);
 router.get('/', (0, validation_middleware_1.validate)(product_validation_1.listProductsSchema), product_controller_1.listProducts);
+router.get('/pos-catalog', auth_middleware_1.authenticate, product_controller_1.getPosCatalog);
 router.get('/export/excel', product_controller_1.exportProductsToExcel);
 router.get('/featured', product_controller_1.getFeaturedProducts);
 router.get('/best-selling', auth_middleware_1.authenticate, product_controller_1.getBestSellingProducts);
+router.get('/:id/cost-history', (0, validation_middleware_1.validate)(product_validation_1.getProductSchema), product_controller_1.getProductCostHistory);
 router.get('/:id', (0, validation_middleware_1.validate)(product_validation_1.getProductSchema), product_controller_1.getProduct);
 router.patch('/:id', (0, validation_middleware_1.validate)(product_validation_1.updateProductSchema), product_controller_1.updateProduct);
 router.patch('/:id/toggle-status', (0, validation_middleware_1.validate)(product_validation_1.getProductSchema), product_controller_1.toggleProductStatus);

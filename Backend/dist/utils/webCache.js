@@ -3,12 +3,13 @@
 // Redis was removed from the project; this lightweight layer prevents every
 // page view from hammering Postgres with identical heavy queries.
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.WEB_CACHE_TTL = void 0;
+exports.WEB_CACHE_PREFIXES = exports.WEB_CACHE_TTL = void 0;
 exports.getCache = getCache;
 exports.setCache = setCache;
 exports.withCache = withCache;
 exports.invalidateCache = invalidateCache;
 exports.invalidatePattern = invalidatePattern;
+exports.invalidateWebCatalogCache = invalidateWebCatalogCache;
 const store = new Map();
 const MAX_ENTRIES = 500;
 function pruneIfNeeded() {
@@ -74,4 +75,20 @@ exports.WEB_CACHE_TTL = {
     SEARCH_SUGGEST: 2 * 60,
     PRODUCT_COUNT: 10 * 60,
 };
+/**
+ * Key prefixes written by web.service.ts. Invalidation must use these exact
+ * prefixes so POS catalog edits show up on the public website.
+ */
+exports.WEB_CACHE_PREFIXES = {
+    HOME: 'home:',
+    CATEGORIES_LIST: 'categories:',
+    CATEGORY_DETAIL: 'category:',
+    PRODUCT_LIST: 'products:',
+    PRODUCT_DETAIL: 'product:',
+    SEARCH_SUGGEST: 'suggest:',
+    PRODUCT_COUNT: 'meta:',
+};
+async function invalidateWebCatalogCache() {
+    await Promise.all(Object.values(exports.WEB_CACHE_PREFIXES).map((prefix) => invalidatePattern(prefix)));
+}
 //# sourceMappingURL=webCache.js.map

@@ -141,7 +141,7 @@ class BranchService {
         if (is_active !== undefined) {
             where.is_active = is_active;
         }
-        const take = fetch_all ? 1000 : limit;
+        const take = fetch_all ? 100 : limit;
         const skip = fetch_all ? 0 : (page - 1) * limit;
         const [total, branches] = await Promise.all([
             client_2.prisma.branch.count({ where }),
