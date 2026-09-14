@@ -24,6 +24,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { usePosData } from "@/hooks/use-pos-data";
+import { useAllPosProducts } from "@/hooks/queries/use-products";
 
 const PAYMENT_METHODS = [
   "CASH",
@@ -147,7 +148,10 @@ const mapSaleItemsToLines = (saleItems: EditableSale["sale_items"] | any[]): Edi
 
 export function EditSaleDialog({ sale, open, onOpenChange, onUpdated }: Props) {
   const { toast } = useToast();
-  const { products, customers, fetchProducts, fetchCustomers } = usePosData();
+  const { customers, fetchCustomers } = usePosData();
+  // Full sellable catalog (not the store's capped 20-item page) so "Add
+  // product" search actually searches every product, not just the first page.
+  const { products, isFirstLoad: productsLoading } = useAllPosProducts({ enabled: open });
   const [loadingSale, setLoadingSale] = useState(false);
   const [saving, setSaving] = useState(false);
   const [productQuery, setProductQuery] = useState("");
@@ -184,9 +188,8 @@ export function EditSaleDialog({ sale, open, onOpenChange, onUpdated }: Props) {
 
   useEffect(() => {
     if (!open) return;
-    fetchProducts({ force: true }).catch(() => undefined);
     fetchCustomers(true).catch(() => undefined);
-  }, [open, fetchProducts, fetchCustomers]);
+  }, [open, fetchCustomers]);
 
   useEffect(() => {
     if (!open || !sale?.id) return;
@@ -487,6 +490,9 @@ export function EditSaleDialog({ sale, open, onOpenChange, onUpdated }: Props) {
                 }}
               />
             </div>
+            {productsLoading && productQuery.trim() && (
+              <p className="mt-1 text-[11px] text-gray-400">Loading product catalog…</p>
+            )}
             {productMatches.length > 0 && (
               <div className="mt-1 rounded-md border bg-white shadow-sm max-h-40 overflow-auto">
                 {productMatches.map((p: any) => (
