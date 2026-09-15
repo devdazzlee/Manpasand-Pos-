@@ -842,12 +842,15 @@ model Order {
   total_amount   Decimal
   status         OrderStatus    @default(PENDING)
   payment_method PaymentMethod?
+  payment_status PaymentStatus  @default(PENDING)
+  apg_transaction_id String?
   created_at     DateTime       @default(now())
   updated_at     DateTime       @default(now()) @updatedAt
 
   @@index([customer_id])
   @@index([order_number])
   @@index([status])
+  @@index([payment_status])
   @@index([created_at])
 }
 
@@ -925,6 +928,7 @@ enum PaymentStatus {
   PARTIAL
   PENDING
   OVERDUE
+  FAILED
 }
 
 enum StockMovementType {

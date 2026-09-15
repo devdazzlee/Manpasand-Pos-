@@ -205,6 +205,7 @@ interface WebsiteOrder {
   created_at: string;
   items: OrderItem[];
   payment_method: string;
+  payment_status?: string;
   customer_name?: string;
   customer_email?: string;
   customer_phone?: string;
@@ -257,7 +258,7 @@ function formatPaymentMethod(method?: string) {
     case "CASH":
       return "Cash on Delivery";
     case "CARD":
-      return "Card";
+      return "Bank Alfalah (Card)";
     case "MOBILE_MONEY":
       return "Mobile Money";
     case "BANK_TRANSFER":
@@ -315,6 +316,7 @@ function normalizeOrder(raw: any, fallback: WebsiteOrder | null = null): Website
     status: raw?.status || fallback?.status || "PENDING",
     created_at: raw?.created_at || fallback?.created_at || new Date().toISOString(),
     payment_method: raw?.payment_method || fallback?.payment_method || "CASH",
+    payment_status: raw?.payment_status || fallback?.payment_status || "PENDING",
     customer_name:
       raw?.customer_name ||
       (raw?.customer ? `${raw.customer.firstName || ""} ${raw.customer.lastName || ""}`.trim() : "") ||
@@ -1028,6 +1030,7 @@ const WebsiteOrders: React.FC = () => {
                             <TableCell className="py-3">
                               <span className="text-xs font-medium text-foreground">
                                 {formatPaymentMethod(o.payment_method)}
+                              {o.payment_status ? ` · ${formatStatusLabel(o.payment_status)}` : ""}
                               </span>
                             </TableCell>
                             <TableCell className="py-3 text-right">
@@ -1150,6 +1153,7 @@ const WebsiteOrders: React.FC = () => {
                             <span className="flex items-center gap-1">
                               <Wallet className="h-3 w-3" />
                               {formatPaymentMethod(o.payment_method)}
+                              {o.payment_status ? ` · ${formatStatusLabel(o.payment_status)}` : ""}
                             </span>
                             <span className="flex items-center gap-1">
                               <Package className="h-3 w-3" />
@@ -1317,6 +1321,9 @@ const WebsiteOrders: React.FC = () => {
                   <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground">
                     <Wallet className="h-3 w-3" />
                     {formatPaymentMethod(selectedOrder.payment_method)}
+                    {selectedOrder.payment_status
+                      ? ` · ${formatStatusLabel(selectedOrder.payment_status)}`
+                      : ""}
                   </span>
                   <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground">
                     <Package className="h-3 w-3" />

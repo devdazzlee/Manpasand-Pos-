@@ -44,6 +44,7 @@ import shiftAssignmentRoutes  from './routes/shiftAssignment.routes';
 import barcodeRoutes from './routes/barcode.routes';
 import guestOrderRoutes from './routes/guestOrder.routes';
 import webRoutes from './routes/web.routes';
+import alfalahRoutes from './routes/alfalah.routes';
 import cron from 'node-cron';
 
 const vAPI = process.env.vAPI || '/api/v1';
@@ -153,6 +154,7 @@ app.use(`${vAPI}/customer`, customerRoutes);
 app.use(`${vAPI}/app/customer/order`, customerOrderRoutes);
 app.use(`${vAPI}/customer/device-identity`, deviceIdentityRoutes);
 app.use(`${vAPI}/guest/order`, guestOrderRoutes); // Guest checkout route
+app.use(`${vAPI}/payments/alfalah`, alfalahRoutes);
 
 // Health check
 app.get('/health', (req, res) => {

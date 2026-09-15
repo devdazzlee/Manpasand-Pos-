@@ -178,7 +178,7 @@ class GuestOrderService {
       throw new AppError(400, 'No valid order items found');
     }
 
-    const orderNumber = `MP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+    const orderNumber = `MP${Date.now()}${Math.floor(Math.random() * 900 + 100)}`;
     const totalAmount = new Prisma.Decimal(data.total);
 
     const order = await prisma.order.create({
@@ -195,6 +195,7 @@ class GuestOrderService {
         total_amount: totalAmount,
         status: 'PENDING',
         payment_method: data.paymentMethod.toUpperCase() as Prisma.OrderCreateInput['payment_method'],
+        payment_status: 'PENDING',
         items: { create: orderItems },
       },
       include: {
@@ -206,31 +207,35 @@ class GuestOrderService {
       throw new AppError(500, 'Order created without item details');
     }
 
-    // Stock is optional — never block checkout
-    void this.applyStockUpdatesBestEffort(data.items, products);
+    const isCard = data.paymentMethod === 'card';
 
-    const emailData = {
-      orderNumber,
-      customerName: `${data.customer.firstName} ${data.customer.lastName}`,
-      customerEmail: data.customer.email,
-      customerPhone: data.customer.phone,
-      shippingAddress: data.shipping,
-      items: data.items.map((item) => ({
-        name: item.name,
-        quantity: item.quantity,
-        price: item.price,
-        total: item.price * item.quantity,
-      })),
-      subtotal: data.subtotal,
-      shipping: data.shippingCost,
-      total: data.total,
-      paymentMethod: data.paymentMethod,
-      orderNotes: data.orderNotes,
-    };
+    // Card orders wait for Bank Alfalah before stock and confirmation email.
+    if (!isCard) {
+      void this.applyStockUpdatesBestEffort(data.items, products);
 
-    EmailService.sendOrderConfirmationEmails(emailData).catch((err) => {
-      console.error('Failed to send order confirmation emails:', err);
-    });
+      const emailData = {
+        orderNumber,
+        customerName: `${data.customer.firstName} ${data.customer.lastName}`,
+        customerEmail: data.customer.email,
+        customerPhone: data.customer.phone,
+        shippingAddress: data.shipping,
+        items: data.items.map((item) => ({
+          name: item.name,
+          quantity: item.quantity,
+          price: item.price,
+          total: item.price * item.quantity,
+        })),
+        subtotal: data.subtotal,
+        shipping: data.shippingCost,
+        total: data.total,
+        paymentMethod: data.paymentMethod,
+        orderNotes: data.orderNotes,
+      };
+
+      EmailService.sendOrderConfirmationEmails(emailData).catch((err) => {
+        console.error('Failed to send order confirmation emails:', err);
+      });
+    }
 
     return this.formatGuestOrder(order);
   }
