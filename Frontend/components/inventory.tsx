@@ -45,6 +45,7 @@ import {
   List,
   PackageCheck,
   PackageX,
+  Globe,
 } from "lucide-react"
 import apiClient from "@/lib/apiClient"
 import { usePosData } from "@/hooks/use-pos-data"
@@ -127,6 +128,7 @@ interface Product {
   max_qty?: number
   is_active: boolean
   display_on_pos: boolean
+  display_on_website: boolean
   is_batch: boolean
   auto_fill_on_demand_sheet: boolean
   non_inventory_item: boolean
@@ -165,6 +167,7 @@ const mapStoreProductToCard = (product: any): Product => ({
   max_qty: product.max_qty != null ? Number(product.max_qty) : undefined,
   is_active: product.is_active ?? true,
   display_on_pos: product.display_on_pos ?? true,
+  display_on_website: product.display_on_website ?? true,
   is_batch: product.is_batch ?? false,
   auto_fill_on_demand_sheet: product.auto_fill_on_demand_sheet ?? false,
   non_inventory_item: product.non_inventory_item ?? false,
@@ -297,6 +300,7 @@ interface ProductFormData {
   size_id?: string
   is_active?: boolean
   display_on_pos?: boolean
+  display_on_website?: boolean
   is_batch?: boolean
   auto_fill_on_demand_sheet?: boolean
   non_inventory_item?: boolean
@@ -937,7 +941,7 @@ const ProductForm = ({
       {/* Settings */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Settings</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div className="flex items-center space-x-2">
             <Switch
               id="is_active"
@@ -954,7 +958,21 @@ const ProductForm = ({
             />
             <Label htmlFor="is_featured">Is Featured</Label>
           </div>
+          <div className="flex items-center space-x-2">
+            <Switch
+              id="display_on_website"
+              checked={formData.display_on_website ?? true}
+              onCheckedChange={(checked) => updateFormData("display_on_website", checked)}
+            />
+            <Label htmlFor="display_on_website" className="flex items-center gap-1.5">
+              <Globe className="h-3.5 w-3.5 text-muted-foreground" />
+              Show on website
+            </Label>
+          </div>
         </div>
+        <p className="text-xs text-muted-foreground">
+          Turn off Show on website to keep the product on POS only (back inventory).
+        </p>
       </div>
 
       {/* Submit Button */}
@@ -1023,7 +1041,7 @@ export default function Inventory() {
   const [selectedSubcategory, setSelectedSubcategory] = useState("__all__")
   // Catalog quick filters: status / stock health / featured
   const [statusFilter, setStatusFilter] = useState<
-    "ALL" | "ACTIVE" | "INACTIVE" | "OUT" | "LOW" | "FEATURED"
+    "ALL" | "ACTIVE" | "INACTIVE" | "OUT" | "LOW" | "FEATURED" | "HIDDEN_WEB"
   >("ALL")
   const [viewMode, setViewMode] = useState<"table" | "grid">("table")
 
@@ -1077,6 +1095,7 @@ export default function Inventory() {
     category_id: "",
     is_active: true,
     display_on_pos: true,
+    display_on_website: true,
     is_batch: false,
     auto_fill_on_demand_sheet: false,
     non_inventory_item: false,
@@ -1155,6 +1174,7 @@ export default function Inventory() {
       subcategory_id?: string
       is_active?: boolean
       display_on_pos?: boolean
+      display_on_website?: boolean
     }) {
       const response = await apiClient.get("/products", { params })
       return response.data
@@ -1291,6 +1311,7 @@ export default function Inventory() {
         isActive:
           statusFilter === "ACTIVE" ? true : statusFilter === "INACTIVE" ? false : undefined,
         isFeatured: statusFilter === "FEATURED" ? true : undefined,
+        displayOnWebsite: statusFilter === "HIDDEN_WEB" ? false : undefined,
         stockStatus: statusFilter === "OUT" ? "out" : statusFilter === "LOW" ? "low" : undefined,
       }).catch(() => undefined)
     }, delay)
@@ -1366,6 +1387,7 @@ export default function Inventory() {
   const catalogStats = useMemo(() => {
     let active = 0
     let featured = 0
+    let hiddenOnWeb = 0
     let inactive = 0
     let outOfStock = 0
     let lowStock = 0
@@ -1374,6 +1396,7 @@ export default function Inventory() {
       if (product.is_active) active += 1
       else inactive += 1
       if (product.is_featured) featured += 1
+      if (product.display_on_website === false) hiddenOnWeb += 1
       const stock = Number(
         product.available_stock ?? product.current_stock ?? product.stock ?? 0,
       )
@@ -1387,6 +1410,7 @@ export default function Inventory() {
       active,
       inactive,
       featured,
+      hiddenOnWeb,
       outOfStock,
       lowStock,
     }
@@ -1641,6 +1665,7 @@ export default function Inventory() {
       category_id: "",
       is_active: true,
       display_on_pos: true,
+      display_on_website: true,
       is_batch: false,
       auto_fill_on_demand_sheet: false,
       non_inventory_item: false,
@@ -1714,6 +1739,7 @@ export default function Inventory() {
         size_id: fresh.size?.id ?? "",
         is_active: fresh.is_active ?? true,
         display_on_pos: fresh.display_on_pos ?? true,
+        display_on_website: fresh.display_on_website ?? true,
         is_batch: fresh.is_batch ?? false,
         auto_fill_on_demand_sheet: fresh.auto_fill_on_demand_sheet ?? false,
         non_inventory_item: fresh.non_inventory_item ?? false,
@@ -1833,7 +1859,7 @@ export default function Inventory() {
   }
 
   const statusChips: {
-    key: "ALL" | "ACTIVE" | "INACTIVE" | "OUT" | "LOW" | "FEATURED"
+    key: "ALL" | "ACTIVE" | "INACTIVE" | "OUT" | "LOW" | "FEATURED" | "HIDDEN_WEB"
     label: string
     count: number
   }[] = [
@@ -1843,6 +1869,7 @@ export default function Inventory() {
     { key: "OUT", label: "Out of stock", count: catalogStats.outOfStock },
     { key: "LOW", label: "Low stock", count: catalogStats.lowStock },
     { key: "FEATURED", label: "Featured", count: catalogStats.featured },
+    { key: "HIDDEN_WEB", label: "Hidden on web", count: catalogStats.hiddenOnWeb },
   ]
 
   const renderProductActions = (product: Product) => (
@@ -2347,6 +2374,11 @@ export default function Inventory() {
                                       {product.is_featured ? (
                                         <Badge className="h-5 text-[10px] bg-blue-600 hover:bg-blue-600">Featured</Badge>
                                       ) : null}
+                                      {product.display_on_website === false ? (
+                                        <Badge variant="outline" className="h-5 text-[10px] text-amber-700 border-amber-200 bg-amber-50">
+                                          Hidden on web
+                                        </Badge>
+                                      ) : null}
                                       <Badge variant="outline" className="h-5 text-[10px] text-gray-600">
                                         {product.unit?.name || "No unit"}
                                       </Badge>
@@ -2490,6 +2522,11 @@ export default function Inventory() {
                             {product.is_featured ? (
                               <Badge className="bg-blue-600 text-white hover:bg-blue-600 text-[10px]">
                                 Featured
+                              </Badge>
+                            ) : null}
+                            {product.display_on_website === false ? (
+                              <Badge className="bg-amber-100 text-amber-800 hover:bg-amber-100 text-[10px] border border-amber-200">
+                                Hidden on web
                               </Badge>
                             ) : null}
                           </div>

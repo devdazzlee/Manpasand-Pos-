@@ -26,6 +26,7 @@ export class ProductService {
         brand_id?: string;
         is_active?: boolean;
         display_on_pos?: boolean;
+        display_on_website?: boolean;
     }) {
         const where: Prisma.ProductWhereInput = {};
 
@@ -43,6 +44,7 @@ export class ProductService {
         if (filters?.brand_id) where.brand_id = filters.brand_id;
         if (filters?.is_active !== undefined) where.is_active = filters.is_active;
         if (filters?.display_on_pos !== undefined) where.display_on_pos = filters.display_on_pos;
+        if (filters?.display_on_website !== undefined) where.display_on_website = filters.display_on_website;
 
         return prisma.product.findMany({
             where,
@@ -312,6 +314,7 @@ export class ProductService {
             max_qty: data.max_qty ?? 10,
             is_active: data.is_active ?? true,
             display_on_pos: data.display_on_pos ?? true,
+            display_on_website: data.display_on_website ?? true,
             is_batch: data.is_batch ?? false,
             auto_fill_on_demand_sheet: data.auto_fill_on_demand_sheet ?? false,
             non_inventory_item: data.non_inventory_item ?? false,
@@ -346,6 +349,7 @@ export class ProductService {
         if (data.max_qty !== undefined) updateData.max_qty = data.max_qty;
         if (data.is_active !== undefined) updateData.is_active = data.is_active;
         if (data.display_on_pos !== undefined) updateData.display_on_pos = data.display_on_pos;
+        if (data.display_on_website !== undefined) updateData.display_on_website = data.display_on_website;
         if (data.is_batch !== undefined) updateData.is_batch = data.is_batch;
         if (data.auto_fill_on_demand_sheet !== undefined) updateData.auto_fill_on_demand_sheet = data.auto_fill_on_demand_sheet;
         if (data.non_inventory_item !== undefined) updateData.non_inventory_item = data.non_inventory_item;
@@ -951,6 +955,7 @@ export class ProductService {
         subcategory_id,
         is_active,
         display_on_pos,
+        display_on_website,
         is_featured,
         stock_status,
         branch_id,
@@ -968,6 +973,7 @@ export class ProductService {
         // must pass these explicitly.
         is_active?: boolean;
         display_on_pos?: boolean;
+        display_on_website?: boolean;
         is_featured?: boolean;
         stock_status?: 'out' | 'low';
         branch_id?: string;
@@ -1000,6 +1006,10 @@ export class ProductService {
             where.display_on_pos = display_on_pos;
         }
 
+        if (display_on_website !== undefined) {
+            where.display_on_website = display_on_website;
+        }
+
         if (is_featured !== undefined) {
             where.is_featured = is_featured;
         }
@@ -1030,6 +1040,7 @@ export class ProductService {
             discount_amount: true,
             is_active: true,
             display_on_pos: true,
+            display_on_website: true,
             is_featured: true,
             created_at: true,
             updated_at: true,
@@ -1334,6 +1345,7 @@ export class ProductService {
             where: {
                 is_featured: true,
                 is_active: true,
+                display_on_website: true,
             },
             orderBy: {
                 created_at: "desc",
@@ -1359,7 +1371,7 @@ export class ProductService {
             featuredProducts = await prisma.product.findMany({
                 where: {
                     is_active: true,
-                    display_on_pos: true,
+                    display_on_website: true,
                 },
                 orderBy: {
                     created_at: "desc",
@@ -1391,6 +1403,7 @@ export class ProductService {
         const bestSellingActiveProductsThisMonth = await prisma.product.findMany({
             where: {
                 is_active: true,
+                display_on_website: true,
                 order_items: {
                     some: {
                         created_at: {
@@ -1433,6 +1446,7 @@ export class ProductService {
                     mode: 'insensitive',
                 },
                 is_active: true,
+                display_on_website: true,
             },
             include: {
                 category: {

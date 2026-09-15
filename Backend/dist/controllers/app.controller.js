@@ -7,6 +7,7 @@ exports.getCategories = exports.getProductById = exports.searchProducts = export
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const app_service_1 = __importDefault(require("../services/app.service"));
 const apiResponse_1 = require("../utils/apiResponse");
+const apiError_1 = require("../utils/apiError");
 const appService = new app_service_1.default();
 exports.getHomeData = (0, asyncHandler_1.default)(async (req, res) => {
     const homeData = await appService.getHomeData();
@@ -20,6 +21,9 @@ exports.searchProducts = (0, asyncHandler_1.default)(async (req, res) => {
 });
 exports.getProductById = (0, asyncHandler_1.default)(async (req, res) => {
     const product = await appService.getProductById(req.params.id);
+    if (!product || !product.is_active || product.display_on_website === false) {
+        throw new apiError_1.AppError(404, "Product not found");
+    }
     new apiResponse_1.ApiResponse(product, 'Product fetched successfully', 200).send(res);
 });
 exports.getCategories = (0, asyncHandler_1.default)(async (_req, res) => {

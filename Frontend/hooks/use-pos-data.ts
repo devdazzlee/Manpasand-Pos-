@@ -64,6 +64,7 @@ export function usePosData() {
     isActive?: boolean
     displayOnPos?: boolean
     isFeatured?: boolean
+    displayOnWebsite?: boolean
     stockStatus?: "out" | "low"
   }) => 
     fetchProductsAction(options), [fetchProductsAction])

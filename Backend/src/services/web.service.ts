@@ -26,6 +26,7 @@ const PRODUCT_CARD_SELECT = {
   discount_amount: true,
   is_featured: true,
   is_active: true,
+  display_on_website: true,
   category_id: true,
   created_at: true,
   category: { select: { id: true, name: true, slug: true } },
@@ -48,7 +49,7 @@ const CATEGORY_CARD_SELECT = {
     select: { image: true },
     take: 1,
   },
-  _count: { select: { products: { where: { is_active: true } } } },
+  _count: { select: { products: { where: { is_active: true, display_on_website: true } } } },
 } satisfies Prisma.CategorySelect;
 
 type ProductCard = Prisma.ProductGetPayload<{ select: typeof PRODUCT_CARD_SELECT }>;
@@ -108,7 +109,7 @@ export class WebService {
     const bestLimit =
       opts.bestLimit === 0 ? 0 : clampLimit(opts.bestLimit ?? 0, 0, 24);
     const categoriesLimit = clampLimit(opts.categoriesLimit, 24, 50);
-    const cacheKey = `${WEB_CACHE_PREFIXES.HOME}v3:f${featuredLimit}:b${bestLimit}:c${categoriesLimit}`;
+    const cacheKey = `${WEB_CACHE_PREFIXES.HOME}v5:f${featuredLimit}:b${bestLimit}:c${categoriesLimit}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.HOME, async () => {
       const [featured, bestSellers, categories, productCount, featuredTotal, categoriesTotal] =
@@ -116,8 +117,8 @@ export class WebService {
           this.loadFeatured(featuredLimit),
           bestLimit > 0 ? this.loadBestSellers(bestLimit) : Promise.resolve([]),
           this.loadHomeCategories(categoriesLimit),
-          prisma.product.count({ where: { is_active: true } }),
-          prisma.product.count({ where: { is_active: true, is_featured: true } }),
+          prisma.product.count({ where: { is_active: true, display_on_website: true } }),
+          prisma.product.count({ where: { is_active: true, display_on_website: true, is_featured: true } }),
           prisma.category.count({ where: { is_active: true } }),
         ]);
 
@@ -134,7 +135,7 @@ export class WebService {
 
   private async loadFeatured(limit: number) {
     const featured = await prisma.product.findMany({
-      where: { is_featured: true, is_active: true },
+      where: { is_featured: true, is_active: true, display_on_website: true },
       orderBy: { created_at: 'desc' },
       take: limit,
       select: PRODUCT_CARD_SELECT,
@@ -147,7 +148,7 @@ export class WebService {
     const fillers = await prisma.product.findMany({
       where: {
         is_active: true,
-        display_on_pos: true,
+        display_on_website: true,
         id: excludeIds.length ? { notIn: excludeIds } : undefined,
       },
       orderBy: { created_at: 'desc' },
@@ -165,6 +166,7 @@ export class WebService {
     const bestSellers = await prisma.product.findMany({
       where: {
         is_active: true,
+        display_on_website: true,
         order_items: { some: { created_at: { gte: startDate, lte: endDate } } },
       },
       orderBy: { order_items: { _count: 'desc' } },
@@ -179,7 +181,7 @@ export class WebService {
     const fillers = await prisma.product.findMany({
       where: {
         is_active: true,
-        display_on_pos: true,
+        display_on_website: true,
         id: excludeIds.length ? { notIn: excludeIds } : undefined,
       },
       orderBy: { created_at: 'desc' },
@@ -193,7 +195,7 @@ export class WebService {
   private async loadHomeCategories(limit: number) {
     const categories = await prisma.category.findMany({
       where: { is_active: true },
-      orderBy: [{ products: { _count: 'desc' } }, { created_at: 'desc' }],
+      orderBy: { name: 'asc' },
       take: limit,
       select: CATEGORY_CARD_SELECT,
     });
@@ -207,8 +209,8 @@ export class WebService {
     const search = (opts.search ?? '').trim();
 
     const cacheKey = all
-      ? `${WEB_CACHE_PREFIXES.CATEGORIES_LIST}all`
-      : `${WEB_CACHE_PREFIXES.CATEGORIES_LIST}p${page}:l${limit}:q${search.toLowerCase()}`;
+      ? `${WEB_CACHE_PREFIXES.CATEGORIES_LIST}v2:all`
+      : `${WEB_CACHE_PREFIXES.CATEGORIES_LIST}v2:p${page}:l${limit}:q${search.toLowerCase()}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.CATEGORIES_LIST, async () => {
       const where: Prisma.CategoryWhereInput = { is_active: true };
@@ -222,7 +224,7 @@ export class WebService {
       const [rows, total] = await Promise.all([
         prisma.category.findMany({
           where,
-          orderBy: [{ products: { _count: 'desc' } }, { created_at: 'desc' }],
+          orderBy: { name: 'asc' },
           skip: all ? undefined : (page - 1) * limit,
           take: all ? undefined : limit,
           select: CATEGORY_CARD_SELECT,
@@ -264,6 +266,7 @@ export class WebService {
       const productsWhere: Prisma.ProductWhereInput = {
         category_id: category.id,
         is_active: true,
+        display_on_website: true,
       };
 
       const [products, total] = await Promise.all([
@@ -308,7 +311,7 @@ export class WebService {
     const sort: SortKey = opts.sort && SORT_MAP[opts.sort] ? opts.sort : 'newest';
     const search = (opts.search ?? '').trim();
 
-    const where: Prisma.ProductWhereInput = { is_active: true };
+    const where: Prisma.ProductWhereInput = { is_active: true, display_on_website: true };
 
     if (search) {
       where.OR = [
@@ -386,7 +389,7 @@ export class WebService {
         },
       });
 
-      if (!product || !product.is_active) {
+      if (!product || !product.is_active || product.display_on_website === false) {
         throw new AppError(404, 'Product not found');
       }
 
@@ -419,6 +422,7 @@ export class WebService {
       const rows = await prisma.product.findMany({
         where: {
           is_active: true,
+          display_on_website: true,
           OR: [
             { name: { contains: trimmed, mode: 'insensitive' } },
             { sku: { contains: trimmed, mode: 'insensitive' } },
@@ -451,7 +455,7 @@ export class WebService {
 
   async getProductCount() {
     return withCache(`${WEB_CACHE_PREFIXES.PRODUCT_COUNT}product-count`, WEB_CACHE_TTL.PRODUCT_COUNT, async () => {
-      const count = await prisma.product.count({ where: { is_active: true } });
+      const count = await prisma.product.count({ where: { is_active: true, display_on_website: true } });
       return { count };
     });
   }

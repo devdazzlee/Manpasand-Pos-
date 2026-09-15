@@ -160,7 +160,7 @@ export class CategoryService {
         where,
         skip,
         take: safeLimit,
-        orderBy: { created_at: 'desc' },
+        orderBy: { name: 'asc' },
         include: {
           branch: {
             select: { id: true, name: true, code: true },
@@ -190,7 +190,7 @@ export class CategoryService {
   async getCategories() {
     return prisma.category.findMany({
       where: { is_active: true },
-      orderBy: { created_at: 'desc' },
+      orderBy: { name: 'asc' },
       include: CATEGORY_IMAGE_INCLUDE,
     });
   }

@@ -125,7 +125,7 @@ class CategoryService {
                 where,
                 skip,
                 take: safeLimit,
-                orderBy: { created_at: 'desc' },
+                orderBy: { name: 'asc' },
                 include: {
                     branch: {
                         select: { id: true, name: true, code: true },
@@ -153,7 +153,7 @@ class CategoryService {
     async getCategories() {
         return client_1.prisma.category.findMany({
             where: { is_active: true },
-            orderBy: { created_at: 'desc' },
+            orderBy: { name: 'asc' },
             include: CATEGORY_IMAGE_INCLUDE,
         });
     }

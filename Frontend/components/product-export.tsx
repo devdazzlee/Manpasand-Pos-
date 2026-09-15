@@ -63,6 +63,7 @@ const EXPORT_COLUMNS = [
   { key: "maximum_stock", label: "Maximum Stock" },
   { key: "is_active", label: "Active?" },
   { key: "display_on_pos", label: "Display On POS?" },
+  { key: "display_on_website", label: "Display On Website?" },
   { key: "is_batch", label: "Batch Item?" },
   { key: "auto_fill_on_demand_sheet", label: "Auto Fill On Demand Sheet?" },
   { key: "non_inventory_item", label: "Non Inventory Item?" },
@@ -89,6 +90,7 @@ export function ProductExport() {
   const [brandId, setBrandId] = useState("all")
   const [isActive, setIsActive] = useState("all")
   const [displayOnPos, setDisplayOnPos] = useState("all")
+  const [displayOnWebsite, setDisplayOnWebsite] = useState("all")
   const [selectedColumns, setSelectedColumns] = useState<string[]>(
     EXPORT_COLUMNS.map((column) => column.key)
   )
@@ -127,6 +129,7 @@ export function ProductExport() {
     setBrandId("all")
     setIsActive("all")
     setDisplayOnPos("all")
+    setDisplayOnWebsite("all")
     setSelectedColumns(EXPORT_COLUMNS.map((column) => column.key))
   }
 
@@ -165,6 +168,7 @@ export function ProductExport() {
       if (brandId !== "all") params.brand_id = brandId
       if (isActive !== "all") params.is_active = isActive
       if (displayOnPos !== "all") params.display_on_pos = displayOnPos
+      if (displayOnWebsite !== "all") params.display_on_website = displayOnWebsite
       params.columns = selectedColumns.join(",")
 
       const response = await apiClient.get(API_ENDPOINTS.PRODUCT_EXPORT_EXCEL, {
@@ -287,6 +291,18 @@ export function ProductExport() {
             <div className="space-y-2">
               <Label>Display on POS</Label>
               <Select value={displayOnPos} onValueChange={setDisplayOnPos}>
+                <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="true">Yes</SelectItem>
+                  <SelectItem value="false">No</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Display on website</Label>
+              <Select value={displayOnWebsite} onValueChange={setDisplayOnWebsite}>
                 <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All</SelectItem>

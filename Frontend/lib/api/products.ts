@@ -14,6 +14,7 @@ export interface ProductQuery {
   limit?: number;
   isActive?: boolean;
   displayOnPos?: boolean;
+  displayOnWebsite?: boolean;
   isFeatured?: boolean;
   stockStatus?: "out" | "low";
 }
@@ -27,6 +28,7 @@ function toParams(q: ProductQuery): Record<string, unknown> {
     subcategory_id: q.subcategoryId,
     is_active: q.isActive,
     display_on_pos: q.displayOnPos,
+    display_on_website: q.displayOnWebsite,
     is_featured: q.isFeatured,
     stock_status: q.stockStatus,
     ...getBranchScopeParam(),

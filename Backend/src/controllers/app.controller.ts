@@ -2,6 +2,7 @@ import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import AppService from "../services/app.service";
 import { ApiResponse } from "../utils/apiResponse";
+import { AppError } from "../utils/apiError";
 
 const appService = new AppService();
 
@@ -19,6 +20,9 @@ export const searchProducts = asyncHandler(async (req: Request, res: Response) =
 
 export const getProductById = asyncHandler(async (req: Request, res: Response) => {
     const product = await appService.getProductById(req.params.id);
+    if (!product || !product.is_active || product.display_on_website === false) {
+        throw new AppError(404, "Product not found");
+    }
     new ApiResponse(product, 'Product fetched successfully', 200).send(res);
 });
 

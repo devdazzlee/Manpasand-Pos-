@@ -119,6 +119,7 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
         subcategory_id,
         is_active,
         display_on_pos,
+        display_on_website,
         is_featured,
         stock_status,
         branch_id,
@@ -136,6 +137,7 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
         subcategory_id: subcategory_id as string | undefined,
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
+        display_on_website: display_on_website ? display_on_website === 'true' : undefined,
         is_featured: is_featured ? is_featured === 'true' : undefined,
         stock_status: stockStatus,
         branch_id: branch_id as string | undefined,
@@ -160,6 +162,7 @@ export const exportProductsToExcel = asyncHandler(async (req: Request, res: Resp
         brand_id,
         is_active,
         display_on_pos,
+        display_on_website,
     } = req.query;
 
     const products = await productService.getProductsForExcelExport({
@@ -170,6 +173,7 @@ export const exportProductsToExcel = asyncHandler(async (req: Request, res: Resp
         brand_id: brand_id as string | undefined,
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
+        display_on_website: display_on_website ? display_on_website === 'true' : undefined,
     });
 
     const requestedColumnsRaw = typeof req.query.columns === 'string' ? req.query.columns : '';
@@ -224,6 +228,7 @@ export const exportProductsToExcel = asyncHandler(async (req: Request, res: Resp
         maximum_stock: 'Maximum Stock',
         is_active: 'Active?',
         display_on_pos: 'Display On POS?',
+        display_on_website: 'Display On Website?',
         is_batch: 'Batch Item?',
         auto_fill_on_demand_sheet: 'Auto Fill On Demand Sheet?',
         non_inventory_item: 'Non Inventory Item?',
@@ -304,6 +309,7 @@ export const exportProductsToExcel = asyncHandler(async (req: Request, res: Resp
             maximum_stock: totalMaximumStock,
             is_active: product.is_active,
             display_on_pos: product.display_on_pos,
+            display_on_website: product.display_on_website,
             is_batch: product.is_batch,
             auto_fill_on_demand_sheet: product.auto_fill_on_demand_sheet,
             non_inventory_item: product.non_inventory_item,
@@ -365,6 +371,15 @@ function pickCell(row: Record<string, unknown>, ...keys: string[]): unknown {
         }
     }
     return undefined;
+}
+
+function parseExcelBoolean(value: unknown, fallback: boolean): boolean {
+    if (value === undefined || value === null || String(value).trim() === '') return fallback;
+    if (typeof value === 'boolean') return value;
+    const normalized = String(value).trim().toLowerCase();
+    if (['true', 'yes', '1', 'y'].includes(normalized)) return true;
+    if (['false', 'no', '0', 'n'].includes(normalized)) return false;
+    return fallback;
 }
 
 function mapBulkUploadRow(prod: Record<string, unknown>) {
@@ -448,6 +463,16 @@ function mapBulkUploadRow(prod: Record<string, unknown>) {
         opening_stock,
         is_active: prod.is_active !== undefined ? Boolean(prod.is_active) : true,
         display_on_pos: prod.display_on_pos !== undefined ? Boolean(prod.display_on_pos) : true,
+        display_on_website: parseExcelBoolean(
+            pickCell(
+                prod,
+                'display_on_website',
+                'Display On Website?',
+                'Display On Website',
+                'Show on website',
+            ),
+            true,
+        ),
         is_batch: prod.is_batch !== undefined ? Boolean(prod.is_batch) : false,
         auto_fill_on_demand_sheet:
             prod.auto_fill_on_demand_sheet !== undefined

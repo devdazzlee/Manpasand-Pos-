@@ -346,6 +346,7 @@ model Product {
   is_featured                Boolean      @default(false)
   is_active                  Boolean      @default(true)
   display_on_pos             Boolean      @default(true)
+  display_on_website         Boolean      @default(true)
   is_batch                   Boolean      @default(false)
   auto_fill_on_demand_sheet  Boolean      @default(false)
   non_inventory_item         Boolean      @default(false)
@@ -379,6 +380,7 @@ model Product {
   @@index([is_featured])
   @@index([is_active])
   @@index([display_on_pos])
+  @@index([display_on_website])
 }
 
 enum ImageStatus {

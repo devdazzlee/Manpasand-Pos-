@@ -125,7 +125,7 @@ exports.deleteProduct = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(product, 'Product deleted successfully').send(res);
 });
 exports.listProducts = (0, asyncHandler_1.default)(async (req, res) => {
-    const { page = 1, limit = 20, search, category_id, subcategory_id, is_active, display_on_pos, is_featured, stock_status, branch_id, fetch_all, } = req.query;
+    const { page = 1, limit = 20, search, category_id, subcategory_id, is_active, display_on_pos, display_on_website, is_featured, stock_status, branch_id, fetch_all, } = req.query;
     const stockStatus = stock_status === 'out' || stock_status === 'low' ? stock_status : undefined;
     const result = await productService.listProducts({
         page: Number(page),
@@ -135,6 +135,7 @@ exports.listProducts = (0, asyncHandler_1.default)(async (req, res) => {
         subcategory_id: subcategory_id,
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
+        display_on_website: display_on_website ? display_on_website === 'true' : undefined,
         is_featured: is_featured ? is_featured === 'true' : undefined,
         stock_status: stockStatus,
         branch_id: branch_id,
@@ -148,7 +149,7 @@ exports.getPosCatalog = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(result.data, 'POS catalog retrieved successfully', 200, true, result.meta).send(res);
 });
 exports.exportProductsToExcel = (0, asyncHandler_1.default)(async (req, res) => {
-    const { search, category_id, subcategory_id, supplier_id, brand_id, is_active, display_on_pos, } = req.query;
+    const { search, category_id, subcategory_id, supplier_id, brand_id, is_active, display_on_pos, display_on_website, } = req.query;
     const products = await productService.getProductsForExcelExport({
         search: search,
         category_id: category_id,
@@ -157,6 +158,7 @@ exports.exportProductsToExcel = (0, asyncHandler_1.default)(async (req, res) => 
         brand_id: brand_id,
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
+        display_on_website: display_on_website ? display_on_website === 'true' : undefined,
     });
     const requestedColumnsRaw = typeof req.query.columns === 'string' ? req.query.columns : '';
     const requestedColumns = requestedColumnsRaw
@@ -209,6 +211,7 @@ exports.exportProductsToExcel = (0, asyncHandler_1.default)(async (req, res) => 
         maximum_stock: 'Maximum Stock',
         is_active: 'Active?',
         display_on_pos: 'Display On POS?',
+        display_on_website: 'Display On Website?',
         is_batch: 'Batch Item?',
         auto_fill_on_demand_sheet: 'Auto Fill On Demand Sheet?',
         non_inventory_item: 'Non Inventory Item?',
@@ -274,6 +277,7 @@ exports.exportProductsToExcel = (0, asyncHandler_1.default)(async (req, res) => 
             maximum_stock: totalMaximumStock,
             is_active: product.is_active,
             display_on_pos: product.display_on_pos,
+            display_on_website: product.display_on_website,
             is_batch: product.is_batch,
             auto_fill_on_demand_sheet: product.auto_fill_on_demand_sheet,
             non_inventory_item: product.non_inventory_item,
@@ -324,6 +328,18 @@ function pickCell(row, ...keys) {
     }
     return undefined;
 }
+function parseExcelBoolean(value, fallback) {
+    if (value === undefined || value === null || String(value).trim() === '')
+        return fallback;
+    if (typeof value === 'boolean')
+        return value;
+    const normalized = String(value).trim().toLowerCase();
+    if (['true', 'yes', '1', 'y'].includes(normalized))
+        return true;
+    if (['false', 'no', '0', 'n'].includes(normalized))
+        return false;
+    return fallback;
+}
 function mapBulkUploadRow(prod) {
     const nameRaw = pickCell(prod, 'Product Name', 'product name', 'Name', 'name', 'PRODUCT NAME');
     const purchaseRaw = pickCell(prod, 'Purchase Rate', 'purchase_rate', 'Buy Price (Rs)', 'buy_price', 'Cost');
@@ -372,6 +388,7 @@ function mapBulkUploadRow(prod) {
         opening_stock,
         is_active: prod.is_active !== undefined ? Boolean(prod.is_active) : true,
         display_on_pos: prod.display_on_pos !== undefined ? Boolean(prod.display_on_pos) : true,
+        display_on_website: parseExcelBoolean(pickCell(prod, 'display_on_website', 'Display On Website?', 'Display On Website', 'Show on website'), true),
         is_batch: prod.is_batch !== undefined ? Boolean(prod.is_batch) : false,
         auto_fill_on_demand_sheet: prod.auto_fill_on_demand_sheet !== undefined
             ? Boolean(prod.auto_fill_on_demand_sheet)

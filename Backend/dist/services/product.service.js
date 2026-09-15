@@ -33,6 +33,8 @@ class ProductService {
             where.is_active = filters.is_active;
         if (filters?.display_on_pos !== undefined)
             where.display_on_pos = filters.display_on_pos;
+        if (filters?.display_on_website !== undefined)
+            where.display_on_website = filters.display_on_website;
         return client_2.prisma.product.findMany({
             where,
             orderBy: { created_at: 'desc' },
@@ -272,6 +274,7 @@ class ProductService {
             max_qty: data.max_qty ?? 10,
             is_active: data.is_active ?? true,
             display_on_pos: data.display_on_pos ?? true,
+            display_on_website: data.display_on_website ?? true,
             is_batch: data.is_batch ?? false,
             auto_fill_on_demand_sheet: data.auto_fill_on_demand_sheet ?? false,
             non_inventory_item: data.non_inventory_item ?? false,
@@ -314,6 +317,8 @@ class ProductService {
             updateData.is_active = data.is_active;
         if (data.display_on_pos !== undefined)
             updateData.display_on_pos = data.display_on_pos;
+        if (data.display_on_website !== undefined)
+            updateData.display_on_website = data.display_on_website;
         if (data.is_batch !== undefined)
             updateData.is_batch = data.is_batch;
         if (data.auto_fill_on_demand_sheet !== undefined)
@@ -856,7 +861,7 @@ class ProductService {
         }, { maxWait: 20000, timeout: 30000 });
         return product;
     }
-    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, is_featured, stock_status, branch_id, fetchAll = false, }) {
+    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, display_on_website, is_featured, stock_status, branch_id, fetchAll = false, }) {
         const where = {};
         if (search) {
             where.OR = [
@@ -877,6 +882,9 @@ class ProductService {
         }
         if (display_on_pos !== undefined) {
             where.display_on_pos = display_on_pos;
+        }
+        if (display_on_website !== undefined) {
+            where.display_on_website = display_on_website;
         }
         if (is_featured !== undefined) {
             where.is_featured = is_featured;
@@ -906,6 +914,7 @@ class ProductService {
             discount_amount: true,
             is_active: true,
             display_on_pos: true,
+            display_on_website: true,
             is_featured: true,
             created_at: true,
             updated_at: true,
@@ -1192,6 +1201,7 @@ class ProductService {
             where: {
                 is_featured: true,
                 is_active: true,
+                display_on_website: true,
             },
             orderBy: {
                 created_at: "desc",
@@ -1216,7 +1226,7 @@ class ProductService {
             featuredProducts = await client_2.prisma.product.findMany({
                 where: {
                     is_active: true,
-                    display_on_pos: true,
+                    display_on_website: true,
                 },
                 orderBy: {
                     created_at: "desc",
@@ -1245,6 +1255,7 @@ class ProductService {
         const bestSellingActiveProductsThisMonth = await client_2.prisma.product.findMany({
             where: {
                 is_active: true,
+                display_on_website: true,
                 order_items: {
                     some: {
                         created_at: {
@@ -1285,6 +1296,7 @@ class ProductService {
                     mode: 'insensitive',
                 },
                 is_active: true,
+                display_on_website: true,
             },
             include: {
                 category: {

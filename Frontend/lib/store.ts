@@ -41,6 +41,7 @@ interface Product {
   max_qty?: number
   is_active?: boolean
   display_on_pos?: boolean
+  display_on_website?: boolean
   is_batch?: boolean
   auto_fill_on_demand_sheet?: boolean
   non_inventory_item?: boolean
@@ -119,6 +120,7 @@ interface StoreState {
     isActive?: boolean
     displayOnPos?: boolean
     isFeatured?: boolean
+    displayOnWebsite?: boolean
     stockStatus?: "out" | "low"
   }) => Promise<void>
   fetchCategories: (force?: boolean) => Promise<void>
@@ -215,6 +217,7 @@ export const mapApiProductToStoreProduct = (item: any): Product => {
     max_qty: item.max_qty ? Number(item.max_qty) : undefined,
     is_active: item.is_active ?? true,
     display_on_pos: item.display_on_pos ?? true,
+    display_on_website: item.display_on_website ?? true,
     is_batch: item.is_batch ?? false,
     auto_fill_on_demand_sheet: item.auto_fill_on_demand_sheet ?? false,
     non_inventory_item: item.non_inventory_item ?? false,
@@ -264,6 +267,7 @@ export const useStore = create<StoreState>()(
         isActive?: boolean
         displayOnPos?: boolean
         isFeatured?: boolean
+        displayOnWebsite?: boolean
         stockStatus?: "out" | "low"
       }) => {
         const {
@@ -276,6 +280,7 @@ export const useStore = create<StoreState>()(
           isActive,
           displayOnPos,
           isFeatured,
+          displayOnWebsite,
           stockStatus,
         } = options ?? {}
         const state = get()
@@ -288,6 +293,7 @@ export const useStore = create<StoreState>()(
           isActive !== undefined ||
           displayOnPos !== undefined ||
           isFeatured !== undefined ||
+          displayOnWebsite !== undefined ||
           Boolean(stockStatus)
 
         if (!hasFilters && !force) {
@@ -356,6 +362,7 @@ export const useStore = create<StoreState>()(
           if (isActive !== undefined) params.is_active = isActive
           if (displayOnPos !== undefined) params.display_on_pos = displayOnPos
           if (isFeatured !== undefined) params.is_featured = isFeatured
+          if (displayOnWebsite !== undefined) params.display_on_website = displayOnWebsite
           if (stockStatus) params.stock_status = stockStatus
 
           const res = await apiClient.get("/products", { params })
