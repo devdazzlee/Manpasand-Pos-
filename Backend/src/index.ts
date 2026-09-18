@@ -76,7 +76,13 @@ app.use(cors({
       process.env.NODE_ENV !== 'production' &&
       /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
 
-    if (originMatch || isLocalDev) {
+    const isTunnelDev =
+      process.env.NODE_ENV !== 'production' &&
+      /^https:\/\/([a-z0-9-]+\.(ngrok-free\.app|ngrok-free\.dev|ngrok\.io|ngrok\.app|trycloudflare\.com|loca\.lt))$/i.test(
+        origin,
+      );
+
+    if (originMatch || isLocalDev || isTunnelDev) {
       callback(null, true);
     } else {
       callback(new Error('Not allowed by CORS'));

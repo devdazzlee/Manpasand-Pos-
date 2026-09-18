@@ -234,7 +234,20 @@ const getOrderStatusStyle = (status: string) => {
   }
 };
 
-const getAllowedStatusOptions = (status: string): OrderStatusOption[] => {
+const getAllowedStatusOptions = (
+  status: string,
+  paymentMethod?: string,
+  paymentStatus?: string,
+): OrderStatusOption[] => {
+  const unpaidCard =
+    (paymentMethod || "").toUpperCase() === "CARD" &&
+    (paymentStatus || "PENDING").toUpperCase() !== "PAID";
+
+  if (unpaidCard) {
+    if (status === "CANCELLED") return ["CANCELLED"];
+    return ["PENDING", "CANCELLED"];
+  }
+
   switch (status) {
     case "PENDING":
       return ["PENDING", "PROCESSING", "COMPLETED", "CANCELLED"];
@@ -268,6 +281,47 @@ function formatPaymentMethod(method?: string) {
     default:
       return method || "Cash";
   }
+}
+
+function getPaymentHold(order: { payment_method?: string; payment_status?: string }) {
+  if ((order.payment_method || "").toUpperCase() !== "CARD") return null;
+  const status = (order.payment_status || "PENDING").toUpperCase();
+  if (status === "PAID") {
+    return {
+      label: "Paid",
+      className: "bg-green-100 text-green-800 border-green-200",
+    };
+  }
+  if (status === "FAILED") {
+    return {
+      label: "Payment not received",
+      className: "bg-red-100 text-red-800 border-red-200",
+    };
+  }
+  return {
+    label: "On hold — awaiting payment",
+    className: "bg-amber-100 text-amber-900 border-amber-300",
+  };
+}
+
+function PaymentHoldBadge({ order }: { order: { payment_method?: string; payment_status?: string } }) {
+  const hold = getPaymentHold(order);
+  if (!hold) return null;
+  return (
+    <span
+      className={cn(
+        "mt-1 inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[11px] font-semibold",
+        hold.className,
+      )}
+    >
+      {hold.label === "Paid" ? (
+        <CheckCircle2 className="h-3 w-3" />
+      ) : (
+        <Clock className="h-3 w-3" />
+      )}
+      {hold.label}
+    </span>
+  );
 }
 
 function formatStatusLabel(status: string) {
@@ -971,7 +1025,11 @@ const WebsiteOrders: React.FC = () => {
                     </TableHeader>
                     <TableBody>
                       {paged.map((o) => {
-                        const allowedStatusOptions = getAllowedStatusOptions(o.status);
+                        const allowedStatusOptions = getAllowedStatusOptions(
+                          o.status,
+                          o.payment_method,
+                          o.payment_status,
+                        );
                         const isTerminal = isTerminalOrderStatus(o.status);
                         const statusStyle = getOrderStatusStyle(o.status);
                         const ts = new Date(o.created_at);
@@ -1028,10 +1086,12 @@ const WebsiteOrders: React.FC = () => {
                               )}
                             </TableCell>
                             <TableCell className="py-3">
-                              <span className="text-xs font-medium text-foreground">
-                                {formatPaymentMethod(o.payment_method)}
-                              {o.payment_status ? ` · ${formatStatusLabel(o.payment_status)}` : ""}
-                              </span>
+                              <div className="flex flex-col items-start">
+                                <span className="text-xs font-medium text-foreground">
+                                  {formatPaymentMethod(o.payment_method)}
+                                </span>
+                                <PaymentHoldBadge order={o} />
+                              </div>
                             </TableCell>
                             <TableCell className="py-3 text-right">
                               <span className="text-sm font-semibold nums text-foreground">
@@ -1107,7 +1167,11 @@ const WebsiteOrders: React.FC = () => {
                 {/* Mobile / tablet cards */}
                 <div className="lg:hidden divide-y divide-border">
                   {paged.map((o) => {
-                    const allowedStatusOptions = getAllowedStatusOptions(o.status);
+                    const allowedStatusOptions = getAllowedStatusOptions(
+                      o.status,
+                      o.payment_method,
+                      o.payment_status,
+                    );
                     const isTerminal = isTerminalOrderStatus(o.status);
                     const statusStyle = getOrderStatusStyle(o.status);
                     const ts = new Date(o.created_at);
@@ -1149,12 +1213,12 @@ const WebsiteOrders: React.FC = () => {
                               </span>
                             </p>
                           )}
-                          <div className="flex items-center gap-3 pl-5 text-xs text-muted-foreground pt-0.5">
+                          <div className="flex flex-col items-start gap-1 pl-5 text-xs text-muted-foreground pt-0.5">
                             <span className="flex items-center gap-1">
                               <Wallet className="h-3 w-3" />
                               {formatPaymentMethod(o.payment_method)}
-                              {o.payment_status ? ` · ${formatStatusLabel(o.payment_status)}` : ""}
                             </span>
+                            <PaymentHoldBadge order={o} />
                             <span className="flex items-center gap-1">
                               <Package className="h-3 w-3" />
                               {itemCount} items
@@ -1321,10 +1385,8 @@ const WebsiteOrders: React.FC = () => {
                   <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground">
                     <Wallet className="h-3 w-3" />
                     {formatPaymentMethod(selectedOrder.payment_method)}
-                    {selectedOrder.payment_status
-                      ? ` · ${formatStatusLabel(selectedOrder.payment_status)}`
-                      : ""}
                   </span>
+                  <PaymentHoldBadge order={selectedOrder} />
                   <span className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2.5 py-1 text-xs font-medium text-foreground">
                     <Package className="h-3 w-3" />
                     {selectedOrder.items.length} items
@@ -1338,7 +1400,11 @@ const WebsiteOrders: React.FC = () => {
                   Update Status
                 </Label>
                 {(() => {
-                  const allowedStatusOptions = getAllowedStatusOptions(selectedOrder.status);
+                  const allowedStatusOptions = getAllowedStatusOptions(
+                    selectedOrder.status,
+                    selectedOrder.payment_method,
+                    selectedOrder.payment_status,
+                  );
                   const isTerminal = isTerminalOrderStatus(selectedOrder.status);
                   return (
                     <div className="mt-2 space-y-2">

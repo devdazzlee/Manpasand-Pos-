@@ -1,6 +1,6 @@
 import dotenv from 'dotenv';
 
-dotenv.config();
+dotenv.config({ override: true });
 
 export const DATABASE_URL = process.env.DATABASE_URL!;
 export const REDIS_SERVICE_URI = process.env.DATABASE_URL!;

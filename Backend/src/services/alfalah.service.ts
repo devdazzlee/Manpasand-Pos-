@@ -79,8 +79,29 @@ function parseOrderRefFromApgReturn(input: {
   return '';
 }
 
+function parseGatewayPayload(data: unknown): Record<string, any> {
+  let payload: unknown = data;
+  if (typeof payload === 'string') {
+    try {
+      payload = JSON.parse(payload);
+    } catch {
+      return {};
+    }
+  }
+  if (payload && typeof payload === 'object' && !Array.isArray(payload)) {
+    return payload as Record<string, any>;
+  }
+  return {};
+}
+
 function isPaidStatus(status?: string | null): boolean {
   return String(status || '').trim().toLowerCase() === 'paid';
+}
+
+function isFailedStatus(status?: string | null): boolean {
+  return ['failed', 'unpaid', 'declined', 'cancelled', 'canceled', 'expired'].includes(
+    String(status || '').trim().toLowerCase(),
+  );
 }
 
 class AlfalahService {
@@ -103,7 +124,7 @@ class AlfalahService {
       HS_ChannelId: config.channelId,
       HS_MerchantId: config.merchantId,
       HS_StoreId: config.storeId,
-      HS_ReturnURL: `${config.websiteUrl}/checkout/alfalah/handshake?ref=${encodeURIComponent(orderNumber)}`,
+      HS_ReturnURL: `${config.websiteUrl}/checkout/alfalah/complete`,
       HS_MerchantHash: config.merchantHash,
       HS_MerchantUsername: config.merchantUsername,
       HS_MerchantPassword: config.merchantPassword,
@@ -130,14 +151,15 @@ class AlfalahService {
     const fieldsWithoutHash = {
       AuthToken: token,
       ChannelId: config.channelId,
-      Currency: 'PKR',
-      ReturnURL: `${config.websiteUrl}/checkout/alfalah/complete?ref=${encodeURIComponent(orderNumber)}`,
+      Currency: config.currency,
+      ReturnURL: `${config.websiteUrl}/checkout/alfalah/complete`,
       MerchantId: config.merchantId,
       StoreId: config.storeId,
       MerchantHash: config.merchantHash,
       MerchantUsername: config.merchantUsername,
       MerchantPassword: config.merchantPassword,
-      TransactionTypeId: '3',
+      IsBIN: config.isBin,
+      TransactionTypeId: config.cardTransactionTypeId,
       TransactionReferenceNumber: orderNumber,
       TransactionAmount: formatAmount(amount),
     };
@@ -164,7 +186,46 @@ class AlfalahService {
     return this.buildSsoForm(order.order_number, authToken, Number(order.total_amount));
   }
 
+  async startCardCheckout(orderNumber: string): Promise<AlfalahFormPayload> {
+    const order = await this.findOrderByNumber(orderNumber);
+    if (order.payment_method !== 'CARD') {
+      throw new AppError(400, 'This order is not a card payment');
+    }
+    if (order.payment_status === 'PAID') {
+      throw new AppError(409, 'This order is already paid');
+    }
+
+    const handshake = this.buildHandshakeForm(order.order_number);
+    const { data } = await axios.post(
+      handshake.actionUrl,
+      new URLSearchParams(handshake.fields).toString(),
+      {
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        timeout: 20000,
+        validateStatus: () => true,
+      },
+    );
+
+    let payload: any = data;
+    if (typeof data === 'string') {
+      try {
+        payload = JSON.parse(data);
+      } catch {
+        payload = {};
+      }
+    }
+
+    const success = String(payload?.success).toLowerCase() === 'true';
+    const authToken = String(payload?.AuthToken || payload?.authToken || '').trim();
+    if (!success || !authToken) {
+      throw new AppError(502, 'Bank Alfalah handshake failed. Please try card payment again.');
+    }
+
+    return this.buildSsoForm(order.order_number, authToken, Number(order.total_amount));
+  }
+
   async inquireAndSettle(orderNumber: string) {
+    await this.expireUnpaidCardOrders();
     const config = this.requireConfig();
     const order = await this.findOrderByNumber(orderNumber);
 
@@ -173,13 +234,13 @@ class AlfalahService {
       validateStatus: () => true,
     });
 
-    const status = data?.TransactionStatus || data?.transaction_status || data?.transactionStatus;
+    const gateway = parseGatewayPayload(data);
+    const status =
+      gateway.TransactionStatus || gateway.transaction_status || gateway.transactionStatus;
     const transactionId =
-      data?.TransactionId || data?.unique_tran_id || data?.transaction_id || null;
+      gateway.TransactionId || gateway.unique_tran_id || gateway.transaction_id || null;
     const paid = isPaidStatus(status);
-    const failed = ['failed', 'unpaid', 'declined', 'cancelled', 'canceled', 'expired'].includes(
-      String(status || '').trim().toLowerCase(),
-    );
+    const failed = isFailedStatus(status);
 
     if (paid) {
       await this.markPaid(order.id, String(transactionId || ''));
@@ -195,7 +256,6 @@ class AlfalahService {
       order: formatGuestOrder(fresh),
       transactionStatus: status || (paid ? 'Paid' : 'Failed'),
       paid,
-      gateway: data || null,
     };
   }
 
@@ -217,8 +277,11 @@ class AlfalahService {
     }
 
     const { data } = await axios.get(statusUrl, { timeout: 20000, validateStatus: () => true });
+    const gateway = parseGatewayPayload(data);
     const orderNumber =
-      data?.TransactionReferenceNumber || data?.transaction_reference_number || data?.order_id;
+      gateway.TransactionReferenceNumber ||
+      gateway.transaction_reference_number ||
+      gateway.order_id;
     if (!orderNumber) {
       throw new AppError(400, 'IPN response did not include an order reference');
     }
@@ -230,6 +293,24 @@ class AlfalahService {
     const ref = parseOrderRefFromApgReturn(input);
     if (!ref) throw new AppError(400, 'Could not find order reference from Bank Alfalah return');
     return ref;
+  }
+
+  async expireUnpaidCardOrders() {
+    const minutes = getAlfalahConfig().unpaidCardExpiryMinutes;
+    const cutoff = new Date(Date.now() - minutes * 60 * 1000);
+    await prisma.order.updateMany({
+      where: {
+        customer_id: null,
+        payment_method: 'CARD',
+        payment_status: 'PENDING',
+        status: 'PENDING',
+        created_at: { lt: cutoff },
+      },
+      data: {
+        status: 'CANCELLED',
+        payment_status: 'FAILED',
+      },
+    });
   }
 
   private async findOrderByNumber(orderNumber: string): Promise<OrderWithItems> {

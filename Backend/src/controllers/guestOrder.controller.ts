@@ -18,7 +18,7 @@ const createGuestOrder = asyncHandler(async (req: Request, res: Response) => {
   const order = await guestOrderService.createGuestOrder(req.body);
 
   if (req.body.paymentMethod === 'card') {
-    const payment = alfalahService.buildHandshakeForm(order.order_number);
+    const payment = await alfalahService.startCardCheckout(order.order_number);
     return new ApiResponse(
       { ...order, payment },
       'Order created. Redirecting to Bank Alfalah.',

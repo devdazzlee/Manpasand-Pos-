@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { EmailService } from '../utils/email.service';
+import { alfalahService } from './alfalah.service';
 
 interface GuestOrderData {
   items: Array<{
@@ -123,6 +124,7 @@ class GuestOrderService {
   }
 
   async createGuestOrder(data: GuestOrderData) {
+    await alfalahService.expireUnpaidCardOrders();
     const productIds = data.items
       .map((item) => this.resolveItemProductId(item))
       .filter((id): id is string => Boolean(id));
@@ -241,6 +243,8 @@ class GuestOrderService {
   }
 
   async getGuestOrders(status?: string, page: number = 1, pageSize: number = 10) {
+    await alfalahService.expireUnpaidCardOrders();
+
     const where: any = {
       customer_id: null, // Only guest orders (no customer_id)
     };

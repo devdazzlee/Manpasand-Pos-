@@ -43,6 +43,12 @@ export function getAlfalahConfig() {
     key2,
     websiteUrl: websiteUrl.replace(/\/$/, ''),
     channelId,
+    currency: 'PKR',
+    cardTransactionTypeId: '3',
+    isBin: '0',
+    unpaidCardExpiryMinutes: Number(process.env.ALFALAH_UNPAID_EXPIRY_MINUTES) > 0
+      ? Number(process.env.ALFALAH_UNPAID_EXPIRY_MINUTES)
+      : 45,
     handshakeUrl: `${host}/HS/HS/HS`,
     ssoUrl: `${host}/SSO/SSO/SSO`,
     ipnOrderStatusUrl: (orderId: string) =>
