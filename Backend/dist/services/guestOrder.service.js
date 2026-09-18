@@ -5,6 +5,7 @@ const client_1 = require("@prisma/client");
 const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const email_service_1 = require("../utils/email.service");
+const alfalah_service_1 = require("./alfalah.service");
 class GuestOrderService {
     formatGuestOrder(order) {
         const fullName = order.customer_name || '';
@@ -81,6 +82,7 @@ class GuestOrderService {
         }
     }
     async createGuestOrder(data) {
+        await alfalah_service_1.alfalahService.expireUnpaidCardOrders();
         const productIds = data.items
             .map((item) => this.resolveItemProductId(item))
             .filter((id) => Boolean(id));
@@ -125,7 +127,7 @@ class GuestOrderService {
         if (orderItems.length === 0) {
             throw new apiError_1.AppError(400, 'No valid order items found');
         }
-        const orderNumber = `MP-${Date.now()}-${Math.floor(Math.random() * 1000)}`;
+        const orderNumber = `MP${Date.now()}${Math.floor(Math.random() * 900 + 100)}`;
         const totalAmount = new client_1.Prisma.Decimal(data.total);
         const order = await client_2.prisma.order.create({
             data: {
@@ -141,6 +143,7 @@ class GuestOrderService {
                 total_amount: totalAmount,
                 status: 'PENDING',
                 payment_method: data.paymentMethod.toUpperCase(),
+                payment_status: 'PENDING',
                 items: { create: orderItems },
             },
             include: {
@@ -150,32 +153,36 @@ class GuestOrderService {
         if (!order.items?.length) {
             throw new apiError_1.AppError(500, 'Order created without item details');
         }
-        // Stock is optional — never block checkout
-        void this.applyStockUpdatesBestEffort(data.items, products);
-        const emailData = {
-            orderNumber,
-            customerName: `${data.customer.firstName} ${data.customer.lastName}`,
-            customerEmail: data.customer.email,
-            customerPhone: data.customer.phone,
-            shippingAddress: data.shipping,
-            items: data.items.map((item) => ({
-                name: item.name,
-                quantity: item.quantity,
-                price: item.price,
-                total: item.price * item.quantity,
-            })),
-            subtotal: data.subtotal,
-            shipping: data.shippingCost,
-            total: data.total,
-            paymentMethod: data.paymentMethod,
-            orderNotes: data.orderNotes,
-        };
-        email_service_1.EmailService.sendOrderConfirmationEmails(emailData).catch((err) => {
-            console.error('Failed to send order confirmation emails:', err);
-        });
+        const isCard = data.paymentMethod === 'card';
+        // Card orders wait for Bank Alfalah before stock and confirmation email.
+        if (!isCard) {
+            void this.applyStockUpdatesBestEffort(data.items, products);
+            const emailData = {
+                orderNumber,
+                customerName: `${data.customer.firstName} ${data.customer.lastName}`,
+                customerEmail: data.customer.email,
+                customerPhone: data.customer.phone,
+                shippingAddress: data.shipping,
+                items: data.items.map((item) => ({
+                    name: item.name,
+                    quantity: item.quantity,
+                    price: item.price,
+                    total: item.price * item.quantity,
+                })),
+                subtotal: data.subtotal,
+                shipping: data.shippingCost,
+                total: data.total,
+                paymentMethod: data.paymentMethod,
+                orderNotes: data.orderNotes,
+            };
+            email_service_1.EmailService.sendOrderConfirmationEmails(emailData).catch((err) => {
+                console.error('Failed to send order confirmation emails:', err);
+            });
+        }
         return this.formatGuestOrder(order);
     }
     async getGuestOrders(status, page = 1, pageSize = 10) {
+        await alfalah_service_1.alfalahService.expireUnpaidCardOrders();
         const where = {
             customer_id: null, // Only guest orders (no customer_id)
         };

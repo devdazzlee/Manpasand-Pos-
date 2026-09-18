@@ -49,6 +49,7 @@ const shiftAssignment_routes_1 = __importDefault(require("./routes/shiftAssignme
 const barcode_routes_1 = __importDefault(require("./routes/barcode.routes"));
 const guestOrder_routes_1 = __importDefault(require("./routes/guestOrder.routes"));
 const web_routes_1 = __importDefault(require("./routes/web.routes"));
+const alfalah_routes_1 = __importDefault(require("./routes/alfalah.routes"));
 const node_cron_1 = __importDefault(require("node-cron"));
 const vAPI = process.env.vAPI || '/api/v1';
 const app = (0, express_1.default)();
@@ -72,7 +73,9 @@ app.use((0, cors_1.default)({
         // In local dev, allow any localhost port (Next.js may use 3000, 3001, etc.)
         const isLocalDev = process.env.NODE_ENV !== 'production' &&
             /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
-        if (originMatch || isLocalDev) {
+        const isTunnelDev = process.env.NODE_ENV !== 'production' &&
+            /^https:\/\/([a-z0-9-]+\.(ngrok-free\.app|ngrok-free\.dev|ngrok\.io|ngrok\.app|trycloudflare\.com|loca\.lt))$/i.test(origin);
+        if (originMatch || isLocalDev || isTunnelDev) {
             callback(null, true);
         }
         else {
@@ -146,6 +149,7 @@ app.use(`${vAPI}/customer`, customer_routes_1.default);
 app.use(`${vAPI}/app/customer/order`, customerOrder_routes_1.default);
 app.use(`${vAPI}/customer/device-identity`, device_identity_routes_1.default);
 app.use(`${vAPI}/guest/order`, guestOrder_routes_1.default); // Guest checkout route
+app.use(`${vAPI}/payments/alfalah`, alfalah_routes_1.default);
 // Health check
 app.get('/health', (req, res) => {
     res.status(200).json({ status: 'OK - Server is working fine' });

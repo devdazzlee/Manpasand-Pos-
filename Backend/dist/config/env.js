@@ -5,7 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.EMAIL_PORT = exports.EMAIL_HOST = exports.EMAIL_PASS = exports.EMAIL_USER = exports.vAPI = exports.NODE_ENV = exports.PORT = exports.AWS_BUCKET_NAME = exports.AWS_SECRET_ACCESS_KEY = exports.AWS_ACCESS_KEY_ID = exports.AWS_REGION = exports.REDIS_DB = exports.COOKIE_EXPIRES_IN = exports.JWT_EXPIRES_IN = exports.JWT_SECRET = exports.REDIS_PASSWORD = exports.REDIS_PORT = exports.REDIS_HOST = exports.REDIS_SERVICE_URI = exports.DATABASE_URL = void 0;
 const dotenv_1 = __importDefault(require("dotenv"));
-dotenv_1.default.config();
+dotenv_1.default.config({ override: true });
 exports.DATABASE_URL = process.env.DATABASE_URL;
 exports.REDIS_SERVICE_URI = process.env.DATABASE_URL;
 exports.REDIS_HOST = process.env.DATABASE_URL;
