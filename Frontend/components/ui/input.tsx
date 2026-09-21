@@ -1,9 +1,33 @@
+"use client"
+
 import * as React from "react"
 
 import { cn } from "@/lib/utils"
+import { useIsMobile } from "@/components/ui/use-mobile"
 
 const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
-  ({ className, type, ...props }, ref) => {
+  (
+    {
+      className,
+      type,
+      autoComplete,
+      autoCorrect,
+      enterKeyHint,
+      ...props
+    },
+    ref,
+  ) => {
+    const isMobile = useIsMobile()
+    const guardMobileAutofill =
+      isMobile &&
+      type !== "password" &&
+      type !== "file" &&
+      type !== "hidden" &&
+      type !== "checkbox" &&
+      type !== "radio" &&
+      type !== "button" &&
+      type !== "submit"
+
     return (
       <input
         type={type}
@@ -12,6 +36,16 @@ const Input = React.forwardRef<HTMLInputElement, React.ComponentProps<"input">>(
           className
         )}
         ref={ref}
+        autoComplete={guardMobileAutofill ? autoComplete ?? "off" : autoComplete}
+        autoCorrect={guardMobileAutofill ? autoCorrect ?? "off" : autoCorrect}
+        enterKeyHint={
+          guardMobileAutofill
+            ? enterKeyHint ?? (type === "search" ? "search" : "done")
+            : enterKeyHint
+        }
+        data-lpignore={guardMobileAutofill ? "true" : undefined}
+        data-1p-ignore={guardMobileAutofill ? "true" : undefined}
+        data-form-type={guardMobileAutofill ? "other" : undefined}
         {...props}
       />
     )

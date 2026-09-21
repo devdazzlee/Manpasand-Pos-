@@ -26,7 +26,7 @@ interface GuestOrderData {
     city: string;
     postalCode?: string;
   };
-  paymentMethod: 'cash' | 'card';
+  paymentMethod: 'cash' | 'card' | 'bank_transfer';
   subtotal: number;
   shippingCost: number;
   total: number;

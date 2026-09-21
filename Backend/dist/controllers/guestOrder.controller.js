@@ -19,7 +19,9 @@ const createGuestOrder = (0, asyncHandler_1.default)(async (req, res) => {
         const payment = await alfalah_service_1.alfalahService.startCardCheckout(order.order_number);
         return new apiResponse_1.ApiResponse({ ...order, payment }, 'Order created. Redirecting to Bank Alfalah.', 201).send(res);
     }
-    new apiResponse_1.ApiResponse(order, 'Order placed successfully. Confirmation email sent.', 201).send(res);
+    new apiResponse_1.ApiResponse(order, req.body.paymentMethod === 'bank_transfer'
+        ? 'Order placed. Continue on WhatsApp to confirm bank transfer.'
+        : 'Order placed successfully. Confirmation email sent.', 201).send(res);
 });
 exports.createGuestOrder = createGuestOrder;
 const getGuestOrders = (0, asyncHandler_1.default)(async (req, res) => {

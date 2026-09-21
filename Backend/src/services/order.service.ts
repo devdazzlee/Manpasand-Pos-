@@ -271,15 +271,6 @@ class OrderService {
       throw new AppError(400, 'Completed orders are terminal and cannot be modified.');
     }
 
-    const isUnpaidCard =
-      order.payment_method === 'CARD' && order.payment_status !== 'PAID';
-    if (isUnpaidCard && status !== 'CANCELLED' && status !== 'PENDING') {
-      throw new AppError(
-        400,
-        'This card order is not paid yet. Pack and complete it only after Bank Alfalah confirms payment.',
-      );
-    }
-
     return prisma.order.update({
       where: { id: orderId },
       data: { status },

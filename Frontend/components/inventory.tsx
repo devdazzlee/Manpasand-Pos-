@@ -2123,7 +2123,8 @@ export default function Inventory() {
         )}
       </div>
 
-      {/* Filters */}
+      {/* Filters — sticky on phones so search stays above the keyboard */}
+      <div className="sticky top-14 z-20 -mx-4 space-y-3 border-b border-gray-200 bg-gray-50/95 px-4 py-3 shadow-sm backdrop-blur-sm sm:top-16 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none lg:backdrop-blur-none">
       <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
         <div className="flex flex-wrap gap-1.5">
           {statusChips.map((chip) => {
@@ -2167,18 +2168,51 @@ export default function Inventory() {
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2.5">
-          <div className="relative min-w-0 sm:col-span-2">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
+          <form
+            className="relative min-w-0 sm:col-span-2"
+            autoComplete="off"
+            action=""
+            onSubmit={(e) => {
+              e.preventDefault()
+              const input = e.currentTarget.querySelector("input")
+              if (input instanceof HTMLInputElement) input.blur()
+            }}
+          >
+            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
             <Input
+              type="search"
+              name="product-catalog-search"
               placeholder="Search name, SKU, code, category..."
               value={searchTerm}
+              autoComplete="off"
+              autoCorrect="off"
+              autoCapitalize="none"
+              spellCheck={false}
+              inputMode="search"
+              enterKeyHint="search"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              data-form-type="other"
               onChange={(e) => {
                 setSearchTerm(e.target.value)
                 setCurrentPage(1)
               }}
-              className="h-10 pl-10"
+              className="h-10 pl-10 pr-10 [&::-webkit-search-cancel-button]:hidden"
             />
-          </div>
+            {searchTerm ? (
+              <button
+                type="button"
+                aria-label="Clear search"
+                className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                onClick={() => {
+                  setSearchTerm("")
+                  setCurrentPage(1)
+                }}
+              >
+                <X className="h-4 w-4" />
+              </button>
+            ) : null}
+          </form>
           <Select
             value={selectedCategory}
             onValueChange={(v) => {
@@ -2265,6 +2299,7 @@ export default function Inventory() {
             </Button>
           </div>
         )}
+      </div>
       </div>
 
       {/* Products */}

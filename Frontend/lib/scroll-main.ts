@@ -8,8 +8,9 @@ export function scrollMainToTop(behavior: ScrollBehavior = "smooth") {
 
   if (el instanceof HTMLElement) {
     el.scrollTo({ top: 0, behavior });
-    return;
   }
 
+  // On phones the document itself scrolls (so the keyboard does not freeze
+  // a nested overflow box). Keep window in sync with the main pane.
   window.scrollTo({ top: 0, behavior });
 }

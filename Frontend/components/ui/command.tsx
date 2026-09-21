@@ -7,6 +7,7 @@ import { Search } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Dialog, DialogContent } from "@/components/ui/dialog"
+import { useIsMobile } from "@/components/ui/use-mobile"
 
 const Command = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive>,
@@ -38,11 +39,19 @@ const CommandDialog = ({ children, ...props }: DialogProps) => {
 const CommandInput = React.forwardRef<
   React.ElementRef<typeof CommandPrimitive.Input>,
   React.ComponentPropsWithoutRef<typeof CommandPrimitive.Input>
->(({ className, ...props }, ref) => (
+>(({ className, autoComplete, autoCorrect, enterKeyHint, ...props }, ref) => {
+  const isMobile = useIsMobile()
+  return (
   <div className="flex items-center border-b px-3" cmdk-input-wrapper="">
     <Search className="mr-2 h-4 w-4 shrink-0 opacity-50" />
     <CommandPrimitive.Input
       ref={ref}
+      autoComplete={isMobile ? autoComplete ?? "off" : autoComplete}
+      autoCorrect={isMobile ? autoCorrect ?? "off" : autoCorrect}
+      enterKeyHint={isMobile ? enterKeyHint ?? "search" : enterKeyHint}
+      data-lpignore={isMobile ? "true" : undefined}
+      data-1p-ignore={isMobile ? "true" : undefined}
+      data-form-type={isMobile ? "other" : undefined}
       className={cn(
         "flex h-11 w-full rounded-md bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground disabled:cursor-not-allowed disabled:opacity-50",
         className
@@ -50,7 +59,8 @@ const CommandInput = React.forwardRef<
       {...props}
     />
   </div>
-))
+  )
+})
 
 CommandInput.displayName = CommandPrimitive.Input.displayName
 

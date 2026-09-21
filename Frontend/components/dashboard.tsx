@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Menu } from "lucide-react";
 import { useDashboardTab } from "@/lib/dashboard-tabs";
 import { scrollMainToTop } from "@/lib/scroll-main";
+import { useDismissKeyboardOnScroll } from "@/hooks/use-dismiss-keyboard-on-scroll";
 
 import { Customers } from "@/components/customers";
 import { Reports } from "@/components/reports";
@@ -68,6 +69,7 @@ interface DashboardProps {
 export function Dashboard({ onLogout }: DashboardProps) {
   const { activeTab, setActiveTab } = useDashboardTab();
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  useDismissKeyboardOnScroll();
 
   useEffect(() => {
     scrollMainToTop("auto");
@@ -179,7 +181,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
   };
 
   return (
-    <div className="flex h-screen bg-gray-50">
+    <div className="flex min-h-dvh bg-gray-50 lg:h-dvh lg:max-h-dvh lg:overflow-hidden">
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
@@ -210,7 +212,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
       <main
         id="app-main-scroll"
-        className="flex w-full flex-1 flex-col overflow-auto pt-14 sm:pt-16 lg:pt-0"
+        className="flex w-full min-w-0 flex-1 flex-col pt-14 sm:pt-16 lg:min-h-0 lg:overflow-y-auto lg:pt-0"
       >
         {renderContent()}
       </main>

@@ -31,7 +31,7 @@ const createGuestOrderSchema = zod_1.z.object({
             city: zod_1.z.string().min(1, 'City is required'),
             postalCode: zod_1.z.string().optional(),
         }),
-        paymentMethod: zod_1.z.enum(['cash', 'card']).default('cash'),
+        paymentMethod: zod_1.z.enum(['cash', 'card', 'bank_transfer']).default('cash'),
         subtotal: zod_1.z.number().min(0),
         shippingCost: zod_1.z.number().min(0),
         total: zod_1.z.number().min(0),

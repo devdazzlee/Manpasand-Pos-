@@ -84,6 +84,7 @@ import {
   sumMoney,
 } from "@/lib/money";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
+import { searchFieldDomProps } from "@/hooks/use-dismiss-keyboard-on-scroll";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -196,7 +197,9 @@ function CustomerSearchCombobox({
   );
 
   const selectedCustomer =
-    activeCustomers.find((customer) => customer.id === value) || null;
+    activeCustomers.find((customer) => customer.id === value) ||
+    customers.find((customer) => customer.id === value) ||
+    null;
 
   return (
     <Popover open={open} onOpenChange={setOpen}>
@@ -443,6 +446,7 @@ export function NewSale() {
   const [scanLoading, setScanLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
+  const [pinnedCustomer, setPinnedCustomer] = useState<PosCustomer | null>(null);
   // Global printer settings (configured in Printer Settings page)
   const { receiptPrinter, getReceiptPrinterObj, printers } = usePrinterSettings();
   const [showHeldSales, setShowHeldSales] = useState(false);
@@ -482,6 +486,14 @@ export function NewSale() {
     page: 1,
     limit: 20,
   });
+
+  const customersForPicker = useMemo(() => {
+    if (!pinnedCustomer) return customers;
+    if (customers.some((customer) => customer.id === pinnedCustomer.id)) {
+      return customers;
+    }
+    return [pinnedCustomer, ...customers];
+  }, [customers, pinnedCustomer]);
 
   // Clear any pending scan timeout on unmount.
   useEffect(() => {
@@ -563,6 +575,29 @@ export function NewSale() {
     }
   }, [cart.length]);
 
+  useEffect(() => {
+    if (!mobileCartOpen || cart.length === 0) return;
+
+    const html = document.documentElement;
+    const body = document.body;
+    const main = document.getElementById("app-main-scroll");
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      mainOverflow: main instanceof HTMLElement ? main.style.overflow : "",
+    };
+
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    if (main instanceof HTMLElement) main.style.overflow = "hidden";
+
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
+      if (main instanceof HTMLElement) main.style.overflow = prev.mainOverflow;
+    };
+  }, [mobileCartOpen, cart.length]);
+
   const setCartSync = (updater: (prev: CartItem[]) => CartItem[]) => {
     setCart((prev) => {
       const next = updater(prev);
@@ -571,11 +606,13 @@ export function NewSale() {
     });
   };
 
-  // Keep search input always focused (professional POS behavior)
-  // Uses intelligent focus management: only refocuses when user is idle
+  // Keep search input always focused on desktop (barcode scanners).
+  // On phones, never steal focus — that would reopen the keyboard after scroll-to-dismiss.
   useEffect(() => {
     const IDLE_TIMEOUT = 2000; // 2 seconds of inactivity before refocusing search
     const INTERACTION_TIMEOUT = 500; // 500ms to detect if user is still interacting
+    const isTouchUi = () =>
+      window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768;
 
     const markUserInteracting = () => {
       isUserInteractingRef.current = true;
@@ -629,6 +666,8 @@ export function NewSale() {
     };
 
     const scheduleRefocus = () => {
+      if (isTouchUi()) return;
+
       // Clear any existing timeout
       if (userInteractionTimeoutRef.current) {
         clearTimeout(userInteractionTimeoutRef.current);
@@ -720,7 +759,7 @@ export function NewSale() {
     window.addEventListener('keydown', handleGlobalKeyDown);
     
     // Initial focus
-    if (searchInputRef.current) {
+    if (searchInputRef.current && !isTouchUi()) {
       searchInputRef.current.focus();
     }
 
@@ -900,6 +939,9 @@ export function NewSale() {
     requestAnimationFrame(() => {
       const el = searchInputRef.current;
       if (!el || paymentDialogOpen) return;
+      const isTouch =
+        window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768;
+      if (isTouch) return;
       el.focus({ preventScroll: true });
       el.select();
     });
@@ -1364,6 +1406,8 @@ export function NewSale() {
     if (held) {
       setCart([]);
       setGlobalDiscountValue("");
+      setSelectedCustomer(null);
+      setPinnedCustomer(null);
     }
     setIsHoldingSale(false);
   };
@@ -1433,12 +1477,28 @@ export function NewSale() {
     const heldSale = await retrieveHoldSale(index);
     if (heldSale) {
       setCart(
-        heldSale.map((item) => ({
+        heldSale.items.map((item) => ({
           ...item,
           originalPrice: Number(item.originalPrice ?? item.price ?? 0),
           actualUnitPrice: Number(item.actualUnitPrice ?? item.price ?? 0),
         }))
       );
+      setSelectedCustomer(heldSale.customerId);
+      setPinnedCustomer(
+        heldSale.customer
+          ? {
+              id: heldSale.customer.id,
+              name: heldSale.customer.name,
+              email: heldSale.customer.email,
+              phone_number: heldSale.customer.phone_number,
+              phone: heldSale.customer.phone,
+              is_active: heldSale.customer.is_active,
+            }
+          : null,
+      );
+      if (heldSale.customerId) {
+        setCustomerSearch("");
+      }
     }
     setResumingHoldIndex(null);
   };
@@ -2420,8 +2480,9 @@ export function NewSale() {
         <button
           type="button"
           aria-label="Close cart"
-          className="fixed inset-0 z-20 bg-black/40 lg:hidden"
+          className="fixed inset-0 z-20 bg-black/40 touch-none overscroll-none lg:hidden"
           onClick={() => setMobileCartOpen(false)}
+          onTouchMove={(event) => event.preventDefault()}
         />
       )}
 
@@ -2431,6 +2492,7 @@ export function NewSale() {
         className={cn(
           "min-h-0 flex-1 overflow-auto p-2 sm:p-4 md:p-6",
           cart.length > 0 && "pb-28 sm:pb-40 lg:pb-6",
+          mobileCartOpen && cart.length > 0 && "max-lg:overflow-hidden max-lg:pointer-events-none",
         )}
       >
         <div className="mb-2 sm:mb-4 md:mb-6">
@@ -2483,10 +2545,17 @@ export function NewSale() {
                 Customer
               </label>
               <CustomerSearchCombobox
-                customers={customers}
+                customers={customersForPicker}
                 loading={customersLoading}
                 value={selectedCustomer}
-                onChange={setSelectedCustomer}
+                onChange={(customerId) => {
+                  setSelectedCustomer(customerId);
+                  if (!customerId) setPinnedCustomer(null);
+                  else {
+                    const picked = customersForPicker.find((c) => c.id === customerId);
+                    if (picked) setPinnedCustomer(picked);
+                  }
+                }}
                 onSearch={(query) => {
                   if (customerSearchTimerRef.current) {
                     window.clearTimeout(customerSearchTimerRef.current);
@@ -2530,14 +2599,25 @@ export function NewSale() {
             </label>
             <div className="flex w-full items-stretch gap-1.5 sm:gap-2">
               <div className="relative min-w-0 flex-1">
-                <Search className={`absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
+                <Search className={`pointer-events-none absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
                 {isScanning && (
                   <LoadingSpinner size="sm" className="absolute right-3 top-1/2 transform -translate-y-1/2" />
                 )}
+                <form
+                  autoComplete="off"
+                  action=""
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    searchInputRef.current?.blur();
+                  }}
+                >
                 <Input
                   ref={searchInputRef}
+                  type="search"
+                  name="pos-product-search"
                   placeholder={isScanning ? "Scanning…" : "Scan or search…"}
                   value={searchTerm}
+                  {...searchFieldDomProps}
                   onFocus={() => {
                     if (searchTerm.trim()) setProductSearchOpen(true);
                   }}
@@ -2658,11 +2738,11 @@ export function NewSale() {
                     }
                   }}
                   className={cn(
-                    "h-9 border-gray-200 pl-9 text-sm shadow-sm focus-visible:ring-1 focus-visible:ring-blue-400 focus-visible:ring-offset-0 sm:h-10 sm:pl-10",
+                    "h-9 border-gray-200 pl-9 text-sm shadow-sm focus-visible:ring-1 focus-visible:ring-blue-400 focus-visible:ring-offset-0 sm:h-10 sm:pl-10 [&::-webkit-search-cancel-button]:hidden",
                     isScanning && "border-blue-500 bg-blue-50/50 pr-10",
                   )}
-                  autoFocus
                 />
+                </form>
 
                 {productSearchOpen && searchDropdownProducts.length > 0 && (
                   <div
@@ -2933,18 +3013,18 @@ export function NewSale() {
       {/* Cart Section */}
       <div
         className={cn(
-          "flex w-full flex-col bg-white lg:h-full lg:w-[360px] lg:shrink-0 lg:border-l lg:border-slate-200",
+          "flex w-full min-h-0 flex-col overflow-hidden bg-white lg:h-full lg:w-[360px] lg:shrink-0 lg:border-l lg:border-slate-200",
           cart.length === 0
             ? "max-lg:hidden"
             : cn(
                 "max-lg:fixed max-lg:inset-x-0 max-lg:bottom-0 max-lg:z-30 max-lg:border-t max-lg:border-slate-200",
                 mobileCartOpen
-                  ? "max-lg:max-h-[min(85dvh,100%)] max-lg:rounded-t-2xl max-lg:shadow-2xl"
+                  ? "max-lg:h-[min(85dvh,100%)] max-lg:max-h-[min(85dvh,100%)] max-lg:rounded-t-2xl max-lg:shadow-2xl"
                   : "max-lg:shadow-[0_-8px_30px_-12px_rgba(15,23,42,0.3)]",
               ),
         )}
       >
-        <div className="border-b border-slate-200 px-2 py-1.5 sm:px-3 sm:py-2.5">
+        <div className="shrink-0 border-b border-slate-200 px-2 py-1.5 sm:px-3 sm:py-2.5">
           <button
             type="button"
             className="flex w-full items-center justify-between gap-2 text-left lg:hidden"
@@ -3086,6 +3166,8 @@ export function NewSale() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[11px] font-medium text-slate-800">
                         #{index + 1} · {sale.items.length} items
+                        {sale.customer?.name || sale.customerId ? " · " : ""}
+                        {sale.customer?.name || (sale.customerId ? "Customer" : "Walk-in")}
                       </p>
                       <p className="text-[10px] tabular-nums text-slate-500">
                         Rs {formatMoney(saleTotal)}
@@ -3127,7 +3209,12 @@ export function NewSale() {
             !mobileCartOpen && "max-lg:hidden",
           )}
         >
-          <div ref={cartScrollContainerRef} className="h-full overflow-y-auto px-2 py-2">
+          <div
+            ref={cartScrollContainerRef}
+            className="h-full min-h-0 overflow-y-auto overscroll-contain px-2 py-2 touch-pan-y [-webkit-overflow-scrolling:touch]"
+            onWheel={(event) => event.stopPropagation()}
+            onTouchMove={(event) => event.stopPropagation()}
+          >
             {cart.length === 0 ? (
               <div className="flex flex-col items-center justify-center py-12 text-center">
                 <Scan className="mb-2 h-8 w-8 text-slate-200" />
@@ -3380,7 +3467,7 @@ export function NewSale() {
         {cart.length > 0 && (
           <div
             className={cn(
-              "border-t border-slate-200 bg-white px-2 py-2 shadow-[0_-4px_20px_-12px_rgba(15,23,42,0.15)] sm:px-3 sm:py-3 max-lg:pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]",
+              "shrink-0 border-t border-slate-200 bg-white px-2 py-2 shadow-[0_-4px_20px_-12px_rgba(15,23,42,0.15)] sm:px-3 sm:py-3 max-lg:pb-[max(0.5rem,env(safe-area-inset-bottom))] lg:pb-[max(0.75rem,env(safe-area-inset-bottom))]",
               !mobileCartOpen && "max-lg:hidden",
             )}
           >

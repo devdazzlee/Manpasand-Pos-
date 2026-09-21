@@ -70,7 +70,7 @@ SelectScrollDownButton.displayName =
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitive.Content>,
   React.ComponentPropsWithoutRef<typeof SelectPrimitive.Content>
->(({ className, children, position = "popper", ...props }, ref) => (
+>(({ className, children, position = "popper", onCloseAutoFocus, ...props }, ref) => (
   <SelectPrimitive.Portal>
     <SelectPrimitive.Content
       ref={ref}
@@ -82,6 +82,11 @@ const SelectContent = React.forwardRef<
       )}
       position={position}
       {...props}
+      onCloseAutoFocus={(event) => {
+        // Keep the page from jumping / re-opening the mobile keyboard.
+        event.preventDefault()
+        onCloseAutoFocus?.(event)
+      }}
     >
       <SelectScrollUpButton />
       <SelectPrimitive.Viewport

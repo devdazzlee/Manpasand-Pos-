@@ -37,6 +37,17 @@ interface OrderEmailData {
   orderNotes?: string;
 }
 
+function formatGuestPaymentMethod(method: string): string {
+  switch (method) {
+    case 'card':
+      return 'Credit / Debit Card';
+    case 'bank_transfer':
+      return 'Bank Transfer';
+    default:
+      return 'Cash on Delivery';
+  }
+}
+
 export class EmailService {
   /**
    * Send order confirmation email to customer
@@ -74,7 +85,7 @@ export class EmailService {
                 <h2>Order Details</h2>
                 <p><strong>Order Number:</strong> ${orderData.orderNumber}</p>
                 <p><strong>Order Date:</strong> ${new Date().toLocaleDateString()}</p>
-                <p><strong>Payment Method:</strong> ${orderData.paymentMethod === 'cash' ? 'Cash on Delivery' : orderData.paymentMethod}</p>
+                <p><strong>Payment Method:</strong> ${formatGuestPaymentMethod(orderData.paymentMethod)}</p>
               </div>
 
               <div class="order-info">
@@ -104,6 +115,13 @@ export class EmailService {
                 <div class="order-info" style="background: #fff3cd; border-left: 4px solid #ffc107;">
                   <h3>Cash on Delivery</h3>
                   <p>Please have the exact amount (Rs. ${orderData.total.toLocaleString()}) ready for our delivery agent.</p>
+                </div>
+              ` : ''}
+
+              ${orderData.paymentMethod === 'bank_transfer' ? `
+                <div class="order-info" style="background: #e8f4fc; border-left: 4px solid #1A73A8;">
+                  <h3>Bank Transfer</h3>
+                  <p>Please message us on WhatsApp (+92 342 3344040) with order ${orderData.orderNumber} so we can share account details and verify your transfer.</p>
                 </div>
               ` : ''}
 
@@ -197,7 +215,7 @@ export class EmailService {
                 <p>Subtotal: Rs. ${orderData.subtotal.toLocaleString()}</p>
                 <p>Shipping: ${orderData.shipping === 0 ? 'Free' : `Rs. ${orderData.shipping.toLocaleString()}`}</p>
                 <p class="total">Total: Rs. ${orderData.total.toLocaleString()}</p>
-                <p><strong>Payment Method:</strong> ${orderData.paymentMethod === 'cash' ? 'Cash on Delivery' : orderData.paymentMethod}</p>
+                <p><strong>Payment Method:</strong> ${formatGuestPaymentMethod(orderData.paymentMethod)}</p>
               </div>
 
               ${orderData.orderNotes ? `

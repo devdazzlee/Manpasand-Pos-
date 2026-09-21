@@ -236,18 +236,9 @@ const getOrderStatusStyle = (status: string) => {
 
 const getAllowedStatusOptions = (
   status: string,
-  paymentMethod?: string,
-  paymentStatus?: string,
+  _paymentMethod?: string,
+  _paymentStatus?: string,
 ): OrderStatusOption[] => {
-  const unpaidCard =
-    (paymentMethod || "").toUpperCase() === "CARD" &&
-    (paymentStatus || "PENDING").toUpperCase() !== "PAID";
-
-  if (unpaidCard) {
-    if (status === "CANCELLED") return ["CANCELLED"];
-    return ["PENDING", "CANCELLED"];
-  }
-
   switch (status) {
     case "PENDING":
       return ["PENDING", "PROCESSING", "COMPLETED", "CANCELLED"];
@@ -284,7 +275,8 @@ function formatPaymentMethod(method?: string) {
 }
 
 function getPaymentHold(order: { payment_method?: string; payment_status?: string }) {
-  if ((order.payment_method || "").toUpperCase() !== "CARD") return null;
+  const method = (order.payment_method || "").toUpperCase();
+  if (method !== "CARD" && method !== "BANK_TRANSFER") return null;
   const status = (order.payment_status || "PENDING").toUpperCase();
   if (status === "PAID") {
     return {
@@ -299,7 +291,7 @@ function getPaymentHold(order: { payment_method?: string; payment_status?: strin
     };
   }
   return {
-    label: "On hold — awaiting payment",
+    label: method === "BANK_TRANSFER" ? "Awaiting bank transfer" : "On hold — awaiting payment",
     className: "bg-amber-100 text-amber-900 border-amber-300",
   };
 }

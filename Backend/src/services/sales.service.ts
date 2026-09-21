@@ -676,6 +676,15 @@ class SaleService {
             name: true,
           },
         },
+        customer: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone_number: true,
+            is_active: true,
+          },
+        },
       },
       orderBy: { created_at: 'desc' },
     });
@@ -723,7 +732,7 @@ class SaleService {
     return prisma.holdSale.create({
       data: {
         branch_id: branchId,
-        customer_id: customerId,
+        customer_id: customerId?.trim() ? customerId.trim() : null,
         created_by: createdBy,
         items: normalizedItems as Prisma.InputJsonValue,
         subtotal: new Prisma.Decimal(subtotal),
@@ -734,6 +743,15 @@ class SaleService {
           select: {
             id: true,
             name: true,
+          },
+        },
+        customer: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone_number: true,
+            is_active: true,
           },
         },
       },
@@ -755,6 +773,15 @@ class SaleService {
             select: {
               id: true,
               name: true,
+            },
+          },
+          customer: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              phone_number: true,
+              is_active: true,
             },
           },
         },

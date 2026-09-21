@@ -26,7 +26,13 @@ const createGuestOrder = asyncHandler(async (req: Request, res: Response) => {
     ).send(res);
   }
 
-  new ApiResponse(order, 'Order placed successfully. Confirmation email sent.', 201).send(res);
+  new ApiResponse(
+    order,
+    req.body.paymentMethod === 'bank_transfer'
+      ? 'Order placed. Continue on WhatsApp to confirm bank transfer.'
+      : 'Order placed successfully. Confirmation email sent.',
+    201,
+  ).send(res);
 });
 
 const getGuestOrders = asyncHandler(async (req: Request, res: Response) => {

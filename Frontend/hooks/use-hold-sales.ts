@@ -17,6 +17,15 @@ interface CartItem {
   productId?: string;
 }
 
+interface HoldSaleCustomer {
+  id: string;
+  name?: string | null;
+  email?: string | null;
+  phone_number?: string | null;
+  phone?: string | null;
+  is_active?: boolean;
+}
+
 interface HoldSaleRecord {
   id: string;
   items: CartItem[];
@@ -25,6 +34,8 @@ interface HoldSaleRecord {
   branchId: string;
   branchName: string;
   createdAt: string;
+  customerId: string | null;
+  customer: HoldSaleCustomer | null;
 }
 
 export function useHoldSales(branchIdOverride?: string) {
@@ -55,15 +66,35 @@ export function useHoldSales(branchIdOverride?: string) {
     unit: item.unit,
   });
 
-  const mapHoldSale = (holdSale: any): HoldSaleRecord => ({
-    id: holdSale.id,
-    items: Array.isArray(holdSale.items) ? holdSale.items.map(normalizeItem) : [],
-    subtotal: Number(holdSale.subtotal || 0),
-    totalItems: Number(holdSale.total_items || 0),
-    branchId: holdSale.branch_id || "",
-    branchName: holdSale.branch?.name || "Unknown Branch",
-    createdAt: holdSale.created_at || new Date().toISOString(),
-  });
+  const mapHoldSale = (holdSale: any): HoldSaleRecord => {
+    const customer = holdSale.customer
+      ? {
+          id: String(holdSale.customer.id),
+          name: holdSale.customer.name ?? null,
+          email: holdSale.customer.email ?? null,
+          phone_number: holdSale.customer.phone_number ?? holdSale.customer.phone ?? null,
+          phone: holdSale.customer.phone ?? holdSale.customer.phone_number ?? null,
+          is_active: holdSale.customer.is_active,
+        }
+      : null;
+    const customerId =
+      holdSale.customer_id ||
+      holdSale.customerId ||
+      customer?.id ||
+      null;
+
+    return {
+      id: holdSale.id,
+      items: Array.isArray(holdSale.items) ? holdSale.items.map(normalizeItem) : [],
+      subtotal: Number(holdSale.subtotal || 0),
+      totalItems: Number(holdSale.total_items || 0),
+      branchId: holdSale.branch_id || "",
+      branchName: holdSale.branch?.name || "Unknown Branch",
+      createdAt: holdSale.created_at || new Date().toISOString(),
+      customerId: customerId ? String(customerId) : null,
+      customer,
+    };
+  };
 
   const refreshHoldSales = useCallback(async () => {
     const branchId = getBranchId();
@@ -100,7 +131,7 @@ export function useHoldSales(branchIdOverride?: string) {
     try {
       const response = await apiClient.post("/sale/hold", {
         branchId,
-        customerId,
+        customerId: customerId || null,
         items: cart,
       });
       const created = response?.data?.data ? mapHoldSale(response.data.data) : null;
@@ -116,7 +147,7 @@ export function useHoldSales(branchIdOverride?: string) {
     }
   }, [getBranchId, refreshHoldSales]);
 
-  const retrieveHoldSale = useCallback(async (index: number): Promise<CartItem[] | null> => {
+  const retrieveHoldSale = useCallback(async (index: number): Promise<HoldSaleRecord | null> => {
     if (index < 0 || index >= holdSales.length) return null;
     const holdSaleRecord = holdSales[index];
     const branchId = getBranchId();
@@ -125,9 +156,9 @@ export function useHoldSales(branchIdOverride?: string) {
       const response = await apiClient.post(`/sale/hold/${holdSaleRecord.id}/retrieve`, {
         branchId,
       });
-      const retrieved = response?.data?.data ? mapHoldSale(response.data.data) : null;
+      const retrieved = response?.data?.data ? mapHoldSale(response.data.data) : holdSaleRecord;
       setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
-      return retrieved?.items || null;
+      return retrieved;
     } catch (error) {
       console.error("Failed to retrieve hold sale from DB:", error);
       return null;
