@@ -30,6 +30,18 @@ textarea {
   font-feature-settings: "tnum";
 }
 
+/* Hide browser up/down spinners on number inputs so scroll cannot change values. */
+input[type="number"] {
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}
+
 /* Ensure mobile viewport */
 html {
   -webkit-text-size-adjust: 100%;

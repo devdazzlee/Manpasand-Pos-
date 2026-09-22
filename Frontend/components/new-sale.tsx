@@ -71,7 +71,7 @@ import { syncManager } from "@/lib/offline-sync";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAllPosProducts } from "@/hooks/queries/use-products";
 import { useCategories } from "@/hooks/queries/use-categories";
-import { useCustomers } from "@/hooks/queries/use-customers";
+import { useCustomers, useCustomerMutations } from "@/hooks/queries/use-customers";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import {
   formatMoneyDisplay,
@@ -122,6 +122,30 @@ interface CartItem {
   unitId?: string;
   unitName?: string;
   unit?: string;
+}
+
+const SALE_DRAFT_KEY = "manpasand_pos_new_sale_draft";
+
+type SaleDraft = {
+  cart: CartItem[];
+  selectedCustomer: string | null;
+  pinnedCustomer: PosCustomer | null;
+  globalDiscountType: "percentage" | "fixed";
+  globalDiscountValue: string;
+  showDiscountRow: boolean;
+};
+
+function readSaleDraft(): SaleDraft | null {
+  if (typeof window === "undefined") return null;
+  try {
+    const raw = localStorage.getItem(SALE_DRAFT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || !Array.isArray(parsed.cart)) return null;
+    return parsed as SaleDraft;
+  } catch {
+    return null;
+  }
 }
 
 interface Product {
@@ -177,6 +201,7 @@ interface CustomerSearchComboboxProps {
   loading?: boolean;
   value: string | null;
   onChange: (customerId: string | null) => void;
+  onCreated?: (customer: PosCustomer) => void;
   onSearch?: (query: string) => void;
   disabled?: boolean;
 }
@@ -186,10 +211,21 @@ function CustomerSearchCombobox({
   loading = false,
   value,
   onChange,
+  onCreated,
   onSearch,
   disabled = false,
 }: CustomerSearchComboboxProps) {
   const [open, setOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
+  const [savingCustomer, setSavingCustomer] = useState(false);
+  const [newCustomer, setNewCustomer] = useState({
+    name: "",
+    phone_number: "",
+    email: "",
+    address: "",
+    default_discount_percent: "",
+  });
+  const { create: createCustomerMutation } = useCustomerMutations();
 
   const activeCustomers = useMemo(
     () => customers.filter((customer) => customer.is_active !== false),
@@ -209,7 +245,7 @@ function CustomerSearchCombobox({
           role="combobox"
           aria-expanded={open}
           disabled={disabled || loading}
-          className="h-9 w-full justify-between bg-white text-sm font-normal sm:h-10"
+          className="h-11 w-full justify-between bg-white text-sm font-normal sm:h-10"
         >
           <span className="flex min-w-0 items-center gap-2 truncate">
             <User className="h-4 w-4 shrink-0 text-gray-500" />
@@ -225,15 +261,16 @@ function CustomerSearchCombobox({
         </Button>
       </PopoverTrigger>
       <PopoverContent
-        className="w-[var(--radix-popover-trigger-width)] p-0"
+        className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-1rem)] p-0 sm:max-w-none"
         align="start"
+        collisionPadding={8}
       >
         <Command shouldFilter={false}>
           <CommandInput
             placeholder="Search by name, phone, or email..."
             onValueChange={(query) => onSearch?.(query)}
           />
-          <CommandList>
+          <CommandList className="max-h-[min(50dvh,20rem)]">
             <CommandEmpty>No customer found.</CommandEmpty>
             <CommandGroup>
               <CommandItem
@@ -242,6 +279,7 @@ function CustomerSearchCombobox({
                   onChange(null);
                   setOpen(false);
                 }}
+                className="min-h-11 sm:min-h-0"
               >
                 <Check
                   className={cn("mr-2 h-4 w-4", !value ? "opacity-100" : "opacity-0")}
@@ -256,6 +294,7 @@ function CustomerSearchCombobox({
                     onChange(customer.id);
                     setOpen(false);
                   }}
+                  className="min-h-11 sm:min-h-0"
                 >
                   <Check
                     className={cn(
@@ -264,7 +303,7 @@ function CustomerSearchCombobox({
                     )}
                   />
                   <div className="min-w-0 flex flex-col">
-                    <span className="truncate">{getCustomerDisplayName(customer)}</span>
+                    <span className="truncate font-medium">{getCustomerDisplayName(customer)}</span>
                     {(customer.phone_number || customer.phone || customer.email) && (
                       <span className="truncate text-xs text-muted-foreground">
                         {[
@@ -282,8 +321,202 @@ function CustomerSearchCombobox({
               ))}
             </CommandGroup>
           </CommandList>
+          <button
+            type="button"
+            className="flex w-full items-center gap-2 border-t border-slate-200 px-3 py-3 text-left text-sm font-semibold text-blue-700 hover:bg-blue-50"
+            onClick={() => {
+              setOpen(false);
+              setAddOpen(true);
+            }}
+          >
+            <Plus className="h-4 w-4 shrink-0" />
+            Add customer
+          </button>
         </Command>
       </PopoverContent>
+      <Dialog open={addOpen} onOpenChange={setAddOpen}>
+        <DialogContent className="flex max-h-[92dvh] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-h-[90dvh] sm:max-w-md sm:gap-4 sm:p-6 max-sm:bottom-0 max-sm:left-0 max-sm:right-0 max-sm:top-auto max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+          <DialogHeader className="shrink-0 px-4 pb-2 pt-4 pr-10 text-left sm:px-0 sm:pt-0 sm:pr-8">
+            <DialogTitle>Add customer</DialogTitle>
+            <DialogDescription>
+              Name and phone are required. The new customer is selected for this sale.
+            </DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex min-h-0 flex-1 flex-col"
+            onSubmit={async (event) => {
+              event.preventDefault();
+              const name = newCustomer.name.trim();
+              const phone = newCustomer.phone_number.trim();
+              const email = newCustomer.email.trim();
+              const address = newCustomer.address.trim();
+              const discountRaw = newCustomer.default_discount_percent.trim();
+
+              if (!name) {
+                toast.error("Customer name is required");
+                return;
+              }
+              if (!/^[0-9+\-\s]{7,20}$/.test(phone)) {
+                toast.error("Enter a valid phone number (at least 7 digits)");
+                return;
+              }
+              if (email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+                toast.error("Enter a valid email or leave it blank");
+                return;
+              }
+              const discount = discountRaw === "" ? undefined : Number(discountRaw);
+              if (
+                discount !== undefined &&
+                (Number.isNaN(discount) || discount < 0 || discount > 100)
+              ) {
+                toast.error("Discount must be between 0 and 100");
+                return;
+              }
+
+              setSavingCustomer(true);
+              try {
+                const result = await createCustomerMutation.mutateAsync({
+                  name,
+                  phone_number: phone,
+                  email: email || undefined,
+                  address: address || undefined,
+                  default_discount_percent: discount,
+                  is_active: true,
+                });
+                const created = ((result as { customer?: PosCustomer })?.customer ??
+                  result) as PosCustomer;
+                if (!created?.id) {
+                  toast.error("Customer was saved but could not be selected");
+                  return;
+                }
+                onChange(created.id);
+                onCreated?.({
+                  id: created.id,
+                  name: created.name || name,
+                  phone_number: created.phone_number || phone,
+                  phone: created.phone || created.phone_number || phone,
+                  email: created.email || email || null,
+                  is_active: created.is_active !== false,
+                });
+                setNewCustomer({
+                  name: "",
+                  phone_number: "",
+                  email: "",
+                  address: "",
+                  default_discount_percent: "",
+                });
+                setAddOpen(false);
+                toast.success(`${created.name || name} added`);
+              } catch (error: any) {
+                toast.error(
+                  error?.response?.data?.message ||
+                    error?.message ||
+                    "Could not add customer",
+                );
+              } finally {
+                setSavingCustomer(false);
+              }
+            }}
+          >
+            <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain px-4 py-2 sm:px-1">
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-700" htmlFor="new-sale-customer-name">
+                Name
+              </label>
+              <Input
+                id="new-sale-customer-name"
+                className="h-11 text-base sm:h-10 sm:text-sm"
+                value={newCustomer.name}
+                onChange={(e) => setNewCustomer((prev) => ({ ...prev, name: e.target.value }))}
+                placeholder="Customer name"
+                autoComplete="name"
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-700" htmlFor="new-sale-customer-phone">
+                Phone
+              </label>
+              <Input
+                id="new-sale-customer-phone"
+                className="h-11 text-base sm:h-10 sm:text-sm"
+                value={newCustomer.phone_number}
+                onChange={(e) =>
+                  setNewCustomer((prev) => ({ ...prev, phone_number: e.target.value }))
+                }
+                placeholder="03xx xxxxxxx"
+                inputMode="tel"
+                autoComplete="tel"
+                required
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-700" htmlFor="new-sale-customer-email">
+                Email
+              </label>
+              <Input
+                id="new-sale-customer-email"
+                className="h-11 text-base sm:h-10 sm:text-sm"
+                value={newCustomer.email}
+                onChange={(e) => setNewCustomer((prev) => ({ ...prev, email: e.target.value }))}
+                placeholder="Optional"
+                inputMode="email"
+                autoComplete="email"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-700" htmlFor="new-sale-customer-address">
+                Address
+              </label>
+              <Input
+                id="new-sale-customer-address"
+                className="h-11 text-base sm:h-10 sm:text-sm"
+                value={newCustomer.address}
+                onChange={(e) => setNewCustomer((prev) => ({ ...prev, address: e.target.value }))}
+                placeholder="Optional"
+                autoComplete="street-address"
+              />
+            </div>
+            <div className="space-y-1">
+              <label className="text-xs font-medium text-slate-700" htmlFor="new-sale-customer-discount">
+                Default discount %
+              </label>
+              <Input
+                id="new-sale-customer-discount"
+                className="h-11 text-base sm:h-10 sm:text-sm"
+                value={newCustomer.default_discount_percent}
+                onChange={(e) =>
+                  setNewCustomer((prev) => ({
+                    ...prev,
+                    default_discount_percent: e.target.value,
+                  }))
+                }
+                placeholder="0"
+                inputMode="decimal"
+              />
+            </div>
+            </div>
+            <DialogFooter className="mt-0 shrink-0 gap-2 border-t border-slate-200 px-4 py-3 sm:mt-2 sm:border-0 sm:px-0 sm:py-0">
+              <Button
+                type="submit"
+                className="h-11 w-full text-base sm:h-10 sm:w-auto sm:text-sm"
+                disabled={savingCustomer}
+              >
+                {savingCustomer ? "Saving..." : "Save customer"}
+              </Button>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-11 w-full text-base sm:h-10 sm:w-auto sm:text-sm"
+                onClick={() => setAddOpen(false)}
+                disabled={savingCustomer}
+              >
+                Cancel
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
     </Popover>
   );
 }
@@ -321,7 +554,7 @@ function CategoryFilterCombobox({
           role="combobox"
           aria-expanded={open}
           disabled={disabled || loading || categories.length === 0}
-          className="h-9 w-full justify-between bg-white text-sm font-normal sm:h-10"
+          className="h-11 w-full justify-between bg-white text-sm font-normal sm:h-10"
         >
           <span className="flex min-w-0 items-center gap-2 truncate">
             <LayoutGrid className="h-4 w-4 shrink-0 text-gray-500" />
@@ -334,10 +567,14 @@ function CategoryFilterCombobox({
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[320px] p-0" align="start">
+      <PopoverContent
+        className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-1rem)] p-0 sm:w-[320px] sm:max-w-none"
+        align="start"
+        collisionPadding={8}
+      >
         <Command>
           <CommandInput placeholder="Search categories..." />
-          <CommandList className="max-h-72">
+          <CommandList className="max-h-[min(50dvh,18rem)] sm:max-h-72">
             <CommandEmpty>No category found.</CommandEmpty>
             <CommandGroup>
               {categories.map((category) => (
@@ -348,6 +585,7 @@ function CategoryFilterCombobox({
                     onChange(category.id);
                     setOpen(false);
                   }}
+                  className="min-h-11 sm:min-h-0"
                 >
                   <Check
                     className={cn(
@@ -371,6 +609,48 @@ function CategoryFilterCombobox({
   );
 }
 
+
+function wrappedLineCount(text: string, charsPerLine: number) {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return 1;
+  const limit = Math.max(8, charsPerLine);
+  let lines = 1;
+  let used = 0;
+  for (const word of words) {
+    if (word.length > limit) {
+      if (used > 0) {
+        lines += 1;
+        used = 0;
+      }
+      const chunks = Math.ceil(word.length / limit);
+      lines += chunks - 1;
+      used = word.length % limit;
+      continue;
+    }
+    const next = used === 0 ? word.length : used + 1 + word.length;
+    if (next <= limit) {
+      used = next;
+    } else {
+      lines += 1;
+      used = word.length;
+    }
+  }
+  return lines;
+}
+
+function productRowHeight(names: string[], cardWidth: number, mobile: boolean) {
+  const fontPx = mobile ? 14 : 13;
+  const linePx = mobile ? 20 : 18;
+  const inner = Math.max(48, cardWidth - (mobile ? 24 : 20));
+  const charsPerLine = Math.max(8, Math.floor(inner / (fontPx * 0.58)));
+  let lines = 1;
+  for (const name of names) {
+    lines = Math.max(lines, wrappedLineCount(name, charsPerLine));
+  }
+  // Padding + price row, plus a little extra so the last line is never clipped.
+  const chrome = mobile ? 64 : 56;
+  return chrome + lines * linePx;
+}
 
 export function NewSale() {
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -447,6 +727,7 @@ export function NewSale() {
   const [isScanning, setIsScanning] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
   const [pinnedCustomer, setPinnedCustomer] = useState<PosCustomer | null>(null);
+  const [saleDraftReady, setSaleDraftReady] = useState(false);
   // Global printer settings (configured in Printer Settings page)
   const { receiptPrinter, getReceiptPrinterObj, printers } = usePrinterSettings();
   const [showHeldSales, setShowHeldSales] = useState(false);
@@ -463,6 +744,8 @@ export function NewSale() {
   const [globalDiscountValue, setGlobalDiscountValue] = useState<string>("");
   const [showDiscountRow, setShowDiscountRow] = useState(false);
   const [priceEditLineId, setPriceEditLineId] = useState<string | null>(null);
+  const [qtySheetLineId, setQtySheetLineId] = useState<string | null>(null);
+  const [qtySheetValue, setQtySheetValue] = useState("");
   // True once the cashier edits the discount by hand — stops the customer's
   // default discount from overwriting their change.
   const discountTouchedRef = useRef(false);
@@ -524,6 +807,56 @@ export function NewSale() {
       autoDiscountCustomerRef.current = null;
     }
   }, [selectedCustomer, customers]);
+
+  // Restore the in-progress sale after a refresh, then keep it saved.
+  useEffect(() => {
+    const draft = readSaleDraft();
+    if (draft) {
+      if (draft.cart.length > 0) setCart(draft.cart);
+      if (draft.selectedCustomer) setSelectedCustomer(draft.selectedCustomer);
+      if (draft.pinnedCustomer?.id) setPinnedCustomer(draft.pinnedCustomer);
+      if (draft.globalDiscountType === "percentage" || draft.globalDiscountType === "fixed") {
+        setGlobalDiscountType(draft.globalDiscountType);
+      }
+      if (draft.globalDiscountValue) {
+        setGlobalDiscountValue(draft.globalDiscountValue);
+        setShowDiscountRow(true);
+        discountTouchedRef.current = true;
+      } else if (draft.showDiscountRow) {
+        setShowDiscountRow(true);
+      }
+    }
+    setSaleDraftReady(true);
+  }, []);
+
+  useEffect(() => {
+    if (!saleDraftReady) return;
+    try {
+      if (cart.length === 0 && !selectedCustomer) {
+        localStorage.removeItem(SALE_DRAFT_KEY);
+        return;
+      }
+      const draft: SaleDraft = {
+        cart,
+        selectedCustomer,
+        pinnedCustomer,
+        globalDiscountType,
+        globalDiscountValue,
+        showDiscountRow,
+      };
+      localStorage.setItem(SALE_DRAFT_KEY, JSON.stringify(draft));
+    } catch {
+      // Ignore private-mode or full storage.
+    }
+  }, [
+    saleDraftReady,
+    cart,
+    selectedCustomer,
+    pinnedCustomer,
+    globalDiscountType,
+    globalDiscountValue,
+    showDiscountRow,
+  ]);
 
   // Load cart duplicated from Sales History
   useEffect(() => {
@@ -781,9 +1114,9 @@ export function NewSale() {
     () =>
       products.map((product) => ({
         product,
-        hay: `${product.name ?? ""} ${product.code ?? ""} ${
+        hay: `${product.name ?? ""}|${product.code ?? ""}|${
           product.barcode ?? ""
-        } ${product.sku ?? ""}`.toLowerCase(),
+        }|${product.sku ?? ""}`.toLowerCase(),
       })),
     [products],
   );
@@ -812,19 +1145,22 @@ export function NewSale() {
   // Below the threshold we render the plain CSS grid (proven, zero risk). Above
   // it, only the visible rows are mounted so the catalog can be any size.
   const VIRTUALIZE_THRESHOLD = 120;
-  const GRID_ROW_HEIGHT = 96; // initial estimate; real height comes from measureElement
+  // Row height follows the longest name in that row, then stays fixed while
+  // scrolling so prices do not jump.
   const productScrollRef = useRef<HTMLDivElement>(null);
   const productGridRef = useRef<HTMLDivElement>(null);
   const [gridColumns, setGridColumns] = useState(4);
+  const [gridWidth, setGridWidth] = useState(0);
   const [gridScrollMargin, setGridScrollMargin] = useState(0);
 
-  // Column count from the scroll container's inner width (its own padding aside).
+  // Phones stay at 2 columns. Desktop widths keep the previous 4 / 5 / 6 layout.
   useEffect(() => {
     const el = productScrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const compute = () => {
       const w = el.clientWidth;
-      setGridColumns(w < 480 ? 3 : w < 680 ? 4 : w < 1000 ? 5 : 6);
+      setGridColumns(w < 480 ? 2 : w < 680 ? 4 : w < 1000 ? 5 : 6);
+      setGridWidth(w);
     };
     compute();
     const ro = new ResizeObserver(compute);
@@ -834,10 +1170,30 @@ export function NewSale() {
 
   const virtualizeGrid = gridProducts.length > VIRTUALIZE_THRESHOLD;
   const gridRowCount = Math.ceil(gridProducts.length / gridColumns);
+  const gridRowHeights = useMemo(() => {
+    const cols = Math.max(1, gridColumns);
+    const mobile = cols <= 2;
+    const gap = 8;
+    const width = gridWidth > 0 ? gridWidth : mobile ? 360 : 1100;
+    const cardWidth = (width - gap * (cols - 1)) / cols;
+    const heights: number[] = [];
+    for (let row = 0; row < gridRowCount; row++) {
+      const names = gridProducts
+        .slice(row * cols, row * cols + cols)
+        .map((product) => product.name || "");
+      heights.push(productRowHeight(names, cardWidth, mobile));
+    }
+    return heights;
+  }, [gridProducts, gridColumns, gridWidth, gridRowCount]);
+  const gridRowHeightsRef = useRef(gridRowHeights);
+  gridRowHeightsRef.current = gridRowHeights;
+  const estimateRowSize = useCallback((index: number) => {
+    return gridRowHeightsRef.current[index] ?? 84;
+  }, []);
 
-  // How far the grid sits below the top of the scroll container — the header,
-  // filters and printer chip all scroll with it, so this isn't constant.
+  // Measure once when the grid mounts / columns change — not on every scroll.
   useLayoutEffect(() => {
+    if (!virtualizeGrid) return;
     const grid = productGridRef.current;
     const scroll = productScrollRef.current;
     if (!grid || !scroll) return;
@@ -846,23 +1202,22 @@ export function NewSale() {
         scroll.getBoundingClientRect().top +
         scroll.scrollTop,
     );
-  }, [virtualizeGrid, productsLoading, isProductQueryPending, receiptPrinter, gridColumns]);
+  }, [virtualizeGrid, gridColumns, productsLoading, receiptPrinter]);
 
   const rowVirtualizer = useVirtualizer({
     count: virtualizeGrid ? gridRowCount : 0,
     getScrollElement: () => productScrollRef.current,
-    // Starting guess only — each row reports its real height via
-    // `measureElement`, so rows with 1-line vs 2-line names never overlap.
-    estimateSize: () => GRID_ROW_HEIGHT,
-    overscan: 6,
+    estimateSize: estimateRowSize,
+    overscan: 8,
+    gap: 8,
     scrollMargin: gridScrollMargin,
   });
 
-  // Re-measure rows when the column count changes (row contents shift).
-  useEffect(() => {
-    rowVirtualizer.measure();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [gridColumns, gridProducts.length]);
+  const rowVirtualizerRef = useRef(rowVirtualizer);
+  rowVirtualizerRef.current = rowVirtualizer;
+  useLayoutEffect(() => {
+    rowVirtualizerRef.current.measure();
+  }, [gridRowHeights]);
 
   const renderProductCard = (product: Product) => {
     const cartItems = cart.filter(
@@ -878,7 +1233,7 @@ export function NewSale() {
         type="button"
         onClick={() => handleProductClick(product)}
         className={cn(
-          "group relative flex h-full flex-col rounded-xl border bg-white p-2.5 text-left transition-colors duration-100",
+          "group relative flex h-full min-h-[4.75rem] flex-col rounded-xl border bg-white p-3 text-left transition-colors duration-100 sm:min-h-[4.5rem] sm:p-2.5",
           "active:scale-[0.98] sm:hover:border-blue-300 sm:hover:bg-blue-50/40",
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:ring-offset-1",
           inCart
@@ -887,16 +1242,16 @@ export function NewSale() {
         )}
       >
         {inCart && (
-          <span className="absolute -right-1.5 -top-1.5 flex h-5 min-w-[1.25rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-[11px] font-bold tabular-nums text-white shadow-sm">
+          <span className="absolute -right-1.5 -top-1.5 flex h-6 min-w-[1.5rem] items-center justify-center rounded-full bg-blue-600 px-1.5 text-xs font-bold tabular-nums text-white shadow-sm sm:h-5 sm:min-w-[1.25rem] sm:text-[11px]">
             {formatQuantityValue(totalQty)}
           </span>
         )}
 
-        <span className="line-clamp-2 flex-1 text-[13px] font-medium leading-snug text-slate-900">
+        <span className="break-words text-sm font-semibold leading-snug text-slate-900 sm:text-[13px] sm:font-medium">
           {product.name}
         </span>
 
-        <div className="mt-1.5 flex items-baseline justify-between gap-2 border-t border-slate-100 pt-1.5">
+        <div className="mt-auto flex items-baseline justify-between gap-2 border-t border-slate-100 pt-1.5">
           {product.category ? (
             <span className="hidden truncate text-[11px] text-slate-400 sm:inline">
               {product.category}
@@ -904,8 +1259,8 @@ export function NewSale() {
           ) : (
             <span className="hidden text-[11px] text-slate-300 sm:inline">—</span>
           )}
-          <span className="ml-auto shrink-0 text-[15px] font-bold tabular-nums text-slate-900">
-            <span className="text-[11px] font-medium text-slate-400">Rs </span>
+          <span className="ml-auto shrink-0 text-base font-bold tabular-nums text-slate-900 sm:text-[15px]">
+            <span className="text-xs font-medium text-slate-400 sm:text-[11px]">Rs </span>
             {formatMoney(product.price)}
           </span>
         </div>
@@ -932,19 +1287,24 @@ export function NewSale() {
     highlightedEl.scrollIntoView({ block: "nearest" });
   }, [highlightedProductIndex, productSearchOpen, searchDropdownProducts.length]);
 
-  const focusSearchInput = useCallback((options?: { clear?: boolean }) => {
+  const focusSearchInput = useCallback((options?: { clear?: boolean; allowTouch?: boolean }) => {
     setProductSearchOpen(false);
     setHighlightedProductIndex(0);
     if (options?.clear) setSearchTerm("");
-    requestAnimationFrame(() => {
+    const focusNow = () => {
       const el = searchInputRef.current;
       if (!el || paymentDialogOpen) return;
       const isTouch =
         window.matchMedia("(pointer: coarse)").matches || window.innerWidth < 768;
-      if (isTouch) return;
+      // Idle/page-load focus stays desktop-only. The search → qty → search
+      // loop passes allowTouch so Android/iOS Next keeps the keyboard open.
+      if (isTouch && !options?.allowTouch) return;
       el.focus({ preventScroll: true });
       el.select();
-    });
+    };
+    // Focus in the same key event so iOS/Android do not dismiss the keyboard.
+    if (options?.allowTouch) focusNow();
+    requestAnimationFrame(focusNow);
   }, [paymentDialogOpen]);
 
   const focusQuantityInput = useCallback(() => {
@@ -1051,10 +1411,18 @@ export function NewSale() {
       },
     ];
 
+    // Commit any in-progress qty on the previous line before switching.
+    const previousLineId = activeCartLineIdRef.current;
+    if (previousLineId) {
+      applyTypedOverlayToCart(previousLineId);
+      clearQuantityOverlay(previousLineId);
+    }
+
     setCartSync(() => nextCart);
 
     lastAddedProductId.current = affectedLineId;
     activeCartLineIdRef.current = affectedLineId;
+    quantityFocusLineIdRef.current = affectedLineId;
     setActiveCartLineId(affectedLineId);
     setQuickQtyFocusTick((n) => n + 1);
 
@@ -2353,10 +2721,55 @@ export function NewSale() {
     selectProductForSale(product);
   };
 
+  // Enter on desktop and Next/Search on the phone keyboard both land here.
+  const commitSearchEntry = () => {
+    // Keydown Enter and the form's Next/submit can both fire for one tap.
+    if (enterKeyPressedRef.current) return;
+    const trimmed = searchTerm.trim();
+    if (!trimmed) return;
+    enterKeyPressedRef.current = true;
+
+    const isNumericBarcode =
+      /^\d{8,}$/.test(trimmed) ||
+      /^\d{12,13}$/.test(trimmed) ||
+      /^\d{8}$/.test(trimmed);
+    const isCodePriceFormat = trimmed.includes("-") && trimmed.length > 3;
+
+    const added =
+      isNumericBarcode || isCodePriceFormat || searchDropdownProducts.length > 0;
+
+    if (isNumericBarcode || isCodePriceFormat) {
+      handleScannerInput(trimmed);
+    } else if (searchDropdownProducts.length > 0) {
+      const product =
+        searchDropdownProducts[highlightedProductIndex] ??
+        searchDropdownProducts[0];
+      selectProductForSale(product);
+    }
+
+    // Move to quantity in this same tap so the phone keyboard stays up.
+    if (added) {
+      const qtyEl = quickQtyInputRef.current;
+      if (qtyEl) {
+        qtyEl.disabled = false;
+        qtyEl.focus({ preventScroll: true });
+      }
+    }
+
+    setTimeout(() => {
+      enterKeyPressedRef.current = false;
+    }, 100);
+  };
+
   const quickAdjustLine = useMemo(() => {
     if (cart.length === 0) return null;
-    if (activeCartLineId) {
-      return cart.find((line) => line.id === activeCartLineId) ?? cart[cart.length - 1];
+    // Prefer the line just activated (new product), never fall back to an
+    // older line while the cart already contains the new id.
+    const preferredId =
+      activeCartLineId ?? lastAddedProductId.current ?? null;
+    if (preferredId) {
+      const match = cart.find((line) => line.id === preferredId);
+      if (match) return match;
     }
     return cart[cart.length - 1];
   }, [cart, activeCartLineId]);
@@ -2369,7 +2782,7 @@ export function NewSale() {
       clearQuantityOverlay(id);
     }
     quantityFocusLineIdRef.current = null;
-    focusSearchInput({ clear: true });
+    focusSearchInput({ clear: true, allowTouch: true });
   }, [focusSearchInput]);
 
   useLayoutEffect(() => {
@@ -2490,7 +2903,7 @@ export function NewSale() {
       <div
         ref={productScrollRef}
         className={cn(
-          "min-h-0 flex-1 overflow-auto p-2 sm:p-4 md:p-6",
+          "min-h-0 flex-1 overflow-auto p-3 sm:p-4 md:p-6 [overflow-anchor:none]",
           cart.length > 0 && "pb-28 sm:pb-40 lg:pb-6",
           mobileCartOpen && cart.length > 0 && "max-lg:overflow-hidden max-lg:pointer-events-none",
         )}
@@ -2539,8 +2952,8 @@ export function NewSale() {
               )}
             </div>
           </div>
-          <div className="mb-2 grid grid-cols-2 gap-2 sm:mb-4 sm:gap-4">
-            <div>
+          <div className="mb-3 grid grid-cols-1 gap-2.5 sm:mb-4 sm:grid-cols-2 sm:gap-4">
+            <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
                 Customer
               </label>
@@ -2556,6 +2969,10 @@ export function NewSale() {
                     if (picked) setPinnedCustomer(picked);
                   }
                 }}
+                onCreated={(customer) => {
+                  setSelectedCustomer(customer.id);
+                  setPinnedCustomer(customer);
+                }}
                 onSearch={(query) => {
                   if (customerSearchTimerRef.current) {
                     window.clearTimeout(customerSearchTimerRef.current);
@@ -2567,7 +2984,7 @@ export function NewSale() {
                 disabled={paymentLoading}
               />
             </div>
-            <div>
+            <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
                 Category
               </label>
@@ -2597,7 +3014,7 @@ export function NewSale() {
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
               Product search
             </label>
-            <div className="flex w-full items-stretch gap-1.5 sm:gap-2">
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-2">
               <div className="relative min-w-0 flex-1">
                 <Search className={`pointer-events-none absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
                 {isScanning && (
@@ -2608,16 +3025,18 @@ export function NewSale() {
                   action=""
                   onSubmit={(e) => {
                     e.preventDefault();
-                    searchInputRef.current?.blur();
+                    // Phone keyboards submit the form on Next instead of keydown Enter.
+                    commitSearchEntry();
                   }}
                 >
                 <Input
                   ref={searchInputRef}
-                  type="search"
+                  type="text"
                   name="pos-product-search"
                   placeholder={isScanning ? "Scanning…" : "Scan or search…"}
                   value={searchTerm}
                   {...searchFieldDomProps}
+                  enterKeyHint="next"
                   onFocus={() => {
                     if (searchTerm.trim()) setProductSearchOpen(true);
                   }}
@@ -2702,43 +3121,14 @@ export function NewSale() {
                       return;
                     }
 
-                    if (e.key === "Enter" && trimmed) {
-                      enterKeyPressedRef.current = true;
-
-                      const isNumericBarcode =
-                        /^\d{8,}$/.test(trimmed) ||
-                        /^\d{12,13}$/.test(trimmed) ||
-                        /^\d{8}$/.test(trimmed);
-                      const isCodePriceFormat = trimmed.includes("-") && trimmed.length > 3;
-
-                      if (isNumericBarcode || isCodePriceFormat) {
-                        e.preventDefault();
-                        handleScannerInput(trimmed);
-                        setTimeout(() => {
-                          enterKeyPressedRef.current = false;
-                        }, 100);
-                        return;
-                      }
-
-                      if (searchDropdownProducts.length > 0) {
-                        e.preventDefault();
-                        const product =
-                          searchDropdownProducts[highlightedProductIndex] ??
-                          searchDropdownProducts[0];
-                        selectProductForSale(product);
-                        setTimeout(() => {
-                          enterKeyPressedRef.current = false;
-                        }, 100);
-                        return;
-                      }
-
-                      setTimeout(() => {
-                        enterKeyPressedRef.current = false;
-                      }, 100);
+                    if (e.key === "Enter" || e.key === "NumpadEnter" || e.key === "Go") {
+                      e.preventDefault();
+                      commitSearchEntry();
+                      return;
                     }
                   }}
                   className={cn(
-                    "h-9 border-gray-200 pl-9 text-sm shadow-sm focus-visible:ring-1 focus-visible:ring-blue-400 focus-visible:ring-offset-0 sm:h-10 sm:pl-10 [&::-webkit-search-cancel-button]:hidden",
+                    "h-11 border-gray-200 pl-9 text-base shadow-sm focus-visible:ring-1 focus-visible:ring-blue-400 focus-visible:ring-offset-0 sm:h-10 sm:pl-10 sm:text-sm [&::-webkit-search-cancel-button]:hidden",
                     isScanning && "border-blue-500 bg-blue-50/50 pr-10",
                   )}
                 />
@@ -2749,7 +3139,7 @@ export function NewSale() {
                     ref={searchDropdownRef}
                     data-product-search-dropdown
                     role="listbox"
-                    className="absolute left-0 right-0 top-full z-50 mt-1 max-h-64 overflow-y-auto rounded-md border border-gray-200 bg-white py-1 shadow-lg"
+                    className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[min(40dvh,16rem)] overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white py-1 shadow-lg sm:max-h-64"
                   >
                     {searchDropdownProducts.map((product, index) => (
                       <button
@@ -2787,7 +3177,7 @@ export function NewSale() {
 
               <div
                 className={cn(
-                  "flex h-9 w-[7.25rem] shrink-0 items-stretch overflow-hidden rounded-md border bg-white shadow-sm transition-opacity sm:h-10 sm:w-[15rem]",
+                  "flex h-11 w-full shrink-0 items-stretch overflow-hidden rounded-md border bg-white shadow-sm transition-opacity sm:h-10 sm:w-[15rem]",
                   quickAdjustLine ? "border-gray-200" : "border-dashed border-gray-200 opacity-40",
                 )}
                 title={
@@ -2800,12 +3190,18 @@ export function NewSale() {
                   type="button"
                   variant="ghost"
                   disabled={!quickAdjustLine}
-                  className="h-9 w-8 shrink-0 rounded-none border-r border-gray-200 px-0 hover:bg-slate-100 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-10 sm:w-11"
+                  className="h-11 w-12 shrink-0 rounded-none border-r border-gray-200 px-0 hover:bg-slate-100 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-10 sm:w-11"
                   aria-label="Decrease quantity"
                   data-quick-qty="true"
-                  onClick={() => quickAdjustLine && bumpQuantity(quickAdjustLine.id, -1)}
+                  onClick={() => {
+                    const lineId =
+                      activeCartLineIdRef.current ??
+                      lastAddedProductId.current ??
+                      quickAdjustLine?.id;
+                    if (lineId) bumpQuantity(lineId, -1);
+                  }}
                 >
-                  <Minus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <Minus className="h-4 w-4" />
                 </Button>
                 <div className="flex min-w-0 flex-1 flex-col items-center justify-center border-r border-gray-200 bg-slate-50/90 px-1 py-0 sm:px-2">
                   <Input
@@ -2820,6 +3216,7 @@ export function NewSale() {
                     placeholder="Qty"
                     data-quantity-input="true"
                     data-quick-qty="true"
+                    enterKeyHint="next"
                     value={
                       quickAdjustLine
                         ? quantityInputs[quickAdjustLine.id] ??
@@ -2827,13 +3224,23 @@ export function NewSale() {
                         : ""
                     }
                     onFocus={() => {
-                      if (!quickAdjustLine) return;
-                      quantityFocusLineIdRef.current = quickAdjustLine.id;
+                      // Prefer the ref set by addToCart — focusing this input
+                      // often happens before React re-renders, so quickAdjustLine
+                      // can still point at the previous cart line.
+                      const lineId =
+                        activeCartLineIdRef.current ??
+                        lastAddedProductId.current ??
+                        quickAdjustLine?.id;
+                      if (!lineId) return;
+                      quantityFocusLineIdRef.current = lineId;
                       isUserInteractingRef.current = true;
-                      switchActiveCartLine(quickAdjustLine.id);
+                      switchActiveCartLine(lineId);
                     }}
                     onChange={(e) => {
-                      const lineId = quickAdjustLine?.id;
+                      const lineId =
+                        activeCartLineIdRef.current ??
+                        lastAddedProductId.current ??
+                        quickAdjustLine?.id;
                       if (!lineId) return;
                       const value = e.target.value;
                       setQuantityModes((prev) => ({ ...prev, [lineId]: "custom" }));
@@ -2864,20 +3271,20 @@ export function NewSale() {
                       }, 300);
                     }}
                     onKeyDown={(e) => {
-                      if (!quickAdjustLine) return;
-                      if (e.key === "Enter") {
+                      const lineId =
+                        activeCartLineIdRef.current ??
+                        lastAddedProductId.current ??
+                        quickAdjustLine?.id;
+                      if (!lineId) return;
+                      if (e.key === "Enter" || e.key === "NumpadEnter" || e.key === "Go") {
                         e.preventDefault();
-                        quantityFocusLineIdRef.current = quickAdjustLine.id;
-                        confirmQuantityAndReturnToSearch(quickAdjustLine.id);
+                        quantityFocusLineIdRef.current = lineId;
+                        confirmQuantityAndReturnToSearch(lineId);
                         return;
                       }
-                      if (e.key === "ArrowUp") {
+                      // Don't change qty with keyboard arrows — use +/- or type.
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
                         e.preventDefault();
-                        bumpQuantity(quickAdjustLine.id, 1);
-                      }
-                      if (e.key === "ArrowDown") {
-                        e.preventDefault();
-                        bumpQuantity(quickAdjustLine.id, -1);
                       }
                     }}
                     className="h-7 w-full max-w-[4rem] border-0 bg-transparent p-0 text-center text-sm font-bold tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-7 sm:max-w-[5.5rem] sm:text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none disabled:opacity-50"
@@ -2893,12 +3300,18 @@ export function NewSale() {
                   type="button"
                   variant="ghost"
                   disabled={!quickAdjustLine}
-                  className="h-9 w-8 shrink-0 rounded-none px-0 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-10 sm:w-11"
+                  className="h-11 w-12 shrink-0 rounded-none px-0 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-10 sm:w-11"
                   aria-label="Increase quantity"
                   data-quick-qty="true"
-                  onClick={() => quickAdjustLine && bumpQuantity(quickAdjustLine.id, 1)}
+                  onClick={() => {
+                    const lineId =
+                      activeCartLineIdRef.current ??
+                      lastAddedProductId.current ??
+                      quickAdjustLine?.id;
+                    if (lineId) bumpQuantity(lineId, 1);
+                  }}
                 >
-                  <Plus className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                  <Plus className="h-4 w-4" />
                 </Button>
               </div>
             </div>
@@ -2948,11 +3361,11 @@ export function NewSale() {
         {/* Products Grid */}
         {productsLoading ||
         (isProductQueryPending && filteredProducts.length === 0) ? (
-          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
             {Array.from({ length: 12 }).map((_, i) => (
               <div
                 key={i}
-                className="animate-pulse rounded-lg border border-slate-200 bg-white p-2 sm:rounded-xl sm:p-2.5"
+                className="animate-pulse rounded-xl border border-slate-200 bg-white p-3 sm:p-2.5"
               >
                 <div className="mb-1 h-5 rounded-md bg-slate-100 sm:h-6" />
                 <div className="h-2 w-3/4 rounded bg-slate-100" />
@@ -2974,13 +3387,14 @@ export function NewSale() {
             </p>
           </div>
         ) : !virtualizeGrid ? (
-          <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
             {gridProducts.map((product) => renderProductCard(product))}
           </div>
         ) : (
           <div
             ref={productGridRef}
-            style={{ height: rowVirtualizer.getTotalSize(), position: "relative" }}
+            className="[overflow-anchor:none]"
+            style={{ height: rowVirtualizer.getTotalSize(), position: "relative", width: "100%" }}
           >
             {rowVirtualizer.getVirtualItems().map((virtualRow) => {
               const start = virtualRow.index * gridColumns;
@@ -2989,17 +3403,15 @@ export function NewSale() {
                 <div
                   key={virtualRow.key}
                   data-index={virtualRow.index}
-                  ref={rowVirtualizer.measureElement}
-                  className="grid items-stretch gap-1.5 pb-2 sm:gap-2"
+                  className="grid items-stretch gap-2"
                   style={{
                     position: "absolute",
                     top: 0,
                     left: 0,
                     width: "100%",
+                    height: `${gridRowHeights[virtualRow.index] ?? 84}px`,
                     gridTemplateColumns: `repeat(${gridColumns}, minmax(0, 1fr))`,
-                    transform: `translateY(${
-                      virtualRow.start - rowVirtualizer.options.scrollMargin
-                    }px)`,
+                    transform: `translateY(${virtualRow.start - gridScrollMargin}px)`,
                   }}
                 >
                   {rowItems.map((product) => renderProductCard(product))}
@@ -3254,33 +3666,76 @@ export function NewSale() {
                             : "hover:bg-slate-50",
                         )}
                       >
-                        <div className="flex shrink-0 items-center rounded-md border border-slate-200 bg-white">
+                        <div className="flex h-11 shrink-0 items-center rounded-md border border-slate-200 bg-white lg:h-8">
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 rounded-none rounded-l-md text-slate-600"
+                            className="h-11 w-11 rounded-none rounded-l-md text-slate-600 lg:h-8 lg:w-8"
                             onClick={(e) => {
                               e.stopPropagation();
                               bumpQuantity(item.id, -1);
                             }}
                           >
-                            <Minus className="h-3.5 w-3.5" />
+                            <Minus className="h-4 w-4 lg:h-3.5 lg:w-3.5" />
                           </Button>
-                          <span className="min-w-[2rem] px-1 text-center text-sm font-bold tabular-nums text-slate-900">
-                            {qtyDisplay}
-                          </span>
+                          <button
+                            type="button"
+                            className="h-11 min-w-[2.75rem] px-1 text-center text-base font-bold tabular-nums text-slate-900 lg:hidden"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              switchActiveCartLine(item.id);
+                              setQtySheetValue(formatQuantityValue(item.quantity));
+                              setQtySheetLineId(item.id);
+                            }}
+                          >
+                            {formatQuantityValue(item.quantity)}
+                          </button>
+                          <Input
+                            type="text"
+                            inputMode="decimal"
+                            aria-label={`Quantity for ${item.name}`}
+                            data-quantity-input="true"
+                            value={qtyDisplay}
+                            onClick={(e) => e.stopPropagation()}
+                            onFocus={(e) => {
+                              switchActiveCartLine(item.id);
+                              e.currentTarget.select();
+                            }}
+                            onChange={(e) => {
+                              const value = e.target.value;
+                              setQuantityInputs((prev) => {
+                                const next = { ...prev, [item.id]: value };
+                                quantityInputsRef.current = next;
+                                return next;
+                              });
+                            }}
+                            onBlur={() => {
+                              applyTypedOverlayToCart(item.id);
+                              clearQuantityOverlay(item.id);
+                            }}
+                            onKeyDown={(e) => {
+                              e.stopPropagation();
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                applyTypedOverlayToCart(item.id);
+                                clearQuantityOverlay(item.id);
+                                (e.currentTarget as HTMLInputElement).blur();
+                              }
+                            }}
+                            className="hidden h-8 w-12 rounded-none border-0 bg-transparent px-0 text-center text-sm font-bold tabular-nums text-slate-900 shadow-none focus-visible:ring-1 focus-visible:ring-blue-400 focus-visible:ring-offset-0 lg:block"
+                          />
                           <Button
                             type="button"
                             variant="ghost"
                             size="icon"
-                            className="h-8 w-8 rounded-none rounded-r-md text-slate-600"
+                            className="h-11 w-11 rounded-none rounded-r-md text-slate-600 lg:h-8 lg:w-8"
                             onClick={(e) => {
                               e.stopPropagation();
                               bumpQuantity(item.id, 1);
                             }}
                           >
-                            <Plus className="h-3.5 w-3.5" />
+                            <Plus className="h-4 w-4 lg:h-3.5 lg:w-3.5" />
                           </Button>
                         </div>
 
@@ -3464,6 +3919,99 @@ export function NewSale() {
           </div>
         </div>
 
+        <Dialog
+          open={qtySheetLineId !== null}
+          onOpenChange={(open) => {
+            if (!open) setQtySheetLineId(null);
+          }}
+        >
+          <DialogContent className="flex max-h-[92dvh] w-[calc(100vw-1rem)] max-w-[calc(100vw-1rem)] flex-col gap-0 overflow-hidden p-0 sm:max-w-sm sm:gap-4 sm:p-6 max-sm:bottom-0 max-sm:left-0 max-sm:right-0 max-sm:top-auto max-sm:w-full max-sm:max-w-none max-sm:translate-x-0 max-sm:translate-y-0 max-sm:rounded-b-none max-sm:rounded-t-2xl max-sm:pb-[max(0.75rem,env(safe-area-inset-bottom))]">
+            {(() => {
+              const sheetLine = cart.find((line) => line.id === qtySheetLineId);
+              if (!sheetLine) return null;
+              const unitName = sheetLine.unitName || sheetLine.unit;
+              const presets = getQuantityPresetOptions(unitName);
+              const applySheetQuantity = () => {
+                const parsed = parseCustomQuantityInput(qtySheetValue, unitName);
+                if (parsed === null || parsed <= 0) {
+                  toast.error("Enter a valid quantity");
+                  return;
+                }
+                updateQuantityManual(sheetLine.id, parsed);
+                clearQuantityOverlay(sheetLine.id);
+                setQtySheetLineId(null);
+              };
+              const nudgeSheetQuantity = (direction: 1 | -1) => {
+                const current =
+                  parseCustomQuantityInput(qtySheetValue, unitName) ?? sheetLine.quantity;
+                const next = computeQuantityAfterChange(current, direction, unitName, "custom");
+                setQtySheetValue(formatQuantityValue(next));
+              };
+              return (
+                <>
+                  <DialogHeader className="shrink-0 px-4 pb-2 pt-4 pr-10 text-left sm:px-0 sm:pt-0">
+                    <DialogTitle className="truncate">{sheetLine.name}</DialogTitle>
+                    <DialogDescription>
+                      Rs {formatMoney(getSellingPrice(sheetLine))} each
+                    </DialogDescription>
+                  </DialogHeader>
+                  <div className="space-y-3 px-4 pb-4 sm:px-0 sm:pb-0">
+                    <div className="flex items-center gap-2">
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-14 w-14 shrink-0 text-xl"
+                        onClick={() => nudgeSheetQuantity(-1)}
+                      >
+                        <Minus className="h-5 w-5" />
+                      </Button>
+                      <Input
+                        autoFocus
+                        type="text"
+                        inputMode="decimal"
+                        data-quantity-input="true"
+                        value={qtySheetValue}
+                        onChange={(e) => setQtySheetValue(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            e.preventDefault();
+                            applySheetQuantity();
+                          }
+                        }}
+                        className="h-14 text-center text-2xl font-bold tabular-nums"
+                      />
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="h-14 w-14 shrink-0 text-xl"
+                        onClick={() => nudgeSheetQuantity(1)}
+                      >
+                        <Plus className="h-5 w-5" />
+                      </Button>
+                    </div>
+                    <div className="grid grid-cols-3 gap-2">
+                      {presets.map((preset) => (
+                        <Button
+                          key={preset.value}
+                          type="button"
+                          variant="outline"
+                          className="h-11"
+                          onClick={() => setQtySheetValue(formatQuantityValue(preset.quantity))}
+                        >
+                          {preset.label}
+                        </Button>
+                      ))}
+                    </div>
+                    <Button type="button" className="h-12 w-full text-base" onClick={applySheetQuantity}>
+                      Set quantity
+                    </Button>
+                  </div>
+                </>
+              );
+            })()}
+          </DialogContent>
+        </Dialog>
+
         {cart.length > 0 && (
           <div
             className={cn(
@@ -3518,8 +4066,8 @@ export function NewSale() {
                         </SelectContent>
                       </Select>
                       <Input
-                        type="number"
-                        min="0"
+                        type="text"
+                        inputMode="decimal"
                         placeholder="0"
                         value={globalDiscountValue}
                         onChange={(e) => {
@@ -3527,7 +4075,7 @@ export function NewSale() {
                           setGlobalDiscountValue(e.target.value);
                         }}
                         data-amount-input="true"
-                        className="h-8 flex-1 rounded-none border-0 bg-transparent px-2.5 text-right text-xs font-medium tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                        className="h-8 flex-1 rounded-none border-0 bg-transparent px-2.5 text-right text-xs font-medium tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
                       />
                     </div>
                   </div>
@@ -3605,7 +4153,8 @@ export function NewSale() {
                 Amount Received
               </label>
               <Input
-                type="number"
+                type="text"
+                inputMode="decimal"
                 autoFocus
                 value={tenderedAmount}
                 onChange={(e) => handleTenderedInputChange(e.target.value)}
@@ -3621,9 +4170,8 @@ export function NewSale() {
                     resetPaymentState();
                   }
                 }}
-                className="mt-1 [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                min="0"
-                step="0.01"
+                className="mt-1"
+                data-amount-input="true"
               />
             </div>
             {paymentError && (

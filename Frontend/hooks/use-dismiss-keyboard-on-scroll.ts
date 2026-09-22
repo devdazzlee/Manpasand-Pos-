@@ -46,6 +46,16 @@ function suppressMobileAutofill(el: HTMLElement) {
 function blurActiveField() {
   const active = document.activeElement
   if (!isTextField(active)) return
+  // Never dismiss mid-edit sale fields — blur would commit a half-typed qty/price.
+  if (
+    active.closest('[data-quantity-input="true"]') ||
+    active.closest('[data-price-input="true"]') ||
+    active.closest('[data-amount-input="true"]') ||
+    active.closest('[data-quick-qty="true"]') ||
+    active.closest('[data-discount-select="true"]')
+  ) {
+    return
+  }
   active.blur()
 }
 

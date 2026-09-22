@@ -182,11 +182,12 @@ class GuestOrderService {
 
     const orderNumber = `MP${Date.now()}${Math.floor(Math.random() * 900 + 100)}`;
     const totalAmount = new Prisma.Decimal(data.total);
+    const customer = await this.findOrCreateWebsiteCustomer(data);
 
     const order = await prisma.order.create({
       data: {
         order_number: orderNumber,
-        customer_id: null,
+        customer: { connect: { id: customer.id } },
         customer_name: `${data.customer.firstName} ${data.customer.lastName}`.trim(),
         customer_email: data.customer.email,
         customer_phone: data.customer.phone,
@@ -242,11 +243,46 @@ class GuestOrderService {
     return this.formatGuestOrder(order);
   }
 
+  private async findOrCreateWebsiteCustomer(data: GuestOrderData) {
+    const name = `${data.customer.firstName} ${data.customer.lastName}`.trim() || 'Website customer';
+    const phone = data.customer.phone.trim();
+    const email = data.customer.email.trim();
+    const address = [data.shipping.address, data.shipping.city, data.shipping.postalCode]
+      .filter(Boolean)
+      .join(', ');
+    const digits = phone.replace(/\D/g, '');
+    const phoneTail = digits.length >= 10 ? digits.slice(-10) : digits;
+
+    const existing = await prisma.customer.findFirst({
+      where: {
+        OR: [
+          { email },
+          { phone_number: phone },
+          ...(phoneTail.length >= 7 ? [{ phone_number: { contains: phoneTail } }] : []),
+        ],
+      },
+      orderBy: { created_at: 'desc' },
+    });
+
+    if (existing) return existing;
+
+    return prisma.customer.create({
+      data: {
+        name,
+        phone_number: phone,
+        email,
+        address,
+        billing_address: address,
+        is_active: true,
+      },
+    });
+  }
+
   async getGuestOrders(status?: string, page: number = 1, pageSize: number = 10) {
     await alfalahService.expireUnpaidCardOrders();
 
     const where: any = {
-      customer_id: null, // Only guest orders (no customer_id)
+      customer_name: { not: null },
     };
 
     if (status) {
@@ -283,7 +319,7 @@ class GuestOrderService {
     const order = await prisma.order.findFirst({
       where: {
         id: orderId,
-        customer_id: null, // Ensure it's a guest order
+        customer_name: { not: null },
       },
       include: {
         items: {
