@@ -38,5 +38,13 @@ const createGuestOrderSchema = z.object({
   }),
 });
 
-export { createGuestOrderSchema };
+const trackGuestOrderSchema = z.object({
+  body: z.object({
+    orderNumber: z.string().trim().min(1, 'Order number is required'),
+    email: z.string().trim().email('Invalid email address').optional().or(z.literal('')),
+    phone: z.string().trim().optional().or(z.literal('')),
+  }),
+});
+
+export { createGuestOrderSchema, trackGuestOrderSchema };
 

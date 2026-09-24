@@ -6,9 +6,11 @@ const validation_middleware_1 = require("../middleware/validation.middleware");
 const guestOrder_validation_1 = require("../validations/guestOrder.validation");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const router = (0, express_1.Router)();
-// Public route - no authentication required for guest checkout
+// Public — guest checkout
 router.post('/', (0, validation_middleware_1.validate)(guestOrder_validation_1.createGuestOrderSchema), guestOrder_controller_1.createGuestOrder);
-// Protected routes - require authentication for admin/branch to view orders
+// Public — customer order status (order number + email or phone)
+router.post('/track', (0, validation_middleware_1.validate)(guestOrder_validation_1.trackGuestOrderSchema), guestOrder_controller_1.trackGuestOrder);
+// Staff — list / detail
 router.get('/', auth_middleware_1.authenticate, guestOrder_controller_1.getGuestOrders);
 router.get('/:id', auth_middleware_1.authenticate, guestOrder_controller_1.getGuestOrderById);
 exports.default = router;

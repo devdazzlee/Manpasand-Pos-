@@ -51,4 +51,9 @@ const getGuestOrderById = asyncHandler(async (req: Request, res: Response) => {
   new ApiResponse(order, 'Website order retrieved successfully').send(res);
 });
 
-export { createGuestOrder, getGuestOrders, getGuestOrderById };
+const trackGuestOrder = asyncHandler(async (req: Request, res: Response) => {
+  const order = await guestOrderService.trackGuestOrder(req.body);
+  new ApiResponse(order, 'Order status retrieved successfully').send(res);
+});
+
+export { createGuestOrder, getGuestOrders, getGuestOrderById, trackGuestOrder };

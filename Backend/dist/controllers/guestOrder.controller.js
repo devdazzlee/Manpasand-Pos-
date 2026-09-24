@@ -3,7 +3,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getGuestOrderById = exports.getGuestOrders = exports.createGuestOrder = void 0;
+exports.trackGuestOrder = exports.getGuestOrderById = exports.getGuestOrders = exports.createGuestOrder = void 0;
 const guestOrder_service_1 = require("../services/guestOrder.service");
 const alfalah_service_1 = require("../services/alfalah.service");
 const apiResponse_1 = require("../utils/apiResponse");
@@ -36,4 +36,9 @@ const getGuestOrderById = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(order, 'Website order retrieved successfully').send(res);
 });
 exports.getGuestOrderById = getGuestOrderById;
+const trackGuestOrder = (0, asyncHandler_1.default)(async (req, res) => {
+    const order = await guestOrderService.trackGuestOrder(req.body);
+    new apiResponse_1.ApiResponse(order, 'Order status retrieved successfully').send(res);
+});
+exports.trackGuestOrder = trackGuestOrder;
 //# sourceMappingURL=guestOrder.controller.js.map

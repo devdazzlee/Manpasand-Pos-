@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.createGuestOrderSchema = void 0;
+exports.trackGuestOrderSchema = exports.createGuestOrderSchema = void 0;
 const zod_1 = require("zod");
 const orderItemSchema = zod_1.z
     .object({
@@ -39,4 +39,12 @@ const createGuestOrderSchema = zod_1.z.object({
     }),
 });
 exports.createGuestOrderSchema = createGuestOrderSchema;
+const trackGuestOrderSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        orderNumber: zod_1.z.string().trim().min(1, 'Order number is required'),
+        email: zod_1.z.string().trim().email('Invalid email address').optional().or(zod_1.z.literal('')),
+        phone: zod_1.z.string().trim().optional().or(zod_1.z.literal('')),
+    }),
+});
+exports.trackGuestOrderSchema = trackGuestOrderSchema;
 //# sourceMappingURL=guestOrder.validation.js.map

@@ -236,7 +236,13 @@ class OrderService {
         }
         return client_2.prisma.order.update({
             where: { id: orderId },
-            data: { status },
+            data: {
+                status,
+                // Completed / delivered means payment was collected (COD) or already settled.
+                ...(status === 'COMPLETED' && order.payment_status !== 'PAID'
+                    ? { payment_status: 'PAID' }
+                    : {}),
+            },
             include: {
                 items: {
                     include: { product: true },

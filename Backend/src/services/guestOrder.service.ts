@@ -336,6 +336,97 @@ class GuestOrderService {
 
     return this.formatGuestOrder(order);
   }
+
+  private normalizePhone(value?: string | null): string {
+    return (value || '').replace(/\D/g, '');
+  }
+
+  private phonesMatch(stored?: string | null, incomingDigits?: string): boolean {
+    if (!incomingDigits || incomingDigits.length < 7) return false;
+    const saved = this.normalizePhone(stored);
+    if (!saved) return false;
+    if (saved === incomingDigits) return true;
+    // Compare last 10 digits so +92 / 0 prefixes still match.
+    const a = saved.slice(-10);
+    const b = incomingDigits.slice(-10);
+    return a.length >= 7 && a === b;
+  }
+
+  /** Public customer lookup by order number (email/phone optional). */
+  async trackGuestOrder(data: {
+    orderNumber: string;
+    email?: string;
+    phone?: string;
+  }) {
+    const orderNumber = data.orderNumber.trim();
+    const email = data.email?.trim().toLowerCase() || '';
+    const phoneDigits = this.normalizePhone(data.phone);
+
+    const order = await prisma.order.findFirst({
+      where: {
+        order_number: { equals: orderNumber, mode: 'insensitive' },
+      },
+      include: {
+        customer: true,
+        items: {
+          include: {
+            product: { include: { unit: true } },
+          },
+        },
+      },
+    });
+
+    if (!order) {
+      throw new AppError(404, 'No order found with that order number');
+    }
+
+    // If the customer also sent email/phone, verify it matches — otherwise
+    // order number alone is enough.
+    if (email || phoneDigits.length >= 7) {
+      const emailMatch =
+        Boolean(email) &&
+        (order.customer_email?.toLowerCase() === email ||
+          order.customer?.email?.toLowerCase() === email);
+
+      const phoneMatch =
+        this.phonesMatch(order.customer_phone, phoneDigits) ||
+        this.phonesMatch(order.customer?.phone_number, phoneDigits) ||
+        this.phonesMatch(order.customer?.mobile_number, phoneDigits);
+
+      if (!emailMatch && !phoneMatch) {
+        throw new AppError(404, 'No order found with that order number');
+      }
+    }
+
+    const formatted = this.formatGuestOrder(order);
+    const items = (order.items || []).map((item) => ({
+      id: item.id,
+      name: item.display_name || item.product?.name || 'Item',
+      quantity: Number(item.quantity),
+      price: Number(item.price),
+      total_price: Number(item.total_price),
+      unit_name: item.unit_name || item.product?.unit?.name || null,
+      grams_per_unit: item.grams_per_unit != null ? Number(item.grams_per_unit) : null,
+    }));
+
+    return {
+      id: order.id,
+      order_number: order.order_number,
+      status: order.status,
+      payment_method: order.payment_method,
+      // Completed orders are paid (COD collected on delivery, etc.)
+      payment_status:
+        order.status === 'COMPLETED' && order.payment_status === 'PENDING'
+          ? 'PAID'
+          : order.payment_status,
+      total_amount: Number(order.total_amount),
+      created_at: order.created_at,
+      updated_at: order.updated_at,
+      customer: formatted.customer,
+      shipping: formatted.shipping,
+      items,
+    };
+  }
 }
 
 export { GuestOrderService };
