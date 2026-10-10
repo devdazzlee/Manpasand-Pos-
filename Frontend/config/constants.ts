@@ -1,11 +1,8 @@
-// For Local 
-// export const API_BASE = "http://localhost:5000/api/v1"  ;
+// For Production (Pehnawa Store POS on VPS)
+export const API_BASE = "http://169.58.4.58:8090/api/v1";
 
-// For Production (VPS)
-export const API_BASE = "https://pehnava.acestudiosus.com/api/v1";
-
-// For Local / Development (Vercel API + Neon DB)
-// export const API_BASE = "https://pehnava-boutique-pos-ba34.vercel.app/api/v1";
+// For Local development
+// export const API_BASE = "http://localhost:5000/api/v1";
 
 /** Ace Studios footer on thermal receipts (not the store WhatsApp line). */
 export const ACE_STUDIOS_CONTACT = "+92 336 2500357";
