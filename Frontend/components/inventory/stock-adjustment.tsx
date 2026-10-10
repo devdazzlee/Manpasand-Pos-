@@ -1,6 +1,7 @@
 "use client";
 
-import React, { useState, useEffect, useCallback, useMemo, type ComponentType } from "react";
+import React, { useState, useEffect, useCallback, useMemo, useRef, type ComponentType } from "react";
+import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -45,6 +46,8 @@ import {
   ArrowRight,
   Wallet,
   Info,
+  FileUp,
+  Download,
 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -193,6 +196,18 @@ const signedMoney = (n: number) => `${n > 0 ? "+" : n < 0 ? "−" : ""}${money(n
 
 type BranchStockRow = { qty: number; cost: number; name: string; sku: string };
 
+// Header aliases accepted when importing stock exported from another POS.
+// Headers are compared lower-cased with spaces/punctuation stripped.
+const IMPORT_CODE_HEADERS = ["sku", "code", "itemcode", "productcode", "barcode", "article", "articleno", "customcode"];
+const IMPORT_NAME_HEADERS = ["productname", "name", "product", "itemname", "item", "description"];
+const IMPORT_QTY_HEADERS = ["quantity", "qty", "stock", "currentstock", "closingstock", "balance", "balanceqty", "onhand", "instock"];
+const MAX_BATCH_LINES = 500;
+
+type UnmatchedImportRow = { row: number; code: string; name: string; quantity: string; reason: string };
+
+const normHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
+const normKey = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
+
 export function StockAdjustment() {
   const logoDataUri = useLogoDataUri();
   const { products, categories, branches, productsLoading, branchesLoading, fetchProducts, fetchBranches } = usePosData();
@@ -321,6 +336,9 @@ export function StockAdjustment() {
   const [branchStock, setBranchStock] = useState<Record<string, BranchStockRow>>({});
   const [branchStockLoading, setBranchStockLoading] = useState(false);
   const [showNotes, setShowNotes] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const [importing, setImporting] = useState(false);
+  const [unmatched, setUnmatched] = useState<UnmatchedImportRow[]>([]);
 
   // Live on-hand (and cost) for the chosen branch — the server re-reads it on save.
   useEffect(() => {
@@ -411,6 +429,7 @@ export function StockAdjustment() {
     setLines([]);
     setFormErrors({});
     setShowNotes(false);
+    setUnmatched([]);
     setDialogOpen(true);
   };
 
@@ -452,6 +471,158 @@ export function StockAdjustment() {
       }));
     setLines((prev) => [...prev, ...added]);
     toast.success(`Added ${added.length} item${added.length === 1 ? "" : "s"} — change only what you counted differently`);
+  };
+
+  // The store only holds one page of products, so load the whole catalog
+  // (100 per page — the API cap) and index it: codes first, then exact name.
+  const loadProductLookup = async () => {
+    const all: any[] = [];
+    for (let page = 1, totalPages = 1; page <= totalPages && page <= 500; page++) {
+      const res = await apiClient.get(`${API_BASE}/products`, { params: { page, limit: 100 } });
+      const batch = Array.isArray(res.data?.data) ? res.data.data : [];
+      all.push(...batch);
+      totalPages = Number(res.data?.meta?.totalPages) || 1;
+      if (!batch.length) break;
+    }
+    const byCode = new Map<string, any>();
+    const byName = new Map<string, any>();
+    for (const p of all) {
+      if (!p?.id) continue;
+      for (const c of [p.sku, p.code, p.barcode, p.label_barcode, p.custom_code]) {
+        const k = normKey(c);
+        if (k && !byCode.has(k)) byCode.set(k, p);
+      }
+      const n = normKey(p.name);
+      if (n && !byName.has(n)) byName.set(n, p);
+    }
+    return { byCode, byName };
+  };
+
+  const downloadImportTemplate = () => {
+    const ws = XLSX.utils.aoa_to_sheet([
+      ["SKU", "Product Name", "Quantity"],
+      ["ABC-001", "Example product", 10],
+    ]);
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Stock");
+    XLSX.writeFile(wb, "stock_import_template.xlsx");
+  };
+
+  const downloadUnmatched = () => {
+    const ws = XLSX.utils.json_to_sheet(
+      unmatched.map((u) => ({ Row: u.row, SKU: u.code, "Product Name": u.name, Quantity: u.quantity, Problem: u.reason })),
+    );
+    const wb = XLSX.utils.book_new();
+    XLSX.utils.book_append_sheet(wb, ws, "Not imported");
+    XLSX.writeFile(wb, "stock_import_not_matched.xlsx");
+  };
+
+  /**
+   * Reads a sheet exported from another POS (SKU/code and/or name + quantity),
+   * matches each row to an existing product and drops it into the cart. Nothing
+   * is written to the database until the user reviews the lines and saves.
+   */
+  const handleImportFile = async (file: File) => {
+    if (!form.branchId) {
+      toast.error("Choose a branch first");
+      return;
+    }
+    setImporting(true);
+    try {
+      const wb = XLSX.read(await file.arrayBuffer(), { type: "array" });
+      const sheet = wb.Sheets[wb.SheetNames[0]];
+      const rows = sheet ? XLSX.utils.sheet_to_json<Record<string, any>>(sheet, { defval: "" }) : [];
+      if (!rows.length) {
+        toast.error("No data rows found — the first row must be column headers");
+        return;
+      }
+
+      const headers = Object.keys(rows[0]);
+      const findCol = (aliases: string[]) => {
+        for (const a of aliases) {
+          const h = headers.find((x) => normHeader(x) === a);
+          if (h) return h;
+        }
+        return undefined;
+      };
+      const codeCol = findCol(IMPORT_CODE_HEADERS);
+      const nameCol = findCol(IMPORT_NAME_HEADERS);
+      const qtyCol = findCol(IMPORT_QTY_HEADERS);
+      if (!qtyCol || (!codeCol && !nameCol)) {
+        toast.error("The file needs a Quantity column and a SKU/Code or Product Name column", {
+          description: `Found columns: ${headers.join(", ")}`,
+        });
+        return;
+      }
+
+      const isCount = form.adjustmentType === "RECONCILIATION";
+      const productLookup = await loadProductLookup();
+      const qtyByProduct = new Map<string, { product: any; qty: number }>();
+      const misses: UnmatchedImportRow[] = [];
+
+      rows.forEach((r, i) => {
+        const code = codeCol ? String(r[codeCol] ?? "").trim() : "";
+        const name = nameCol ? String(r[nameCol] ?? "").trim() : "";
+        const rawQty = String(r[qtyCol] ?? "").trim();
+        if (!code && !name && !rawQty) return; // blank line
+        const miss = (reason: string) => {
+          misses.push({ row: i + 2, code, name, quantity: rawQty, reason });
+        };
+
+        const qty = Number(rawQty.replace(/,/g, ""));
+        if (rawQty === "" || !Number.isFinite(qty)) return miss("Quantity is not a number");
+        if (qty < 0) return miss("Quantity is negative");
+        if (!isCount && qty === 0) return miss("Quantity is 0");
+
+        const product =
+          (code && productLookup.byCode.get(normKey(code))) || (name && productLookup.byName.get(normKey(name)));
+        if (!product) return miss("No product with this SKU/code or name");
+
+        // Same product listed more than once — add the rows up.
+        const prev = qtyByProduct.get(product.id);
+        qtyByProduct.set(product.id, { product, qty: (prev?.qty || 0) + qty });
+      });
+
+      const imported = new Map(qtyByProduct);
+      const merged: StockLineItem[] = lines.map((l) => {
+        const hit = imported.get(l.productId);
+        if (!hit) return l;
+        imported.delete(l.productId);
+        return { ...l, quantity: String(hit.qty) };
+      });
+      for (const { product, qty } of imported.values()) {
+        merged.push({
+          productId: product.id,
+          productName: product.name || "Product",
+          sku: product.sku || product.code || undefined,
+          quantity: String(qty),
+          unitCost: "",
+          currentQty: onHand(product.id),
+        });
+      }
+
+      setLines(merged);
+      setUnmatched(misses);
+      setFormErrors((e) => ({ ...e, lines: "" }));
+
+      const matched = qtyByProduct.size;
+      if (matched === 0) {
+        toast.error("No rows matched a product — see the list below");
+      } else {
+        toast.success(`Loaded ${matched} product${matched === 1 ? "" : "s"} from ${file.name}`, {
+          description:
+            (misses.length ? `${misses.length} row${misses.length === 1 ? "" : "s"} couldn't be matched. ` : "") +
+            "Review the quantities, then save.",
+        });
+      }
+      if (merged.length > MAX_BATCH_LINES) {
+        toast.warning(`${merged.length} lines — you can save at most ${MAX_BATCH_LINES} at a time. Split the file into parts.`);
+      }
+    } catch (err: any) {
+      toast.error(err?.message || "Couldn't read the file");
+    } finally {
+      setImporting(false);
+    }
   };
 
   const handleSubmit = async () => {
@@ -1244,6 +1415,74 @@ export function StockAdjustment() {
                 {branchStockLoading ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <ListChecks className="mr-1.5 h-3.5 w-3.5" />}
                 Count everything at {branchName || "this branch"}
               </Button>
+            </div>
+          ) : null}
+
+          {form.adjustmentType !== "SUBTRACTION" ? (
+            <div className="flex flex-col gap-2 rounded-xl border border-emerald-100 bg-emerald-50/70 px-4 py-3 text-sm text-emerald-900 sm:flex-row sm:items-center sm:justify-between">
+              <span className="flex items-start gap-2">
+                <FileUp className="mt-0.5 h-4 w-4 shrink-0 text-emerald-600" />
+                <span>
+                  Moving from another POS? Import an Excel/CSV with <strong>SKU or Product Name</strong> and <strong>Quantity</strong>
+                  {form.adjustmentType === "RECONCILIATION" ? " — quantities become the new on-hand." : " — quantities are added to on-hand."}
+                </span>
+              </span>
+              <div className="flex shrink-0 gap-2">
+                <Button type="button" size="sm" variant="ghost" className="h-8 text-emerald-700 hover:bg-emerald-100" onClick={downloadImportTemplate}>
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  Template
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 border-emerald-200 bg-white text-emerald-700 hover:bg-emerald-100"
+                  disabled={!form.branchId || importing}
+                  onClick={() => importInputRef.current?.click()}
+                >
+                  {importing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <FileUp className="mr-1.5 h-3.5 w-3.5" />}
+                  Import from file
+                </Button>
+              </div>
+              <input
+                ref={importInputRef}
+                type="file"
+                accept=".xlsx,.xls,.csv"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  e.target.value = "";
+                  if (file) void handleImportFile(file);
+                }}
+              />
+            </div>
+          ) : null}
+
+          {unmatched.length > 0 ? (
+            <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+              <div className="flex items-center justify-between gap-2">
+                <span className="font-medium">
+                  {unmatched.length} row{unmatched.length === 1 ? " was" : "s were"} not imported
+                </span>
+                <div className="flex gap-1">
+                  <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-amber-800 hover:bg-amber-100" onClick={downloadUnmatched}>
+                    <Download className="mr-1 h-3.5 w-3.5" />
+                    Download
+                  </Button>
+                  <Button type="button" size="icon" variant="ghost" className="h-7 w-7 text-amber-800 hover:bg-amber-100" onClick={() => setUnmatched([])}>
+                    <X className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              </div>
+              <ul className="mt-1 max-h-28 space-y-0.5 overflow-y-auto text-xs">
+                {unmatched.slice(0, 50).map((u) => (
+                  <li key={u.row}>
+                    Row {u.row}: {u.code || u.name || "(blank)"}
+                    {u.code && u.name ? ` · ${u.name}` : ""} — {u.reason}
+                  </li>
+                ))}
+                {unmatched.length > 50 ? <li>…and {unmatched.length - 50} more (download to see all)</li> : null}
+              </ul>
             </div>
           ) : null}
 
