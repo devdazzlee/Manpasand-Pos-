@@ -1,8 +1,11 @@
 // For Production (Pehnawa Store POS on VPS)
-export const API_BASE = "http://169.58.4.58:8090/api/v1";
+export const API_BASE = "https://pehnawa.acestudiosus.com/api/v1";
 
 // For Local development
 // export const API_BASE = "http://localhost:5000/api/v1";
+
+// IP fallback (port 8090) if domain DNS is not ready yet
+// export const API_BASE = "http://169.58.4.58:8090/api/v1";
 
 /** Ace Studios footer on thermal receipts (not the store WhatsApp line). */
 export const ACE_STUDIOS_CONTACT = "+92 336 2500357";
