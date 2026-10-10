@@ -69,6 +69,8 @@ import {
   InventoryReports,
   InventoryAudit,
   BulkProductUpload,
+  OpeningStockImport,
+  ScanStockCount,
 } from "./inventory/index";
 import Orders from "./orders";
 import Subcategories from "./sub-categories";
@@ -229,6 +231,10 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <StockView onNavigate={setActiveTab} />;
       case "bulk-product-upload":
         return <BulkProductUpload />;
+      case "opening-stock-import":
+        return <OpeningStockImport />;
+      case "scan-stock-count":
+        return <ScanStockCount />;
       case "inventory-reports":
         return <InventoryReports />;
       case "purchase-report":

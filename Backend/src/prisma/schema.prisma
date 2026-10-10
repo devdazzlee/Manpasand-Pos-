@@ -40,6 +40,8 @@ model User {
   recurring_expenses RecurringExpense[] @relation("RecurringExpenseCreator")
   purchase_returns  PurchaseReturn[]  @relation("PurchaseReturnCreator")
   purchase_invoices PurchaseInvoice[] @relation("PurchaseInvoiceCreator")
+  stock_imports     StockImportBatch[] @relation("StockImportCreator")
+  stock_import_reversals StockImportBatch[] @relation("StockImportReverser")
   employee          Employee?
 
   @@index([email])
@@ -94,6 +96,7 @@ model Branch {
   transfers_from     Transfer[]    @relation("TransferFrom")
   transfers_to       Transfer[]    @relation("TransferTo")
   stock_adjustments  StockAdjustment[]
+  stock_import_lines StockImportLine[]
 
   @@index([code])
   @@index([is_active])
@@ -399,6 +402,7 @@ model Product {
   purchases            Purchase[]
   purchase_return_items PurchaseReturnItem[]
   stock_adjustments    StockAdjustment[]
+  stock_import_lines   StockImportLine[]
   transfers            Transfer[]
   created_at           DateTime            @default(now())
   updated_at           DateTime            @default(now()) @updatedAt
@@ -606,6 +610,101 @@ model StockAdjustment {
 }
 
 // NEW: Sales/Sell Table
+/// How an opening-stock import treats quantities: ADD to on-hand, or SET on-hand to the file's figure.
+enum StockImportMode {
+  ADD
+  SET
+}
+
+enum StockImportStatus {
+  /// Lines saved, still being applied in chunks
+  PROCESSING
+  COMMITTED
+  REVERSED
+}
+
+enum StockImportLineStatus {
+  PENDING
+  APPLIED
+  SKIPPED
+  ERROR
+  REVERSED
+}
+
+/// One opening-stock import (e.g. migration from a previous POS). Undo reverses every applied line.
+model StockImportBatch {
+  id                  String            @id @default(uuid())
+  reference           String            @unique
+  file_name           String?
+  /// SHA-256 of the uploaded file — warns before the same file is imported twice
+  file_checksum       String?
+  /// Free-text reference typed by the user, e.g. "Old POS closing 30-Sep"
+  source_reference    String?
+  notes               String?
+  mode                StockImportMode   @default(SET)
+  status              StockImportStatus @default(PROCESSING)
+  update_cost         Boolean           @default(false)
+  create_missing      Boolean           @default(true)
+  stock_date          DateTime          @default(now())
+  total_lines         Int               @default(0)
+  applied_lines       Int               @default(0)
+  error_lines         Int               @default(0)
+  created_products    Int               @default(0)
+  total_qty           Decimal           @default(0)
+  total_value         Decimal           @default(0)
+  journal_voucher_id  String?
+  reversal_voucher_id String?
+  created_by          String?
+  creator             User?             @relation("StockImportCreator", fields: [created_by], references: [id])
+  reversed_by         String?
+  reverser            User?             @relation("StockImportReverser", fields: [reversed_by], references: [id])
+  reversed_at         DateTime?
+  committed_at        DateTime?
+  created_at          DateTime          @default(now())
+  updated_at          DateTime          @default(now()) @updatedAt
+  lines               StockImportLine[]
+
+  @@index([file_checksum])
+  @@index([source_reference])
+  @@index([status])
+  @@index([created_at])
+}
+
+model StockImportLine {
+  id              String                @id @default(uuid())
+  batch_id        String
+  batch           StockImportBatch      @relation(fields: [batch_id], references: [id], onDelete: Cascade)
+  row_no          Int
+  branch_id       String
+  branch          Branch                @relation(fields: [branch_id], references: [id])
+  /// Null until the product is matched or created
+  product_id      String?
+  product         Product?              @relation(fields: [product_id], references: [id])
+  /// Raw values from the file, kept for the audit trail and for creating missing products
+  sku             String?
+  name            String?
+  category_name   String?
+  brand_name      String?
+  size_name       String?
+  color_name      String?
+  quantity        Decimal
+  unit_cost       Decimal?
+  sale_price      Decimal?
+  /// Product purchase rate before this line changed it — restored on undo
+  previous_cost   Decimal?
+  create_product  Boolean               @default(false)
+  created_product Boolean               @default(false)
+  status          StockImportLineStatus @default(PENDING)
+  previous_qty    Decimal?
+  new_qty         Decimal?
+  applied_change  Decimal?
+  applied_value   Decimal?
+  error           String?
+
+  @@index([batch_id, status])
+  @@index([product_id])
+}
+
 model Sale {
   id               String        @id @default(uuid())
   sale_number      String        @unique

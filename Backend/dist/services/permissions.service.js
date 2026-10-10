@@ -24,6 +24,7 @@ exports.PERMISSIONS = [
     { key: 'register.reopen', group: 'Cash register', label: 'Reopen closed register', description: 'Reopen a register that was already closed' },
     // Inventory & products
     { key: 'inventory.adjust', group: 'Inventory', label: 'Stock adjustments', description: 'Adjust stock quantities with a reason' },
+    { key: 'inventory.import', group: 'Inventory', label: 'Opening stock import', description: 'Import stock from another POS (posts to Opening Balance Equity) and undo imports' },
     { key: 'products.price_change', group: 'Inventory', label: 'Change prices', description: 'Edit cost price, sale price or product discount' },
     // Money
     { key: 'expenses.approve', group: 'Expenses & accounts', label: 'Approve expenses', description: 'Approve or reject expenses' },
@@ -59,6 +60,7 @@ const DEFAULTS = {
     'register.approve_variance': ['ADMIN', 'BRANCH_MANAGER', 'SUPERVISOR'],
     'register.reopen': ['ADMIN'],
     'inventory.adjust': ['ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER'],
+    'inventory.import': ['ADMIN'],
     'products.price_change': ['ADMIN', 'PURCHASE_MANAGER'],
     'expenses.approve': ['ADMIN', 'BRANCH_MANAGER'],
     'customers.adjust': ['ADMIN', 'BRANCH_MANAGER'],

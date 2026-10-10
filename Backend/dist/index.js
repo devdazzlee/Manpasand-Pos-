@@ -32,6 +32,7 @@ const purchaseInvoice_routes_1 = __importDefault(require("./routes/purchaseInvoi
 const transfer_routes_1 = __importDefault(require("./routes/transfer.routes"));
 const stock_out_routes_1 = __importDefault(require("./routes/stock-out.routes"));
 const stock_adjustment_routes_1 = __importDefault(require("./routes/stock-adjustment.routes"));
+const stock_import_routes_1 = __importDefault(require("./routes/stock-import.routes"));
 const inventory_routes_1 = __importDefault(require("./routes/inventory.routes"));
 const sale_routes_1 = __importDefault(require("./routes/sale.routes"));
 const app_routes_1 = __importDefault(require("./routes/app.routes"));
@@ -166,6 +167,7 @@ app.use(`${vAPI}/purchase-invoices`, purchaseInvoice_routes_1.default);
 app.use(`${vAPI}/transfers`, transfer_routes_1.default);
 app.use(`${vAPI}/stock-out`, stock_out_routes_1.default);
 app.use(`${vAPI}/stock-adjustments`, stock_adjustment_routes_1.default);
+app.use(`${vAPI}/stock-imports`, stock_import_routes_1.default);
 app.use(`${vAPI}/inventory`, inventory_routes_1.default);
 app.use(`${vAPI}/expenses`, expense_routes_1.default);
 app.use(`${vAPI}/cashflows`, cashflow_routes_1.default);

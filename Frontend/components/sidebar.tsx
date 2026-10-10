@@ -76,6 +76,7 @@ import {
   BadgePercent,
   Award,
   Gift,
+  FileUp,
 } from "lucide-react";
 import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 
@@ -281,6 +282,18 @@ const menuSections: SidebarMenuSection[] = [
         id: "stock-adjustment",
         label: "Stock Adjustment",
         icon: SlidersHorizontal,
+        roles: INVENTORY_ROLES,
+      },
+      {
+        id: "scan-stock-count",
+        label: "Scan Stock Count",
+        icon: BarcodeScanIcon,
+        roles: INVENTORY_ROLES,
+      },
+      {
+        id: "opening-stock-import",
+        label: "Opening Stock Import",
+        icon: FileUp,
         roles: INVENTORY_ROLES,
       },
     ],

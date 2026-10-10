@@ -42,6 +42,8 @@ export const DASHBOARD_TAB_IDS = new Set([
   "stock-adjustment",
   "stock-view",
   "bulk-product-upload",
+  "opening-stock-import",
+  "scan-stock-count",
   "inventory-reports",
   "purchase-report",
   "stock-quantity-report",

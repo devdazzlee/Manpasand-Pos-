@@ -1839,7 +1839,7 @@ export class ProductService {
         });
     }
 
-    private async buildRelationsFromNames(data: any, tx: any) {
+    async buildRelationsFromNames(data: any, tx: any) {
         const relations: Record<string, { connect: { id: string } }> = {};
         
         // Map of field names to their corresponding model names and code prefixes

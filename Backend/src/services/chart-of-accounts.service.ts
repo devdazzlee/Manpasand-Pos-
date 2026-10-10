@@ -51,6 +51,9 @@ const COMPUTED_KEYS = new Set([
   'COGS',
 ]);
 
+/** Voucher references posted by opening-stock imports (see stock-import.service). */
+export const STOCK_IMPORT_VOUCHER_PREFIX = 'STOCK-IMPORT';
+
 const COMPUTED_SOURCE: Record<string, string> = {
   INVENTORY: 'Stock value at purchase rate (Balance Sheet)',
   RECEIVABLES: 'Customer credit sales less payments (Balance Sheet)',
@@ -156,7 +159,11 @@ const DEFAULT_CHART: DefaultSubType[] = [
         code: '311',
         name: "Owner's Equity",
         systemKey: 'CAPITAL',
-        accounts: [{ name: "Owner's Capital", systemKey: 'OWNER_CAPITAL' }, { name: "Owner's Drawings" }],
+        accounts: [
+          { name: "Owner's Capital", systemKey: 'OWNER_CAPITAL' },
+          { name: "Owner's Drawings" },
+          { name: 'Opening Balance Equity', systemKey: 'OPENING_EQUITY' },
+        ],
       },
     ],
   },
@@ -1021,12 +1028,21 @@ export class ChartOfAccountsService {
             debit: true,
             credit: true,
             description: true,
-            voucher: { select: { id: true, voucher_no: true, voucher_date: true, narration: true } },
+            voucher: { select: { id: true, voucher_no: true, voucher_date: true, narration: true, reference: true } },
           },
         });
         for (const line of lines) {
           const account = byId.get(line.account_id);
           if (!account) continue;
+          // Opening-stock vouchers debit Inventory for the record, but Inventory is
+          // already overlaid from live stock — counting the line too would double it.
+          if (
+            account.systemKey &&
+            COMPUTED_KEYS.has(account.systemKey) &&
+            line.voucher.reference?.startsWith(STOCK_IMPORT_VOUCHER_PREFIX)
+          ) {
+            continue;
+          }
           const before = line.voucher.voucher_date < start;
           if (before && isProfitLossType(account.typeCode)) continue;
           entries.push({
