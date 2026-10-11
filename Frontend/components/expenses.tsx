@@ -74,8 +74,13 @@ import { formatMoney } from "@/components/inventory/stock-ops/export-utils";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { extractApiError } from "@/lib/api/errors";
-import { ExpenseCategorySelect } from "@/components/expense-category-select";
-import { ExpenseAccountSelect, useExpenseAccounts } from "@/components/expense-account-select";
+import {
+  ExpenseAccountPicker,
+  PaidFromSelect,
+  defaultPaidFrom,
+  useExpenseAccounts,
+  useMoneyAccounts,
+} from "@/components/expense-account-select";
 import { DateField, YmdDatePicker } from "@/components/ui/date-picker";
 import { useQueryClient } from "@tanstack/react-query";
 import { qk } from "@/lib/query/query-keys";
@@ -690,7 +695,8 @@ function ExpenseFormSheet({
 }) {
   const qc = useQueryClient();
   const [f, setF] = useState(() => blankExpense());
-  const { accounts, loading: accountsLoading } = useExpenseAccounts(open);
+  const { accounts, setAccounts, loading: accountsLoading } = useExpenseAccounts(open);
+  const moneyAccounts = useMoneyAccounts(open);
   // Open cash register (if any): cash expenses can be taken straight from the drawer.
   const [drawer, setDrawer] = useState<{ branch: string } | null>(null);
   useEffect(() => {
@@ -704,10 +710,8 @@ function ExpenseFormSheet({
       })
       .catch(() => setDrawer(null));
   }, [open, editing]);
-  const [localCategories, setLocalCategories] = useState(categories);
   useEffect(() => {
     if (!open) return;
-    setLocalCategories(categories);
     setF(
       editing
         ? {
@@ -715,6 +719,7 @@ function ExpenseFormSheet({
             amount: String(editing.amount),
             category_id: editing.category?.id ?? "",
             account_id: editing.account?.id ?? "",
+            paid_from_account_id: editing.paid_from?.id ?? "",
             payment_method: editing.payment_method,
             bank_account: editing.bank_account ?? "",
             reference: editing.reference ?? "",
@@ -726,8 +731,14 @@ function ExpenseFormSheet({
     );
   }, [open, editing, categories]);
 
+  useEffect(() => {
+    if (open && !f.paid_from_account_id && moneyAccounts.length) {
+      setF((prev) => ({ ...prev, paid_from_account_id: defaultPaidFrom(moneyAccounts, prev.payment_method) }));
+    }
+  }, [open, moneyAccounts, f.paid_from_account_id]);
+
   const showBank = BANKISH.includes(f.payment_method);
-  const valid = f.particular.trim().length > 0 && Number(f.amount) > 0;
+  const valid = f.particular.trim().length > 0 && Number(f.amount) > 0 && !!f.account_id;
 
   return (
     <DetailSheet open={open} onOpenChange={onOpenChange} size="lg">
@@ -750,39 +761,41 @@ function ExpenseFormSheet({
           </Field>
         </div>
         <Field
-          label="Category"
-          hint="Labels for reports and filters. Each category gets a linked ledger account under 521 Expenses Control."
+          label="Expense account"
+          hint="From your Chart of Accounts. Pick one, or add a new one here — it appears in Chart of Accounts straight away."
         >
-          <ExpenseCategorySelect
-            value={f.category_id}
-            categories={localCategories}
-            onChange={(categoryId) => {
-              const linked = accounts.find((a) => a.expense_category_id === categoryId);
-              setF({ ...f, category_id: categoryId, account_id: f.account_id || linked?.id || "" });
-            }}
-            onCategoriesChange={(next) => {
-              setLocalCategories(next);
-              qc.invalidateQueries({ queryKey: qk.expenses.categories });
-            }}
-            triggerClassName="h-9"
-          />
-        </Field>
-        <Field label="Expense account (Chart of Accounts)">
-          <ExpenseAccountSelect
+          <ExpenseAccountPicker
             value={f.account_id}
             accounts={accounts}
+            onAccountsChange={(next) => {
+              setAccounts(next);
+              qc.invalidateQueries({ queryKey: qk.expenses.categories });
+            }}
             loading={accountsLoading}
-            onChange={(accountId) => setF({ ...f, account_id: accountId })}
+            onChange={(account) =>
+              setF({ ...f, account_id: account?.id ?? "", category_id: account?.expense_category_id ?? "" })
+            }
             triggerClassName="h-9"
           />
         </Field>
         <Field label="Payment method">
-          <Select value={f.payment_method} onValueChange={(v) => setF({ ...f, payment_method: v as ExpensePaymentMethod })}>
+          <Select
+            value={f.payment_method}
+            onValueChange={(v) => setF({ ...f, payment_method: v as ExpensePaymentMethod, paid_from_account_id: defaultPaidFrom(moneyAccounts, v) })}
+          >
             <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
             <SelectContent>
               {EXPENSE_PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>)}
             </SelectContent>
           </Select>
+        </Field>
+        <Field label="Paid from" hint="The cash or bank account this money came out of — it is reduced in Chart of Accounts.">
+          <PaidFromSelect
+            value={f.paid_from_account_id}
+            accounts={moneyAccounts}
+            onChange={(id) => setF({ ...f, paid_from_account_id: id })}
+            triggerClassName="h-9"
+          />
         </Field>
         {!editing && drawer && f.expense_date === new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Karachi" }) && (
           <p className="rounded-lg bg-[#fcf8f2] px-3 py-2 text-xs text-gray-700">
@@ -795,15 +808,9 @@ function ExpenseFormSheet({
           <p className="rounded-lg bg-[#fcf8f2] px-3 py-2 text-xs text-gray-600">This expense is recorded in a cash register session.</p>
         )}
         {showBank && (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Bank account">
-              <Input value={f.bank_account} onChange={(e) => setF({ ...f, bank_account: e.target.value })}
-                placeholder="Account / bank name" className="h-9" />
-            </Field>
-            <Field label="Reference / cheque no.">
-              <Input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} className="h-9" />
-            </Field>
-          </div>
+          <Field label="Reference / cheque no.">
+            <Input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} className="h-9" />
+          </Field>
         )}
         <Field label="Vendor / paid to">
           <Input value={f.vendor} onChange={(e) => setF({ ...f, vendor: e.target.value })} className="h-9" />
@@ -832,8 +839,8 @@ function ExpenseFormSheet({
               amount: Number(f.amount),
               category_id: f.category_id || null,
               account_id: f.account_id || null,
+              paid_from_account_id: f.paid_from_account_id || null,
               payment_method: f.payment_method,
-              bank_account: showBank ? f.bank_account.trim() || null : null,
               reference: f.reference.trim() || null,
               vendor: f.vendor.trim() || null,
               notes: f.notes.trim() || null,
@@ -855,6 +862,7 @@ function blankExpense() {
     amount: "",
     category_id: "",
     account_id: "",
+    paid_from_account_id: "",
     payment_method: "CASH" as ExpensePaymentMethod,
     bank_account: "",
     reference: "",
@@ -1059,11 +1067,10 @@ function RecurringFormSheet({
 }) {
   const qc = useQueryClient();
   const [f, setF] = useState(() => blankRecurring());
-  const { accounts, loading: accountsLoading } = useExpenseAccounts(open);
-  const [localCategories, setLocalCategories] = useState(categories);
+  const { accounts, setAccounts, loading: accountsLoading } = useExpenseAccounts(open);
+  const moneyAccounts = useMoneyAccounts(open);
   useEffect(() => {
     if (!open) return;
-    setLocalCategories(categories);
     setF(
       editing
         ? {
@@ -1071,6 +1078,7 @@ function RecurringFormSheet({
             amount: String(editing.amount),
             category_id: editing.category?.id ?? "",
             account_id: editing.account?.id ?? "",
+            paid_from_account_id: editing.paid_from?.id ?? "",
             payment_method: editing.payment_method,
             bank_account: editing.bank_account ?? "",
             vendor: editing.vendor ?? "",
@@ -1085,8 +1093,14 @@ function RecurringFormSheet({
     );
   }, [open, editing, categories]);
 
+  useEffect(() => {
+    if (open && !f.paid_from_account_id && moneyAccounts.length) {
+      setF((prev) => ({ ...prev, paid_from_account_id: defaultPaidFrom(moneyAccounts, prev.payment_method) }));
+    }
+  }, [open, moneyAccounts, f.paid_from_account_id]);
+
   const showBank = BANKISH.includes(f.payment_method);
-  const valid = f.particular.trim().length > 0 && Number(f.amount) > 0;
+  const valid = f.particular.trim().length > 0 && Number(f.amount) > 0 && !!f.account_id;
 
   return (
     <DetailSheet open={open} onOpenChange={onOpenChange} size="lg">
@@ -1104,7 +1118,10 @@ function RecurringFormSheet({
               onChange={(e) => setF({ ...f, amount: e.target.value })} className="h-9 nums" />
           </Field>
           <Field label="Payment method">
-            <Select value={f.payment_method} onValueChange={(v) => setF({ ...f, payment_method: v as ExpensePaymentMethod })}>
+            <Select
+              value={f.payment_method}
+              onValueChange={(v) => setF({ ...f, payment_method: v as ExpensePaymentMethod, paid_from_account_id: defaultPaidFrom(moneyAccounts, v) })}
+            >
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {EXPENSE_PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>)}
@@ -1112,30 +1129,29 @@ function RecurringFormSheet({
             </Select>
           </Field>
         </div>
-        <Field
-          label="Category"
-          hint="Labels for reports and filters. Each category gets a linked ledger account under 521 Expenses Control."
-        >
-          <ExpenseCategorySelect
-            value={f.category_id}
-            categories={localCategories}
-            onChange={(categoryId) => {
-              const linked = accounts.find((a) => a.expense_category_id === categoryId);
-              setF({ ...f, category_id: categoryId, account_id: f.account_id || linked?.id || "" });
-            }}
-            onCategoriesChange={(next) => {
-              setLocalCategories(next);
-              qc.invalidateQueries({ queryKey: qk.expenses.categories });
-            }}
+        <Field label="Paid from" hint="The cash or bank account this money came out of — it is reduced in Chart of Accounts.">
+          <PaidFromSelect
+            value={f.paid_from_account_id}
+            accounts={moneyAccounts}
+            onChange={(id) => setF({ ...f, paid_from_account_id: id })}
             triggerClassName="h-9"
           />
         </Field>
-        <Field label="Expense account (Chart of Accounts)">
-          <ExpenseAccountSelect
+        <Field
+          label="Expense account"
+          hint="From your Chart of Accounts. Pick one, or add a new one here — it appears in Chart of Accounts straight away."
+        >
+          <ExpenseAccountPicker
             value={f.account_id}
             accounts={accounts}
+            onAccountsChange={(next) => {
+              setAccounts(next);
+              qc.invalidateQueries({ queryKey: qk.expenses.categories });
+            }}
             loading={accountsLoading}
-            onChange={(accountId) => setF({ ...f, account_id: accountId })}
+            onChange={(account) =>
+              setF({ ...f, account_id: account?.id ?? "", category_id: account?.expense_category_id ?? "" })
+            }
             triggerClassName="h-9"
           />
         </Field>
@@ -1153,11 +1169,6 @@ function RecurringFormSheet({
               onChange={(e) => setF({ ...f, interval: e.target.value })} className="h-9 nums" />
           </Field>
         </div>
-        {showBank && (
-          <Field label="Bank account">
-            <Input value={f.bank_account} onChange={(e) => setF({ ...f, bank_account: e.target.value })} className="h-9" />
-          </Field>
-        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Starts">
             <YmdDatePicker value={f.start_date} onChange={(value) => setF({ ...f, start_date: value })} className="h-9" />
@@ -1184,8 +1195,8 @@ function RecurringFormSheet({
               amount: Number(f.amount),
               category_id: f.category_id || null,
               account_id: f.account_id || null,
+              paid_from_account_id: f.paid_from_account_id || null,
               payment_method: f.payment_method,
-              bank_account: showBank ? f.bank_account.trim() || null : null,
               vendor: f.vendor.trim() || null,
               notes: f.notes.trim() || null,
               frequency: f.frequency,
@@ -1210,6 +1221,7 @@ function blankRecurring() {
     amount: "",
     category_id: "",
     account_id: "",
+    paid_from_account_id: "",
     payment_method: "CASH" as ExpensePaymentMethod,
     bank_account: "",
     vendor: "",

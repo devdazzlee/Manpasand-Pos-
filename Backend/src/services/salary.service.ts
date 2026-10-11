@@ -6,6 +6,7 @@ import { localRange } from '../utils/timezone';
 import { salaryNet } from './employee-payroll.service';
 import { recordCashPayOnOpenRegister } from './register-cash-out.helper';
 import { CreateSalaryInput, UpdateSalaryInput } from '../validations/salary.validation';
+import { ChartOfAccountsService } from './chart-of-accounts.service';
 
 export class SalaryService {
   async createSalary(data: CreateSalaryInput) {
@@ -314,19 +315,18 @@ export class SalaryService {
     return this.serialize(salary);
   }
 
-  async markPaid(id: string, paid_date?: string, opts?: { payment_method?: string; userId?: string }) {
+  async markPaid(id: string, paid_date?: string, opts?: { payment_method?: string; paid_from_account_id?: string | null; userId?: string }) {
     const updated = await this.updateSalary(id, {
       is_paid: true,
       paid_date: paid_date || new Date().toISOString(),
     });
     const method = String(opts?.payment_method || updated.payment_method || 'CASH').toUpperCase();
-    if (opts?.payment_method || !updated.payment_method) {
-      await prisma.salary.update({
-        where: { id },
-        data: { payment_method: method },
-      });
-      updated.payment_method = method;
-    }
+    const paidFrom = await new ChartOfAccountsService().resolveMoneyAccount(opts?.paid_from_account_id, method);
+    await prisma.salary.update({
+      where: { id },
+      data: { payment_method: method, paid_from_account_id: paidFrom },
+    });
+    updated.payment_method = method;
     if (method === 'CASH') {
       const empName = updated.employee?.name || 'Staff';
       await recordCashPayOnOpenRegister({

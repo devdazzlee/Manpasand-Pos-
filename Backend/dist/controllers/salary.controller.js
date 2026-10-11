@@ -40,6 +40,7 @@ exports.updateSalary = (0, asyncHandler_1.default)(async (req, res) => {
 exports.markSalaryPaid = (0, asyncHandler_1.default)(async (req, res) => {
     const salary = await salaryService.markPaid(req.params.id, req.body?.paid_date, {
         payment_method: req.body?.payment_method,
+        paid_from_account_id: req.body?.paid_from_account_id,
         userId: req.user?.id,
     });
     new apiResponse_1.ApiResponse(salary, 'Salary marked as paid').send(res);

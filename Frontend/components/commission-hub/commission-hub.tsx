@@ -63,6 +63,7 @@ import {
   type RecordsMeta,
   type Salesperson,
 } from "./commission-api";
+import { PaidFromSelect, usePaidFrom } from "@/components/expense-account-select";
 
 type Tab = "earned" | "payouts" | "rules";
 type RangeKey = "today" | "yesterday" | "week" | "month" | "lastMonth" | "custom";
@@ -904,6 +905,7 @@ function PayDialog({
   const [reference, setReference] = useState("");
   const [amount, setAmount] = useState("");
   const [busy, setBusy] = useState(false);
+  const paidFrom = usePaidFrom(method, !!pay);
 
   useEffect(() => {
     if (pay) {
@@ -936,6 +938,7 @@ function PayDialog({
           paid_date: date,
           payment_method: method,
           payment_reference: reference || null,
+          paid_from_account_id: paidFrom.paidFrom || null,
         });
         const st = commissionStatus(updated);
         toast({
@@ -948,6 +951,7 @@ function PayDialog({
           paid_date: date,
           payment_method: method,
           payment_reference: reference || null,
+          paid_from_account_id: paidFrom.paidFrom || null,
         });
         toast({ title: "Commission paid", description: `${rs(pay.total)} · ${pay.label}` });
       }
@@ -1014,6 +1018,11 @@ function PayDialog({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+          <div className="space-y-1.5 sm:col-span-2">
+            <Label>Paid from</Label>
+            <PaidFromSelect value={paidFrom.paidFrom} onChange={paidFrom.setPaidFrom} accounts={paidFrom.accounts} />
+            <p className="text-[11px] text-gray-500">Cash or bank account this commission comes out of in Chart of Accounts.</p>
           </div>
           <div className="space-y-1.5 sm:col-span-2">
             <Label>Reference (optional)</Label>

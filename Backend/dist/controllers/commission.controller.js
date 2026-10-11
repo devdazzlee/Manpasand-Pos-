@@ -66,6 +66,7 @@ exports.markCommissionPaid = (0, asyncHandler_1.default)(async (req, res) => {
         paid_date: req.body?.paid_date,
         payment_method: req.body?.payment_method,
         payment_reference: req.body?.payment_reference,
+        paid_from_account_id: req.body?.paid_from_account_id,
         userId: req.user?.id,
     });
     new apiResponse_1.ApiResponse(row, 'Commission marked as paid').send(res);
@@ -76,6 +77,7 @@ exports.payCommission = (0, asyncHandler_1.default)(async (req, res) => {
         paid_date: req.body?.paid_date,
         payment_method: req.body?.payment_method,
         payment_reference: req.body?.payment_reference,
+        paid_from_account_id: req.body?.paid_from_account_id,
         userId: req.user?.id,
     });
     const msg = row.status === 'PAID'
@@ -111,6 +113,7 @@ exports.bulkPayCommissions = (0, asyncHandler_1.default)(async (req, res) => {
         paid_date: req.body.paid_date,
         payment_method: req.body.payment_method,
         payment_reference: req.body.payment_reference,
+        paid_from_account_id: req.body.paid_from_account_id,
         userId: req.user?.id,
     });
     new apiResponse_1.ApiResponse(result, 'Commissions paid').send(res);

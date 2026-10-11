@@ -62,6 +62,7 @@ exports.markSalaryPaidSchema = zod_1.z.object({
         .object({
         paid_date: zod_1.z.string().datetime().optional(),
         payment_method: zod_1.z.string().optional(),
+        paid_from_account_id: zod_1.z.string().uuid().nullish(),
     })
         .optional(),
 });

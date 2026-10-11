@@ -7,6 +7,7 @@ const helpers_1 = require("../utils/helpers");
 const timezone_1 = require("../utils/timezone");
 const employee_payroll_service_1 = require("./employee-payroll.service");
 const register_cash_out_helper_1 = require("./register-cash-out.helper");
+const chart_of_accounts_service_1 = require("./chart-of-accounts.service");
 class SalaryService {
     async createSalary(data) {
         const employee = await client_1.prisma.employee.findUnique({
@@ -273,13 +274,12 @@ class SalaryService {
             paid_date: paid_date || new Date().toISOString(),
         });
         const method = String(opts?.payment_method || updated.payment_method || 'CASH').toUpperCase();
-        if (opts?.payment_method || !updated.payment_method) {
-            await client_1.prisma.salary.update({
-                where: { id },
-                data: { payment_method: method },
-            });
-            updated.payment_method = method;
-        }
+        const paidFrom = await new chart_of_accounts_service_1.ChartOfAccountsService().resolveMoneyAccount(opts?.paid_from_account_id, method);
+        await client_1.prisma.salary.update({
+            where: { id },
+            data: { payment_method: method, paid_from_account_id: paidFrom },
+        });
+        updated.payment_method = method;
         if (method === 'CASH') {
             const empName = updated.employee?.name || 'Staff';
             await (0, register_cash_out_helper_1.recordCashPayOnOpenRegister)({

@@ -123,6 +123,8 @@ export interface TxnRow {
   amount: number;
   payment_date: string;
   method: string;
+  /** Cash / bank account the money left from (or came into, for refunds) */
+  paid_from_account_id?: string | null;
   reference: string | null;
   notes: string | null;
   purchase_invoice_id: string | null;

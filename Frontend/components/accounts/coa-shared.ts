@@ -124,6 +124,12 @@ export const KIND_LABEL: Record<string, string> = {
   PURCHASE_RETURN: "Goods returned",
   SUPPLIER_PAYMENT: "Supplier payment",
   SUPPLIER_NOTE: "Supplier note",
+  EXPENSE_PAYMENT: "Expense paid",
+  SALARY_PAYMENT: "Salary paid",
+  COMMISSION_PAYMENT: "Commission paid",
+  STAFF_ADVANCE: "Staff advance",
+  CUSTOMER_RECEIPT: "Customer receipt",
+  GIFT_CARD: "Gift card",
   COMPUTED: "POS computed",
 };
 
@@ -139,6 +145,12 @@ export const KIND_STYLE: Record<string, string> = {
   PURCHASE_RETURN: "bg-amber-50 text-amber-800 ring-amber-200",
   SUPPLIER_NOTE: "bg-violet-50 text-violet-700 ring-violet-200",
   SUPPLIER_PAYMENT: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  EXPENSE_PAYMENT: "bg-amber-50 text-amber-800 ring-amber-200",
+  SALARY_PAYMENT: "bg-sky-50 text-sky-700 ring-sky-200",
+  COMMISSION_PAYMENT: "bg-cyan-50 text-cyan-700 ring-cyan-200",
+  STAFF_ADVANCE: "bg-indigo-50 text-indigo-700 ring-indigo-200",
+  CUSTOMER_RECEIPT: "bg-emerald-50 text-emerald-700 ring-emerald-200",
+  GIFT_CARD: "bg-pink-50 text-pink-700 ring-pink-200",
   COMPUTED: "bg-[#fcf8f2] text-[#8a6520] ring-[#a67c2e]/30",
 };
 

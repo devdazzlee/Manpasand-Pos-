@@ -72,6 +72,7 @@ import { extractApiError } from "@/lib/api/errors";
 import { useEmployees } from "@/hooks/queries/use-employees";
 import { useSalaries, useSalaryMutations } from "@/hooks/queries/use-salaries";
 import type { SalaryRecord } from "@/lib/api/salaries";
+import { PaidFromSelect, usePaidFrom } from "@/components/expense-account-select";
 import { useQuery } from "@tanstack/react-query";
 import { fetchCommissions } from "@/lib/api/commissions";
 import {
@@ -416,10 +417,29 @@ export function Salaries() {
     }
   };
 
+  const [payTarget, setPayTarget] = useState<SalaryRecord | null>(null);
+  const [payMethod, setPayMethod] = useState("CASH");
+  const payFrom = usePaidFrom(payMethod, !!payTarget);
+
   const handleMarkPaid = (row: SalaryRecord) => {
+    setPayMethod("CASH");
+    setPayTarget(row);
+  };
+
+  const confirmMarkPaid = () => {
+    const row = payTarget;
+    if (!row) return;
+    setPayTarget(null);
     setActionId(row.id);
     markPaid.mutate(
-      { id: row.id, body: { paid_date: new Date().toISOString() } },
+      {
+        id: row.id,
+        body: {
+          paid_date: new Date().toISOString(),
+          payment_method: payMethod,
+          paid_from_account_id: payFrom.paidFrom || null,
+        },
+      },
       {
         onSuccess: () => {
           toast({ title: "Marked as paid" });
@@ -1752,6 +1772,43 @@ export function Salaries() {
                 "Delete"
               )}
             </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={!!payTarget} onOpenChange={(open) => !open && setPayTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Mark salary as paid</AlertDialogTitle>
+            <AlertDialogDescription>
+              {payTarget?.employee?.name ?? "Employee"} — choose how it was paid. The amount comes out of the selected
+              cash or bank account in Chart of Accounts.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="space-y-1.5">
+              <Label>Paid by</Label>
+              <Select value={payMethod} onValueChange={setPayMethod}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {["CASH", "BANK_TRANSFER", "CHEQUE", "MOBILE_MONEY", "CARD"].map((m) => (
+                    <SelectItem key={m} value={m}>
+                      {m.replace(/_/g, " ").toLowerCase().replace(/^./, (c) => c.toUpperCase())}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Paid from</Label>
+              <PaidFromSelect value={payFrom.paidFrom} onChange={payFrom.setPaidFrom} accounts={payFrom.accounts} />
+            </div>
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmMarkPaid}>Mark paid</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

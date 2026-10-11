@@ -21,6 +21,7 @@ import {
     supplierBalances,
     supplierEffect,
 } from './supplier-accounts.service';
+import { ChartOfAccountsService } from './chart-of-accounts.service';
 
 const r2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
 const METHOD_LABEL: Record<string, string> = {
@@ -749,6 +750,7 @@ export class SupplierService {
             amount: asNumber(p.amount),
             payment_date: p.payment_date,
             method: p.method,
+            paid_from_account_id: p.paid_from_account_id,
             reference: p.reference,
             notes: p.notes,
             purchase_invoice_id: p.purchase_invoice_id,
@@ -768,6 +770,9 @@ export class SupplierService {
         const invoiceId = await this.checkInvoice(supplierId, type, data.purchaseInvoiceId);
 
         const method = SUPPLIER_CASH_TYPES.has(type) ? String(data.method || 'CASH').toUpperCase() : 'ADJUSTMENT';
+        const paidFrom = SUPPLIER_CASH_TYPES.has(type)
+            ? await new ChartOfAccountsService().resolveMoneyAccount(data.paidFromAccountId, method)
+            : null;
         const payment = await prisma.supplierPayment.create({
             data: {
                 supplier_id: supplierId,
@@ -775,6 +780,7 @@ export class SupplierService {
                 amount: data.amount,
                 payment_date: paymentDate,
                 method,
+                paid_from_account_id: paidFrom,
                 reference: data.reference || null,
                 notes: data.notes || null,
                 purchase_invoice_id: invoiceId,
@@ -812,13 +818,21 @@ export class SupplierService {
         }
         const invoiceId =
             data.purchaseInvoiceId !== undefined ? await this.checkInvoice(supplierId, type, data.purchaseInvoiceId) : SUPPLIER_INVOICE_TYPES.has(type) ? existing.purchase_invoice_id : null;
+        const method = SUPPLIER_CASH_TYPES.has(type) ? data.method || (existing.method === 'ADJUSTMENT' ? 'CASH' : existing.method) : 'ADJUSTMENT';
+        // Keep the cash / bank account in step with the method unless one was chosen.
+        const paidFrom = !SUPPLIER_CASH_TYPES.has(type)
+            ? null
+            : data.paidFromAccountId !== undefined || method !== existing.method
+              ? await new ChartOfAccountsService().resolveMoneyAccount(data.paidFromAccountId, method)
+              : existing.paid_from_account_id;
         const payment = await prisma.supplierPayment.update({
             where: { id: paymentId },
             data: {
                 type,
                 ...(data.amount !== undefined ? { amount: data.amount } : {}),
                 ...(paymentDate ? { payment_date: paymentDate } : {}),
-                method: SUPPLIER_CASH_TYPES.has(type) ? data.method || (existing.method === 'ADJUSTMENT' ? 'CASH' : existing.method) : 'ADJUSTMENT',
+                method,
+                paid_from_account_id: paidFrom,
                 ...(data.reference !== undefined ? { reference: data.reference || null } : {}),
                 ...(data.notes !== undefined ? { notes: data.notes || null } : {}),
                 purchase_invoice_id: invoiceId,

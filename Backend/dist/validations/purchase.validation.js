@@ -36,6 +36,7 @@ exports.createBulkPurchaseSchema = zod_1.z.object({
             .optional()
             .default('CASH'),
         paymentReference: zod_1.z.string().optional(),
+        paidFromAccountId: zod_1.z.string().uuid().nullish(),
         paymentNotes: zod_1.z.string().optional(),
         lines: zod_1.z
             .array(zod_1.z.object({

@@ -75,6 +75,7 @@ exports.bulkPaySchema = zod_1.z.object({
         paid_date: zod_1.z.string().optional(),
         payment_method: zod_1.z.string().max(40).optional(),
         payment_reference: zod_1.z.string().max(120).nullable().optional(),
+        paid_from_account_id: zod_1.z.string().uuid().nullish(),
     }),
 });
 exports.commissionIdParamSchema = zod_1.z.object({
@@ -87,6 +88,7 @@ exports.markCommissionPaidSchema = zod_1.z.object({
         paid_date: zod_1.z.string().optional(),
         payment_method: zod_1.z.string().max(40).optional(),
         payment_reference: zod_1.z.string().max(120).nullable().optional(),
+        paid_from_account_id: zod_1.z.string().uuid().nullish(),
     })
         .optional(),
 });
@@ -97,6 +99,7 @@ exports.payCommissionSchema = zod_1.z.object({
         paid_date: zod_1.z.string().optional(),
         payment_method: zod_1.z.string().max(40).optional(),
         payment_reference: zod_1.z.string().max(120).nullable().optional(),
+        paid_from_account_id: zod_1.z.string().uuid().nullish(),
     }),
 });
 exports.commissionSalesSchema = zod_1.z.object({

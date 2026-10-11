@@ -3,10 +3,12 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteVoucher = exports.updateVoucher = exports.createVoucher = exports.getVoucher = exports.listVouchers = exports.deleteAccount = exports.updateAccount = exports.createAccount = exports.getAccount = exports.listAccounts = exports.deleteControl = exports.updateControl = exports.createControl = exports.deleteSubType = exports.updateSubType = exports.createSubType = exports.getExpenseAccountOptions = exports.getNextCodes = exports.syncAccounts = exports.getTrialBalance = exports.getExpenseBreakdown = exports.getLedger = exports.getTree = void 0;
+exports.deleteVoucher = exports.updateVoucher = exports.createVoucher = exports.getVoucher = exports.listVouchers = exports.deleteAccount = exports.updateAccount = exports.createAccount = exports.getAccount = exports.listAccounts = exports.deleteControl = exports.updateControl = exports.createControl = exports.deleteSubType = exports.updateSubType = exports.createSubType = exports.createExpenseAccount = exports.getMoneyAccountOptions = exports.getExpenseGroupOptions = exports.getExpenseAccountOptions = exports.getNextCodes = exports.syncAccounts = exports.getMoneyFlow = exports.updatePaymentRoutingSetting = exports.getPaymentRoutingSetting = exports.getTrialBalance = exports.getExpenseBreakdown = exports.getLedger = exports.getTree = void 0;
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const chart_of_accounts_service_1 = require("../services/chart-of-accounts.service");
+const apiError_1 = require("../utils/apiError");
+const payment_accounts_service_1 = require("../services/payment-accounts.service");
 const chart_of_accounts_validation_1 = require("../validations/chart-of-accounts.validation");
 const service = new chart_of_accounts_service_1.ChartOfAccountsService();
 // `validate` only checks the request; parse again here to get coerced values.
@@ -35,6 +37,17 @@ exports.getTrialBalance = (0, asyncHandler_1.default)(async (req, res) => {
     const data = await service.trialBalance(reportParams(req));
     new apiResponse_1.ApiResponse(data, 'Trial balance retrieved').send(res);
 });
+exports.getPaymentRoutingSetting = (0, asyncHandler_1.default)(async (_req, res) => {
+    new apiResponse_1.ApiResponse(await (0, payment_accounts_service_1.getPaymentRouting)(), 'Payment accounts retrieved').send(res);
+});
+exports.updatePaymentRoutingSetting = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await (0, payment_accounts_service_1.setPaymentRouting)(req.body || {}, req.user?.id);
+    new apiResponse_1.ApiResponse(data, 'Payment accounts saved').send(res);
+});
+exports.getMoneyFlow = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await service.moneyFlow(reportParams(req));
+    new apiResponse_1.ApiResponse(data, 'Money flow retrieved').send(res);
+});
 exports.syncAccounts = (0, asyncHandler_1.default)(async (_req, res) => {
     const data = await service.syncLinkedAccounts();
     new apiResponse_1.ApiResponse(data, 'Linked accounts synchronised').send(res);
@@ -47,6 +60,22 @@ exports.getNextCodes = (0, asyncHandler_1.default)(async (req, res) => {
 exports.getExpenseAccountOptions = (0, asyncHandler_1.default)(async (_req, res) => {
     const data = await service.expenseAccountOptions();
     new apiResponse_1.ApiResponse(data, 'Expense accounts retrieved').send(res);
+});
+exports.getExpenseGroupOptions = (0, asyncHandler_1.default)(async (_req, res) => {
+    const data = await service.expenseGroupOptions();
+    new apiResponse_1.ApiResponse(data, 'Expense groups retrieved').send(res);
+});
+exports.getMoneyAccountOptions = (0, asyncHandler_1.default)(async (_req, res) => {
+    const data = await service.moneyAccountOptions();
+    new apiResponse_1.ApiResponse(data, 'Cash and bank accounts retrieved').send(res);
+});
+exports.createExpenseAccount = (0, asyncHandler_1.default)(async (req, res) => {
+    const input = body(chart_of_accounts_validation_1.createExpenseAccountSchema, req);
+    if (input.new_group_name && !['SUPER_ADMIN', 'ADMIN'].includes(String(req.user?.role))) {
+        throw new apiError_1.AppError(403, 'Only an admin can create a new expense group — pick an existing group');
+    }
+    const data = await service.createExpenseAccount(input);
+    new apiResponse_1.ApiResponse(data, 'Expense account created', 201).send(res);
 });
 /* ---------------------------- sub types ---------------------------- */
 exports.createSubType = (0, asyncHandler_1.default)(async (req, res) => {

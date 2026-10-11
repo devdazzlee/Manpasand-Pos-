@@ -130,9 +130,18 @@ export const commissionApi = {
     apiClient.get("/commissions", { params: { fetch_all: "true", ...params } }).then((r) => ({ rows: r.data.data as CommissionRecord[], meta: r.data.meta as RecordsMeta })),
   generate: (body: { month: number; year: number; employee_id?: string; overwrite?: boolean }) =>
     data<{ count: number; created: number; skippedPaid: number; skippedExisting: number }>(apiClient.post("/commissions/generate", body)),
-  pay: (id: string, body: { amount: number; paid_date: string; payment_method: string; payment_reference?: string | null }) =>
+  pay: (
+    id: string,
+    body: { amount: number; paid_date: string; payment_method: string; payment_reference?: string | null; paid_from_account_id?: string | null },
+  ) =>
     data<CommissionRecord>(apiClient.post(`/commissions/${id}/pay`, body)),
-  bulkPay: (body: { ids: string[]; paid_date: string; payment_method: string; payment_reference?: string | null }) => data<{ paid: number; amount: number }>(apiClient.post("/commissions/bulk-pay", body)),
+  bulkPay: (body: {
+    ids: string[];
+    paid_date: string;
+    payment_method: string;
+    payment_reference?: string | null;
+    paid_from_account_id?: string | null;
+  }) => data<{ paid: number; amount: number }>(apiClient.post("/commissions/bulk-pay", body)),
   unpay: (id: string) => data<CommissionRecord>(apiClient.patch(`/commissions/${id}/mark-unpaid`)),
   update: (id: string, body: Record<string, unknown>) => data<CommissionRecord>(apiClient.put(`/commissions/${id}`, body)),
   remove: (id: string) => apiClient.delete(`/commissions/${id}`),

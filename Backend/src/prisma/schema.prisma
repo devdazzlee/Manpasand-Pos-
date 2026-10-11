@@ -258,6 +258,9 @@ model SupplierPayment {
   type         String   @default("PAYMENT")
   payment_date DateTime @default(now())
   method       String   @default("CASH")
+  /// Cash / bank account the money left from (or came into, for refunds)
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("SupplierPaymentPaidFrom", fields: [paid_from_account_id], references: [id], onDelete: SetNull)
   reference    String?
   notes        String?
   purchase_invoice_id String?
@@ -273,6 +276,7 @@ model SupplierPayment {
   @@index([purchase_invoice_id])
   @@index([bill_group_id])
   @@index([created_by])
+  @@index([paid_from_account_id])
 }
 
 enum PurchaseInvoiceStatus {
@@ -1210,12 +1214,17 @@ model Expense {
 
   // Chart of Accounts expense head this expense posts to
   account_id String?
-  account    TransactionalAccount? @relation(fields: [account_id], references: [id])
+  account    TransactionalAccount? @relation("ExpenseAccount", fields: [account_id], references: [id])
+
+  /// Cash / bank account the money left from (Cr side). Null on old rows: derived from payment_method.
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("ExpensePaidFrom", fields: [paid_from_account_id], references: [id])
 
   attachments ExpenseAttachment[]
 
   @@index([status])
   @@index([account_id])
+  @@index([paid_from_account_id])
   @@index([expense_date])
   @@index([category_id])
   @@index([branch_id])
@@ -1234,7 +1243,10 @@ model RecurringExpense {
   category    ExpenseCategory? @relation(fields: [category_id], references: [id])
 
   account_id String?
-  account    TransactionalAccount? @relation(fields: [account_id], references: [id])
+  account    TransactionalAccount? @relation("RecurringExpenseAccount", fields: [account_id], references: [id])
+
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("RecurringExpensePaidFrom", fields: [paid_from_account_id], references: [id])
 
   branch_id String?
   branch    Branch? @relation(fields: [branch_id], references: [id])
@@ -1513,6 +1525,9 @@ model Salary {
   advance_deduction Decimal @default(0)
   paid_amount       Decimal @default(0)
   payment_method    String?
+  /// Cash / bank account the salary was paid from (Cr side in Chart of Accounts)
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("SalaryPaidFrom", fields: [paid_from_account_id], references: [id], onDelete: SetNull)
   reference         String?
   is_paid     Boolean   @default(false)
   paid_date   DateTime?
@@ -1524,6 +1539,7 @@ model Salary {
   @@index([employee_id])
   @@index([paid_date])
   @@index([is_paid])
+  @@index([paid_from_account_id])
 }
 
 model Commission {
@@ -1547,6 +1563,8 @@ model Commission {
   is_paid       Boolean   @default(false)
   paid_date     DateTime?
   payment_method    String?
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("CommissionPaidFrom", fields: [paid_from_account_id], references: [id], onDelete: SetNull)
   payment_reference String?
   paid_by           String?
   notes         String?
@@ -1558,6 +1576,7 @@ model Commission {
   @@index([employee_id])
   @@index([paid_date])
   @@index([is_paid])
+  @@index([paid_from_account_id])
 }
 
 // ============================================================
@@ -1635,8 +1654,13 @@ model TransactionalAccount {
   expense_category_id String?          @unique
   expense_category    ExpenseCategory? @relation(fields: [expense_category_id], references: [id], onDelete: SetNull)
 
-  expenses           Expense[]
-  recurring_expenses RecurringExpense[]
+  expenses           Expense[]          @relation("ExpenseAccount")
+  recurring_expenses RecurringExpense[] @relation("RecurringExpenseAccount")
+  paid_expenses      Expense[]          @relation("ExpensePaidFrom")
+  paid_recurring     RecurringExpense[] @relation("RecurringExpensePaidFrom")
+  paid_salaries      Salary[]           @relation("SalaryPaidFrom")
+  paid_commissions   Commission[]       @relation("CommissionPaidFrom")
+  paid_supplier_payments SupplierPayment[] @relation("SupplierPaymentPaidFrom")
   budgets            Budget[]
   journal_lines      JournalVoucherLine[]
 

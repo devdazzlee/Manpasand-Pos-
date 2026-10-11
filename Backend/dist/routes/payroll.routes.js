@@ -44,6 +44,7 @@ const paySchema = zod_1.z.object({
         method: zod_1.z.string().max(40).optional(),
         date: ymd.optional(),
         reference: zod_1.z.string().max(120).nullable().optional(),
+        paid_from_account_id: zod_1.z.string().uuid().nullish(),
     }),
 });
 const advanceSchema = zod_1.z.object({

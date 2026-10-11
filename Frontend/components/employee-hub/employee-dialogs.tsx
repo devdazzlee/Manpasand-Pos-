@@ -28,6 +28,7 @@ import {
   type Named,
   type Payslip,
 } from "./employee-api";
+import { PaidFromSelect, usePaidFrom } from "@/components/expense-account-select";
 
 function Field({ label, hint, error, children, className }: { label: string; hint?: string; error?: string; children: ReactNode; className?: string }) {
   return (
@@ -635,6 +636,7 @@ export function PaySalaryDialog({
   const [date, setDate] = useState(businessTodayYmd());
   const [reference, setReference] = useState("");
   const [saving, setSaving] = useState(false);
+  const paidFrom = usePaidFrom(method, !!slip);
 
   useEffect(() => {
     if (!slip) return;
@@ -649,7 +651,13 @@ export function PaySalaryDialog({
     if (!slip) return;
     setSaving(true);
     try {
-      const res = await employeeApi.paySlip(slip.id, { amount: value, method, date, reference: reference.trim() || null });
+      const res = await employeeApi.paySlip(slip.id, {
+        amount: value,
+        method,
+        date,
+        reference: reference.trim() || null,
+        paid_from_account_id: paidFrom.paidFrom || null,
+      });
       toast({ title: res.status === "PAID" ? "Salary paid in full" : "Partial payment recorded", description: `${employeeName} · ${slip.period_label} · ${rs(value)}` });
       onOpenChange(false);
       onSaved();
@@ -685,6 +693,9 @@ export function PaySalaryDialog({
               <YmdDatePicker value={date} onChange={setDate} className="h-9" />
             </Field>
           </div>
+          <Field label="Paid from" hint="Cash or bank account this salary comes out of in Chart of Accounts">
+            <PaidFromSelect value={paidFrom.paidFrom} onChange={paidFrom.setPaidFrom} accounts={paidFrom.accounts} triggerClassName="h-9" />
+          </Field>
           <Field label="Reference" hint="Cheque / transfer no.">
             <Input value={reference} onChange={(e) => setReference(e.target.value)} className="h-9" />
           </Field>

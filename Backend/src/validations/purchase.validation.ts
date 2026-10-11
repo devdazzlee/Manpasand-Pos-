@@ -35,6 +35,7 @@ export const createBulkPurchaseSchema = z.object({
         .optional()
         .default('CASH'),
       paymentReference: z.string().optional(),
+      paidFromAccountId: z.string().uuid().nullish(),
       paymentNotes: z.string().optional(),
       lines: z
         .array(

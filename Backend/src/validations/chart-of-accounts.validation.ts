@@ -141,3 +141,22 @@ export const listVouchersSchema = z.object({
     limit: z.coerce.number().int().positive().max(200).optional(),
   }),
 });
+
+export const createExpenseAccountSchema = z.object({
+  body: z
+    .object({
+      name: z.string().trim().min(2, 'Enter an account name').max(120),
+      control_id: z.string().nullish(),
+      new_group_name: z.string().trim().max(120).nullish(),
+    })
+    .refine((b) => !(b.control_id && b.new_group_name), { message: 'Choose a group or type a new one, not both' }),
+});
+
+export const paymentRoutingSchema = z.object({
+  body: z.object({
+    CARD: z.string().uuid().nullish(),
+    BANK_TRANSFER: z.string().uuid().nullish(),
+    MOBILE_MONEY: z.string().uuid().nullish(),
+    CHEQUE: z.string().uuid().nullish(),
+  }),
+});

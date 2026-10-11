@@ -105,6 +105,7 @@ import {
   billInvoiceLabel,
   formatBillProductSummary,
 } from "@/components/inventory/stock-in-bill-utils";
+import { PaidFromSelect, usePaidFrom } from "@/components/expense-account-select";
 
 const purchaseSchema = z.object({
   supplierId: z.string().min(1, "Choose a supplier"),
@@ -888,6 +889,8 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     "CASH" | "BANK_TRANSFER" | "CHEQUE" | "CARD" | "OTHER"
   >("CASH");
   const [settleReference, setSettleReference] = useState("");
+  // Cash / bank account the paid part comes out of (follows the method).
+  const stockInPaidFrom = usePaidFrom(settleMethod);
 
   const clearError = (key: keyof PurchaseFieldErrors) =>
     setFormErrors((prev) => {
@@ -1135,6 +1138,8 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             paymentMode === "MIX" ? paidNowAmount : undefined,
           paymentMethod:
             paymentMode === "CREDIT" ? undefined : settleMethod,
+          paidFromAccountId:
+            paymentMode === "CREDIT" ? undefined : stockInPaidFrom.paidFrom || undefined,
           paymentReference:
             paymentMode === "CREDIT"
               ? undefined
@@ -2461,6 +2466,12 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                           <SelectItem value="OTHER">Other</SelectItem>
                         </SelectContent>
                       </Select>
+                      <PaidFromSelect
+                        value={stockInPaidFrom.paidFrom}
+                        onChange={stockInPaidFrom.setPaidFrom}
+                        accounts={stockInPaidFrom.accounts}
+                        triggerClassName="h-7 w-[10.5rem] bg-white text-[11px]"
+                      />
                       <Input
                         value={settleReference}
                         onChange={(e) => setSettleReference(e.target.value)}

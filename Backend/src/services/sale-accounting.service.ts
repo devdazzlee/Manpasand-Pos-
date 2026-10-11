@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { toBusinessYmd, localRange } from '../utils/timezone';
 import { assertPeriodOpen } from './period-lock.service';
+import { bankAccountForMethod } from './payment-accounts.service';
 
 /**
  * Posts POS tenders into Chart of Accounts:
@@ -84,28 +85,31 @@ export async function ensureBankSystemAccount() {
   });
 }
 
+/** Cash total, plus the non-cash total per method (card, transfer, wallet). */
 function splitTenders(
   payments: Array<{ method: string; amount: Prisma.Decimal | number }>,
   fallbackMethod: string,
   fallbackPaid: number,
-): { cash: number; bank: number } {
+): { cash: number; bank: number; bankByMethod: Map<string, number> } {
   let cash = 0;
-  let bank = 0;
+  const bankByMethod = new Map<string, number>();
+  const addBank = (method: string, amt: number) => bankByMethod.set(method, round2((bankByMethod.get(method) || 0) + amt));
   if (payments.length) {
     for (const p of payments) {
       const amt = round2(Math.abs(Number(p.amount) || 0));
       if (amt < 0.005) continue;
       const method = String(p.method || '').toUpperCase();
       if (method === 'CASH') cash += amt;
-      else if (BANK_METHODS.has(method)) bank += amt;
+      else if (BANK_METHODS.has(method)) addBank(method, amt);
       // GIFT_CARD / CREDIT / unknown — skip (not cash or bank drawer)
     }
   } else if (fallbackPaid > 0.005) {
     const method = String(fallbackMethod || 'CASH').toUpperCase();
     if (method === 'CASH') cash = round2(fallbackPaid);
-    else if (BANK_METHODS.has(method)) bank = round2(fallbackPaid);
+    else if (BANK_METHODS.has(method)) addBank(method, round2(fallbackPaid));
   }
-  return { cash: round2(cash), bank: round2(bank) };
+  const bank = round2([...bankByMethod.values()].reduce((s, v) => s + v, 0));
+  return { cash: round2(cash), bank, bankByMethod };
 }
 
 async function createBalancedVoucher(params: {
@@ -222,7 +226,7 @@ class SaleAccountingService {
     const existing = await prisma.journalVoucher.findFirst({ where: { reference }, select: { id: true } });
     if (existing) return existing;
 
-    const { cash, bank } = splitTenders(
+    const { cash, bank, bankByMethod } = splitTenders(
       sale.payments,
       String(sale.payment_method),
       Number(sale.payment_received) || 0,
@@ -247,11 +251,22 @@ class SaleAccountingService {
       });
     }
     if (bank > 0.005) {
-      lines.push({
-        accountId: bankAcct.id,
-        debit: bank,
-        description: `Card/bank tender · ${sale.sale_number}`,
-      });
+      // Each method goes to its configured account (Settings → Payment accounts).
+      const perAccount = new Map<string, { amount: number; methods: string[] }>();
+      for (const [method, amount] of bankByMethod) {
+        const accountId = await bankAccountForMethod(method, bankAcct.id);
+        const row = perAccount.get(accountId) || { amount: 0, methods: [] };
+        row.amount = round2(row.amount + amount);
+        row.methods.push(method.toLowerCase().replace(/_/g, ' '));
+        perAccount.set(accountId, row);
+      }
+      for (const [accountId, row] of perAccount) {
+        lines.push({
+          accountId,
+          debit: row.amount,
+          description: `${row.methods.join(' + ')} tender · ${sale.sale_number}`,
+        });
+      }
     }
     lines.push({
       accountId: salesAcct.id,
@@ -300,7 +315,7 @@ class SaleAccountingService {
 
     const ymd = toBusinessYmd(sale.sale_date);
     const voucherDate = localRange(ymd, ymd).start;
-    const moneyAcct = toBank ? bankAcct : cashAcct;
+    const moneyAcct = toBank ? { id: await bankAccountForMethod(method, bankAcct.id) } : cashAcct;
 
     return createBalancedVoucher({
       voucherDate,

@@ -89,6 +89,8 @@ exports.createSupplierPaymentSchema = zod_1.z.object({
         reference: zod_1.z.string().max(120).nullable().optional(),
         notes: zod_1.z.string().max(500).nullable().optional(),
         purchaseInvoiceId: zod_1.z.string().uuid().nullable().optional(),
+        /** Cash / bank account the money left from (into, for refunds) */
+        paidFromAccountId: zod_1.z.string().uuid().nullish(),
     }),
 });
 exports.updateSupplierPaymentSchema = zod_1.z.object({
@@ -104,6 +106,8 @@ exports.updateSupplierPaymentSchema = zod_1.z.object({
         reference: zod_1.z.string().max(120).nullable().optional(),
         notes: zod_1.z.string().max(500).nullable().optional(),
         purchaseInvoiceId: zod_1.z.string().uuid().nullable().optional(),
+        /** Cash / bank account the money left from (into, for refunds) */
+        paidFromAccountId: zod_1.z.string().uuid().nullish(),
     }),
 });
 exports.deleteSupplierPaymentSchema = zod_1.z.object({

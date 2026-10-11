@@ -4,6 +4,7 @@ import { AppError } from '../utils/apiError';
 import { asNumber } from '../utils/helpers';
 import { CommissionService } from './commission.service';
 import { assertPeriodOpen } from './period-lock.service';
+import { ChartOfAccountsService } from './chart-of-accounts.service';
 
 /** Last calendar day of a payslip month as YYYY-MM-DD. */
 const monthEnd = (year: number, month: number) =>
@@ -453,7 +454,10 @@ export class EmployeePayrollService {
     return this.serializeSalary(salary);
   }
 
-  async pay(id: string, data: { amount?: number; method?: string; date?: string; reference?: string | null }) {
+  async pay(
+    id: string,
+    data: { amount?: number; method?: string; date?: string; reference?: string | null; paid_from_account_id?: string | null },
+  ) {
     const existing = await prisma.salary.findUnique({ where: { id } });
     if (!existing) throw new AppError(404, 'Payslip not found');
     await assertPeriodOpen(data.date ? data.date.slice(0, 10) : new Date(), 'a salary payment');
@@ -467,13 +471,16 @@ export class EmployeePayrollService {
 
     const paid = round2(alreadyPaid + amount);
     const full = paid >= net - 0.005;
+    const method = data.method || existing.payment_method || 'CASH';
+    const paidFrom = await new ChartOfAccountsService().resolveMoneyAccount(data.paid_from_account_id, method);
     const salary = await prisma.salary.update({
       where: { id },
       data: {
         paid_amount: paid,
         is_paid: full,
         paid_date: data.date ? new Date(data.date) : new Date(),
-        payment_method: data.method || existing.payment_method || 'CASH',
+        payment_method: method,
+        paid_from_account_id: paidFrom,
         ...(data.reference !== undefined ? { reference: data.reference || null } : {}),
       },
     });

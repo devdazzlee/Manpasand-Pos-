@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listVouchersSchema = exports.updateVoucherSchema = exports.createVoucherSchema = exports.listAccountsSchema = exports.updateAccountSchema = exports.createAccountSchema = exports.updateControlSchema = exports.createControlSchema = exports.updateSubTypeSchema = exports.createSubTypeSchema = exports.idParamSchema = exports.nextCodeSchema = exports.ledgerSchema = exports.reportQuerySchema = void 0;
+exports.paymentRoutingSchema = exports.createExpenseAccountSchema = exports.listVouchersSchema = exports.updateVoucherSchema = exports.createVoucherSchema = exports.listAccountsSchema = exports.updateAccountSchema = exports.createAccountSchema = exports.updateControlSchema = exports.createControlSchema = exports.updateSubTypeSchema = exports.createSubTypeSchema = exports.idParamSchema = exports.nextCodeSchema = exports.ledgerSchema = exports.reportQuerySchema = void 0;
 const zod_1 = require("zod");
 const ymd = zod_1.z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use YYYY-MM-DD');
 const optionalText = (max) => zod_1.z.string().trim().max(max).nullable().optional();
@@ -121,6 +121,23 @@ exports.listVouchersSchema = zod_1.z.object({
         account_id: zod_1.z.string().uuid().optional(),
         page: zod_1.z.coerce.number().int().positive().optional(),
         limit: zod_1.z.coerce.number().int().positive().max(200).optional(),
+    }),
+});
+exports.createExpenseAccountSchema = zod_1.z.object({
+    body: zod_1.z
+        .object({
+        name: zod_1.z.string().trim().min(2, 'Enter an account name').max(120),
+        control_id: zod_1.z.string().nullish(),
+        new_group_name: zod_1.z.string().trim().max(120).nullish(),
+    })
+        .refine((b) => !(b.control_id && b.new_group_name), { message: 'Choose a group or type a new one, not both' }),
+});
+exports.paymentRoutingSchema = zod_1.z.object({
+    body: zod_1.z.object({
+        CARD: zod_1.z.string().uuid().nullish(),
+        BANK_TRANSFER: zod_1.z.string().uuid().nullish(),
+        MOBILE_MONEY: zod_1.z.string().uuid().nullish(),
+        CHEQUE: zod_1.z.string().uuid().nullish(),
     }),
 });
 //# sourceMappingURL=chart-of-accounts.validation.js.map

@@ -410,7 +410,18 @@ export class BalanceSheetService {
     );
     const periodNetProfit = round2(periodRevenue - periodCogs - periodExpenseTotal);
 
-    const totalAssets = round2(cashOnHand + inventoryValue + accountsReceivable);
+    // Cash in Hand and Bank come from the Chart of Accounts ledger (opening
+    // balances, sales, refunds, expenses, supplier / salary payments, ...), so
+    // this report and Chart of Accounts show the same money. What is sitting in
+    // the register drawers right now is kept as a memo line.
+    const cashInRegisters = cashOnHand;
+    // Lazy import: chart-of-accounts also uses this service.
+    const { ChartOfAccountsService } = await import('./chart-of-accounts.service');
+    const money = await new ChartOfAccountsService().moneyBalances({ to: params.to, branchId });
+    cashOnHand = money.cash;
+    const bankBalance = money.bank;
+
+    const totalAssets = round2(cashOnHand + bankBalance + inventoryValue + accountsReceivable);
     const totalLiabilities = round2(accountsPayable + customerCredits);
     const equity = round2(totalAssets - totalLiabilities);
 
@@ -421,6 +432,9 @@ export class BalanceSheetService {
       branches,
       assets: {
         cashOnHand,
+        bank: bankBalance,
+        cashInRegisters,
+        moneyAccounts: money.accounts,
         inventory: inventoryValue,
         inventoryQty,
         accountsReceivable,
@@ -452,7 +466,8 @@ export class BalanceSheetService {
         balanced: Math.abs(totalAssets - (totalLiabilities + equity)) < 0.02,
       },
       lines: [
-        { side: 'asset', label: 'Cash on hand', amount: cashOnHand },
+        { side: 'asset', label: 'Cash in hand', amount: cashOnHand },
+        { side: 'asset', label: 'Bank', amount: bankBalance },
         { side: 'asset', label: 'Inventory', amount: inventoryValue },
         { side: 'asset', label: 'Accounts receivable', amount: accountsReceivable },
         { side: 'asset', label: 'Total assets', amount: totalAssets, emphasis: true },

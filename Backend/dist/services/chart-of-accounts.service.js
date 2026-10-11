@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.ChartOfAccountsService = exports.STOCK_IMPORT_VOUCHER_PREFIX = exports.ACCOUNT_TYPES = void 0;
+exports.ChartOfAccountsService = exports.movesMoney = exports.isCashMethod = exports.STOCK_IMPORT_VOUCHER_PREFIX = exports.ACCOUNT_TYPES = void 0;
 const client_1 = require("@prisma/client");
 const client_2 = require("../prisma/client");
 const supplier_accounts_service_1 = require("./supplier-accounts.service");
@@ -11,6 +11,7 @@ const balance_sheet_service_1 = require("./balance-sheet.service");
 const financial_statement_service_1 = require("./financial-statement.service");
 const period_lock_service_1 = require("./period-lock.service");
 const sale_accounting_service_1 = require("./sale-accounting.service");
+const payment_accounts_service_1 = require("./payment-accounts.service");
 /* ============================================================
  * Chart of Accounts
  *
@@ -57,6 +58,12 @@ const COMPUTED_SOURCE = {
     SALES_DISCOUNTS: 'Sales discounts (Financial Statement)',
     COGS: 'Sold items × cost at sale (unit_cost / purchase rate)',
 };
+/**
+ * The chart the app creates on a fresh install: only the structure and the
+ * accounts that POS modules post to automatically (all locked). Everything
+ * else — expense heads, fixed assets, loans, other income — is added by the
+ * owner, from Chart of Accounts or straight from the Expenses screen.
+ */
 const DEFAULT_CHART = [
     {
         code: '11',
@@ -70,7 +77,6 @@ const DEFAULT_CHART = [
                 accounts: [
                     { name: 'Cash in Hand', systemKey: 'CASH' },
                     { name: 'Bank Account', systemKey: 'BANK' },
-                    { name: 'Petty Cash' },
                 ],
             },
             {
@@ -88,19 +94,8 @@ const DEFAULT_CHART = [
             {
                 code: '114',
                 name: 'Advances & Deposits',
-                accounts: [{ name: 'Staff Loans & Advances' }, { name: 'Security Deposits' }, { name: 'Advance Rent' }],
-            },
-        ],
-    },
-    {
-        code: '12',
-        name: 'Fixed Assets',
-        controls: [
-            { code: '121', name: 'Furniture & Fixtures', accounts: [{ name: 'Shop Furniture & Fixtures' }] },
-            {
-                code: '122',
-                name: 'Equipment',
-                accounts: [{ name: 'Computers & POS Hardware' }, { name: 'Air Conditioners & Electronics' }],
+                systemKey: 'ADVANCES',
+                accounts: [{ name: 'Staff Loans & Advances', systemKey: 'STAFF_ADVANCES' }],
             },
         ],
     },
@@ -116,17 +111,10 @@ const DEFAULT_CHART = [
                 systemKey: 'OTHER_PAYABLES',
                 accounts: [
                     { name: 'Customer Advances & Credits', systemKey: 'CUSTOMER_CREDITS' },
-                    { name: 'Salaries Payable' },
-                    { name: 'Utility Bills Payable' },
-                    { name: 'Tax Payable' },
+                    { name: 'Gift Cards Outstanding', systemKey: 'GIFT_CARDS' },
                 ],
             },
         ],
-    },
-    {
-        code: '22',
-        name: 'Long Term Liabilities',
-        controls: [{ code: '221', name: 'Long Term Loans', accounts: [{ name: 'Bank Loan' }] }],
     },
     {
         code: '31',
@@ -139,7 +127,6 @@ const DEFAULT_CHART = [
                 systemKey: 'CAPITAL',
                 accounts: [
                     { name: "Owner's Capital", systemKey: 'OWNER_CAPITAL' },
-                    { name: "Owner's Drawings" },
                     { name: 'Opening Balance Equity', systemKey: 'OPENING_EQUITY' },
                 ],
             },
@@ -163,13 +150,6 @@ const DEFAULT_CHART = [
         ],
     },
     {
-        code: '42',
-        name: 'Other Income',
-        controls: [
-            { code: '421', name: 'Other Income', accounts: [{ name: 'Miscellaneous Income' }, { name: 'Alteration / Stitching Income' }] },
-        ],
-    },
-    {
         code: '51',
         name: 'Direct Expenses',
         system: true,
@@ -178,7 +158,7 @@ const DEFAULT_CHART = [
                 code: '511',
                 name: 'Cost of Sales',
                 systemKey: 'COST_OF_SALES',
-                accounts: [{ name: 'Cost of Goods Sold', systemKey: 'COGS' }, { name: 'Freight & Cartage Inward' }, { name: 'Stitching & Tailoring Charges' }],
+                accounts: [{ name: 'Cost of Goods Sold', systemKey: 'COGS' }],
             },
         ],
     },
@@ -194,32 +174,111 @@ const DEFAULT_CHART = [
                 accounts: [{ name: 'Miscellaneous Expense', systemKey: 'MISC_EXPENSE' }],
             },
             { code: '522', name: 'Payroll Expense', systemKey: 'PAYROLL', accounts: [] },
-            {
-                code: '523',
-                name: 'Utility Expenses',
-                systemKey: 'UTILITIES',
-                accounts: [{ name: 'Electricity Bill' }, { name: 'Gas Bill' }, { name: 'Water Bill' }, { name: 'Internet & Telephone' }],
-            },
-            {
-                code: '524',
-                name: 'Office Expenses',
-                systemKey: 'OFFICE',
-                accounts: [
-                    { name: 'Shop / Office Rent' },
-                    { name: 'Stationery & Printing' },
-                    { name: 'Tea & Refreshment' },
-                    { name: 'Cleaning & Maintenance' },
-                    { name: 'Repair & Maintenance' },
-                ],
-            },
-            {
-                code: '525',
-                name: 'Selling & Marketing',
-                accounts: [{ name: 'Advertisement & Promotion' }, { name: 'Packing Material' }, { name: 'Delivery Charges' }],
-            },
         ],
     },
 ];
+/**
+ * Template accounts / heads that older versions seeded automatically. They are
+ * removed once (see removeUnusedStarterAccounts) when nothing has posted to
+ * them; anything the owner created or used is never touched.
+ */
+const LEGACY_STARTER_ACCOUNTS = {
+    '111': ['Petty Cash'],
+    '114': ['Security Deposits', 'Advance Rent'],
+    '121': ['Shop Furniture & Fixtures'],
+    '122': ['Computers & POS Hardware', 'Air Conditioners & Electronics'],
+    '212': ['Salaries Payable', 'Utility Bills Payable', 'Tax Payable'],
+    '221': ['Bank Loan'],
+    '311': ["Owner's Drawings"],
+    '421': ['Miscellaneous Income', 'Alteration / Stitching Income'],
+    '511': ['Freight & Cartage Inward', 'Stitching & Tailoring Charges'],
+    '523': ['Electricity Bill', 'Gas Bill', 'Water Bill', 'Internet & Telephone'],
+    '524': ['Shop / Office Rent', 'Stationery & Printing', 'Tea & Refreshment', 'Cleaning & Maintenance', 'Repair & Maintenance'],
+    '525': ['Advertisement & Promotion', 'Packing Material', 'Delivery Charges'],
+};
+const LEGACY_STARTER_CONTROLS = {
+    '121': 'Furniture & Fixtures',
+    '122': 'Equipment',
+    '221': 'Long Term Loans',
+    '421': 'Other Income',
+    '523': 'Utility Expenses',
+    '524': 'Office Expenses',
+    '525': 'Selling & Marketing',
+};
+const LEGACY_STARTER_SUBTYPES = {
+    '12': 'Fixed Assets',
+    '22': 'Long Term Liabilities',
+    '42': 'Other Income',
+};
+const STARTER_CLEANUP_KEY = 'coa.starter_cleanup_v1';
+/**
+ * Expenses created by recordCashPayOnOpenRegister (cash salary, commission or
+ * supplier payment while a register is open) only exist so the drawer
+ * balances. Their reference is the payment's id; the payment posts itself.
+ */
+async function registerMirrorExpenseIds(rows) {
+    const candidates = rows.filter((r) => r.cashflow_id && r.reference);
+    if (!candidates.length)
+        return new Set();
+    const refs = [...new Set(candidates.map((r) => r.reference))];
+    const [salaries, commissions, payments] = await Promise.all([
+        client_2.prisma.salary.findMany({ where: { id: { in: refs } }, select: { id: true } }),
+        client_2.prisma.commission.findMany({ where: { id: { in: refs } }, select: { id: true } }),
+        client_2.prisma.supplierPayment.findMany({ where: { id: { in: refs } }, select: { id: true } }),
+    ]);
+    const known = new Set([...salaries, ...commissions, ...payments].map((r) => r.id));
+    return new Set(candidates.filter((r) => known.has(r.reference)).map((r) => r.id));
+}
+/** Money Flow groups — what each ledger posting on Cash / Bank is about. */
+const FLOW_SOURCES = {
+    SALES: { label: 'Sales', direction: 'in' },
+    SALE_REFUNDS: { label: 'Sale refunds', direction: 'out' },
+    CUSTOMER_RECEIPTS: { label: 'Customer payments', direction: 'both' },
+    GIFT_CARDS: { label: 'Gift cards sold', direction: 'in' },
+    EXPENSES: { label: 'Expenses', direction: 'out' },
+    SUPPLIERS: { label: 'Supplier payments', direction: 'both' },
+    SALARIES: { label: 'Salaries', direction: 'out' },
+    COMMISSIONS: { label: 'Commissions', direction: 'out' },
+    STAFF_ADVANCES: { label: 'Staff advances', direction: 'both' },
+    JOURNALS: { label: 'Journal vouchers', direction: 'both' },
+};
+const flowSource = (e) => {
+    switch (e.kind) {
+        case 'EXPENSE_PAYMENT':
+            return 'EXPENSES';
+        case 'SUPPLIER_PAYMENT':
+            return 'SUPPLIERS';
+        case 'SALARY_PAYMENT':
+            return 'SALARIES';
+        case 'COMMISSION_PAYMENT':
+            return 'COMMISSIONS';
+        case 'STAFF_ADVANCE':
+            return 'STAFF_ADVANCES';
+        case 'CUSTOMER_RECEIPT':
+            return 'CUSTOMER_RECEIPTS';
+        case 'GIFT_CARD':
+            return 'GIFT_CARDS';
+        default: {
+            const ref = e.sourceRef || '';
+            if (ref.startsWith('SALE-RTN:'))
+                return 'SALE_REFUNDS';
+            if (ref.startsWith('SALE:'))
+                return 'SALES';
+            return 'JOURNALS';
+        }
+    }
+};
+/** Expense heads filled by POS modules — not offered for manual expenses. */
+const EXPENSE_GROUP_EXCLUDED = new Set(['PAYROLL', 'COST_OF_SALES']);
+/** Payment methods that move real money, and which side they land on. */
+const NON_MONEY_METHODS = new Set(['CREDIT', 'STORE_CREDIT', 'SALARY', 'COMPLIMENTARY', 'GIFT_CARD', 'ADJUSTMENT', 'NONE', 'WRITE_OFF']);
+const isCashMethod = (method) => {
+    const m = String(method || 'CASH').toUpperCase();
+    return m === 'CASH' || m === 'OTHER';
+};
+exports.isCashMethod = isCashMethod;
+const movesMoney = (method) => !NON_MONEY_METHODS.has(String(method || 'CASH').toUpperCase());
+exports.movesMoney = movesMoney;
 const ACCOUNT_LIST_INCLUDE = {
     control: { select: { id: true, code: true, name: true, sub_type: { select: { id: true, code: true, name: true, type_code: true } } } },
     employee: { select: { id: true, name: true, employee_code: true } },
@@ -252,6 +311,7 @@ class ChartOfAccountsService {
             await this.seedDefaults();
         await this.ensureSystemAccounts();
         await (0, sale_accounting_service_1.ensureBankSystemAccount)().catch(() => undefined);
+        await this.removeUnusedStarterAccounts().catch((error) => console.error('[chart-of-accounts] starter cleanup failed', error.message));
     }
     async seedDefaults() {
         await client_2.prisma.accountSubType.createMany({
@@ -303,7 +363,11 @@ class ChartOfAccountsService {
         }
         await client_2.prisma.transactionalAccount.createMany({ data: accountRows, skipDuplicates: true });
     }
-    /** Re-creates any missing system control / account (e.g. if a code was taken by a user record). */
+    /**
+     * Re-creates any missing system control / account. An existing control with
+     * the same code, or an account with the same name in that control, is
+     * adopted (given the system key) rather than duplicated.
+     */
     async ensureSystemAccounts() {
         for (const sub of DEFAULT_CHART) {
             for (const control of sub.controls) {
@@ -314,6 +378,15 @@ class ChartOfAccountsService {
                 let controlRow = control.systemKey
                     ? await client_2.prisma.controlAccount.findUnique({ where: { system_key: control.systemKey } })
                     : await client_2.prisma.controlAccount.findUnique({ where: { code: control.code } });
+                if (!controlRow && control.systemKey) {
+                    const sameCode = await client_2.prisma.controlAccount.findUnique({ where: { code: control.code } });
+                    if (sameCode && !sameCode.system_key && sameCode.name.trim().toLowerCase() === control.name.toLowerCase()) {
+                        controlRow = await client_2.prisma.controlAccount.update({
+                            where: { id: sameCode.id },
+                            data: { system_key: control.systemKey, is_system: true },
+                        });
+                    }
+                }
                 if (!controlRow) {
                     let subRow = await client_2.prisma.accountSubType.findUnique({ where: { code: sub.code } });
                     if (!subRow) {
@@ -338,6 +411,23 @@ class ChartOfAccountsService {
                     const found = await client_2.prisma.transactionalAccount.findUnique({ where: { system_key: account.systemKey } });
                     if (found)
                         continue;
+                    const sameName = await client_2.prisma.transactionalAccount.findFirst({
+                        where: {
+                            control_id: controlRow.id,
+                            system_key: null,
+                            employee_id: null,
+                            supplier_id: null,
+                            expense_category_id: null,
+                            name: { equals: account.name, mode: 'insensitive' },
+                        },
+                    });
+                    if (sameName) {
+                        await client_2.prisma.transactionalAccount.update({
+                            where: { id: sameName.id },
+                            data: { system_key: account.systemKey, is_system: true },
+                        });
+                        continue;
+                    }
                     await client_2.prisma.transactionalAccount.create({
                         data: {
                             code: await this.nextAccountCode(controlRow.id),
@@ -351,6 +441,75 @@ class ChartOfAccountsService {
                 }
             }
         }
+    }
+    /**
+     * One-time removal of the template accounts older versions seeded
+     * (Furniture & Fixtures, Bank Loan, Electricity Bill, ...). Only exact
+     * template names in their original head are considered, and only when
+     * nothing uses them: no expenses, recurring expenses, budgets, journal
+     * lines, opening balance or link to an employee / supplier / category.
+     * Empty template heads and groups are removed afterwards.
+     */
+    async removeUnusedStarterAccounts(opts = {}) {
+        if (!opts.force) {
+            const done = await client_2.prisma.appSetting.findUnique({ where: { key: STARTER_CLEANUP_KEY } });
+            if (done)
+                return null;
+        }
+        const removed = [];
+        const kept = [];
+        for (const [controlCode, names] of Object.entries(LEGACY_STARTER_ACCOUNTS)) {
+            const control = await client_2.prisma.controlAccount.findUnique({ where: { code: controlCode } });
+            if (!control)
+                continue;
+            const candidates = await client_2.prisma.transactionalAccount.findMany({
+                where: { control_id: control.id, system_key: null, is_system: false, name: { in: names } },
+                include: {
+                    _count: { select: { expenses: true, recurring_expenses: true, journal_lines: true, budgets: true, paid_expenses: true, paid_recurring: true } },
+                },
+            });
+            for (const account of candidates) {
+                const uses = Object.values(account._count).reduce((sum, n) => sum + n, 0);
+                const linked = account.employee_id || account.supplier_id || account.expense_category_id;
+                if (uses > 0 || linked || Math.abs((0, helpers_1.asNumber)(account.opening_balance)) >= 0.005) {
+                    kept.push(`${account.code} ${account.name}`);
+                    continue;
+                }
+                await client_2.prisma.transactionalAccount.delete({ where: { id: account.id } });
+                removed.push(`${account.code} ${account.name}`);
+            }
+        }
+        for (const [code, name] of Object.entries(LEGACY_STARTER_CONTROLS)) {
+            const control = await client_2.prisma.controlAccount.findUnique({
+                where: { code },
+                include: { _count: { select: { accounts: true } } },
+            });
+            if (!control || control._count.accounts > 0)
+                continue;
+            if (control.name.trim().toLowerCase() !== name.toLowerCase())
+                continue;
+            await client_2.prisma.controlAccount.delete({ where: { id: control.id } });
+            removed.push(`${code} ${name} (head)`);
+        }
+        for (const [code, name] of Object.entries(LEGACY_STARTER_SUBTYPES)) {
+            const sub = await client_2.prisma.accountSubType.findUnique({ where: { code }, include: { _count: { select: { controls: true } } } });
+            if (!sub || sub._count.controls > 0 || sub.is_system)
+                continue;
+            if (sub.name.trim().toLowerCase() !== name.toLowerCase())
+                continue;
+            await client_2.prisma.accountSubType.delete({ where: { id: sub.id } });
+            removed.push(`${code} ${name} (group)`);
+        }
+        const result = { removed, kept, at: new Date().toISOString() };
+        await client_2.prisma.appSetting.upsert({
+            where: { key: STARTER_CLEANUP_KEY },
+            create: { key: STARTER_CLEANUP_KEY, value: result },
+            update: { value: result },
+        });
+        if (removed.length) {
+            console.log(`[chart-of-accounts] removed ${removed.length} unused starter accounts: ${removed.join(', ')}`);
+        }
+        return result;
     }
     async controlBySystemKey(key) {
         await this.ensureSetup();
@@ -735,6 +894,8 @@ class ChartOfAccountsService {
                 is_active: data.is_active ?? true,
             },
         });
+        if (typeCode === 5)
+            await this.ensureCategoryForAccount(created.id).catch(() => undefined);
         return this.getAccount(created.id);
     }
     async updateAccount(id, data) {
@@ -788,7 +949,16 @@ class ChartOfAccountsService {
             patch.opening_side = data.opening_side;
         if (data.is_active !== undefined)
             patch.is_active = data.is_active;
-        await client_2.prisma.transactionalAccount.update({ where: { id }, data: patch });
+        const updated = await client_2.prisma.transactionalAccount.update({ where: { id }, data: patch });
+        if (patch.name && updated.expense_category_id) {
+            const clash = await client_2.prisma.expenseCategory.findFirst({
+                where: { name: { equals: String(patch.name), mode: 'insensitive' }, NOT: { id: updated.expense_category_id } },
+                select: { id: true },
+            });
+            if (!clash) {
+                await client_2.prisma.expenseCategory.update({ where: { id: updated.expense_category_id }, data: { name: String(patch.name) } });
+            }
+        }
         return this.getAccount(id);
     }
     async deleteAccount(id) {
@@ -800,14 +970,27 @@ class ChartOfAccountsService {
             throw new apiError_1.AppError(404, 'Account not found');
         if (existing.is_system)
             throw new apiError_1.AppError(400, `"${existing.name}" is a system account and cannot be deleted`);
-        if (existing.employee_id || existing.supplier_id || existing.expense_category_id) {
-            throw new apiError_1.AppError(400, `"${existing.name}" is linked to an employee / supplier / expense category. Deactivate it instead — it is recreated automatically while the record exists.`);
+        if (existing.employee_id || existing.supplier_id) {
+            throw new apiError_1.AppError(400, `"${existing.name}" is linked to an employee / supplier. Deactivate it instead — it is recreated automatically while the record exists.`);
+        }
+        let categoryToDelete = null;
+        if (existing.expense_category_id) {
+            const usage = await client_2.prisma.expenseCategory.findUnique({
+                where: { id: existing.expense_category_id },
+                select: { _count: { select: { expenses: true, recurring: true } } },
+            });
+            if (usage && usage._count.expenses + usage._count.recurring > 0) {
+                throw new apiError_1.AppError(400, `"${existing.name}" has ${usage._count.expenses + usage._count.recurring} expense(s) under its category. Deactivate it instead.`);
+            }
+            categoryToDelete = existing.expense_category_id;
         }
         const used = existing._count.expenses + existing._count.recurring_expenses + existing._count.journal_lines;
         if (used > 0) {
             throw new apiError_1.AppError(400, `"${existing.name}" has ${used} posting(s) (expenses / recurring / journal lines). Deactivate it instead.`);
         }
         await client_2.prisma.transactionalAccount.delete({ where: { id } });
+        if (categoryToDelete)
+            await client_2.prisma.expenseCategory.delete({ where: { id: categoryToDelete } }).catch(() => undefined);
         return { id };
     }
     /* ========================= balances ========================= */
@@ -834,7 +1017,7 @@ class ChartOfAccountsService {
                 is_active: true,
                 opening_balance: true,
                 opening_side: true,
-                control: { select: { sub_type: { select: { type_code: true } } } },
+                control: { select: { system_key: true, sub_type: { select: { type_code: true } } } },
             },
             orderBy: { code: 'asc' },
         });
@@ -846,6 +1029,7 @@ class ChartOfAccountsService {
                 name: row.name,
                 typeCode: row.control.sub_type.type_code,
                 systemKey: row.system_key,
+                controlSystemKey: row.control.system_key,
                 isActive: row.is_active,
                 openingSigned: row.opening_side === 'DEBIT' ? amount : -amount,
             };
@@ -943,6 +1127,7 @@ class ChartOfAccountsService {
                     credit: (0, helpers_1.asNumber)(line.credit),
                     before,
                     sourceId: line.voucher.id,
+                    sourceRef: line.voucher.reference,
                 });
             }
         })());
@@ -965,9 +1150,13 @@ class ChartOfAccountsService {
                         vendor: true,
                         reference: true,
                         payment_method: true,
+                        cashflow_id: true,
                     },
                 });
+                const mirrors = await registerMirrorExpenseIds(rows);
                 for (const row of rows) {
+                    if (mirrors.has(row.id))
+                        continue;
                     const accountId = (row.account_id && byId.has(row.account_id) ? row.account_id : undefined) ||
                         (row.category_id ? accountByCategory.get(row.category_id) : undefined) ||
                         miscAccountId;
@@ -1132,9 +1321,276 @@ class ChartOfAccountsService {
                 })());
             }
         }
+        tasks.push(this.collectMoneyEntries({ start, end, branchId, accounts, onlyAccountId, byId, entries }));
         await Promise.all(tasks);
         // Only keep postings for the accounts the caller asked about.
         return entries.filter((entry) => byId.has(entry.accountId));
+    }
+    /**
+     * The money side of every POS movement, so Cash in Hand and Bank move with
+     * the business (the other side of each is posted elsewhere in collectEntries
+     * or comes from a computed balance):
+     *
+     *   Expense paid             Cr paid-from account (Cash / Bank)
+     *   Supplier payment/advance Cr Cash / Bank        refund: Dr
+     *   Salary paid              Cr Cash / Bank (net)  + Cr Staff Advances for loan deductions
+     *   Commission paid          Cr Cash / Bank
+     *   Staff advance            Dr Staff Advances / Cr Cash-Bank   (cash recovery reverses;
+     *                            payslip recovery: Cr Staff Advances, the debit is in the salary)
+     *   Customer receipt         Dr Cash / Bank        refund: Cr
+     *   Gift card sold/reloaded  Dr Cash / Bank / Cr Gift Cards Outstanding
+     *   Gift card redeemed       Dr Gift Cards Outstanding / Cr Sales Revenue (refund reverses)
+     *
+     * Money moved between the safe and a register drawer is still Cash in Hand,
+     * so register cash-in / cash-out movements are not posted.
+     */
+    async collectMoneyEntries(ctx) {
+        const { start, end, branchId, accounts, onlyAccountId, byId, entries } = ctx;
+        const key = (k) => accounts.find((a) => a.systemKey === k)?.id;
+        const cashId = key('CASH');
+        const bankId = key('BANK');
+        const staffId = key('STAFF_ADVANCES');
+        const giftId = key('GIFT_CARDS');
+        const salesId = key('SALES');
+        if (!cashId)
+            return;
+        const moneyAccounts = new Set(accounts
+            .filter((a) => a.controlSystemKey === 'CASH_BANK' || a.systemKey === 'CASH' || a.systemKey === 'BANK')
+            .map((a) => a.id));
+        const relevant = new Set([...moneyAccounts, staffId, giftId, salesId].filter(Boolean));
+        if (onlyAccountId && !relevant.has(onlyAccountId))
+            return;
+        // Older rows have no saved account: use today's routing for their method.
+        const routing = await (0, payment_accounts_service_1.getPaymentRouting)();
+        const moneyFor = (method, explicit) => {
+            if (explicit && moneyAccounts.has(explicit))
+                return explicit;
+            if (!(0, exports.movesMoney)(method))
+                return undefined;
+            if ((0, exports.isCashMethod)(method))
+                return cashId;
+            const routed = (0, payment_accounts_service_1.routedMethod)(method);
+            const configured = routed ? routing[routed] : undefined;
+            return (configured && moneyAccounts.has(configured) ? configured : undefined) || bankId || cashId;
+        };
+        const push = (accountId, e) => {
+            if (!accountId || !byId.has(accountId))
+                return;
+            if (onlyAccountId && accountId !== onlyAccountId)
+                return;
+            const account = byId.get(accountId);
+            const before = e.date < start;
+            // Income / expense accounts only carry the current window.
+            if (before && isProfitLossType(account.typeCode))
+                return;
+            if (Math.abs(e.debit) < 0.005 && Math.abs(e.credit) < 0.005)
+                return;
+            entries.push({ ...e, debit: round2(e.debit), credit: round2(e.credit), accountId, before });
+        };
+        const employeeFilter = branchId ? { employee: { branch_id: branchId } } : {};
+        const [expenses, supplierPayments, salaries, commissions, advances, customerPayments, giftTxns] = await Promise.all([
+            client_2.prisma.expense.findMany({
+                where: { status: 'APPROVED', expense_date: { lte: end }, ...(branchId ? { branch_id: branchId } : {}) },
+                select: {
+                    id: true,
+                    particular: true,
+                    amount: true,
+                    expense_date: true,
+                    payment_method: true,
+                    paid_from_account_id: true,
+                    reference: true,
+                    vendor: true,
+                    cashflow_id: true,
+                },
+            }),
+            client_2.prisma.supplierPayment.findMany({
+                where: {
+                    type: { in: [...supplier_accounts_service_1.SUPPLIER_CASH_TYPES] },
+                    payment_date: { lte: end },
+                    ...(branchId ? { OR: [{ purchase_invoice_id: null }, { purchase_invoice: { branch_id: branchId } }] } : {}),
+                },
+                select: {
+                    id: true,
+                    type: true,
+                    amount: true,
+                    payment_date: true,
+                    method: true,
+                    paid_from_account_id: true,
+                    reference: true,
+                    supplier: { select: { name: true } },
+                },
+            }),
+            client_2.prisma.salary.findMany({
+                where: { is_paid: true, paid_date: { lte: end }, ...employeeFilter },
+                select: {
+                    id: true,
+                    month: true,
+                    year: true,
+                    amount: true,
+                    bonus: true,
+                    allowances: true,
+                    deductions: true,
+                    loan_amount: true,
+                    advance_deduction: true,
+                    paid_amount: true,
+                    payment_method: true,
+                    paid_from_account_id: true,
+                    paid_date: true,
+                    employee: { select: { name: true } },
+                },
+            }),
+            client_2.prisma.commission.findMany({
+                where: { is_paid: true, paid_date: { lte: end }, ...employeeFilter },
+                select: {
+                    id: true,
+                    month: true,
+                    year: true,
+                    amount: true,
+                    paid_amount: true,
+                    payment_method: true,
+                    paid_from_account_id: true,
+                    paid_date: true,
+                    employee: { select: { name: true } },
+                },
+            }),
+            client_2.prisma.employeeAdvance.findMany({
+                where: { txn_date: { lte: end }, ...employeeFilter },
+                select: { id: true, type: true, amount: true, txn_date: true, method: true, reference: true, employee: { select: { name: true } } },
+            }),
+            branchId
+                ? Promise.resolve([])
+                : client_2.prisma.customerPayment.findMany({
+                    where: { type: { in: ['PAYMENT', 'ADVANCE', 'REFUND'] }, payment_date: { lte: end } },
+                    select: { id: true, type: true, amount: true, payment_date: true, method: true, reference: true, customer: { select: { name: true } } },
+                }),
+            branchId
+                ? Promise.resolve([])
+                : client_2.prisma.giftCardTransaction.findMany({
+                    where: { type: { in: ['ISSUE', 'RELOAD', 'REDEEM', 'REFUND'] }, created_at: { lte: end } },
+                    select: { id: true, type: true, amount: true, payment_method: true, created_at: true, card: { select: { code: true } } },
+                }),
+        ]);
+        // Cash salary / commission / supplier payments also drop a mirror expense
+        // on the open register (so the drawer balances) — the payment itself posts.
+        const mirrors = await registerMirrorExpenseIds(expenses);
+        for (const row of expenses) {
+            if (mirrors.has(row.id))
+                continue;
+            push(moneyFor(row.payment_method, row.paid_from_account_id), {
+                date: row.expense_date,
+                kind: 'EXPENSE_PAYMENT',
+                reference: row.reference,
+                description: `Expense paid · ${row.particular}${row.vendor ? ` · ${row.vendor}` : ''}`,
+                debit: 0,
+                credit: Math.abs((0, helpers_1.asNumber)(row.amount)),
+                sourceId: row.id,
+            });
+        }
+        for (const row of supplierPayments) {
+            const amount = Math.abs((0, helpers_1.asNumber)(row.amount));
+            const refund = row.type === 'REFUND';
+            const verb = refund ? 'Refund from' : row.type === 'ADVANCE' ? 'Advance to' : 'Paid to';
+            push(moneyFor(row.method, row.paid_from_account_id), {
+                date: row.payment_date,
+                kind: 'SUPPLIER_PAYMENT',
+                reference: row.reference,
+                description: `${verb} ${row.supplier?.name || 'supplier'} (${row.method})`,
+                debit: refund ? amount : 0,
+                credit: refund ? 0 : amount,
+                sourceId: row.id,
+            });
+        }
+        for (const row of salaries) {
+            if (!row.paid_date)
+                continue;
+            const gross = (0, helpers_1.asNumber)(row.amount) + (0, helpers_1.asNumber)(row.bonus) + (0, helpers_1.asNumber)(row.allowances) - (0, helpers_1.asNumber)(row.deductions);
+            const loan = (0, helpers_1.asNumber)(row.loan_amount);
+            const net = Math.max(0, gross - (0, helpers_1.asNumber)(row.advance_deduction) - loan);
+            const paid = (0, helpers_1.asNumber)(row.paid_amount) > 0 ? (0, helpers_1.asNumber)(row.paid_amount) : net;
+            const ref = `SAL-${row.year}-${String(row.month).padStart(2, '0')}`;
+            push(moneyFor(row.payment_method || 'CASH', row.paid_from_account_id), {
+                date: row.paid_date,
+                kind: 'SALARY_PAYMENT',
+                reference: ref,
+                description: `Salary paid · ${row.employee?.name || ''} ${monthLabel(row.month, row.year)}`,
+                debit: 0,
+                credit: paid,
+                sourceId: row.id,
+            });
+            // Older payslips carried loans in loan_amount (newer ones use advance recovery rows).
+            if (loan > 0) {
+                push(staffId, {
+                    date: row.paid_date,
+                    kind: 'STAFF_ADVANCE',
+                    reference: ref,
+                    description: `Loan deducted from salary · ${row.employee?.name || ''}`,
+                    debit: 0,
+                    credit: loan,
+                    sourceId: row.id,
+                });
+            }
+        }
+        for (const row of commissions) {
+            if (!row.paid_date)
+                continue;
+            const paid = (0, helpers_1.asNumber)(row.paid_amount) > 0 ? (0, helpers_1.asNumber)(row.paid_amount) : Math.abs((0, helpers_1.asNumber)(row.amount));
+            push(moneyFor(row.payment_method || 'CASH', row.paid_from_account_id), {
+                date: row.paid_date,
+                kind: 'COMMISSION_PAYMENT',
+                reference: `COM-${row.year}-${String(row.month).padStart(2, '0')}`,
+                description: `Commission paid · ${row.employee?.name || ''} ${monthLabel(row.month, row.year)}`,
+                debit: 0,
+                credit: paid,
+                sourceId: row.id,
+            });
+        }
+        for (const row of advances) {
+            const amount = Math.abs((0, helpers_1.asNumber)(row.amount));
+            const who = row.employee?.name || 'employee';
+            const base = { date: row.txn_date, kind: 'STAFF_ADVANCE', reference: row.reference, sourceId: row.id };
+            if (row.type === 'ADVANCE') {
+                push(staffId, { ...base, description: `Advance to ${who}`, debit: amount, credit: 0 });
+                push(moneyFor(row.method), { ...base, description: `Advance to ${who}`, debit: 0, credit: amount });
+            }
+            else {
+                const viaSalary = row.method === 'SALARY';
+                push(staffId, { ...base, description: `Advance recovered from ${who}${viaSalary ? ' (salary)' : ''}`, debit: 0, credit: amount });
+                if (!viaSalary)
+                    push(moneyFor(row.method), { ...base, description: `Advance repaid by ${who}`, debit: amount, credit: 0 });
+            }
+        }
+        for (const row of customerPayments) {
+            const amount = Math.abs((0, helpers_1.asNumber)(row.amount));
+            const refund = row.type === 'REFUND';
+            const verb = refund ? 'Refund to' : row.type === 'ADVANCE' ? 'Advance from' : 'Received from';
+            push(moneyFor(row.method), {
+                date: row.payment_date,
+                kind: 'CUSTOMER_RECEIPT',
+                reference: row.reference,
+                description: `${verb} ${row.customer?.name || 'customer'} (${row.method})`,
+                debit: refund ? 0 : amount,
+                credit: refund ? amount : 0,
+                sourceId: row.id,
+            });
+        }
+        for (const row of giftTxns) {
+            const amount = Math.abs((0, helpers_1.asNumber)(row.amount));
+            const card = row.card?.code ? `card ${row.card.code}` : 'gift card';
+            const base = { date: row.created_at, kind: 'GIFT_CARD', reference: null, sourceId: row.id };
+            if (row.type === 'ISSUE' || row.type === 'RELOAD') {
+                const money = moneyFor(row.payment_method);
+                if (!money)
+                    continue; // complimentary card — no money, no liability
+                const what = `Gift ${card} ${row.type === 'ISSUE' ? 'sold' : 'reloaded'}`;
+                push(money, { ...base, description: what, debit: amount, credit: 0 });
+                push(giftId, { ...base, description: what, debit: 0, credit: amount });
+            }
+            else {
+                const redeem = row.type === 'REDEEM';
+                push(giftId, { ...base, description: `Gift ${card} ${redeem ? 'used in a sale' : 'refunded to card'}`, debit: redeem ? amount : 0, credit: redeem ? 0 : amount });
+                push(salesId, { ...base, description: `Paid by gift ${card}${redeem ? '' : ' (reversed)'}`, debit: redeem ? 0 : amount, credit: redeem ? amount : 0 });
+            }
+        }
     }
     /** Signed (debit-positive) values for system accounts read from the existing reports. */
     async computedBalances(params, keys) {
@@ -1767,11 +2223,258 @@ class ChartOfAccountsService {
                 name: true,
                 expense_category_id: true,
                 employee_id: true,
-                control: { select: { id: true, code: true, name: true } },
+                control: { select: { id: true, code: true, name: true, system_key: true } },
             },
             orderBy: { code: 'asc' },
         });
         return rows;
+    }
+    /* ================= expense accounts ⇄ expense screens ================= */
+    /** Expense heads (controls) an expense account can be created under. */
+    async expenseGroupOptions() {
+        await this.ensureSetup();
+        return client_2.prisma.controlAccount.findMany({
+            where: {
+                is_active: true,
+                sub_type: { type_code: 5 },
+                OR: [{ system_key: null }, { system_key: { notIn: [...EXPENSE_GROUP_EXCLUDED] } }],
+            },
+            select: { id: true, code: true, name: true, system_key: true, sub_type: { select: { code: true, name: true } } },
+            orderBy: { code: 'asc' },
+        });
+    }
+    /**
+     * Creates an expense account from the Expenses screen: under an existing
+     * head, or under a new head in Indirect Expenses (52). Its matching expense
+     * category is created and linked, so filters and reports keep working.
+     */
+    async createExpenseAccount(data) {
+        await this.ensureSetup();
+        const name = data.name?.trim();
+        if (!name || name.length < 2)
+            throw new apiError_1.AppError(400, 'Enter an account name (at least 2 characters)');
+        let controlId = data.control_id || null;
+        const groupName = data.new_group_name?.trim();
+        if (!controlId && groupName) {
+            const existing = await client_2.prisma.controlAccount.findFirst({
+                where: { name: { equals: groupName, mode: 'insensitive' }, sub_type: { type_code: 5 } },
+            });
+            if (existing) {
+                controlId = existing.id;
+            }
+            else {
+                const indirect = (await client_2.prisma.accountSubType.findUnique({ where: { code: '52' } })) ||
+                    (await client_2.prisma.accountSubType.findFirst({ where: { type_code: 5 }, orderBy: { code: 'desc' } }));
+                if (!indirect)
+                    throw new apiError_1.AppError(500, 'No expense group (sub type) exists in Chart of Accounts');
+                const control = await this.createControl({ sub_type_id: indirect.id, name: groupName });
+                controlId = control.id;
+            }
+        }
+        if (!controlId)
+            controlId = (await this.controlBySystemKey('GENERAL_EXPENSES')).id;
+        const control = await client_2.prisma.controlAccount.findUnique({ where: { id: controlId }, include: { sub_type: true } });
+        if (!control)
+            throw new apiError_1.AppError(404, 'Expense head not found');
+        if (control.sub_type.type_code !== 5)
+            throw new apiError_1.AppError(400, `${control.code} ${control.name} is not an expense head`);
+        if (control.system_key && EXPENSE_GROUP_EXCLUDED.has(control.system_key)) {
+            throw new apiError_1.AppError(400, `${control.name} is filled automatically — choose another head`);
+        }
+        const account = await this.createAccount({ control_id: control.id, name });
+        const categoryId = await this.ensureCategoryForAccount(account.id);
+        return { ...account, expense_category_id: categoryId };
+    }
+    /**
+     * Every expense account has one expense category with the same name (the
+     * Expenses module filters and reports by category). Returns its id, creating
+     * or linking one when missing. Null for payroll / computed accounts.
+     */
+    async ensureCategoryForAccount(accountId) {
+        const account = await client_2.prisma.transactionalAccount.findUnique({
+            where: { id: accountId },
+            include: { control: { include: { sub_type: true } } },
+        });
+        if (!account || account.control.sub_type.type_code !== 5)
+            return null;
+        if (account.expense_category_id)
+            return account.expense_category_id;
+        if (account.employee_id || (account.system_key && COMPUTED_KEYS.has(account.system_key)))
+            return null;
+        if (account.control.system_key && EXPENSE_GROUP_EXCLUDED.has(account.control.system_key))
+            return null;
+        const byName = await client_2.prisma.expenseCategory.findFirst({
+            where: { name: { equals: account.name, mode: 'insensitive' } },
+            include: { chart_account: { select: { id: true } } },
+        });
+        let categoryId;
+        if (byName && !byName.chart_account) {
+            categoryId = byName.id;
+        }
+        else {
+            const name = byName ? `${account.name} (${account.code})` : account.name;
+            const created = await client_2.prisma.expenseCategory.upsert({
+                where: { name },
+                create: { name, description: `Chart of Accounts ${account.code}` },
+                update: {},
+                include: { chart_account: { select: { id: true } } },
+            });
+            if (created.chart_account && created.chart_account.id !== account.id)
+                return null;
+            categoryId = created.id;
+        }
+        await client_2.prisma.transactionalAccount.update({ where: { id: account.id }, data: { expense_category_id: categoryId } });
+        return categoryId;
+    }
+    /**
+     * Closing balance of every Cash & Bank account as of `to` — the same
+     * figures the Chart of Accounts shows. Used by the Balance Sheet so both
+     * screens agree.
+     */
+    async moneyBalances(params) {
+        await this.ensureSetup();
+        const all = await this.loadAccountMeta();
+        const accounts = all.filter((a) => a.controlSystemKey === 'CASH_BANK' || a.systemKey === 'CASH' || a.systemKey === 'BANK');
+        const { start, end } = (0, timezone_1.localRange)(ALL_DATES_FROM, params.to);
+        const entries = await this.collectEntries({ start, end, branchId: params.branchId, accounts });
+        const balance = new Map(accounts.map((a) => [a.id, 0]));
+        for (const e of entries)
+            balance.set(e.accountId, (balance.get(e.accountId) || 0) + e.debit - e.credit);
+        const rows = accounts.map((a) => {
+            const isBank = a.systemKey === 'BANK' || (a.systemKey !== 'CASH' && /bank/i.test(a.name));
+            return { id: a.id, code: a.code, name: a.name, kind: isBank ? 'BANK' : 'CASH', balance: round2(balance.get(a.id) || 0) };
+        });
+        return {
+            cash: round2(rows.filter((r) => r.kind === 'CASH').reduce((sum, r) => sum + r.balance, 0)),
+            bank: round2(rows.filter((r) => r.kind === 'BANK').reduce((sum, r) => sum + r.balance, 0)),
+            accounts: rows,
+        };
+    }
+    /**
+     * Money Flow: for a date range, where money came into Cash / Bank from and
+     * where it went, per source (sales, expenses, salaries, ...), with opening
+     * and closing balances per account. Same postings as the ledger.
+     */
+    async moneyFlow(params) {
+        await this.ensureSetup();
+        const window = this.resolveWindow(params);
+        const branchId = this.resolveBranch(params);
+        const all = await this.loadAccountMeta();
+        const accounts = all.filter((a) => a.controlSystemKey === 'CASH_BANK' || a.systemKey === 'CASH' || a.systemKey === 'BANK');
+        const entries = await this.collectEntries({ start: window.start, end: window.end, branchId, accounts });
+        const perAccount = new Map(accounts.map((a) => [a.id, { opening: 0, moneyIn: 0, moneyOut: 0 }]));
+        const sources = new Map();
+        const lines = [];
+        for (const e of entries) {
+            const acc = perAccount.get(e.accountId);
+            if (!acc)
+                continue;
+            if (e.before) {
+                acc.opening += e.debit - e.credit;
+                continue;
+            }
+            acc.moneyIn += e.debit;
+            acc.moneyOut += e.credit;
+            const key = flowSource(e);
+            const meta = FLOW_SOURCES[key];
+            const src = sources.get(key) || { key, label: meta.label, direction: meta.direction, moneyIn: 0, moneyOut: 0, count: 0, byAccount: {} };
+            src.moneyIn += e.debit;
+            src.moneyOut += e.credit;
+            src.count += 1;
+            const ba = src.byAccount[e.accountId] || { in: 0, out: 0 };
+            ba.in += e.debit;
+            ba.out += e.credit;
+            src.byAccount[e.accountId] = ba;
+            sources.set(key, src);
+            lines.push({ source: key, accountId: e.accountId, date: e.date, kind: e.kind, reference: e.reference, description: e.description, moneyIn: e.debit, moneyOut: e.credit });
+        }
+        const accountRows = accounts.map((a) => {
+            const b = perAccount.get(a.id);
+            const isBank = a.systemKey === 'BANK' || (a.systemKey !== 'CASH' && /bank/i.test(a.name));
+            return {
+                id: a.id,
+                code: a.code,
+                name: a.name,
+                kind: isBank ? 'BANK' : 'CASH',
+                opening: round2(b.opening),
+                moneyIn: round2(b.moneyIn),
+                moneyOut: round2(b.moneyOut),
+                closing: round2(b.opening + b.moneyIn - b.moneyOut),
+            };
+        });
+        const sum = (k) => round2(accountRows.reduce((t, r) => t + r[k], 0));
+        lines.sort((a, b) => (b.date?.getTime() ?? 0) - (a.date?.getTime() ?? 0));
+        return {
+            from: window.from,
+            to: window.to,
+            branchId: branchId ?? null,
+            totals: { opening: sum('opening'), moneyIn: sum('moneyIn'), moneyOut: sum('moneyOut'), closing: sum('closing') },
+            accounts: accountRows,
+            sources: Object.keys(FLOW_SOURCES)
+                .map((key) => sources.get(key))
+                .filter((s) => !!s)
+                .map((s) => ({
+                ...s,
+                moneyIn: round2(s.moneyIn),
+                moneyOut: round2(s.moneyOut),
+                net: round2(s.moneyIn - s.moneyOut),
+                byAccount: Object.fromEntries(Object.entries(s.byAccount).map(([id, v]) => [id, { in: round2(v.in), out: round2(v.out) }])),
+            })),
+            lines: lines.slice(0, 3000).map((l) => ({ ...l, moneyIn: round2(l.moneyIn), moneyOut: round2(l.moneyOut) })),
+            truncated: lines.length > 3000,
+        };
+    }
+    /** Cash in Hand, bank accounts and anything else under Cash & Bank — for "Paid from". */
+    async moneyAccountOptions() {
+        await this.ensureSetup();
+        const rows = await client_2.prisma.transactionalAccount.findMany({
+            where: {
+                is_active: true,
+                OR: [{ control: { system_key: 'CASH_BANK' } }, { system_key: { in: ['CASH', 'BANK'] } }],
+            },
+            select: { id: true, code: true, name: true, system_key: true },
+            orderBy: { code: 'asc' },
+        });
+        return rows;
+    }
+    /** The account money comes out of for a payment method when none was chosen. */
+    async defaultMoneyAccount(method) {
+        if (!(0, exports.movesMoney)(method))
+            return null;
+        await this.ensureSetup();
+        const key = (0, exports.isCashMethod)(method) ? 'CASH' : 'BANK';
+        const row = (await client_2.prisma.transactionalAccount.findUnique({ where: { system_key: key }, select: { id: true } })) ||
+            (await client_2.prisma.transactionalAccount.findUnique({ where: { system_key: 'CASH' }, select: { id: true } }));
+        if (!row)
+            return null;
+        // Card / transfer / wallet / cheque follow Settings → Payment accounts.
+        return key === 'BANK' ? (0, payment_accounts_service_1.bankAccountForMethod)(method, row.id) : row.id;
+    }
+    /**
+     * The cash / bank account for a payment: the user's choice (validated), or
+     * the default for the payment method. Null for non-money methods.
+     */
+    async resolveMoneyAccount(explicit, method) {
+        if (explicit) {
+            await this.assertMoneyAccount(explicit);
+            return explicit;
+        }
+        return this.defaultMoneyAccount(method);
+    }
+    /** Validates a "paid from" choice: an active account under Cash & Bank. */
+    async assertMoneyAccount(accountId) {
+        const account = await client_2.prisma.transactionalAccount.findUnique({
+            where: { id: accountId },
+            include: { control: { select: { system_key: true } } },
+        });
+        if (!account)
+            throw new apiError_1.AppError(400, 'Paid-from account not found');
+        const isMoney = account.control.system_key === 'CASH_BANK' || account.system_key === 'CASH' || account.system_key === 'BANK';
+        if (!isMoney)
+            throw new apiError_1.AppError(400, `${account.code} ${account.name} is not a cash or bank account`);
+        if (!account.is_active)
+            throw new apiError_1.AppError(400, `${account.code} ${account.name} is inactive`);
+        return account;
     }
 }
 exports.ChartOfAccountsService = ChartOfAccountsService;

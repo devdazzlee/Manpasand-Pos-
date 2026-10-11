@@ -12,6 +12,12 @@ import {
   deleteVoucher,
   getAccount,
   getExpenseAccountOptions,
+  getExpenseGroupOptions,
+  getMoneyAccountOptions,
+  getMoneyFlow,
+  getPaymentRoutingSetting,
+  updatePaymentRoutingSetting,
+  createExpenseAccount,
   getExpenseBreakdown,
   getLedger,
   getNextCodes,
@@ -28,6 +34,8 @@ import {
 } from '../controllers/chart-of-accounts.controller';
 import {
   createAccountSchema,
+  createExpenseAccountSchema,
+  paymentRoutingSchema,
   createControlSchema,
   createSubTypeSchema,
   createVoucherSchema,
@@ -52,10 +60,19 @@ const canManage = authorize(['SUPER_ADMIN', 'ADMIN']);
 
 // Anyone signed in can pick an expense head when raising an expense.
 router.get('/expense-accounts', getExpenseAccountOptions);
+router.get('/expense-groups', getExpenseGroupOptions);
+router.get('/money-accounts', getMoneyAccountOptions);
+// Which account card / transfer / wallet / cheque money lands in.
+router.get('/payment-routing', getPaymentRoutingSetting);
+router.put('/payment-routing', canManage, validate(paymentRoutingSchema), updatePaymentRoutingSetting);
+// Expense accounts can be added while raising an expense (like categories);
+// creating a brand-new group is checked for admins in the controller.
+router.post('/expense-accounts', validate(createExpenseAccountSchema), createExpenseAccount);
 
 router.get('/', canView, validate(reportQuerySchema), getTree);
 router.get('/expense-breakdown', canView, validate(reportQuerySchema), getExpenseBreakdown);
 router.get('/trial-balance', canView, validate(reportQuerySchema), getTrialBalance);
+router.get('/money-flow', canView, validate(reportQuerySchema), getMoneyFlow);
 router.get('/next-code', canView, validate(nextCodeSchema), getNextCodes);
 router.post('/sync', canManage, syncAccounts);
 

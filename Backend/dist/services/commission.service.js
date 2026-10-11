@@ -6,6 +6,7 @@ const apiError_1 = require("../utils/apiError");
 const helpers_1 = require("../utils/helpers");
 const timezone_1 = require("../utils/timezone");
 const register_cash_out_helper_1 = require("./register-cash-out.helper");
+const chart_of_accounts_service_1 = require("./chart-of-accounts.service");
 const INCLUDED_STATUSES = ['COMPLETED', 'REFUNDED', 'EXCHANGED'];
 const num = (value) => {
     const parsed = Number(value ?? 0);
@@ -311,6 +312,7 @@ class CommissionService {
         const full = paid >= total - 0.005;
         const parseDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date((0, timezone_1.localRange)(v, v).start.getTime() + 12 * 3600_000) : new Date(v);
         const method = String(opts.payment_method || existing.payment_method || 'CASH').toUpperCase();
+        const paidFrom = await new chart_of_accounts_service_1.ChartOfAccountsService().resolveMoneyAccount(opts.paid_from_account_id, method);
         const row = await client_1.prisma.commission.update({
             where: { id },
             data: {
@@ -318,6 +320,7 @@ class CommissionService {
                 is_paid: full,
                 paid_date: opts.paid_date ? parseDate(opts.paid_date) : new Date(),
                 payment_method: method,
+                paid_from_account_id: paidFrom,
                 payment_reference: opts.payment_reference !== undefined ? opts.payment_reference : existing.payment_reference,
                 ...(opts.userId ? { paid_by: opts.userId } : {}),
             },
@@ -347,6 +350,7 @@ class CommissionService {
             paid_date: opts.paid_date,
             payment_method: opts.payment_method || 'CASH',
             payment_reference: opts.payment_reference ?? null,
+            paid_from_account_id: opts.paid_from_account_id,
             userId: opts.userId,
         });
     }

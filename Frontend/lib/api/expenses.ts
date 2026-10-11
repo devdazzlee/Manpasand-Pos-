@@ -50,6 +50,7 @@ export interface Expense {
   recurring_id: string | null;
   category?: { id: string; name: string } | null;
   account?: { id: string; code: string; name: string } | null;
+  paid_from?: { id: string; code: string; name: string } | null;
   branch?: { id: string; name: string } | null;
   creator?: { id: string; email: string } | null;
   approver?: { id: string; email: string } | null;
@@ -89,6 +90,8 @@ export interface ExpensePayload {
   amount: number;
   category_id?: string | null;
   account_id?: string | null;
+  /** Cash / bank account the money left from */
+  paid_from_account_id?: string | null;
   payment_method?: ExpensePaymentMethod;
   bank_account?: string | null;
   reference?: string | null;
@@ -115,6 +118,7 @@ export interface RecurringExpense {
   auto_approve: boolean;
   category?: { id: string; name: string } | null;
   account?: { id: string; code: string; name: string } | null;
+  paid_from?: { id: string; code: string; name: string } | null;
   branch?: { id: string; name: string } | null;
   _count?: { generated: number };
 }
@@ -124,6 +128,8 @@ export interface RecurringExpensePayload {
   amount: number;
   category_id?: string | null;
   account_id?: string | null;
+  /** Cash / bank account the money left from */
+  paid_from_account_id?: string | null;
   payment_method?: ExpensePaymentMethod;
   bank_account?: string | null;
   vendor?: string | null;

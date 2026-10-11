@@ -26,7 +26,9 @@ class TrialBalanceService {
             accounts.push({ code, account, type, debit: d, credit: c });
         };
         // Assets (as of end date)
-        push('1000', 'Cash on hand', 'asset', sheet.assets.cashOnHand, 0);
+        // Overdrawn cash / bank shows on the credit side instead of disappearing.
+        push('1000', 'Cash in hand', 'asset', sheet.assets.cashOnHand, -sheet.assets.cashOnHand);
+        push('1010', 'Bank', 'asset', sheet.assets.bank, -sheet.assets.bank);
         push('1200', 'Inventory', 'asset', sheet.assets.inventory, 0);
         push('1300', 'Accounts receivable', 'asset', sheet.assets.accountsReceivable, 0);
         // Liabilities

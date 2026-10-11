@@ -77,6 +77,7 @@ import {
   Award,
   Gift,
   FileUp,
+  Waves,
 } from "lucide-react";
 import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 
@@ -427,6 +428,7 @@ const menuSections: SidebarMenuSection[] = [
     expandable: true,
     items: [
       { id: "chart-of-accounts", label: "Accounts Overview", icon: ListTree, roles: SALES_ROLES },
+      { id: "money-flow", label: "Money Flow", icon: Waves, roles: SALES_ROLES },
       { id: "journal-vouchers", label: "Adjustments (Journal)", icon: NotebookPen, roles: SALES_ROLES },
       { id: "expense-breakdown", label: "Expense Breakdown", icon: PieChart, roles: SALES_ROLES },
       { id: "budgets", label: "Budgets", icon: Target, roles: SALES_ROLES },

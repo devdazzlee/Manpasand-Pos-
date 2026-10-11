@@ -11,6 +11,7 @@ const purchaseInvoice_service_1 = require("./purchaseInvoice.service");
 const period_lock_service_1 = require("./period-lock.service");
 const register_cash_out_helper_1 = require("./register-cash-out.helper");
 const supplier_accounts_service_1 = require("./supplier-accounts.service");
+const chart_of_accounts_service_1 = require("./chart-of-accounts.service");
 const r2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
 const METHOD_LABEL = {
     CASH: 'Cash',
@@ -702,6 +703,7 @@ class SupplierService {
             amount: (0, helpers_1.asNumber)(p.amount),
             payment_date: p.payment_date,
             method: p.method,
+            paid_from_account_id: p.paid_from_account_id,
             reference: p.reference,
             notes: p.notes,
             purchase_invoice_id: p.purchase_invoice_id,
@@ -719,6 +721,9 @@ class SupplierService {
         await (0, period_lock_service_1.assertPeriodOpen)(paymentDate, 'a supplier payment');
         const invoiceId = await this.checkInvoice(supplierId, type, data.purchaseInvoiceId);
         const method = supplier_accounts_service_1.SUPPLIER_CASH_TYPES.has(type) ? String(data.method || 'CASH').toUpperCase() : 'ADJUSTMENT';
+        const paidFrom = supplier_accounts_service_1.SUPPLIER_CASH_TYPES.has(type)
+            ? await new chart_of_accounts_service_1.ChartOfAccountsService().resolveMoneyAccount(data.paidFromAccountId, method)
+            : null;
         const payment = await client_2.prisma.supplierPayment.create({
             data: {
                 supplier_id: supplierId,
@@ -726,6 +731,7 @@ class SupplierService {
                 amount: data.amount,
                 payment_date: paymentDate,
                 method,
+                paid_from_account_id: paidFrom,
                 reference: data.reference || null,
                 notes: data.notes || null,
                 purchase_invoice_id: invoiceId,
@@ -763,13 +769,21 @@ class SupplierService {
             await (0, period_lock_service_1.assertPeriodOpen)(paymentDate, 'a supplier payment');
         }
         const invoiceId = data.purchaseInvoiceId !== undefined ? await this.checkInvoice(supplierId, type, data.purchaseInvoiceId) : supplier_accounts_service_1.SUPPLIER_INVOICE_TYPES.has(type) ? existing.purchase_invoice_id : null;
+        const method = supplier_accounts_service_1.SUPPLIER_CASH_TYPES.has(type) ? data.method || (existing.method === 'ADJUSTMENT' ? 'CASH' : existing.method) : 'ADJUSTMENT';
+        // Keep the cash / bank account in step with the method unless one was chosen.
+        const paidFrom = !supplier_accounts_service_1.SUPPLIER_CASH_TYPES.has(type)
+            ? null
+            : data.paidFromAccountId !== undefined || method !== existing.method
+                ? await new chart_of_accounts_service_1.ChartOfAccountsService().resolveMoneyAccount(data.paidFromAccountId, method)
+                : existing.paid_from_account_id;
         const payment = await client_2.prisma.supplierPayment.update({
             where: { id: paymentId },
             data: {
                 type,
                 ...(data.amount !== undefined ? { amount: data.amount } : {}),
                 ...(paymentDate ? { payment_date: paymentDate } : {}),
-                method: supplier_accounts_service_1.SUPPLIER_CASH_TYPES.has(type) ? data.method || (existing.method === 'ADJUSTMENT' ? 'CASH' : existing.method) : 'ADJUSTMENT',
+                method,
+                paid_from_account_id: paidFrom,
                 ...(data.reference !== undefined ? { reference: data.reference || null } : {}),
                 ...(data.notes !== undefined ? { notes: data.notes || null } : {}),
                 purchase_invoice_id: invoiceId,

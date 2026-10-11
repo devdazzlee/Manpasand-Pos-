@@ -38,7 +38,12 @@ interface BalanceSheetData {
   asOf: string;
   branches: { id: string; name: string; code: string }[];
   assets: {
+    /** Cash in Hand from the Chart of Accounts ledger */
     cashOnHand: number;
+    bank: number;
+    /** What the open / last-closed register drawers hold (memo) */
+    cashInRegisters: number;
+    moneyAccounts: { id: string; code: string; name: string; kind: "CASH" | "BANK"; balance: number }[];
     inventory: number;
     inventoryQty: number;
     accountsReceivable: number;
@@ -172,7 +177,8 @@ export function BalanceSheet() {
       <p style="margin:4px 0 0;color:#786448">As of ${format(new Date(`${report.asOf}T00:00:00`), "dd MMM yyyy")} · ${branchLabel}</p>
       <p style="margin:2px 0 0;color:#786448">${periodLabel(from, to)}</p></div></div>
       <div class="cards">
-        <div class="card"><div>Cash</div><strong>${money(report.assets.cashOnHand)}</strong></div>
+        <div class="card"><div>Cash in hand</div><strong>${money(report.assets.cashOnHand)}</strong></div>
+        <div class="card"><div>Bank</div><strong>${money(report.assets.bank)}</strong></div>
         <div class="card"><div>Inventory</div><strong>${money(report.assets.inventory)}</strong></div>
         <div class="card"><div>Receivables</div><strong>${money(report.assets.accountsReceivable)}</strong></div>
         <div class="card"><div>Total assets</div><strong>${money(report.assets.total)}</strong></div>
@@ -283,8 +289,9 @@ export function BalanceSheet() {
         </Card>
       ) : (
         <>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Cash on hand" value={money(report?.assets.cashOnHand || 0)} />
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <SummaryCard label="Cash in hand" value={money(report?.assets.cashOnHand || 0)} hint="Chart of Accounts" />
+        <SummaryCard label="Bank" value={money(report?.assets.bank || 0)} hint="Chart of Accounts" />
         <SummaryCard label="Inventory" value={money(report?.assets.inventory || 0)} hint={report ? `${report.assets.inventoryQty.toLocaleString()} pcs` : undefined} />
         <SummaryCard label="Receivables" value={money(report?.assets.accountsReceivable || 0)} />
         <SummaryCard label="Total assets" value={money(report?.assets.total || 0)} emphasis />
@@ -334,7 +341,8 @@ export function BalanceSheet() {
           <Card>
             <CardContent className="space-y-2 p-4">
               <h2 className="font-semibold">Assets</h2>
-              <Row label="Cash on hand" value={money(report?.assets.cashOnHand || 0)} />
+              <Row label="Cash in hand" value={money(report?.assets.cashOnHand || 0)} />
+              <Row label="Bank" value={money(report?.assets.bank || 0)} />
               <Row label="Inventory" value={money(report?.assets.inventory || 0)} />
               <Row label="Accounts receivable" value={money(report?.assets.accountsReceivable || 0)} />
               <Row label="Total assets" value={money(report?.assets.total || 0)} />
@@ -358,7 +366,40 @@ export function BalanceSheet() {
       <div className="grid gap-4 xl:grid-cols-2">
         <Card>
           <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">Cash by branch</div>
+            <div className="border-b px-4 py-3">
+              <div className="font-semibold">Cash &amp; bank accounts</div>
+              <p className="text-xs text-gray-500">
+                Ledger balances from Chart of Accounts: opening balance + sales and customer receipts − refunds, expenses,
+                supplier, salary and advance payments.
+              </p>
+            </div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Account</TableHead>
+                  <TableHead className="text-right">Balance</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(report?.assets.moneyAccounts || []).map((row) => (
+                  <TableRow key={row.id}>
+                    <TableCell>
+                      <div>{row.name}</div>
+                      <div className="text-xs text-gray-500">
+                        {row.code} · {row.kind === "BANK" ? "Bank" : "Cash"}
+                      </div>
+                    </TableCell>
+                    <TableCell className={`text-right ${row.balance < 0 ? "text-rose-600" : ""}`}>{money(row.balance)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            <div className="border-y bg-gray-50/60 px-4 py-3">
+              <div className="font-semibold">In register drawers (memo)</div>
+              <p className="text-xs text-gray-500">
+                Counted / expected cash in each till — part of Cash in hand. Total {money(report?.assets.cashInRegisters || 0)}.
+              </p>
+            </div>
             <Table>
               <TableHeader>
                 <TableRow>

@@ -2,8 +2,11 @@ import { Request, Response } from 'express';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { ChartOfAccountsService } from '../services/chart-of-accounts.service';
+import { AppError } from '../utils/apiError';
+import { getPaymentRouting, setPaymentRouting } from '../services/payment-accounts.service';
 import {
   createAccountSchema,
+  createExpenseAccountSchema,
   createControlSchema,
   createSubTypeSchema,
   createVoucherSchema,
@@ -52,6 +55,20 @@ export const getTrialBalance = asyncHandler(async (req: Request, res: Response) 
   new ApiResponse(data, 'Trial balance retrieved').send(res);
 });
 
+export const getPaymentRoutingSetting = asyncHandler(async (_req: Request, res: Response) => {
+  new ApiResponse(await getPaymentRouting(), 'Payment accounts retrieved').send(res);
+});
+
+export const updatePaymentRoutingSetting = asyncHandler(async (req: Request, res: Response) => {
+  const data = await setPaymentRouting(req.body || {}, req.user?.id);
+  new ApiResponse(data, 'Payment accounts saved').send(res);
+});
+
+export const getMoneyFlow = asyncHandler(async (req: Request, res: Response) => {
+  const data = await service.moneyFlow(reportParams(req));
+  new ApiResponse(data, 'Money flow retrieved').send(res);
+});
+
 export const syncAccounts = asyncHandler(async (_req: Request, res: Response) => {
   const data = await service.syncLinkedAccounts();
   new ApiResponse(data, 'Linked accounts synchronised').send(res);
@@ -66,6 +83,25 @@ export const getNextCodes = asyncHandler(async (req: Request, res: Response) => 
 export const getExpenseAccountOptions = asyncHandler(async (_req: Request, res: Response) => {
   const data = await service.expenseAccountOptions();
   new ApiResponse(data, 'Expense accounts retrieved').send(res);
+});
+
+export const getExpenseGroupOptions = asyncHandler(async (_req: Request, res: Response) => {
+  const data = await service.expenseGroupOptions();
+  new ApiResponse(data, 'Expense groups retrieved').send(res);
+});
+
+export const getMoneyAccountOptions = asyncHandler(async (_req: Request, res: Response) => {
+  const data = await service.moneyAccountOptions();
+  new ApiResponse(data, 'Cash and bank accounts retrieved').send(res);
+});
+
+export const createExpenseAccount = asyncHandler(async (req: Request, res: Response) => {
+  const input = body(createExpenseAccountSchema, req);
+  if (input.new_group_name && !['SUPER_ADMIN', 'ADMIN'].includes(String(req.user?.role))) {
+    throw new AppError(403, 'Only an admin can create a new expense group — pick an existing group');
+  }
+  const data = await service.createExpenseAccount(input);
+  new ApiResponse(data, 'Expense account created', 201).send(res);
 });
 
 /* ---------------------------- sub types ---------------------------- */

@@ -7,6 +7,7 @@ const helpers_1 = require("../utils/helpers");
 const timezone_1 = require("../utils/timezone");
 const crypto_1 = require("crypto");
 const register_cash_out_helper_1 = require("./register-cash-out.helper");
+const chart_of_accounts_service_1 = require("./chart-of-accounts.service");
 const product_cost_service_1 = require("./product-cost.service");
 const PURCHASE_LIST_INCLUDE = {
     product: true,
@@ -254,6 +255,9 @@ class PurchaseService {
             throw new apiError_1.AppError(404, 'Supplier not found');
         const billTotal = data.lines.reduce((sum, line) => sum + line.quantity * line.costPrice, 0);
         const paymentMode = data.paymentMode || 'CREDIT';
+        const paidFromAccountId = paymentMode === 'CREDIT'
+            ? null
+            : await new chart_of_accounts_service_1.ChartOfAccountsService().resolveMoneyAccount(data.paidFromAccountId, data.paymentMethod || 'CASH');
         let paidNow = 0;
         if (paymentMode === 'CASH') {
             paidNow = billTotal;
@@ -385,6 +389,7 @@ class PurchaseService {
                         amount: paidNow,
                         payment_date: data.purchaseDate || new Date(),
                         method: data.paymentMethod || 'CASH',
+                        paid_from_account_id: paidFromAccountId,
                         reference: data.paymentReference || data.invoiceRef || null,
                         notes: payNotes || null,
                         bill_group_id: billGroupId,

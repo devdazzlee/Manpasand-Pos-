@@ -5,6 +5,7 @@ import { Prisma } from '@prisma/client';
 import { startOfBusinessMonth } from '../utils/timezone';
 import { randomUUID } from 'crypto';
 import { recordCashPayOnOpenRegister } from './register-cash-out.helper';
+import { ChartOfAccountsService } from './chart-of-accounts.service';
 import { applyWeightedAverageCost, productOnHandQty } from './product-cost.service';
 
 const PURCHASE_LIST_INCLUDE = {
@@ -310,6 +311,8 @@ export class PurchaseService {
     paymentMode?: 'CASH' | 'CREDIT' | 'MIX';
     paidAmount?: number;
     paymentMethod?: string;
+    /** Cash / bank account the paid part comes out of */
+    paidFromAccountId?: string | null;
     paymentReference?: string;
     paymentNotes?: string;
     lines: Array<{
@@ -339,6 +342,10 @@ export class PurchaseService {
       0,
     );
     const paymentMode = data.paymentMode || 'CREDIT';
+    const paidFromAccountId =
+      paymentMode === 'CREDIT'
+        ? null
+        : await new ChartOfAccountsService().resolveMoneyAccount(data.paidFromAccountId, data.paymentMethod || 'CASH');
     let paidNow = 0;
     if (paymentMode === 'CASH') {
       paidNow = billTotal;
@@ -481,6 +488,7 @@ export class PurchaseService {
             amount: paidNow,
             payment_date: data.purchaseDate || new Date(),
             method: data.paymentMethod || 'CASH',
+            paid_from_account_id: paidFromAccountId,
             reference: data.paymentReference || data.invoiceRef || null,
             notes: payNotes || null,
             bill_group_id: billGroupId,

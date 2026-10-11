@@ -93,6 +93,8 @@ export const createSupplierPaymentSchema = z.object({
         reference: z.string().max(120).nullable().optional(),
         notes: z.string().max(500).nullable().optional(),
         purchaseInvoiceId: z.string().uuid().nullable().optional(),
+        /** Cash / bank account the money left from (into, for refunds) */
+        paidFromAccountId: z.string().uuid().nullish(),
     }),
 });
 
@@ -109,6 +111,8 @@ export const updateSupplierPaymentSchema = z.object({
         reference: z.string().max(120).nullable().optional(),
         notes: z.string().max(500).nullable().optional(),
         purchaseInvoiceId: z.string().uuid().nullable().optional(),
+        /** Cash / bank account the money left from (into, for refunds) */
+        paidFromAccountId: z.string().uuid().nullish(),
     }),
 });
 

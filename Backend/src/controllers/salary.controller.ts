@@ -61,6 +61,7 @@ export const updateSalary = asyncHandler(async (req: Request, res: Response) => 
 export const markSalaryPaid = asyncHandler(async (req: Request, res: Response) => {
   const salary = await salaryService.markPaid(req.params.id, req.body?.paid_date, {
     payment_method: req.body?.payment_method,
+    paid_from_account_id: req.body?.paid_from_account_id,
     userId: (req as any).user?.id,
   });
   new ApiResponse(salary, 'Salary marked as paid').send(res);

@@ -80,6 +80,7 @@ export const bulkPaySchema = z.object({
     paid_date: z.string().optional(),
     payment_method: z.string().max(40).optional(),
     payment_reference: z.string().max(120).nullable().optional(),
+    paid_from_account_id: z.string().uuid().nullish(),
   }),
 });
 
@@ -94,6 +95,7 @@ export const markCommissionPaidSchema = z.object({
       paid_date: z.string().optional(),
       payment_method: z.string().max(40).optional(),
       payment_reference: z.string().max(120).nullable().optional(),
+      paid_from_account_id: z.string().uuid().nullish(),
     })
     .optional(),
 });
@@ -105,6 +107,7 @@ export const payCommissionSchema = z.object({
     paid_date: z.string().optional(),
     payment_method: z.string().max(40).optional(),
     payment_reference: z.string().max(120).nullable().optional(),
+    paid_from_account_id: z.string().uuid().nullish(),
   }),
 });
 

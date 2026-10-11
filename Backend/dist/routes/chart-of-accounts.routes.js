@@ -11,9 +11,18 @@ const canView = (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'BRANC
 const canManage = (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN']);
 // Anyone signed in can pick an expense head when raising an expense.
 router.get('/expense-accounts', chart_of_accounts_controller_1.getExpenseAccountOptions);
+router.get('/expense-groups', chart_of_accounts_controller_1.getExpenseGroupOptions);
+router.get('/money-accounts', chart_of_accounts_controller_1.getMoneyAccountOptions);
+// Which account card / transfer / wallet / cheque money lands in.
+router.get('/payment-routing', chart_of_accounts_controller_1.getPaymentRoutingSetting);
+router.put('/payment-routing', canManage, (0, validation_middleware_1.validate)(chart_of_accounts_validation_1.paymentRoutingSchema), chart_of_accounts_controller_1.updatePaymentRoutingSetting);
+// Expense accounts can be added while raising an expense (like categories);
+// creating a brand-new group is checked for admins in the controller.
+router.post('/expense-accounts', (0, validation_middleware_1.validate)(chart_of_accounts_validation_1.createExpenseAccountSchema), chart_of_accounts_controller_1.createExpenseAccount);
 router.get('/', canView, (0, validation_middleware_1.validate)(chart_of_accounts_validation_1.reportQuerySchema), chart_of_accounts_controller_1.getTree);
 router.get('/expense-breakdown', canView, (0, validation_middleware_1.validate)(chart_of_accounts_validation_1.reportQuerySchema), chart_of_accounts_controller_1.getExpenseBreakdown);
 router.get('/trial-balance', canView, (0, validation_middleware_1.validate)(chart_of_accounts_validation_1.reportQuerySchema), chart_of_accounts_controller_1.getTrialBalance);
+router.get('/money-flow', canView, (0, validation_middleware_1.validate)(chart_of_accounts_validation_1.reportQuerySchema), chart_of_accounts_controller_1.getMoneyFlow);
 router.get('/next-code', canView, (0, validation_middleware_1.validate)(chart_of_accounts_validation_1.nextCodeSchema), chart_of_accounts_controller_1.getNextCodes);
 router.post('/sync', canManage, chart_of_accounts_controller_1.syncAccounts);
 router.post('/sub-types', canManage, (0, validation_middleware_1.validate)(chart_of_accounts_validation_1.createSubTypeSchema), chart_of_accounts_controller_1.createSubType);

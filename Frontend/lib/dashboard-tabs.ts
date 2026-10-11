@@ -62,6 +62,7 @@ export const DASHBOARD_TAB_IDS = new Set([
   "profit-loss",
   "balance-sheet",
   "trial-balance",
+  "money-flow",
   "chart-of-accounts",
   "journal-vouchers",
   "expense-breakdown",

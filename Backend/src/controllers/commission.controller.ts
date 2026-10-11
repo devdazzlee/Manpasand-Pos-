@@ -71,6 +71,7 @@ export const markCommissionPaid = asyncHandler(async (req: Request, res: Respons
     paid_date: req.body?.paid_date,
     payment_method: req.body?.payment_method,
     payment_reference: req.body?.payment_reference,
+    paid_from_account_id: req.body?.paid_from_account_id,
     userId: req.user?.id,
   });
   new ApiResponse(row, 'Commission marked as paid').send(res);
@@ -82,6 +83,7 @@ export const payCommission = asyncHandler(async (req: Request, res: Response) =>
     paid_date: req.body?.paid_date,
     payment_method: req.body?.payment_method,
     payment_reference: req.body?.payment_reference,
+    paid_from_account_id: req.body?.paid_from_account_id,
     userId: req.user?.id,
   });
   const msg =
@@ -123,6 +125,7 @@ export const bulkPayCommissions = asyncHandler(async (req: Request, res: Respons
     paid_date: req.body.paid_date,
     payment_method: req.body.payment_method,
     payment_reference: req.body.payment_reference,
+    paid_from_account_id: req.body.paid_from_account_id,
     userId: req.user?.id,
   });
   new ApiResponse(result, 'Commissions paid').send(res);

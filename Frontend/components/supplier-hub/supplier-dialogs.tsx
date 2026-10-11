@@ -14,6 +14,7 @@ import { useToast } from "@/hooks/use-toast";
 import { businessTodayYmd } from "@/lib/business-timezone";
 import { cn } from "@/lib/utils";
 import { apiError, METHOD_LABEL, rs, supplierApi, TXN_META, type OpenBill, type PayMethod, type SupplierRow, type TxnRow, type TxnType } from "./supplier-api";
+import { PaidFromSelect, usePaidFrom } from "@/components/expense-account-select";
 
 /* ====================================================================== */
 /* Supplier form                                                          */
@@ -334,6 +335,12 @@ export function TransactionDialog({
   const [notes, setNotes] = useState("");
   const [invoiceId, setInvoiceId] = useState<string>("none");
   const [busy, setBusy] = useState(false);
+  const paidFrom = usePaidFrom(method, open);
+  const { setPaidFrom } = paidFrom;
+  // Editing keeps the account it was saved with.
+  useEffect(() => {
+    if (open && editing?.paid_from_account_id && paidFrom.accounts.length) setPaidFrom(editing.paid_from_account_id);
+  }, [open, editing, paidFrom.accounts, setPaidFrom]);
 
   useEffect(() => {
     if (!open) return;
@@ -362,6 +369,7 @@ export function TransactionDialog({
       amount: value,
       paymentDate: date,
       method: meta.cash ? method : undefined,
+      paidFromAccountId: meta.cash ? paidFrom.paidFrom || null : null,
       reference: reference.trim() || null,
       notes: notes.trim() || null,
       purchaseInvoiceId: canAllocate && invoiceId !== "none" ? invoiceId : null,
@@ -432,6 +440,11 @@ export function TransactionDialog({
                   ))}
                 </SelectContent>
               </Select>
+            </Field>
+          )}
+          {meta.cash && (
+            <Field label={type === "REFUND" ? "Received into" : "Paid from"}>
+              <PaidFromSelect value={paidFrom.paidFrom} onChange={paidFrom.setPaidFrom} accounts={paidFrom.accounts} />
             </Field>
           )}
           <Field label={method === "CHEQUE" && meta.cash ? "Cheque no." : meta.cash ? "Reference / transaction ID" : "Note / bill reference"}>

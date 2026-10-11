@@ -1,4 +1,37 @@
 "use strict";
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.BalanceSheetService = void 0;
 const client_1 = require("@prisma/client");
@@ -366,7 +399,17 @@ class BalanceSheetService {
         const periodExpenseTotal = round2(periodExpenseRows.reduce((sum, row) => sum + Math.abs(num(row.amount)), 0) +
             periodSalaryRows.reduce((sum, row) => sum + Math.abs((num(row.amount) + num(row.bonus) + num(row.allowances) - num(row.deductions))), 0));
         const periodNetProfit = round2(periodRevenue - periodCogs - periodExpenseTotal);
-        const totalAssets = round2(cashOnHand + inventoryValue + accountsReceivable);
+        // Cash in Hand and Bank come from the Chart of Accounts ledger (opening
+        // balances, sales, refunds, expenses, supplier / salary payments, ...), so
+        // this report and Chart of Accounts show the same money. What is sitting in
+        // the register drawers right now is kept as a memo line.
+        const cashInRegisters = cashOnHand;
+        // Lazy import: chart-of-accounts also uses this service.
+        const { ChartOfAccountsService } = await Promise.resolve().then(() => __importStar(require('./chart-of-accounts.service')));
+        const money = await new ChartOfAccountsService().moneyBalances({ to: params.to, branchId });
+        cashOnHand = money.cash;
+        const bankBalance = money.bank;
+        const totalAssets = round2(cashOnHand + bankBalance + inventoryValue + accountsReceivable);
         const totalLiabilities = round2(accountsPayable + customerCredits);
         const equity = round2(totalAssets - totalLiabilities);
         return {
@@ -376,6 +419,9 @@ class BalanceSheetService {
             branches,
             assets: {
                 cashOnHand,
+                bank: bankBalance,
+                cashInRegisters,
+                moneyAccounts: money.accounts,
                 inventory: inventoryValue,
                 inventoryQty,
                 accountsReceivable,
@@ -407,7 +453,8 @@ class BalanceSheetService {
                 balanced: Math.abs(totalAssets - (totalLiabilities + equity)) < 0.02,
             },
             lines: [
-                { side: 'asset', label: 'Cash on hand', amount: cashOnHand },
+                { side: 'asset', label: 'Cash in hand', amount: cashOnHand },
+                { side: 'asset', label: 'Bank', amount: bankBalance },
                 { side: 'asset', label: 'Inventory', amount: inventoryValue },
                 { side: 'asset', label: 'Accounts receivable', amount: accountsReceivable },
                 { side: 'asset', label: 'Total assets', amount: totalAssets, emphasis: true },

@@ -55,7 +55,13 @@ import { toast as sonnerToast } from "sonner";
 import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { CompactReportFilters } from "@/components/report-filters-shell";
-import { ExpenseCategorySelect } from "@/components/expense-category-select";
+import {
+  ExpenseAccountPicker,
+  PaidFromSelect,
+  defaultPaidFrom,
+  useExpenseAccounts,
+  useMoneyAccounts,
+} from "@/components/expense-account-select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ymd, rangeForPreset } from "@/lib/business-timezone";
 import {
@@ -63,7 +69,6 @@ import {
   approveExpense,
   createExpense,
   fetchExpenseById,
-  fetchExpenseCategories,
   updateExpense,
   type ExpensePaymentMethod,
 } from "@/lib/api/expenses";
@@ -204,11 +209,15 @@ export function DayReports({
   const [editingExpenseApproved, setEditingExpenseApproved] = useState(false);
   const [loadingEditExpenseId, setLoadingEditExpenseId] = useState<string | null>(null);
   const [savingExpense, setSavingExpense] = useState(false);
-  const [categories, setCategories] = useState<{ id: string; name: string }[]>([]);
+  const { accounts: expenseAccounts, setAccounts: setExpenseAccounts, loading: expenseAccountsLoading } =
+    useExpenseAccounts(addOpen);
+  const moneyAccounts = useMoneyAccounts(addOpen);
   const emptyExpenseForm = () => ({
     particular: "",
     amount: "",
     category_id: "",
+    account_id: "",
+    paid_from_account_id: "",
     payment_method: "CASH" as ExpensePaymentMethod,
     vendor: "",
     notes: "",
@@ -218,6 +227,8 @@ export function DayReports({
     particular: "",
     amount: "",
     category_id: "",
+    account_id: "",
+    paid_from_account_id: "",
     payment_method: "CASH" as ExpensePaymentMethod,
     vendor: "",
     notes: "",
@@ -229,12 +240,12 @@ export function DayReports({
     setPage(1);
   }, [lockedView]);
 
+  // Default "paid from" (Cash in Hand / bank) once the accounts are known.
   useEffect(() => {
-    if (view !== "expenses") return;
-    fetchExpenseCategories({ isActive: true })
-      .then((rows) => setCategories((rows || []).map((row: any) => ({ id: row.id, name: row.name }))))
-      .catch(() => setCategories([]));
-  }, [view]);
+    if (addOpen && !expenseForm.paid_from_account_id && moneyAccounts.length) {
+      setExpenseForm((prev) => ({ ...prev, paid_from_account_id: defaultPaidFrom(moneyAccounts, prev.payment_method) }));
+    }
+  }, [addOpen, moneyAccounts, expenseForm.paid_from_account_id]);
 
   const loadGenRef = useRef(0);
 
@@ -472,6 +483,8 @@ export function DayReports({
         particular: expense.particular,
         amount: String(expense.amount),
         category_id: expense.category?.id ?? "",
+        account_id: expense.account?.id ?? "",
+        paid_from_account_id: expense.paid_from?.id ?? "",
         payment_method: expense.payment_method,
         vendor: expense.vendor ?? "",
         notes: expense.notes ?? "",
@@ -490,11 +503,11 @@ export function DayReports({
   const saveExpense = async () => {
     const particular = expenseForm.particular.trim();
     const amount = Number(expenseForm.amount);
-    if (!particular || !(amount > 0)) {
+    if (!particular || !(amount > 0) || !expenseForm.account_id) {
       toast({
         variant: "destructive",
         title: "Missing details",
-        description: "Enter a description and a valid amount.",
+        description: "Enter a description, a valid amount and the expense account.",
       });
       return;
     }
@@ -503,6 +516,8 @@ export function DayReports({
       particular,
       amount,
       category_id: expenseForm.category_id || null,
+      account_id: expenseForm.account_id || null,
+      paid_from_account_id: expenseForm.paid_from_account_id || null,
       payment_method: expenseForm.payment_method,
       vendor: expenseForm.vendor.trim() || null,
       notes: expenseForm.notes.trim() || null,
@@ -1097,15 +1112,21 @@ export function DayReports({
               </div>
             </div>
             <div className="space-y-1">
-              <Label>Category</Label>
-              <ExpenseCategorySelect
-                value={expenseForm.category_id}
-                categories={categories}
-                onChange={(categoryId) =>
-                  setExpenseForm((prev) => ({ ...prev, category_id: categoryId }))
+              <Label>Expense account</Label>
+              <ExpenseAccountPicker
+                value={expenseForm.account_id}
+                accounts={expenseAccounts}
+                onAccountsChange={setExpenseAccounts}
+                loading={expenseAccountsLoading}
+                onChange={(account) =>
+                  setExpenseForm((prev) => ({
+                    ...prev,
+                    account_id: account?.id ?? "",
+                    category_id: account?.expense_category_id ?? "",
+                  }))
                 }
-                onCategoriesChange={setCategories}
               />
+              <p className="text-xs text-muted-foreground">From your Chart of Accounts — or add a new one here.</p>
             </div>
             <div className="space-y-1">
               <Label>Payment method</Label>
@@ -1115,6 +1136,7 @@ export function DayReports({
                   setExpenseForm((prev) => ({
                     ...prev,
                     payment_method: value as ExpensePaymentMethod,
+                    paid_from_account_id: defaultPaidFrom(moneyAccounts, value),
                   }))
                 }
               >
@@ -1129,6 +1151,14 @@ export function DayReports({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Paid from</Label>
+              <PaidFromSelect
+                value={expenseForm.paid_from_account_id}
+                accounts={moneyAccounts}
+                onChange={(id) => setExpenseForm((prev) => ({ ...prev, paid_from_account_id: id }))}
+              />
             </div>
             <div className="space-y-1">
               <Label>Vendor / paid to</Label>

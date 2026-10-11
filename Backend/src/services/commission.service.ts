@@ -8,6 +8,7 @@ import {
   UpdateCommissionInput,
 } from '../validations/commission.validation';
 import { recordCashPayOnOpenRegister } from './register-cash-out.helper';
+import { ChartOfAccountsService } from './chart-of-accounts.service';
 
 const INCLUDED_STATUSES: SaleStatus[] = ['COMPLETED', 'REFUNDED', 'EXCHANGED'];
 
@@ -332,6 +333,7 @@ export class CommissionService {
       paid_date?: string;
       payment_method?: string;
       payment_reference?: string | null;
+      paid_from_account_id?: string | null;
       userId?: string;
     },
   ) {
@@ -358,6 +360,7 @@ export class CommissionService {
       /^\d{4}-\d{2}-\d{2}$/.test(v) ? new Date(localRange(v, v).start.getTime() + 12 * 3600_000) : new Date(v);
 
     const method = String(opts.payment_method || existing.payment_method || 'CASH').toUpperCase();
+    const paidFrom = await new ChartOfAccountsService().resolveMoneyAccount(opts.paid_from_account_id, method);
     const row = await prisma.commission.update({
       where: { id },
       data: {
@@ -365,6 +368,7 @@ export class CommissionService {
         is_paid: full,
         paid_date: opts.paid_date ? parseDate(opts.paid_date) : new Date(),
         payment_method: method,
+        paid_from_account_id: paidFrom,
         payment_reference:
           opts.payment_reference !== undefined ? opts.payment_reference : existing.payment_reference,
         ...(opts.userId ? { paid_by: opts.userId } : {}),
@@ -384,7 +388,10 @@ export class CommissionService {
     return this.serialize(row);
   }
 
-  async markPaid(id: string, opts: { paid_date?: string; payment_method?: string; payment_reference?: string | null; userId?: string } = {}) {
+  async markPaid(
+    id: string,
+    opts: { paid_date?: string; payment_method?: string; payment_reference?: string | null; paid_from_account_id?: string | null; userId?: string } = {},
+  ) {
     const existing = await prisma.commission.findUnique({ where: { id } });
     if (!existing) throw new AppError(404, 'Commission record not found');
     const remaining = round2(Math.max(0, asNumber(existing.amount) - asNumber(existing.paid_amount)));
@@ -394,11 +401,15 @@ export class CommissionService {
       paid_date: opts.paid_date,
       payment_method: opts.payment_method || 'CASH',
       payment_reference: opts.payment_reference ?? null,
+      paid_from_account_id: opts.paid_from_account_id,
       userId: opts.userId,
     });
   }
 
-  async bulkPay(ids: string[], opts: { paid_date?: string; payment_method?: string; payment_reference?: string | null; userId?: string }) {
+  async bulkPay(
+    ids: string[],
+    opts: { paid_date?: string; payment_method?: string; payment_reference?: string | null; paid_from_account_id?: string | null; userId?: string },
+  ) {
     const rows = await prisma.commission.findMany({
       where: { id: { in: ids }, is_paid: false },
       select: { id: true, amount: true, paid_amount: true },

@@ -6,6 +6,7 @@ const apiError_1 = require("../utils/apiError");
 const helpers_1 = require("../utils/helpers");
 const commission_service_1 = require("./commission.service");
 const period_lock_service_1 = require("./period-lock.service");
+const chart_of_accounts_service_1 = require("./chart-of-accounts.service");
 /** Last calendar day of a payslip month as YYYY-MM-DD. */
 const monthEnd = (year, month) => `${year}-${String(month).padStart(2, '0')}-${String(new Date(year, month, 0).getDate()).padStart(2, '0')}`;
 /* ============================================================
@@ -420,13 +421,16 @@ class EmployeePayrollService {
             throw new apiError_1.AppError(400, `Only Rs ${remaining.toLocaleString()} is left to pay on this payslip`);
         const paid = round2(alreadyPaid + amount);
         const full = paid >= net - 0.005;
+        const method = data.method || existing.payment_method || 'CASH';
+        const paidFrom = await new chart_of_accounts_service_1.ChartOfAccountsService().resolveMoneyAccount(data.paid_from_account_id, method);
         const salary = await client_1.prisma.salary.update({
             where: { id },
             data: {
                 paid_amount: paid,
                 is_paid: full,
                 paid_date: data.date ? new Date(data.date) : new Date(),
-                payment_method: data.method || existing.payment_method || 'CASH',
+                payment_method: method,
+                paid_from_account_id: paidFrom,
                 ...(data.reference !== undefined ? { reference: data.reference || null } : {}),
             },
         });
