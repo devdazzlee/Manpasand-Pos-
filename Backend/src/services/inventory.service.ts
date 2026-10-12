@@ -852,11 +852,29 @@ export class InventoryService {
             },
             select: {
               branch_id: true,
+              product_id: true,
               current_quantity: true,
               product: { select: { purchase_rate: true, sales_rate_inc_dis_and_tax: true, sales_rate_exc_dis_and_tax: true } },
             },
           }),
         ]);
+
+        // Inventory on hand is shown as of the period's end date: today's stock
+        // minus every movement after it (same method as the Balance Sheet).
+        const movedAfterEnd = new Map<string, number>();
+        if (params.endDate && params.endDate.getTime() < Date.now()) {
+          const after = await prisma.stockMovement.groupBy({
+            by: ['product_id', 'branch_id'],
+            where: {
+              created_at: { gt: params.endDate },
+              ...(params.branchId ? { branch_id: params.branchId } : {}),
+              ...(params.productId ? { product_id: params.productId } : {}),
+              ...(params.categoryId ? { product: { category_id: params.categoryId } } : {}),
+            },
+            _sum: { quantity_change: true },
+          });
+          for (const row of after) movedAfterEnd.set(`${row.product_id}:${row.branch_id}`, asNumber(row._sum.quantity_change ?? 0));
+        }
 
         const r2 = (n: number) => Math.round(n * 100) / 100;
         type Agg = {
@@ -965,7 +983,7 @@ export class InventoryService {
         const stockByBranch: Record<string, { cost: number; retail: number; units: number }> = {};
         const stockTotals = { cost: 0, retail: 0, units: 0 };
         for (const row of stockRows) {
-          const qty = Math.max(0, asNumber(row.current_quantity));
+          const qty = Math.max(0, asNumber(row.current_quantity) - (movedAfterEnd.get(`${row.product_id}:${row.branch_id}`) || 0));
           const cost = qty * asNumber(row.product?.purchase_rate || 0);
           const price =
             asNumber(row.product?.sales_rate_inc_dis_and_tax || 0) || asNumber(row.product?.sales_rate_exc_dis_and_tax || 0);
@@ -1076,6 +1094,8 @@ export class InventoryService {
             stockValue: r2(stockTotals.cost),
             stockRetail: r2(stockTotals.retail),
             stockUnits: r2(stockTotals.units),
+            /** Date the inventory figures are valued at (end of the period, or today) */
+            stockAsOf: params.endDate && params.endDate.getTime() < Date.now() ? params.endDate : new Date(),
             turnover: overallTurnover.turnover,
             daysOfStock: overallTurnover.daysOfStock,
             periodDays,

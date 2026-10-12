@@ -86,6 +86,7 @@ interface Summary {
   stockValue?: number;
   stockRetail?: number;
   stockUnits?: number;
+  stockAsOf?: string;
   turnover?: number | null;
   daysOfStock?: number | null;
   periodDays?: number;
@@ -346,7 +347,7 @@ export function InventoryAudit() {
       valueClass: (summary?.grossProfit || 0) < 0 ? "text-rose-700" : "text-emerald-700",
     },
     {
-      label: "Inventory on hand",
+      label: summary?.stockAsOf ? `Inventory on ${format(new Date(summary.stockAsOf), "dd MMM yyyy")}` : "Inventory on hand",
       value: compact(summary?.stockValue || 0),
       hint: `${formatQty(summary?.stockUnits || 0)} units · retail ${compact(summary?.stockRetail || 0)}`,
       icon: Boxes,
