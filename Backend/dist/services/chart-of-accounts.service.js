@@ -1657,6 +1657,16 @@ class ChartOfAccountsService {
                 balance.credit += -value;
             balance.entries += 1;
         }
+        // Sale vouchers credit Sales with what the customer paid (after discount).
+        // Sales Discounts shows the discount as a debit, so Sales is grossed up by
+        // the same amount: Sales (before discount) − Discounts = what was charged.
+        const discountGrossUp = computed.get('SALES_DISCOUNTS') || 0;
+        const salesAccount = accounts.find((a) => a.systemKey === 'SALES');
+        if (discountGrossUp > 0.005 && salesAccount) {
+            const balance = balances.get(salesAccount.id);
+            balance.credit += discountGrossUp;
+            balance.entries += 1;
+        }
         for (const balance of balances.values()) {
             balance.opening = round2(balance.opening);
             balance.debit = round2(balance.debit);
@@ -1799,6 +1809,21 @@ class ChartOfAccountsService {
                 credit: value < 0 ? round2(-value) : 0,
                 before: false,
             });
+        }
+        if (account.system_key === 'SALES') {
+            const discounts = (await this.computedBalances({ ...params, ...window, branchId }, new Set(['SALES_DISCOUNTS']))).get('SALES_DISCOUNTS') || 0;
+            if (discounts > 0.005) {
+                entries.push({
+                    accountId,
+                    date: window.end,
+                    kind: 'COMPUTED',
+                    reference: null,
+                    description: 'Discounts given at the till · added back so sales show before discount (see Sales Discounts)',
+                    debit: 0,
+                    credit: round2(discounts),
+                    before: false,
+                });
+            }
         }
         const opening = round2(entries.filter((e) => e.before).reduce((s, e) => s + e.debit - e.credit, 0));
         const rows = entries

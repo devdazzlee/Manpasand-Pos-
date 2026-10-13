@@ -110,6 +110,8 @@ class InventoryReportService {
             },
             select: {
                 id: true,
+                product_id: true,
+                branch_id: true,
                 current_quantity: true,
                 minimum_quantity: true,
                 last_updated: true,
@@ -117,8 +119,25 @@ class InventoryReportService {
                 product: { select: productSelect },
             },
         });
+        // Snapshot as of the To date: rewind movements that happened after that moment.
+        const laterByKey = new Map();
+        if (params.endDate) {
+            const later = await client_1.prisma.stockMovement.groupBy({
+                by: ['product_id', 'branch_id'],
+                where: {
+                    created_at: { gt: params.endDate },
+                    ...(params.branchId ? { branch_id: params.branchId } : {}),
+                    ...(params.productId ? { product_id: params.productId } : {}),
+                },
+                _sum: { quantity_change: true },
+            });
+            for (const row of later) {
+                laterByKey.set(`${row.product_id}:${row.branch_id}`, (0, helpers_1.asNumber)(row._sum.quantity_change));
+            }
+        }
         let rows = stocks.map((s) => {
-            const qty = (0, helpers_1.asNumber)(s.current_quantity);
+            const laterQty = laterByKey.get(`${s.product_id}:${s.branch_id}`) || 0;
+            const qty = (0, helpers_1.asNumber)(s.current_quantity) - laterQty;
             const unitCost = (0, helpers_1.asNumber)(s.product.purchase_rate);
             const unitPrice = priceOf(s.product);
             const costValue = qty * unitCost;

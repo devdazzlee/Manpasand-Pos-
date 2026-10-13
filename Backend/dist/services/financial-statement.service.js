@@ -351,6 +351,16 @@ class FinancialStatementService {
                     monthRow.cogs += cost;
                 }
             }
+            // Bill-level discount is not inside the line totals — take it off revenue
+            // so net revenue is what the customer was actually charged.
+            const billDiscount = num(sale.discount_amount);
+            if (billDiscount) {
+                netRevenue -= billDiscount;
+                saleRevenue -= billDiscount;
+                branchRow.revenue -= billDiscount;
+                cashierRow.revenue -= billDiscount;
+                monthRow.revenue -= billDiscount;
+            }
             for (const { row, share } of paymentRows)
                 row.revenue += saleRevenue * share;
         }

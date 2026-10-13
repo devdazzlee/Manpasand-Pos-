@@ -63,7 +63,7 @@ type ReportType = "valuation" | "purchase" | "transfer" | "stockout" | "lowstock
 type Icon = ComponentType<{ className?: string }>;
 type Row = Record<string, any>;
 type Group = { id: string; name: string; count: number; units: number; value: number; extra?: number };
-type DatePreset = "all" | "today" | "7d" | "30d" | "month" | "custom";
+type DatePreset = "all" | "today" | "yesterday" | "7d" | "30d" | "month" | "custom";
 
 interface ReportResponse {
   rows: Row[];
@@ -91,7 +91,7 @@ const REPORTS: {
     short: "Valuation",
     icon: Box,
     desc: "What your stock on hand is worth at cost and at selling price",
-    dates: false,
+    dates: true,
     supplier: true,
     chipKey: "stockStatus",
     search: "Search product, SKU, category…",
@@ -504,18 +504,9 @@ export function InventoryReports() {
   const [filterSupplier, setFilterSupplier] = useState("all");
   const [chip, setChip] = useState("all");
   const [sort, setSort] = useState(REPORTS[0].sorts[0].value);
-  const [preset, setPreset] = useState<DatePreset>("30d");
-  const [filterStart, setFilterStart] = useState<Date | undefined>(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    d.setDate(d.getDate() - 29);
-    return d;
-  });
-  const [filterEnd, setFilterEnd] = useState<Date | undefined>(() => {
-    const d = new Date();
-    d.setHours(0, 0, 0, 0);
-    return d;
-  });
+  const [preset, setPreset] = useState<DatePreset>("all");
+  const [filterStart, setFilterStart] = useState<Date | undefined>(undefined);
+  const [filterEnd, setFilterEnd] = useState<Date | undefined>(undefined);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(25);
   const requestId = useRef(0);
@@ -593,12 +584,16 @@ export function InventoryReports() {
   const switchReport = (next: ReportType) => {
     if (next === reportType) return;
     const cfg = REPORTS.find((r) => r.value === next)!;
+    const prev = REPORTS.find((r) => r.value === reportType)!;
     setReportType(next);
     setChip("all");
     setSort(cfg.sorts[0].value);
     setSearchInput("");
     setSearch("");
     setDetail(null);
+    if (cfg.dates && (next === "valuation" || reportType === "valuation" || !prev.dates)) {
+      applyPreset(next === "valuation" ? "all" : "30d");
+    }
   };
 
   const applyPreset = (next: DatePreset) => {
@@ -616,6 +611,10 @@ export function InventoryReports() {
     } else if (next === "today") {
       setFilterStart(today);
       setFilterEnd(today);
+    } else if (next === "yesterday") {
+      const yesterday = back(1);
+      setFilterStart(yesterday);
+      setFilterEnd(yesterday);
     } else if (next === "7d") {
       setFilterStart(back(6));
       setFilterEnd(today);
@@ -628,13 +627,14 @@ export function InventoryReports() {
     }
   };
 
+  const defaultPreset: DatePreset = reportType === "valuation" ? "all" : "30d";
   const activeFilterCount =
     (search ? 1 : 0) +
     (filterBranch !== "all" ? 1 : 0) +
     (filterCategory !== "all" ? 1 : 0) +
     (active.supplier && filterSupplier !== "all" ? 1 : 0) +
     (chip !== "all" ? 1 : 0) +
-    (active.dates && preset !== "30d" ? 1 : 0);
+    (active.dates && preset !== defaultPreset ? 1 : 0);
 
   const clearFilters = () => {
     setSearchInput("");
@@ -643,7 +643,7 @@ export function InventoryReports() {
     setFilterCategory("all");
     setFilterSupplier("all");
     setChip("all");
-    applyPreset("30d");
+    applyPreset(defaultPreset);
   };
 
   const ready = loadedType === reportType && !!report;
@@ -655,9 +655,13 @@ export function InventoryReports() {
   const pagination = ready ? report!.pagination : { page: 1, limit: pageSize, total: 0, totalPages: 1 };
 
   const periodLabel = active.dates
-    ? filterStart
-      ? `${format(filterStart, "dd MMM yyyy")}${filterEnd ? ` – ${format(filterEnd, "dd MMM yyyy")}` : " onwards"}`
-      : "All time"
+    ? reportType === "valuation"
+      ? filterEnd
+        ? `As of ${format(filterEnd, "dd MMM yyyy")}`
+        : "Live stock"
+      : filterStart
+        ? `${format(filterStart, "dd MMM yyyy")}${filterEnd ? ` – ${format(filterEnd, "dd MMM yyyy")}` : " onwards"}`
+        : "All time"
     : "Live stock today";
   const branchLabel = filterBranch !== "all" ? branches.find((x) => x.id === filterBranch)?.name || "Branch" : "All branches";
 
@@ -962,11 +966,12 @@ export function InventoryReports() {
               <span className={cn("mr-1", filterLabel)}>Period</span>
               {(
                 [
+                  { id: "all", label: reportType === "valuation" ? "All" : "All time" },
                   { id: "today", label: "Today" },
+                  { id: "yesterday", label: "Yesterday" },
                   { id: "7d", label: "Last 7 days" },
                   { id: "30d", label: "Last 30 days" },
                   { id: "month", label: "This month" },
-                  { id: "all", label: "All time" },
                   { id: "custom", label: "Custom" },
                 ] as const
               ).map((p) => (
@@ -982,6 +987,9 @@ export function InventoryReports() {
                   {p.label}
                 </button>
               ))}
+              {reportType === "valuation" ? (
+                <span className="ml-1 text-xs text-slate-500">Stock is valued as of the To date</span>
+              ) : null}
             </div>
           ) : null}
           <div className={cn("grid grid-cols-1 gap-x-3 gap-y-4 md:grid-cols-2 xl:grid-cols-4", active.dates && "border-t border-dashed border-indigo-200 pt-4")}>

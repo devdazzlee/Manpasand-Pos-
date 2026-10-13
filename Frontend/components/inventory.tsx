@@ -1662,9 +1662,13 @@ export default function Inventory() {
   const handleCreateProduct = async () => {
     setFormLoading(true)
     try {
+      // Backend requires exactly 9 digits or omit (auto-generate). There is no
+      // SKU field in the form, so never send an empty/invalid value.
+      const { sku: formSku, ...formWithoutSku } = formData
+      const sku = String(formSku || "").trim()
       const dataToSubmit = {
-        ...formData,
-        sku: String(formData.sku),
+        ...formWithoutSku,
+        ...( /^\d{9}$/.test(sku) ? { sku } : {}),
         label_barcode:
           productBarcodeMode === "manual"
             ? sanitizeManualBarcodeValue(formData.label_barcode || "") || undefined
@@ -1673,7 +1677,7 @@ export default function Inventory() {
       }
 
       // Images are already uploaded — existingImageUrls has all Cloudinary URLs
-      const created = await apiService.createProduct(dataToSubmit, existingImageUrls)
+      const created = await apiService.createProduct(dataToSubmit as ProductFormData, existingImageUrls)
       const createdId = created?.data?.id as string | undefined
 
       // If the user entered a per-branch stock quantity, write it to that
@@ -1728,9 +1732,13 @@ export default function Inventory() {
 
     setFormLoading(true)
     try {
+      // Do not re-send legacy/non-9-digit SKUs on edit — validation rejects them
+      // and the form has no SKU editor. Omitting keeps the existing DB value.
+      const { sku: formSku, ...formWithoutSku } = formData
+      const sku = String(formSku || "").trim()
       const dataToSubmit = {
-        ...formData,
-        sku: String(formData.sku),
+        ...formWithoutSku,
+        ...( /^\d{9}$/.test(sku) ? { sku } : {}),
         label_barcode:
           productBarcodeMode === "manual"
             ? sanitizeManualBarcodeValue(formData.label_barcode || "") || null
