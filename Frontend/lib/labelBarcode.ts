@@ -15,7 +15,7 @@ export function formatBarcodeLabelTitle(productName: string): string {
 
 const NUMERIC_SKU_REGEX = /^\d{9}$/;
 
-export type LabelBarcodeMode = "auto" | "manual" | "existing";
+export type LabelBarcodeMode = "auto" | "manual";
 
 /** Code128-safe auto barcode from product code (keeps hyphens, e.g. AR-SS-SA). */
 export function sanitizeCodeForLabelBarcode(raw: string | undefined | null): string {
@@ -58,21 +58,47 @@ export function existingBarcodeOnProduct(product: {
   return sanitizeManualBarcodeValue(raw);
 }
 
+/** Label / legacy custom code saved on the product record. */
+export function prefillCustomBarcodeInput(product: {
+  label_barcode?: string | null;
+  custom_code?: string | null;
+}): string {
+  return existingBarcodeOnProduct(product);
+}
+
+/** Custom field default when user picks Custom — saved code first, else system code (editable). */
+export function customBarcodeInputSeed(
+  product: {
+    label_barcode?: string | null;
+    custom_code?: string | null;
+    sku?: string | null;
+    code?: string | null;
+    sales_rate_exc_dis_and_tax?: number;
+  },
+  calculatedPriceInt: number,
+): string {
+  const saved = prefillCustomBarcodeInput(product);
+  if (saved) return saved;
+  return encodeLabelBarcodeValue(product.sku, product.code, calculatedPriceInt);
+}
+
+/** When adding to queue: Custom if a saved label barcode exists, else Auto. */
+export function initialBarcodeModeForProduct(product: {
+  label_barcode?: string | null;
+  custom_code?: string | null;
+}): LabelBarcodeMode {
+  return prefillCustomBarcodeInput(product) ? "manual" : "auto";
+}
+
 export function resolveLabelBarcodeValue(options: {
   mode: LabelBarcodeMode;
   manualValue?: string | null;
-  existingValue?: string | null;
   sku?: string | null;
   code?: string | null;
   calculatedPriceInt: number;
 }): string {
   if (options.mode === "manual") {
-    // Never fall back to the system/auto barcode in Custom mode — empty means
-    // the caller must block print, not silently substitute SKU/code.
     return sanitizeManualBarcodeValue(options.manualValue || "");
-  }
-  if (options.mode === "existing") {
-    return sanitizeManualBarcodeValue(options.existingValue || "");
   }
   return encodeLabelBarcodeValue(
     options.sku,
@@ -108,31 +134,12 @@ export function isLegacyStrippedLabelBarcode(
   );
 }
 
-/**
- * Prefill Custom mode with a real custom code only.
- * Do not prefill the auto/system barcode — that made Custom mode look filled
- * and print the same value as Auto when the user hit Print without replacing it.
- */
+/** Prefill queue Custom field when product has label_barcode / custom_code. */
 export function initialManualBarcodeForProduct(options: {
   label_barcode?: string | null;
   custom_code?: string | null;
-  sku?: string | null;
-  code?: string | null;
-  sales_rate_exc_dis_and_tax?: number;
 }): string {
-  const saved = (options.label_barcode || options.custom_code || "").trim();
-  if (!saved) return "";
-  if (isLegacyStrippedLabelBarcode(saved, options.sku, options.code)) {
-    return "";
-  }
-  const auto = encodeLabelBarcodeValue(options.sku, options.code, 0);
-  if (
-    auto &&
-    sanitizeManualBarcodeValue(saved).toUpperCase() === auto.toUpperCase()
-  ) {
-    return "";
-  }
-  return saved;
+  return prefillCustomBarcodeInput(options);
 }
 
 /** Saved label barcode, else SKU, else auto code — same as POS / label print. */
