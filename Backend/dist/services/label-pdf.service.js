@@ -127,12 +127,13 @@ async function printBarcodeLabels(input) {
             }
             // ---- BARCODE ----
             try {
+                // Prefer the client-resolved barcode (supports Custom mode). Only fall
+                // back to SKU/code encoding when no barcode was provided.
                 const priceInt = Math.round(Number(it.price ?? 0));
-                const hasSkuOrCode = (it.sku !== undefined && it.sku !== null && String(it.sku).trim() !== '') ||
-                    (it.code !== undefined && it.code !== null && String(it.code).trim() !== '');
-                const barcodeText = hasSkuOrCode
-                    ? (0, numericBarcodeSku_1.encodeLabelBarcodeValue)(it.sku, it.code, priceInt)
-                    : String(it.barcode);
+                const provided = it.barcode != null ? String(it.barcode).trim() : '';
+                const barcodeText = provided
+                    ? provided
+                    : (0, numericBarcodeSku_1.encodeLabelBarcodeValue)(it.sku, it.code, priceInt);
                 const png = await new Promise((res, rej) => {
                     bwipjs.toBuffer({
                         bcid: 'code128',

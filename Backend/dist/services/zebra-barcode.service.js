@@ -130,7 +130,9 @@ class BarcodeService {
 ^FO10,70^FB${dims.w - 20},1,0,C,0^FD${priceLine}^FS
 ^BY2,2,70
 ^FO10,110^BCN,70,${HRI},N,N
-^FD${(0, numericBarcodeSku_1.encodeLabelBarcodeValue)(it.sku, it.code, Math.round(Number(it.price ?? 0)))}^FS
+^FD${(it.barcode && String(it.barcode).trim())
+                ? String(it.barcode).trim()
+                : (0, numericBarcodeSku_1.encodeLabelBarcodeValue)(it.sku, it.code, Math.round(Number(it.price ?? 0)))}^FS
 ^CF0,22
 ^FO10,190^FD${wt}^FS
 ^XZ`);
@@ -206,7 +208,8 @@ async function printZplRaw(printerName, zpl) {
 }
 function buildLabelsZpl(items) {
     return items.map((it) => buildZplLabel({
-        code: (0, numericBarcodeSku_1.encodeLabelBarcodeValue)(it.sku, it.code, Math.round(it.price)),
+        code: (it.barcode && String(it.barcode).trim()) ||
+            (0, numericBarcodeSku_1.encodeLabelBarcodeValue)(it.sku, it.code, Math.round(it.price)),
         title: (0, labelTitle_1.formatBarcodeLabelTitle)(it.name).slice(0, 28),
         netWt: it.netWeight,
         price: Math.round(it.price).toString(),

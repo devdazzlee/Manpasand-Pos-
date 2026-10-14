@@ -56,9 +56,10 @@ export function resolveLabelBarcodeValue(options: {
   code?: string | null;
   calculatedPriceInt: number;
 }): string {
-  const manual = sanitizeManualBarcodeValue(options.manualValue || "");
-  if (options.mode === "manual" && manual) {
-    return manual;
+  if (options.mode === "manual") {
+    // Never fall back to the system/auto barcode in Custom mode — empty means
+    // the caller must block print, not silently substitute SKU/code.
+    return sanitizeManualBarcodeValue(options.manualValue || "");
   }
   return encodeLabelBarcodeValue(
     options.sku,
@@ -94,7 +95,11 @@ export function isLegacyStrippedLabelBarcode(
   );
 }
 
-/** Prefill Custom mode — saved label, legacy custom_code, or POS/auto barcode. */
+/**
+ * Prefill Custom mode with a real custom code only.
+ * Do not prefill the auto/system barcode — that made Custom mode look filled
+ * and print the same value as Auto when the user hit Print without replacing it.
+ */
 export function initialManualBarcodeForProduct(options: {
   label_barcode?: string | null;
   custom_code?: string | null;
@@ -103,13 +108,18 @@ export function initialManualBarcodeForProduct(options: {
   sales_rate_exc_dis_and_tax?: number;
 }): string {
   const saved = (options.label_barcode || options.custom_code || "").trim();
-  if (saved) {
-    if (isLegacyStrippedLabelBarcode(saved, options.sku, options.code)) {
-      return encodeLabelBarcodeValue(options.sku, options.code, 0);
-    }
-    return saved;
+  if (!saved) return "";
+  if (isLegacyStrippedLabelBarcode(saved, options.sku, options.code)) {
+    return "";
   }
-  return getProductBarcodeDisplay(options);
+  const auto = encodeLabelBarcodeValue(options.sku, options.code, 0);
+  if (
+    auto &&
+    sanitizeManualBarcodeValue(saved).toUpperCase() === auto.toUpperCase()
+  ) {
+    return "";
+  }
+  return saved;
 }
 
 /** Saved label barcode, else SKU, else auto code — same as POS / label print. */

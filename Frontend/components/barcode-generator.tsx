@@ -318,7 +318,16 @@ export default function BarcodeGenerator() {
   const backfillQueueCustomBarcodes = () => {
     setSelectedProducts((prev) =>
       prev.map((item) => {
-        if (item.customBarcode?.trim()) return item;
+        const auto = previewAutoBarcodeValue(
+          item.product.sku,
+          item.product.code,
+          Math.round(Number(item.product.sales_rate_exc_dis_and_tax) || 0),
+        );
+        const current = sanitizeManualBarcodeValue(item.customBarcode || "");
+        // Keep a real custom code; clear empty or auto/system prefill.
+        if (current && current.toUpperCase() !== auto.toUpperCase()) {
+          return item;
+        }
         return {
           ...item,
           customBarcode: initialManualBarcodeForProduct({
@@ -916,11 +925,13 @@ export default function BarcodeGenerator() {
       calculatedPriceInt: labelPriceForItem(sp),
     });
 
-  /** Save the exact barcode printed on the label so New Sale scan/search can find it. */
+  /** Save Custom-mode barcodes so New Sale scan/search matches the sticker. */
   const persistCustomBarcodesForPosScan = async (): Promise<boolean> => {
-    if (!saveCustomBarcodeToProduct) return true;
+    // Auto mode must not overwrite a real custom label_barcode with the system code.
+    if (barcodeMode !== "manual" || !saveCustomBarcodeToProduct) return true;
     for (const sp of selectedProducts) {
       const printed = labelBarcodeForItem(withPrintDefaults(sp));
+      if (!printed) continue;
       const ok = await persistLabelBarcodeToProduct(sp.product.id, printed);
       if (!ok) return false;
     }
@@ -975,17 +986,23 @@ export default function BarcodeGenerator() {
       return;
     }
 
-    if (barcodeMode === "manual") {
-      const missing = selectedProducts.filter((sp) => !sp.customBarcode?.trim());
+    // Snapshot mode + values before any await so Custom never silently becomes Auto.
+    const modeAtPrint = barcodeMode;
+    if (modeAtPrint === "manual") {
+      const missing = selectedProducts.filter(
+        (sp) => !sanitizeManualBarcodeValue(sp.customBarcode || ""),
+      );
       if (missing.length > 0) {
         toast({
           variant: "destructive",
-          title: "Manual barcode required",
-          description: `Enter a barcode for ${missing.length} item(s) in the queue, or switch to Auto.`,
+          title: "Custom barcode required",
+          description: `Enter your code for ${missing.length} item(s) in the queue (Custom mode does not use the system barcode).`,
         });
         return;
       }
     }
+
+    const itemsAtPrint = buildBarcodeLabelItems();
 
     setIsPrinting(true);
 
@@ -1015,7 +1032,7 @@ export default function BarcodeGenerator() {
 
       const result = await printBarcodeLabelsViaServer({
         printerName: barcodePrinter,
-        items: buildBarcodeLabelItems(),
+        items: itemsAtPrint,
         paperSize: paperSizeForPrintServer(selectedPaperSize),
         copies: 1,
         dpi: (printerObj?.labelProfile?.dpi as 203 | 300) ?? 203,
@@ -1700,8 +1717,8 @@ export default function BarcodeGenerator() {
                   <>Uses 9-digit SKU or product code as printed (e.g. <span className="font-mono">AR-SS-SA</span>).</>
                 ) : (
                   <>
-                    Type the code for the label. When you <strong>print</strong>, it is saved on the product so{" "}
-                    <strong>New Sale</strong> search & scan match the sticker.
+                    Type <strong>your</strong> code in each queue row (field starts empty — it will not use the system barcode).
+                    When you <strong>print</strong>, it is saved on the product so <strong>New Sale</strong> can scan it.
                   </>
                 )}
               </p>
