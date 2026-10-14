@@ -15,7 +15,7 @@ export function formatBarcodeLabelTitle(productName: string): string {
 
 const NUMERIC_SKU_REGEX = /^\d{9}$/;
 
-export type LabelBarcodeMode = "auto" | "manual";
+export type LabelBarcodeMode = "auto" | "manual" | "existing";
 
 /** Code128-safe auto barcode from product code (keeps hyphens, e.g. AR-SS-SA). */
 export function sanitizeCodeForLabelBarcode(raw: string | undefined | null): string {
@@ -49,9 +49,19 @@ export function sanitizeManualBarcodeValue(raw: string): string {
     .trim();
 }
 
+/** Barcode already saved on the product (inventory / prior label print). */
+export function existingBarcodeOnProduct(product: {
+  label_barcode?: string | null;
+  custom_code?: string | null;
+}): string {
+  const raw = (product.label_barcode || product.custom_code || "").trim();
+  return sanitizeManualBarcodeValue(raw);
+}
+
 export function resolveLabelBarcodeValue(options: {
   mode: LabelBarcodeMode;
   manualValue?: string | null;
+  existingValue?: string | null;
   sku?: string | null;
   code?: string | null;
   calculatedPriceInt: number;
@@ -60,6 +70,9 @@ export function resolveLabelBarcodeValue(options: {
     // Never fall back to the system/auto barcode in Custom mode — empty means
     // the caller must block print, not silently substitute SKU/code.
     return sanitizeManualBarcodeValue(options.manualValue || "");
+  }
+  if (options.mode === "existing") {
+    return sanitizeManualBarcodeValue(options.existingValue || "");
   }
   return encodeLabelBarcodeValue(
     options.sku,

@@ -76,6 +76,7 @@ import { usePrinterSettings } from "@/hooks/use-printer-settings";
 import {
   type LabelBarcodeMode,
   previewAutoBarcodeValue,
+  existingBarcodeOnProduct,
   resolveLabelBarcodeValue,
   sanitizeManualBarcodeValue,
   initialManualBarcodeForProduct,
@@ -117,6 +118,8 @@ interface SelectedProductItem {
   expiryDuration: string;
   expiryDate?: Date;
   copies: number;
+  /** Per-product: auto, saved barcode, or typed custom */
+  barcodeMode?: LabelBarcodeMode;
   /** Used when barcode mode is manual */
   customBarcode?: string;
 }
@@ -141,6 +144,37 @@ const LABEL_SIZES: Record<string, { label: string; w: number; h: number; css: st
 /** Must match physical roll (LP 2844: 50×25 mm, 3 mm gap). */
 const DEFAULT_LABEL_SIZE = "50x25mm";
 const SETTINGS_KEY = "barcode-generator-settings";
+
+function BarcodeSourceToggle({
+  value,
+  onChange,
+  compact,
+}: {
+  value: LabelBarcodeMode;
+  onChange: (mode: LabelBarcodeMode) => void;
+  /** Smaller buttons for each queue row */
+  compact?: boolean;
+}) {
+  const mk = (mode: LabelBarcodeMode, label: string, short: string) => (
+    <Button
+      key={mode}
+      type="button"
+      size="sm"
+      variant={value === mode ? "default" : "outline"}
+      className={compact ? "h-7 px-2 text-[10px]" : "h-8"}
+      onClick={() => onChange(mode)}
+    >
+      {compact ? short : label}
+    </Button>
+  );
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {mk("auto", "Auto (system)", "Auto")}
+      {mk("existing", "Existing (on product)", "Existing")}
+      {mk("manual", "Custom (your code)", "Custom")}
+    </div>
+  );
+}
 
 export default function BarcodeGenerator() {
   const [selectedProducts, setSelectedProducts] = useState<
@@ -174,7 +208,8 @@ export default function BarcodeGenerator() {
   const [includeProductName, setIncludeProductName] = useState(true);
   const [includePrice, setIncludePrice] = useState(true);
   const [includeSku, setIncludeSku] = useState(false);
-  const [barcodeMode, setBarcodeMode] = useState<LabelBarcodeMode>("auto");
+  /** Default when adding products; each queue row can override. */
+  const [defaultBarcodeMode, setDefaultBarcodeMode] = useState<LabelBarcodeMode>("auto");
   const [saveCustomBarcodeToProduct, setSaveCustomBarcodeToProduct] = useState(true);
   const queryClient = useQueryClient();
 
@@ -203,8 +238,12 @@ export default function BarcodeGenerator() {
         if (typeof saved.expiry === "string") setGlobalExpiryDuration(saved.expiry);
         if (typeof saved.netWeight === "string") setGlobalNetWeight(saved.netWeight);
         if (typeof saved.copies === "string") setGlobalCopies(saved.copies);
-        if (saved.barcodeMode === "manual" || saved.barcodeMode === "auto") {
-          setBarcodeMode(saved.barcodeMode);
+        if (
+          saved.barcodeMode === "manual" ||
+          saved.barcodeMode === "auto" ||
+          saved.barcodeMode === "existing"
+        ) {
+          setDefaultBarcodeMode(saved.barcodeMode);
         }
       }
     } catch {
@@ -226,7 +265,7 @@ export default function BarcodeGenerator() {
           expiry: globalExpiryDuration,
           netWeight: globalNetWeight,
           copies: globalCopies,
-          barcodeMode,
+          barcodeMode: defaultBarcodeMode,
         }),
       );
     } catch {
@@ -241,7 +280,7 @@ export default function BarcodeGenerator() {
     globalExpiryDuration,
     globalNetWeight,
     globalCopies,
-    barcodeMode,
+    defaultBarcodeMode,
   ]);
 
   const expiryOptions = [
@@ -293,13 +332,16 @@ export default function BarcodeGenerator() {
 
   const buildSelectedItem = (
     product: Product,
-    overrides?: Partial<Pick<SelectedProductItem, "netWeight" | "expiryDuration" | "copies">>,
+    overrides?: Partial<
+      Pick<SelectedProductItem, "netWeight" | "expiryDuration" | "copies" | "barcodeMode">
+    >,
   ): SelectedProductItem => {
     const expiryDuration = overrides?.expiryDuration || globalExpiryDuration || "12";
     const packageDate = new Date();
     return {
       id: `${Date.now()}-${product.id}`,
       product,
+      barcodeMode: overrides?.barcodeMode ?? defaultBarcodeMode,
       netWeight: overrides?.netWeight || globalNetWeight || "",
       packageDate,
       expiryDuration,
@@ -315,36 +357,50 @@ export default function BarcodeGenerator() {
     };
   };
 
-  const backfillQueueCustomBarcodes = () => {
+  const itemBarcodeMode = (sp: SelectedProductItem): LabelBarcodeMode =>
+    sp.barcodeMode ?? defaultBarcodeMode;
+
+  const applyBarcodeModeToItem = (
+    item: SelectedProductItem,
+    mode: LabelBarcodeMode,
+  ): SelectedProductItem => {
+    const next = { ...item, barcodeMode: mode };
+    if (mode === "manual") {
+      const current = sanitizeManualBarcodeValue(item.customBarcode || "");
+      const auto = previewAutoBarcodeValue(
+        item.product.sku,
+        item.product.code,
+        Math.round(Number(item.product.sales_rate_exc_dis_and_tax) || 0),
+      );
+      if (!current || current.toUpperCase() === auto.toUpperCase()) {
+        next.customBarcode = initialManualBarcodeForProduct({
+          label_barcode: item.product.label_barcode,
+          custom_code: item.product.custom_code,
+          sku: item.product.sku,
+          code: item.product.code,
+          sales_rate_exc_dis_and_tax: item.product.sales_rate_exc_dis_and_tax,
+        });
+      }
+    }
+    return next;
+  };
+
+  const setItemBarcodeMode = (itemId: string, mode: LabelBarcodeMode) => {
     setSelectedProducts((prev) =>
-      prev.map((item) => {
-        const auto = previewAutoBarcodeValue(
-          item.product.sku,
-          item.product.code,
-          Math.round(Number(item.product.sales_rate_exc_dis_and_tax) || 0),
-        );
-        const current = sanitizeManualBarcodeValue(item.customBarcode || "");
-        // Keep a real custom code; clear empty or auto/system prefill.
-        if (current && current.toUpperCase() !== auto.toUpperCase()) {
-          return item;
-        }
-        return {
-          ...item,
-          customBarcode: initialManualBarcodeForProduct({
-            label_barcode: item.product.label_barcode,
-            custom_code: item.product.custom_code,
-            sku: item.product.sku,
-            code: item.product.code,
-            sales_rate_exc_dis_and_tax: item.product.sales_rate_exc_dis_and_tax,
-          }),
-        };
-      }),
+      prev.map((item) =>
+        item.id === itemId ? applyBarcodeModeToItem(item, mode) : item,
+      ),
     );
   };
 
-  const switchBarcodeMode = (mode: LabelBarcodeMode) => {
-    setBarcodeMode(mode);
-    if (mode === "manual") backfillQueueCustomBarcodes();
+  const applyDefaultBarcodeModeToQueue = () => {
+    if (selectedProducts.length === 0) return;
+    setSelectedProducts((prev) =>
+      prev.map((item) => applyBarcodeModeToItem(item, defaultBarcodeMode)),
+    );
+    sonnerToast.success("Barcode source applied to all items in queue", {
+      position: "top-right",
+    });
   };
 
   const applySavedLabelBarcodes = (byProduct: Map<string, string>) => {
@@ -918,8 +974,9 @@ export default function BarcodeGenerator() {
 
   const labelBarcodeForItem = (sp: SelectedProductItem) =>
     resolveLabelBarcodeValue({
-      mode: barcodeMode,
+      mode: itemBarcodeMode(sp),
       manualValue: sp.customBarcode,
+      existingValue: existingBarcodeOnProduct(sp.product),
       sku: sp.product.sku,
       code: sp.product.code,
       calculatedPriceInt: labelPriceForItem(sp),
@@ -927,9 +984,9 @@ export default function BarcodeGenerator() {
 
   /** Save Custom-mode barcodes so New Sale scan/search matches the sticker. */
   const persistCustomBarcodesForPosScan = async (): Promise<boolean> => {
-    // Auto mode must not overwrite a real custom label_barcode with the system code.
-    if (barcodeMode !== "manual" || !saveCustomBarcodeToProduct) return true;
+    if (!saveCustomBarcodeToProduct) return true;
     for (const sp of selectedProducts) {
+      if (itemBarcodeMode(sp) !== "manual") continue;
       const printed = labelBarcodeForItem(withPrintDefaults(sp));
       if (!printed) continue;
       const ok = await persistLabelBarcodeToProduct(sp.product.id, printed);
@@ -986,20 +1043,32 @@ export default function BarcodeGenerator() {
       return;
     }
 
-    // Snapshot mode + values before any await so Custom never silently becomes Auto.
-    const modeAtPrint = barcodeMode;
-    if (modeAtPrint === "manual") {
-      const missing = selectedProducts.filter(
-        (sp) => !sanitizeManualBarcodeValue(sp.customBarcode || ""),
-      );
-      if (missing.length > 0) {
-        toast({
-          variant: "destructive",
-          title: "Custom barcode required",
-          description: `Enter your code for ${missing.length} item(s) in the queue (Custom mode does not use the system barcode).`,
-        });
-        return;
-      }
+    const queueSnapshot = selectedProducts.map(withPrintDefaults);
+    const missingCustom = queueSnapshot.filter(
+      (sp) =>
+        itemBarcodeMode(sp) === "manual" &&
+        !sanitizeManualBarcodeValue(sp.customBarcode || ""),
+    );
+    if (missingCustom.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "Custom barcode required",
+        description: `${missingCustom.length} item(s) use Custom but have no code entered.`,
+      });
+      return;
+    }
+    const missingExisting = queueSnapshot.filter(
+      (sp) =>
+        itemBarcodeMode(sp) === "existing" &&
+        !existingBarcodeOnProduct(sp.product),
+    );
+    if (missingExisting.length > 0) {
+      toast({
+        variant: "destructive",
+        title: "No saved barcode on product",
+        description: `${missingExisting.length} item(s) use Existing but have no label barcode saved.`,
+      });
+      return;
     }
 
     const itemsAtPrint = buildBarcodeLabelItems();
@@ -1154,16 +1223,33 @@ export default function BarcodeGenerator() {
   const applyDefaultsToAll = () => {
     const copies = Math.max(1, parseInt(globalCopies, 10) || 1);
     setSelectedProducts((prev) =>
-      prev.map((sp) => ({
-        ...sp,
-        netWeight: globalNetWeight,
-        expiryDuration: globalExpiryDuration,
-        expiryDate: calculateExpiryDate(sp.packageDate || new Date(), globalExpiryDuration),
-        copies,
-      })),
+      prev.map((sp) =>
+        applyBarcodeModeToItem(
+          {
+            ...sp,
+            netWeight: globalNetWeight,
+            expiryDuration: globalExpiryDuration,
+            expiryDate: calculateExpiryDate(
+              sp.packageDate || new Date(),
+              globalExpiryDuration,
+            ),
+            copies,
+          },
+          defaultBarcodeMode,
+        ),
+      ),
     );
     sonnerToast.success("Defaults applied to every item in the queue", { position: "top-right" });
   };
+
+  const queueBarcodeModeSummary = useMemo(() => {
+    if (selectedProducts.length === 0) return defaultBarcodeMode;
+    const modes = new Set(
+      selectedProducts.map((sp) => sp.barcodeMode ?? defaultBarcodeMode),
+    );
+    if (modes.size === 1) return [...modes][0];
+    return "mixed" as const;
+  }, [selectedProducts, defaultBarcodeMode]);
 
   const printLabelText = isPrinting
     ? "Preparing labels…"
@@ -1625,10 +1711,13 @@ export default function BarcodeGenerator() {
                   <img src={previewBarcodeSrc} alt="Barcode preview" className="h-12 max-w-full object-contain" />
                 ) : null}
                 <p className="break-all text-center font-mono text-[10px] text-slate-600">{previewBarcodeValue}</p>
-                {barcodeMode === "manual" && previewItem && !previewItem.customBarcode?.trim() ? (
+                {previewItem && itemBarcodeMode(previewItem) === "manual" && !previewItem.customBarcode?.trim() ? (
                   <p className="text-center text-[9px] text-amber-700">Enter manual barcode in queue</p>
                 ) : null}
-                {barcodeMode === "auto" && previewAutoBarcode ? (
+                {previewItem && itemBarcodeMode(previewItem) === "existing" && !existingBarcodeOnProduct(previewItem.product) ? (
+                  <p className="text-center text-[9px] text-amber-700">No barcode saved on this product</p>
+                ) : null}
+                {previewItem && itemBarcodeMode(previewItem) === "auto" && previewAutoBarcode ? (
                   <p className="text-center text-[9px] text-slate-400">Auto: {previewAutoBarcode}</p>
                 ) : null}
                 {previewItem?.netWeight ? (
@@ -1691,46 +1780,30 @@ export default function BarcodeGenerator() {
             </div>
 
             <div className="space-y-2 border-b border-slate-100 bg-slate-50/80 px-4 py-3">
-              <Label className="text-xs font-semibold text-slate-700">Barcode on label</Label>
-              <div className="flex flex-wrap gap-2">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={barcodeMode === "auto" ? "default" : "outline"}
-                  className="h-8"
-                  onClick={() => switchBarcodeMode("auto")}
-                >
-                  Auto (system)
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={barcodeMode === "manual" ? "default" : "outline"}
-                  className="h-8"
-                  onClick={() => switchBarcodeMode("manual")}
-                >
-                  Custom (your code)
-                </Button>
-              </div>
+              <Label className="text-xs font-semibold text-slate-700">Default barcode for new products</Label>
+              <BarcodeSourceToggle
+                value={defaultBarcodeMode}
+                onChange={setDefaultBarcodeMode}
+              />
               <p className="text-[11px] leading-snug text-slate-600">
-                {barcodeMode === "auto" ? (
-                  <>Uses 9-digit SKU or product code as printed (e.g. <span className="font-mono">AR-SS-SA</span>).</>
-                ) : (
-                  <>
-                    Type <strong>your</strong> code in each queue row (field starts empty — it will not use the system barcode).
-                    When you <strong>print</strong>, it is saved on the product so <strong>New Sale</strong> can scan it.
-                  </>
-                )}
+                New items use this setting. Change <strong>each product</strong> below with Auto / Existing / Custom.
               </p>
-              {barcodeMode === "manual" ? (
-                <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
-                  <Checkbox
-                    checked={saveCustomBarcodeToProduct}
-                    onCheckedChange={(v) => setSaveCustomBarcodeToProduct(v === true)}
-                  />
-                  Save barcode on product when printing (for POS scan)
-                </label>
+              {canPrint ? (
+                <button
+                  type="button"
+                  onClick={applyDefaultBarcodeModeToQueue}
+                  className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800"
+                >
+                  Apply this default to all {selectedProducts.length} in queue
+                </button>
               ) : null}
+              <label className="flex cursor-pointer items-center gap-2 text-xs text-slate-700">
+                <Checkbox
+                  checked={saveCustomBarcodeToProduct}
+                  onCheckedChange={(v) => setSaveCustomBarcodeToProduct(v === true)}
+                />
+                Save Custom barcodes on product when printing (for POS scan)
+              </label>
             </div>
 
             {!canPrint ? (
@@ -1841,7 +1914,41 @@ export default function BarcodeGenerator() {
                           </Select>
                         </div>
                       </div>
-                      {barcodeMode === "manual" ? (
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px] text-slate-500">Barcode source</Label>
+                        <BarcodeSourceToggle
+                          compact
+                          value={itemBarcodeMode(item)}
+                          onChange={(mode) => setItemBarcodeMode(item.id, mode)}
+                        />
+                      </div>
+                      {itemBarcodeMode(item) === "auto" ? (
+                        <p className="text-[10px] text-slate-500">
+                          Will print:{" "}
+                          <span className="font-mono">
+                            {previewAutoBarcodeValue(
+                              item.product.sku,
+                              item.product.code,
+                              labelPriceForItem(item),
+                            )}
+                          </span>
+                        </p>
+                      ) : null}
+                      {itemBarcodeMode(item) === "existing" ? (
+                        <div className="space-y-1">
+                          <Label className="text-[11px] text-slate-500">Saved barcode (will print)</Label>
+                          {existingBarcodeOnProduct(item.product) ? (
+                            <div className="rounded-md border border-slate-200 bg-white px-2.5 py-1.5 font-mono text-sm text-slate-900">
+                              {existingBarcodeOnProduct(item.product)}
+                            </div>
+                          ) : (
+                            <p className="text-[11px] text-amber-700">
+                              None saved — set in Inventory (Custom barcode) or use Auto / Custom here.
+                            </p>
+                          )}
+                        </div>
+                      ) : null}
+                      {itemBarcodeMode(item) === "manual" ? (
                         <div className="space-y-1">
                           <Label className="text-[11px] text-slate-500">Barcode to print & scan</Label>
                           <Input
@@ -1925,7 +2032,16 @@ export default function BarcodeGenerator() {
             <div className="min-w-0">
               <h2 className="text-base font-semibold tracking-tight text-slate-900">Label settings & bulk upload</h2>
               <p className="truncate text-xs text-slate-500">
-                {labelSize.label} · barcode {barcodeMode === "auto" ? "auto" : "manual"} · expiry {globalExpiryDuration} months ·{" "}
+                {labelSize.label} · barcode{" "}
+                {queueBarcodeModeSummary === "mixed"
+                  ? "mixed per product"
+                  : queueBarcodeModeSummary === "auto"
+                    ? "auto"
+                    : queueBarcodeModeSummary === "existing"
+                      ? "existing"
+                      : "custom"}{" "}
+                · expiry{" "}
+                {globalExpiryDuration} months ·{" "}
                 {globalCopies || 1} cop{(globalCopies || "1") === "1" ? "y" : "ies"} by default · shows{" "}
                 {[includeProductName && "name", includeSku && "SKU", includePrice && "price"].filter(Boolean).join(", ") || "barcode only"}
               </p>
@@ -1956,30 +2072,22 @@ export default function BarcodeGenerator() {
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs text-slate-600">Barcode on label</Label>
+                <Label className="text-xs text-slate-600">Default barcode for new products</Label>
                 <Select
-                  value={barcodeMode}
-                  onValueChange={(v) => switchBarcodeMode(v as LabelBarcodeMode)}
+                  value={defaultBarcodeMode}
+                  onValueChange={(v) => setDefaultBarcodeMode(v as LabelBarcodeMode)}
                 >
                   <SelectTrigger className="h-9">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="auto">Auto (9-digit SKU or product code)</SelectItem>
-                    <SelectItem value="manual">Manual (you type each barcode)</SelectItem>
+                    <SelectItem value="existing">Existing (saved on product)</SelectItem>
+                    <SelectItem value="manual">Custom (you type each barcode)</SelectItem>
                   </SelectContent>
                 </Select>
                 <p className="text-[11px] leading-snug text-slate-500">
-                  {barcodeMode === "auto" ? (
-                    <>
-                      Uses product <strong>SKU</strong> when it is 9 digits; otherwise your product{" "}
-                      <strong>code</strong> as shown (hyphens kept, e.g. <span className="font-mono">CH-M-1000</span>). Price is printed on the label, not in the bars.
-                    </>
-                  ) : (
-                    <>
-                      Enter the exact string to print in the <strong>Print queue</strong>. New Sale finds products by that barcode or by product code/SKU.
-                    </>
-                  )}
+                  Default when you add products to the queue. Override per product in the print queue.
                 </p>
               </div>
 
