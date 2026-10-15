@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Table,
@@ -861,27 +862,21 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                 />
               </div>
 
-              <Select
+              <SearchableSelect
                 value={filterSupplier}
                 onValueChange={(v) => {
                   setFilterSupplier(v);
                   setPage(1);
                 }}
-              >
-                <SelectTrigger className="h-10 text-sm text-black">
-                  <SelectValue placeholder="All suppliers" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all" className="text-sm">
-                    All suppliers
-                  </SelectItem>
-                  {visibleSuppliers.map((s) => (
-                    <SelectItem key={s.id} value={s.id} className="text-sm">
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+                options={[
+                  { value: "all", label: "All suppliers" },
+                  ...visibleSuppliers.map((s) => ({ value: s.id, label: s.name })),
+                ]}
+                placeholder="All suppliers"
+                searchPlaceholder="Search suppliers..."
+                emptyText="No suppliers found."
+                triggerClassName="h-10 text-sm text-black"
+              />
 
               <Select
                 value={filterBranch}
@@ -1327,29 +1322,21 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                   {metaLoading ? (
                     <StockSelectSkeleton label="Loading suppliers" className="h-9" />
                   ) : (
-                    <Select
+                    <SearchableSelect
                       value={supplierId}
                       onValueChange={(v) => {
                         setSupplierId(v);
                         clearError("supplierId");
                       }}
-                    >
-                      <SelectTrigger
-                        className={cn(
-                          "h-9 text-sm text-black",
-                          formErrors.supplierId && "border-red-500",
-                        )}
-                      >
-                        <SelectValue placeholder="Choose supplier" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {visibleSuppliers.map((s) => (
-                          <SelectItem key={s.id} value={s.id} className="text-sm">
-                            {s.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                      options={visibleSuppliers.map((s) => ({ value: s.id, label: s.name }))}
+                      placeholder="Choose supplier"
+                      searchPlaceholder="Search suppliers..."
+                      emptyText="No suppliers found."
+                      triggerClassName={cn(
+                        "h-9 text-sm text-black",
+                        formErrors.supplierId && "border-red-500",
+                      )}
+                    />
                   )}
                   {formErrors.supplierId ? (
                     <p className="text-[11px] text-red-600">{formErrors.supplierId}</p>

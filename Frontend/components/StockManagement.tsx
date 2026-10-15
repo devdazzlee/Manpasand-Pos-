@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/detail-sheet";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -925,18 +926,15 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
             {suppliersLoading ? (
               <StockSelectSkeleton label="Loading suppliers" />
             ) : (
-              <Select value={addForm.supplierId} onValueChange={(v) => setAddForm({ ...addForm, supplierId: v })}>
-                <SelectTrigger className="h-9 border border-gray-200 text-sm text-black">
-                  <SelectValue placeholder="Select supplier" />
-                </SelectTrigger>
-                <SelectContent>
-                  {supplierOptions.map((s) => (
-                    <SelectItem key={s.id} value={s.id} className="text-sm">
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={addForm.supplierId}
+                onValueChange={(v) => setAddForm({ ...addForm, supplierId: v })}
+                options={supplierOptions.map((s) => ({ value: s.id, label: s.name }))}
+                placeholder="Select supplier"
+                searchPlaceholder="Search suppliers..."
+                emptyText="No suppliers found."
+                triggerClassName="h-9 border border-gray-200 text-sm text-black"
+              />
             )}
           </div>
         </div>
@@ -1436,17 +1434,18 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
               ))}
             </SelectContent>
           </Select>
-          <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-            <SelectTrigger className="h-10 text-sm text-black">
-              <SelectValue placeholder="All suppliers" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value={ALL_SUPPLIERS} className="text-sm">All suppliers</SelectItem>
-              {supplierOptions.map((s) => (
-                <SelectItem key={s.id} value={s.id} className="text-sm">{s.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          <SearchableSelect
+            value={supplierFilter}
+            onValueChange={setSupplierFilter}
+            options={[
+              { value: ALL_SUPPLIERS, label: "All suppliers" },
+              ...supplierOptions.map((s) => ({ value: s.id, label: s.name })),
+            ]}
+            placeholder="All suppliers"
+            searchPlaceholder="Search suppliers..."
+            emptyText="No suppliers found."
+            triggerClassName="h-10 text-sm text-black"
+          />
           {(searchTerm ||
             skuSearch ||
             barcodeSearch ||

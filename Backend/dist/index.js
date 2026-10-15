@@ -51,8 +51,14 @@ const guestOrder_routes_1 = __importDefault(require("./routes/guestOrder.routes"
 const web_routes_1 = __importDefault(require("./routes/web.routes"));
 const alfalah_routes_1 = __importDefault(require("./routes/alfalah.routes"));
 const node_cron_1 = __importDefault(require("node-cron"));
+const localImageService_1 = require("./services/common/localImageService");
 const vAPI = process.env.vAPI || '/api/v1';
 const app = (0, express_1.default)();
+// Locally stored images (IMAGE_STORAGE=local). On the VPS nginx serves these directly.
+app.use('/uploads', express_1.default.static(localImageService_1.UPLOADS_DIR, {
+    maxAge: '30d',
+    setHeaders: (res) => res.setHeader('Cross-Origin-Resource-Policy', 'cross-origin'),
+}));
 // Middleware — CORS must run before route handlers and cache headers.
 app.use((0, cors_1.default)({
     origin: function (origin, callback) {
@@ -68,6 +74,11 @@ app.use((0, cors_1.default)({
             'http://localhost:5173',
             'https://manpasandstore.com',
             'https://www.manpasandstore.com',
+            // Extra origins (e.g. VPS addresses), comma-separated in .env
+            ...(process.env.CORS_ORIGINS || '')
+                .split(',')
+                .map((o) => o.trim())
+                .filter(Boolean),
         ];
         const originMatch = allowedOrigins.some((allowed) => origin === allowed || origin === `${allowed}/`);
         // In local dev, allow any localhost port (Next.js may use 3000, 3001, etc.)

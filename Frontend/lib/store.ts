@@ -548,7 +548,9 @@ export const useStore = create<StoreState>()(
         const force = typeof options === "boolean" ? options : Boolean(options?.force)
         const search = typeof options === "object" ? options?.search : undefined
         const page = typeof options === "object" ? options?.page ?? 1 : 1
-        const limit = typeof options === "object" ? options?.limit ?? 20 : 20
+        // This store holds the full supplier list for dropdowns/filters (not a paginated
+        // table), so default to a high limit instead of the backend's page-size default.
+        const limit = typeof options === "object" ? options?.limit ?? 500 : 500
         const state = get()
         const now = Date.now()
         
