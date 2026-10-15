@@ -45,3 +45,22 @@ export async function recordCashPayOnOpenRegister(opts: {
     select: { id: true, cashflow_id: true },
   });
 }
+
+/**
+ * Reverse drawer cash-outs that were recorded for supplier payment IDs
+ * (Stock In edit cash ↔ credit / payment amount changes).
+ */
+export async function reverseCashPayOnRegisterByPaymentRefs(
+  paymentIds: string[],
+): Promise<number> {
+  const ids = [...new Set(paymentIds.map((id) => String(id || '').trim()).filter(Boolean))];
+  if (ids.length === 0) return 0;
+  const result = await prisma.expense.deleteMany({
+    where: {
+      reference: { in: ids },
+      particular: { startsWith: 'Purchase payment' },
+      cashflow_id: { not: null },
+    },
+  });
+  return result.count;
+}

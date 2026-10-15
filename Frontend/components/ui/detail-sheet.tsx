@@ -24,12 +24,14 @@ import { X } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 
-type Size = "md" | "lg" | "xl";
+type Size = "md" | "lg" | "xl" | "2xl";
 
 const SIZE: Record<Size, string> = {
   md: "sm:max-w-[440px]",
   lg: "sm:max-w-[560px]",
   xl: "sm:max-w-[720px]",
+  /** Wide panel for dense tables (Stock In edit, multi-line bills). */
+  "2xl": "sm:max-w-[min(960px,92vw)]",
 };
 
 interface DetailSheetProps {

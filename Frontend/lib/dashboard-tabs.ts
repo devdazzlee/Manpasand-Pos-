@@ -82,6 +82,10 @@ export const DASHBOARD_TAB_IDS = new Set([
 export const DASHBOARD_TAB_PARAM = "tab";
 export const INSIGHTS_REPORT_PARAM = "report";
 export const INSIGHTS_DIMENSION_PARAM = "dimension";
+/** Deep-link: open Product Management with this product in the edit form. */
+export const INVENTORY_EDIT_PRODUCT_PARAM = "editProduct";
+/** Deep-link: open Product Management with Duplicate form for this product. */
+export const INVENTORY_DUPLICATE_PRODUCT_PARAM = "duplicateProduct";
 
 export const INSIGHTS_REPORT_IDS = new Set([
   "sales-by",
@@ -109,7 +113,12 @@ export const SALES_BY_DIMENSION_IDS = new Set([
 
 export function buildDashboardTabHref(
   tab: string,
-  extra?: { report?: string; dimension?: string }
+  extra?: {
+    report?: string;
+    dimension?: string;
+    editProduct?: string;
+    duplicateProduct?: string;
+  }
 ): string {
   const params = new URLSearchParams();
   params.set(DASHBOARD_TAB_PARAM, tab);
@@ -127,7 +136,53 @@ export function buildDashboardTabHref(
       params.set(INSIGHTS_DIMENSION_PARAM, extra.dimension);
     }
   }
+  if (tab === "inventory" && extra?.editProduct) {
+    params.set(INVENTORY_EDIT_PRODUCT_PARAM, extra.editProduct);
+  }
+  if (tab === "inventory" && extra?.duplicateProduct) {
+    params.set(INVENTORY_DUPLICATE_PRODUCT_PARAM, extra.duplicateProduct);
+  }
   return `/?${params.toString()}`;
+}
+
+export function buildInventoryProductEditHref(productId: string): string {
+  return buildDashboardTabHref("inventory", { editProduct: productId });
+}
+
+export function buildInventoryProductDuplicateHref(productId: string): string {
+  return buildDashboardTabHref("inventory", { duplicateProduct: productId });
+}
+
+export function readInventoryEditProductFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const id = new URLSearchParams(window.location.search).get(
+    INVENTORY_EDIT_PRODUCT_PARAM
+  );
+  return id?.trim() || null;
+}
+
+export function readInventoryDuplicateProductFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const id = new URLSearchParams(window.location.search).get(
+    INVENTORY_DUPLICATE_PRODUCT_PARAM
+  );
+  return id?.trim() || null;
+}
+
+export function clearInventoryEditProductFromUrl(): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  let changed = false;
+  if (url.searchParams.has(INVENTORY_EDIT_PRODUCT_PARAM)) {
+    url.searchParams.delete(INVENTORY_EDIT_PRODUCT_PARAM);
+    changed = true;
+  }
+  if (url.searchParams.has(INVENTORY_DUPLICATE_PRODUCT_PARAM)) {
+    url.searchParams.delete(INVENTORY_DUPLICATE_PRODUCT_PARAM);
+    changed = true;
+  }
+  if (!changed) return;
+  window.history.replaceState(window.history.state, "", url.toString());
 }
 
 export function readInsightsReportFromUrl(): string | null {
@@ -218,6 +273,10 @@ export function writeTabToUrl(tab: string): void {
   if (tab !== "insights") {
     url.searchParams.delete(INSIGHTS_REPORT_PARAM);
     url.searchParams.delete(INSIGHTS_DIMENSION_PARAM);
+  }
+  if (tab !== "inventory") {
+    url.searchParams.delete(INVENTORY_EDIT_PRODUCT_PARAM);
+    url.searchParams.delete(INVENTORY_DUPLICATE_PRODUCT_PARAM);
   }
   window.history.replaceState(window.history.state, "", url.toString());
 }

@@ -96,3 +96,58 @@ export const appendBillLine = asyncHandler(async (req: Request, res: Response) =
   });
   new ApiResponse(purchase, 'Product added to bill', 201).send(res);
 });
+
+export const updateStockInBill = asyncHandler(async (req: Request, res: Response) => {
+  const body = req.body;
+  const purchaseDate = body.purchaseDate ? new Date(body.purchaseDate) : undefined;
+  const expiryDate =
+    body.expiryDate === null
+      ? null
+      : body.expiryDate
+        ? new Date(body.expiryDate)
+        : undefined;
+  const purchase = await purchaseService.updateStockInBill(req.params.anchorId, {
+    ...body,
+    purchaseDate,
+    expiryDate,
+    updatedBy: req.user!.id,
+  });
+  new ApiResponse(purchase, 'Stock In bill updated · stock, ledger & cash synced').send(res);
+});
+
+export const getHoldPurchases = asyncHandler(async (req: Request, res: Response) => {
+  const branchId = (req.query.branchId as string) || undefined;
+  const holds = await purchaseService.getHoldPurchases({ branchId });
+  new ApiResponse(holds, 'Hold purchases retrieved').send(res);
+});
+
+export const createHoldPurchase = asyncHandler(async (req: Request, res: Response) => {
+  const body = req.body;
+  const hold = await purchaseService.createHoldPurchase({
+    branchId: body.branchId,
+    supplierId: body.supplierId,
+    label: body.label,
+    payload: body.payload,
+    createdBy: req.user!.id,
+  });
+  new ApiResponse(hold, 'Stock In held', 201).send(res);
+});
+
+export const retrieveHoldPurchase = asyncHandler(async (req: Request, res: Response) => {
+  const branchId =
+    (req.body?.branchId as string) || (req.query.branchId as string) || undefined;
+  const hold = await purchaseService.retrieveHoldPurchase({
+    holdId: req.params.holdId,
+    branchId,
+  });
+  new ApiResponse(hold, 'Hold purchase retrieved').send(res);
+});
+
+export const deleteHoldPurchase = asyncHandler(async (req: Request, res: Response) => {
+  const branchId = (req.query.branchId as string) || undefined;
+  await purchaseService.deleteHoldPurchase({
+    holdId: req.params.holdId,
+    branchId,
+  });
+  new ApiResponse(null, 'Hold purchase deleted').send(res);
+});

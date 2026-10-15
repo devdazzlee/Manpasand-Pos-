@@ -1,6 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.recordCashPayOnOpenRegister = recordCashPayOnOpenRegister;
+exports.reverseCashPayOnRegisterByPaymentRefs = reverseCashPayOnRegisterByPaymentRefs;
 const client_1 = require("@prisma/client");
 const client_2 = require("../prisma/client");
 /**
@@ -39,5 +40,22 @@ async function recordCashPayOnOpenRegister(opts) {
         },
         select: { id: true, cashflow_id: true },
     });
+}
+/**
+ * Reverse drawer cash-outs that were recorded for supplier payment IDs
+ * (Stock In edit cash ↔ credit / payment amount changes).
+ */
+async function reverseCashPayOnRegisterByPaymentRefs(paymentIds) {
+    const ids = [...new Set(paymentIds.map((id) => String(id || '').trim()).filter(Boolean))];
+    if (ids.length === 0)
+        return 0;
+    const result = await client_2.prisma.expense.deleteMany({
+        where: {
+            reference: { in: ids },
+            particular: { startsWith: 'Purchase payment' },
+            cashflow_id: { not: null },
+        },
+    });
+    return result.count;
 }
 //# sourceMappingURL=register-cash-out.helper.js.map

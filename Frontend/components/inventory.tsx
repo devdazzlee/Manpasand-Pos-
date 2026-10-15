@@ -33,6 +33,13 @@ import {
   CommandList,
 } from "@/components/ui/command"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
@@ -57,12 +64,24 @@ import {
   Globe,
   Check,
   ChevronsUpDown,
+  Copy,
+  ExternalLink,
+  MoreHorizontal,
+  Power,
+  PowerOff,
 } from "lucide-react"
 import apiClient from "@/lib/apiClient"
 import { usePosData } from "@/hooks/use-pos-data"
 import { usePosBranch } from "@/hooks/use-pos-branch"
 import { cn } from "@/lib/utils"
 import { formatMoneyDisplay } from "@/lib/money"
+import {
+  buildInventoryProductDuplicateHref,
+  buildInventoryProductEditHref,
+  clearInventoryEditProductFromUrl,
+  readInventoryDuplicateProductFromUrl,
+  readInventoryEditProductFromUrl,
+} from "@/lib/dashboard-tabs"
 import {
   getProductBarcodeDisplay,
   previewAutoBarcodeValue,
@@ -1252,6 +1271,9 @@ export default function Inventory() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  /** When set, Add form was opened via Duplicate — banner + clearer title. */
+  const [duplicatingFromName, setDuplicatingFromName] = useState<string | null>(null)
+  const deepLinkEditOpenedRef = useRef(false)
 
   // Delete-confirmation modal state. We track the product directly (so we can
   // show its name in the dialog) and a separate `isDeleting` flag so the
@@ -1894,6 +1916,7 @@ export default function Inventory() {
     setStockBranchIds(posBranches.map((b) => b.id))
     setCurrentBranchStocks({})
     setProductBarcodeMode("auto")
+    setDuplicatingFromName(null)
   }
 
   const closeProductForm = () => {
@@ -1901,35 +1924,41 @@ export default function Inventory() {
     setEditingProduct(null)
     setIsAddDialogOpen(false)
     setIsEditDialogOpen(false)
+    setDuplicatingFromName(null)
+    clearInventoryEditProductFromUrl()
+  }
+
+  const extractImageUrls = (fresh: any): string[] =>
+    fresh.ProductImage?.map((img: any) => img.image) ||
+    (Array.isArray(fresh.images)
+      ? fresh.images.map((img: any) => (typeof img === "string" ? img : img.image))
+      : []) ||
+    []
+
+  const toFormNumber = (v: any): number => {
+    if (v === null || v === undefined || v === "") return 0
+    const n = typeof v === "string" ? parseFloat(v) : Number(v)
+    return Number.isFinite(n) ? n : 0
   }
 
   const openEditDialog = async (product: Product) => {
     // Open the modal in a "loading" state — we DON'T show the form until the
     // canonical record arrives, so the user never sees fields flash from
     // empty/"Unknown" to their real values.
+    setDuplicatingFromName(null)
+    setIsAddDialogOpen(false)
     setEditingProduct(product)
     setIsEditDialogOpen(true)
     setIsLoadingEditProduct(true)
     setStockQtyByBranch({})
     loadDropdownData()
 
-    const toNum = (v: any): number => {
-      if (v === null || v === undefined || v === "") return 0
-      const n = typeof v === "string" ? parseFloat(v) : Number(v)
-      return Number.isFinite(n) ? n : 0
-    }
-
     try {
       const detail = await apiService.getProductById(product.id)
       const fresh = detail?.data ?? detail
       if (!fresh) throw new Error("Empty product detail response")
 
-      const existingUrls: string[] =
-        fresh.ProductImage?.map((img: any) => img.image) ||
-        (Array.isArray(fresh.images)
-          ? fresh.images.map((img: any) => (typeof img === "string" ? img : img.image))
-          : []) ||
-        []
+      const existingUrls = extractImageUrls(fresh)
 
       const savedBarcode = (fresh.label_barcode ?? fresh.custom_code ?? "").trim()
       setProductBarcodeMode(savedBarcode ? "manual" : "auto")
@@ -1940,15 +1969,15 @@ export default function Inventory() {
         pct_or_hs_code: fresh.pct_or_hs_code ?? "",
         description: fresh.description ?? "",
         sku: fresh.sku ?? product.sku,
-        purchase_rate: toNum(fresh.purchase_rate),
-        sales_rate_exc_dis_and_tax: toNum(fresh.sales_rate_exc_dis_and_tax),
-        sales_rate_inc_dis_and_tax: toNum(fresh.sales_rate_inc_dis_and_tax),
-        discount_amount: toNum(fresh.discount_amount),
+        purchase_rate: toFormNumber(fresh.purchase_rate),
+        sales_rate_exc_dis_and_tax: toFormNumber(fresh.sales_rate_exc_dis_and_tax),
+        sales_rate_inc_dis_and_tax: toFormNumber(fresh.sales_rate_inc_dis_and_tax),
+        discount_amount: toFormNumber(fresh.discount_amount),
         tax_id: fresh.tax?.id ?? "",
         category_id: fresh.category?.id ?? "",
         subcategory_id: fresh.subcategory?.id ?? "",
-        min_qty: toNum(fresh.min_qty),
-        max_qty: toNum(fresh.max_qty),
+        min_qty: toFormNumber(fresh.min_qty),
+        max_qty: toFormNumber(fresh.max_qty),
         supplier_id: fresh.supplier?.id ?? "",
         brand_id: fresh.brand?.id ?? "",
         color_id: fresh.color?.id ?? "",
@@ -1982,8 +2011,8 @@ export default function Inventory() {
       if (Array.isArray(fresh.stock)) {
         for (const s of fresh.stock) {
           if (!s?.branch_id) continue
-          const cur = toNum(s.current_quantity)
-          const res = toNum(s.reserved_quantity)
+          const cur = toFormNumber(s.current_quantity)
+          const res = toFormNumber(s.reserved_quantity)
           branchStockMap[s.branch_id] = cur - res // available
         }
       }
@@ -2006,6 +2035,7 @@ export default function Inventory() {
       // record.
       setIsEditDialogOpen(false)
       setEditingProduct(null)
+      clearInventoryEditProductFromUrl()
       toast({
         title: "Couldn't load product",
         description: "Please try again.",
@@ -2015,6 +2045,144 @@ export default function Inventory() {
       setIsLoadingEditProduct(false)
     }
   }
+
+  /**
+   * Clone catalog fields into the Add Product form. Unique identity (SKU,
+   * internal code, label barcode) is cleared so the backend allocates new
+   * values — same pattern as professional POS size/variant workflows.
+   */
+  const openDuplicateDialog = async (product: Product) => {
+    setEditingProduct(null)
+    setIsEditDialogOpen(false)
+    setIsAddDialogOpen(true)
+    setDuplicatingFromName(product.name)
+    setIsLoadingEditProduct(true)
+    setStockQtyByBranch({})
+    setCurrentBranchStocks({})
+    loadDropdownData()
+
+    try {
+      const detail = await apiService.getProductById(product.id)
+      const fresh = detail?.data ?? detail
+      if (!fresh) throw new Error("Empty product detail response")
+
+      const existingUrls = extractImageUrls(fresh)
+
+      // Auto barcode — never copy SKU / label_barcode (must stay unique).
+      setProductBarcodeMode("auto")
+      setFormData({
+        name: fresh.name ?? product.name ?? "",
+        unit_id: fresh.unit?.id ?? "",
+        label_barcode: "",
+        pct_or_hs_code: fresh.pct_or_hs_code ?? "",
+        description: fresh.description ?? "",
+        sku: "",
+        purchase_rate: toFormNumber(fresh.purchase_rate),
+        sales_rate_exc_dis_and_tax: toFormNumber(fresh.sales_rate_exc_dis_and_tax),
+        sales_rate_inc_dis_and_tax: toFormNumber(fresh.sales_rate_inc_dis_and_tax),
+        discount_amount: toFormNumber(fresh.discount_amount),
+        tax_id: fresh.tax?.id ?? "",
+        category_id: fresh.category?.id ?? "",
+        subcategory_id: fresh.subcategory?.id ?? "",
+        min_qty: toFormNumber(fresh.min_qty),
+        max_qty: toFormNumber(fresh.max_qty),
+        supplier_id: fresh.supplier?.id ?? "",
+        brand_id: fresh.brand?.id ?? "",
+        color_id: fresh.color?.id ?? "",
+        size_id: fresh.size?.id ?? "",
+        collection: fresh.collection ?? "",
+        is_active: fresh.is_active ?? true,
+        display_on_pos: fresh.display_on_pos ?? true,
+        display_on_website: fresh.display_on_website ?? true,
+        is_batch: fresh.is_batch ?? false,
+        auto_fill_on_demand_sheet: fresh.auto_fill_on_demand_sheet ?? false,
+        non_inventory_item: fresh.non_inventory_item ?? false,
+        is_deal: fresh.is_deal ?? false,
+        is_featured: fresh.is_featured ?? false,
+        images: existingUrls,
+      })
+
+      if (fresh.supplier?.id && fresh.supplier?.name) {
+        setSuppliers((prev) =>
+          prev.some((item) => item.id === fresh.supplier.id)
+            ? prev
+            : [...prev, { id: fresh.supplier.id, name: fresh.supplier.name }]
+        )
+      }
+      setImagePreviews(existingUrls)
+      setExistingImageUrls(existingUrls)
+      // Fresh product — no stock yet; user can set Initial Stock before create.
+      setStockBranchIds(posBranches.map((b) => b.id))
+
+      toast({
+        title: "Duplicating product",
+        description:
+          "Name, prices, and images are copied. Change size/name as needed — a new SKU and code are created on save.",
+      })
+    } catch {
+      setIsAddDialogOpen(false)
+      setDuplicatingFromName(null)
+      toast({
+        title: "Couldn't duplicate product",
+        description: "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingEditProduct(false)
+    }
+  }
+
+  const stubProductForDeepLink = (productId: string): Product => ({
+    id: productId,
+    name: "",
+    sku: "",
+    code: "",
+    purchase_rate: 0,
+    sales_rate_exc_dis_and_tax: 0,
+    sales_rate_inc_dis_and_tax: 0,
+    is_active: true,
+    display_on_pos: true,
+    display_on_website: true,
+    is_batch: false,
+    auto_fill_on_demand_sheet: false,
+    non_inventory_item: false,
+    is_deal: false,
+    is_featured: false,
+    created_at: "",
+    updated_at: "",
+  })
+
+  const openProductInNewTab = (product: Product) => {
+    window.open(
+      buildInventoryProductEditHref(product.id),
+      "_blank",
+      "noopener,noreferrer",
+    )
+  }
+
+  /** Duplicate opens in a new tab so the catalog list stays available. */
+  const openDuplicateInNewTab = (product: Product) => {
+    window.open(
+      buildInventoryProductDuplicateHref(product.id),
+      "_blank",
+      "noopener,noreferrer",
+    )
+  }
+
+  // Deep-link: editProduct / duplicateProduct open the matching form (new tab).
+  useEffect(() => {
+    if (deepLinkEditOpenedRef.current) return
+    const duplicateId = readInventoryDuplicateProductFromUrl()
+    const editId = readInventoryEditProductFromUrl()
+    if (!duplicateId && !editId) return
+    deepLinkEditOpenedRef.current = true
+    if (duplicateId) {
+      void openDuplicateDialog(stubProductForDeepLink(duplicateId))
+      return
+    }
+    void openEditDialog(stubProductForDeepLink(editId as string))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount for deep-link
+  }, [])
 
   const updateFormData = (field: keyof ProductFormData, value: any) => {
     // Functional setState so two consecutive updates in the same tick (e.g.
@@ -2090,44 +2258,68 @@ export default function Inventory() {
   ]
 
   const renderProductActions = (product: Product) => (
-    <div className="flex items-center gap-1.5">
+    <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
       <Button
         size="sm"
         variant="outline"
-        className="h-8 text-xs"
+        className="h-8 shrink-0 px-2.5 text-xs"
         onClick={() => openEditDialog(product)}
       >
         <Edit className="mr-1.5 h-3.5 w-3.5" />
         Edit
       </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        className={cn(
-          "h-8 text-xs min-w-[72px]",
-          product.is_active
-            ? "text-amber-700 hover:bg-amber-50 hover:text-amber-800"
-            : "text-green-700 hover:bg-green-50 hover:text-green-800",
-        )}
-        onClick={() => handleToggleStatus(product)}
-        disabled={toggleStatusProductId === product.id}
-      >
-        {toggleStatusProductId === product.id ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : product.is_active ? (
-          "Disable"
-        ) : (
-          "Enable"
-        )}
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700"
-        onClick={() => setProductToDelete(product)}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 shrink-0 p-0"
+            title="More actions"
+            disabled={toggleStatusProductId === product.id}
+          >
+            {toggleStatusProductId === product.id ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <MoreHorizontal className="h-4 w-4" />
+            )}
+            <span className="sr-only">More actions</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem onSelect={() => openDuplicateInNewTab(product)}>
+            <Copy className="mr-2 h-4 w-4" />
+            Duplicate in new tab
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => openProductInNewTab(product)}>
+            <ExternalLink className="mr-2 h-4 w-4" />
+            Open in new tab
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => handleToggleStatus(product)}
+            disabled={toggleStatusProductId === product.id}
+          >
+            {product.is_active ? (
+              <>
+                <PowerOff className="mr-2 h-4 w-4 text-amber-600" />
+                Disable
+              </>
+            ) : (
+              <>
+                <Power className="mr-2 h-4 w-4 text-green-600" />
+                Enable
+              </>
+            )}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="text-red-600 focus:bg-red-50 focus:text-red-700"
+            onSelect={() => setProductToDelete(product)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 
@@ -2157,25 +2349,45 @@ export default function Inventory() {
 
   if (isAddDialogOpen || isEditDialogOpen) {
     const isEdit = isEditDialogOpen
-    const formBusy = (isEdit && isLoadingEditProduct) || isFormDropdownsLoading
+    const isDuplicate = !isEdit && !!duplicatingFromName
+    const formBusy = isLoadingEditProduct || isFormDropdownsLoading
     return (
       <div className="p-4 md:p-6 space-y-4 min-w-0">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between pb-3 border-b">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
-              {isEdit ? "Edit product" : "Add product"}
+              {isEdit ? "Edit product" : isDuplicate ? "Duplicate product" : "Add product"}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {isEdit ? "Update catalog details and branch stock." : "Create a product, then return to the catalog."}
+              {isEdit
+                ? "Update catalog details and branch stock."
+                : isDuplicate
+                  ? "Copied from an existing product. Adjust name/size, then save — a new SKU and code are generated."
+                  : "Create a product, then return to the catalog."}
             </p>
           </div>
           <Button variant="outline" onClick={closeProductForm} disabled={formLoading}>
             Cancel
           </Button>
         </div>
+        {isDuplicate && duplicatingFromName ? (
+          <Alert className="border-blue-200 bg-blue-50/80 text-blue-950">
+            <Copy className="h-4 w-4 text-blue-700" />
+            <AlertTitle>Based on “{duplicatingFromName}”</AlertTitle>
+            <AlertDescription>
+              Change the name or size for this variant. Stock starts empty; barcode uses Auto (new identity) unless you set Custom.
+            </AlertDescription>
+          </Alert>
+        ) : null}
         {formBusy ? (
           <ProductFormSkeleton
-            message={isLoadingEditProduct ? "Loading product details…" : "Preparing form…"}
+            message={
+              isLoadingEditProduct
+                ? isDuplicate
+                  ? "Loading product to duplicate…"
+                  : "Loading product details…"
+                : "Preparing form…"
+            }
           />
         ) : dropdownsLoadError ? (
           <Alert variant="destructive">
@@ -2193,7 +2405,7 @@ export default function Inventory() {
           <ProductForm
             onSubmit={isEdit ? handleUpdateProduct : handleCreateProduct}
             loading={formLoading}
-            submitText={isEdit ? "Update Product" : "Create Product"}
+            submitText={isEdit ? "Update Product" : isDuplicate ? "Create Duplicate" : "Create Product"}
             formData={formData}
             formErrors={formErrors}
             updateFormData={updateFormData}
@@ -2536,7 +2748,7 @@ export default function Inventory() {
                   ? "Loading catalog..."
                   : hasActiveFilters
                     ? `Showing ${filteredProductCount} of ${catalogStats.total}`
-                    : "Edit, enable/disable, or delete products"}
+                    : "Edit, duplicate, open in a new tab, enable/disable, or delete"}
               </p>
             </div>
             <div className="inline-flex rounded-lg border border-gray-200 p-0.5 self-start">
@@ -2600,7 +2812,7 @@ export default function Inventory() {
                     <Table className="w-full table-fixed">
                       <TableHeader>
                         <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
-                          <TableHead className="w-[30%] pl-4 pr-3 text-xs font-semibold text-gray-600">
+                          <TableHead className="w-[32%] pl-4 pr-3 text-xs font-semibold text-gray-600">
                             Product
                           </TableHead>
                           <TableHead className="w-[14%] px-3 text-xs font-semibold text-gray-600">
@@ -2609,16 +2821,16 @@ export default function Inventory() {
                           <TableHead className="w-[10%] whitespace-nowrap px-3 text-right text-xs font-semibold text-gray-600">
                             Stock
                           </TableHead>
-                          <TableHead className="w-[10%] px-3 text-right text-xs font-semibold text-gray-600">
+                          <TableHead className="w-[11%] px-3 text-right text-xs font-semibold text-gray-600">
                             Purchase
                           </TableHead>
-                          <TableHead className="w-[10%] px-3 text-right text-xs font-semibold text-gray-600">
+                          <TableHead className="w-[11%] px-3 text-right text-xs font-semibold text-gray-600">
                             Sales
                           </TableHead>
                           <TableHead className="w-[10%] px-3 text-xs font-semibold text-gray-600">
                             Status
                           </TableHead>
-                          <TableHead className="w-[16%] pl-3 pr-4 text-right text-xs font-semibold text-gray-600">
+                          <TableHead className="w-[12%] whitespace-nowrap pl-3 pr-4 text-right text-xs font-semibold text-gray-600">
                             Actions
                           </TableHead>
                         </TableRow>
@@ -2691,10 +2903,8 @@ export default function Inventory() {
                                   {product.is_active ? "Active" : "Inactive"}
                                 </Badge>
                               </TableCell>
-                              <TableCell className="py-2.5 pl-3 pr-4 text-right">
-                                <div className="flex justify-end">
-                                  {renderProductActions(product)}
-                                </div>
+                              <TableCell className="whitespace-nowrap py-2.5 pl-3 pr-4 text-right align-middle">
+                                {renderProductActions(product)}
                               </TableCell>
                             </TableRow>
                           )

@@ -28,6 +28,7 @@ model User {
   // Relations for tracking user actions
   sales            Sale[]
   hold_sales       HoldSale[]
+  hold_purchases   HoldPurchase[]
   purchase_orders  PurchaseOrder[]
   stock_movements  StockMovement[]
   purchases        Purchase[]
@@ -87,6 +88,7 @@ model Branch {
   stock              Stock[]
   sales              Sale[]
   hold_sales         HoldSale[]
+  hold_purchases     HoldPurchase[]
   purchase_orders     PurchaseOrder[]
   stock_movements     StockMovement[]
   Order              Order[]
@@ -240,6 +242,7 @@ model Supplier {
   purchase_returns PurchaseReturn[]
   purchase_invoices PurchaseInvoice[]
   payments        SupplierPayment[]
+  hold_purchases  HoldPurchase[]
   chart_account   TransactionalAccount?
   created_at      DateTime        @default(now())
   updated_at      DateTime        @default(now()) @updatedAt
@@ -1005,6 +1008,28 @@ model HoldSale {
 
   @@index([branch_id])
   @@index([customer_id])
+  @@index([created_by])
+  @@index([created_at])
+}
+
+/// Unposted Stock In draft (pause when a customer arrives; resume later).
+model HoldPurchase {
+  id          String    @id @default(uuid())
+  branch_id   String
+  branch      Branch    @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  supplier_id String?
+  supplier    Supplier? @relation(fields: [supplier_id], references: [id], onDelete: SetNull)
+  created_by  String?
+  user        User?     @relation(fields: [created_by], references: [id])
+  label       String?
+  /// Full Stock In form state (bills, payment, notes, …)
+  payload     Json
+  line_count  Int       @default(0)
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now()) @updatedAt
+
+  @@index([branch_id])
+  @@index([supplier_id])
   @@index([created_by])
   @@index([created_at])
 }

@@ -391,18 +391,24 @@ export function PaidFromSelect({
 }) {
   return (
     <Select value={value || undefined} onValueChange={onChange}>
-      <SelectTrigger className={triggerClassName}>
+      <SelectTrigger className={cn("min-w-0", triggerClassName)}>
         <SelectValue placeholder="Choose cash or bank account" />
       </SelectTrigger>
-      <SelectContent>
+      <SelectContent className="min-w-[var(--radix-select-trigger-width)]">
         {accounts.map((a) => {
           const bank = a.system_key === "BANK" || (a.system_key !== "CASH" && /bank/i.test(a.name));
           return (
-            <SelectItem key={a.id} value={a.id}>
-              <span className="flex items-center gap-2">
-                {bank ? <Landmark className="h-3.5 w-3.5 text-muted-foreground" /> : <Wallet className="h-3.5 w-3.5 text-muted-foreground" />}
-                {a.name}
-                <span className="font-mono text-[11px] text-muted-foreground">{a.code}</span>
+            <SelectItem key={a.id} value={a.id} className="pr-8">
+              <span className="flex min-w-0 items-center gap-2">
+                {bank ? (
+                  <Landmark className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                ) : (
+                  <Wallet className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                )}
+                <span className="truncate">{a.name}</span>
+                <span className="ml-auto shrink-0 font-mono text-[11px] text-muted-foreground">
+                  {a.code}
+                </span>
               </span>
             </SelectItem>
           );

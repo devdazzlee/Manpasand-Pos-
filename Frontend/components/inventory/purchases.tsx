@@ -28,6 +28,14 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
   DetailSheet,
   DetailSheetBody,
   DetailSheetFooter,
@@ -55,12 +63,19 @@ import {
   ShoppingCart,
   FileText,
   ChevronDown,
+  ChevronsUpDown,
+  Check,
   RotateCcw,
   Undo2,
   Layers,
   Rows3,
   Trash2,
+  Pause,
 } from "lucide-react";
+import {
+  formatProductSearchLabel,
+  productMatchesSearch,
+} from "@/lib/labelBarcode";
 import apiClient from "@/lib/apiClient";
 import { API_BASE } from "@/config/constants";
 import { toast } from "sonner";
@@ -97,21 +112,39 @@ import {
   StockInDeleteConfirmDialog,
   type StockInDeleteConfirmState,
 } from "@/components/inventory/stock-in-delete-confirm-dialog";
-import {
-  buildPurchaseNotes,
-  parsePurchaseNotes,
-} from "@/components/inventory/purchases-notes";
+import { parsePurchaseNotes } from "@/components/inventory/purchases-notes";
 import {
   billInvoiceLabel,
   formatBillProductSummary,
 } from "@/components/inventory/stock-in-bill-utils";
 import { PaidFromSelect, usePaidFrom } from "@/components/expense-account-select";
+import {
+  useHoldPurchases,
+  type HoldPurchasePayload,
+} from "@/hooks/use-hold-purchases";
 
 const purchaseSchema = z.object({
   supplierId: z.string().min(1, "Choose a supplier"),
   warehouseBranchId: z.string().min(1, "Pick a warehouse or branch"),
   lines: z.array(z.any()).min(1, "Add at least one product line before saving"),
 });
+
+function parsePaymentModeFromNotes(
+  payment: string,
+): { mode: "CASH" | "CREDIT" | "MIX"; paidAmount: string } {
+  const upper = (payment || "").toUpperCase();
+  if (upper.startsWith("MIX")) {
+    const paidMatch = payment.match(/paid\s*([\d.]+)/i);
+    return { mode: "MIX", paidAmount: paidMatch?.[1] || "" };
+  }
+  if (upper.startsWith("CREDIT")) {
+    return { mode: "CREDIT", paidAmount: "" };
+  }
+  if (upper.startsWith("CASH")) {
+    return { mode: "CASH", paidAmount: "" };
+  }
+  return { mode: "CREDIT", paidAmount: "" };
+}
 
 type PurchaseFieldErrors = Partial<
   Record<"supplierId" | "warehouseBranchId" | "lines", string>
@@ -194,7 +227,10 @@ function isUnknownName(name?: string | null) {
 }
 
 type EditLineForm = {
-  id: string;
+  /** Server purchase id — omitted for newly added lines until save. */
+  id?: string;
+  clientKey: string;
+  productId: string;
   productName: string;
   quantity: string;
   costPrice: string;
@@ -202,14 +238,19 @@ type EditLineForm = {
 };
 
 type EditPurchaseForm = {
+  supplierId: string;
+  warehouseBranchId: string;
   invoiceRef: string;
   purchaseDate: string;
   deliveryStatus: "PARTIAL" | "COMPLETE";
   batchNo: string;
   expiryDate: string;
   source: string;
-  payment: string;
   userNotes: string;
+  paymentMode: "CASH" | "CREDIT" | "MIX";
+  paidNowInput: string;
+  settleMethod: "CASH" | "BANK_TRANSFER" | "CHEQUE" | "CARD" | "OTHER";
+  settleReference: string;
   lines: EditLineForm[];
 };
 
@@ -304,6 +345,13 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
   const [deleteConfirm, setDeleteConfirm] = useState<StockInDeleteConfirmState | null>(
     null,
   );
+  const [editAddProductId, setEditAddProductId] = useState("");
+  const [editAddProductOpen, setEditAddProductOpen] = useState(false);
+  const [editAddProductQuery, setEditAddProductQuery] = useState("");
+  const [editSettleMethodForAccounts, setEditSettleMethodForAccounts] = useState<
+    "CASH" | "BANK_TRANSFER" | "CHEQUE" | "CARD" | "OTHER"
+  >("CASH");
+  const editPaidFrom = usePaidFrom(editSettleMethodForAccounts);
 
   const buildEditFormFromDetail = useCallback((detail: any): EditPurchaseForm => {
     const billLines: any[] = Array.isArray(detail?.bill_lines)
@@ -312,11 +360,15 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
         ? [detail]
         : [];
     const parsed = parsePurchaseNotes(detail?.notes);
+    const payParsed = parsePaymentModeFromNotes(parsed.payment);
     const dateSrc = detail?.purchase_date ? new Date(detail.purchase_date) : new Date();
     const yyyy = dateSrc.getFullYear();
     const mm = String(dateSrc.getMonth() + 1).padStart(2, "0");
     const dd = String(dateSrc.getDate()).padStart(2, "0");
     return {
+      supplierId: detail?.supplier_id || detail?.supplier?.id || "",
+      warehouseBranchId:
+        detail?.warehouse_branch_id || detail?.warehouse_branch?.id || "",
       invoiceRef: detail?.invoice_ref || "",
       purchaseDate: `${yyyy}-${mm}-${dd}`,
       deliveryStatus:
@@ -326,10 +378,15 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
       batchNo: parsed.batchNo,
       expiryDate: parsed.expiryDate,
       source: parsed.source,
-      payment: parsed.payment,
       userNotes: parsed.userNotes,
+      paymentMode: payParsed.mode,
+      paidNowInput: payParsed.paidAmount,
+      settleMethod: "CASH",
+      settleReference: "",
       lines: billLines.map((line) => ({
         id: line.id,
+        clientKey: line.id,
+        productId: line.product_id || line.product?.id || "",
         productName: line.product?.name || "Product",
         quantity: String(Number(line.quantity) || 0),
         costPrice: String(Number(line.cost_price) || 0),
@@ -349,7 +406,10 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
       const detail = res.data?.data || null;
       setPurchaseDetail(detail);
       if (startEditing && detail) {
-        setEditForm(buildEditFormFromDetail(detail));
+        const form = buildEditFormFromDetail(detail);
+        setEditForm(form);
+        setEditSettleMethodForAccounts(form.settleMethod);
+        setEditAddProductId("");
         setEditingDetail(true);
       }
     } catch (e: any) {
@@ -362,13 +422,17 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
 
   const startEditingPurchase = useCallback(() => {
     if (!purchaseDetail) return;
-    setEditForm(buildEditFormFromDetail(purchaseDetail));
+    const form = buildEditFormFromDetail(purchaseDetail);
+    setEditForm(form);
+    setEditSettleMethodForAccounts(form.settleMethod);
+    setEditAddProductId("");
     setEditingDetail(true);
   }, [purchaseDetail, buildEditFormFromDetail]);
 
   const cancelEditingPurchase = useCallback(() => {
     setEditingDetail(false);
     setEditForm(null);
+    setEditAddProductId("");
   }, []);
 
   const fetchHistory = useCallback(
@@ -429,8 +493,36 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
 
   const saveEditedPurchase = useCallback(async () => {
     if (!editForm || editForm.lines.length === 0) return;
+    if (!editForm.supplierId) {
+      toast.error("Choose a supplier");
+      return;
+    }
+    if (!editForm.warehouseBranchId) {
+      toast.error("Choose a branch");
+      return;
+    }
+
+    const editBillValue = editForm.lines.reduce(
+      (s, l) => s + (Number(l.quantity) || 0) * (Number(l.costPrice) || 0),
+      0,
+    );
+    const mixPaid = Number(editForm.paidNowInput);
+    if (editForm.paymentMode === "MIX") {
+      if (!Number.isFinite(mixPaid) || mixPaid <= 0) {
+        toast.error("Enter how much was paid now for a part payment");
+        return;
+      }
+      if (mixPaid >= editBillValue && editBillValue > 0) {
+        toast.error("Part paid must be less than bill total (use Paid for full pay)");
+        return;
+      }
+    }
 
     for (const line of editForm.lines) {
+      if (!line.productId) {
+        toast.error(`Missing product on a line (${line.productName})`);
+        return;
+      }
       const qty = Number(line.quantity);
       const cost = Number(line.costPrice);
       const sale = Number(line.salePrice);
@@ -448,40 +540,70 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
       }
     }
 
+    const anchorId =
+      editForm.lines.find((l) => l.id)?.id || purchaseDetail?.id;
+    if (!anchorId) {
+      toast.error("Cannot determine bill to update");
+      return;
+    }
+
     setEditSaving(true);
     try {
-      const notes = buildPurchaseNotes({
-        batchNo: editForm.batchNo,
-        expiryDate: editForm.expiryDate,
-        source: editForm.source,
-        payment: editForm.payment,
-        userNotes: editForm.userNotes,
-      });
       const purchaseDateIso = editForm.purchaseDate
         ? new Date(`${editForm.purchaseDate}T12:00:00`).toISOString()
         : undefined;
+      const expiryIso = editForm.expiryDate
+        ? new Date(`${editForm.expiryDate}T12:00:00`).toISOString()
+        : null;
 
-      await Promise.all(
-        editForm.lines.map((line) =>
-          apiClient.patch(`${API_BASE}/purchases/${line.id}`, {
+      const res = await apiClient.patch(
+        `${API_BASE}/purchases/bills/${anchorId}`,
+        {
+          supplierId: editForm.supplierId,
+          warehouseBranchId: editForm.warehouseBranchId,
+          purchaseDate: purchaseDateIso,
+          invoiceRef: editForm.invoiceRef.trim() || null,
+          deliveryStatus: editForm.deliveryStatus,
+          batchNo: editForm.batchNo || undefined,
+          expiryDate: expiryIso,
+          source: editForm.source || null,
+          userNotes: editForm.userNotes || null,
+          paymentMode: editForm.paymentMode,
+          paidAmount:
+            editForm.paymentMode === "MIX" ? mixPaid : undefined,
+          paymentMethod:
+            editForm.paymentMode === "CREDIT"
+              ? undefined
+              : editForm.settleMethod,
+          paidFromAccountId:
+            editForm.paymentMode === "CREDIT"
+              ? null
+              : editPaidFrom.paidFrom || null,
+          paymentReference:
+            editForm.paymentMode === "CREDIT"
+              ? undefined
+              : editForm.settleReference || undefined,
+          lines: editForm.lines.map((line) => ({
+            ...(line.id ? { id: line.id } : {}),
+            productId: line.productId,
             quantity: Number(line.quantity),
             costPrice: Number(line.costPrice),
             salePrice: Number(line.salePrice),
-            purchaseDate: purchaseDateIso,
-            invoiceRef: editForm.invoiceRef.trim() || null,
-            notes,
-            deliveryStatus: editForm.deliveryStatus,
-          }),
-        ),
+          })),
+        },
       );
 
-      toast.success("Updated · stock, supplier ledger & cash records synced");
+      toast.success("Updated · stock, supplier ledger & cash synced");
       setEditingDetail(false);
       setEditForm(null);
-      const primaryId = editForm.lines[0]?.id || purchaseDetail?.id;
-      if (primaryId) {
-        const res = await apiClient.get(`${API_BASE}/purchases/${primaryId}`);
-        setPurchaseDetail(res.data?.data || null);
+      setEditAddProductId("");
+      const updated = res.data?.data;
+      if (updated) {
+        setPurchaseDetail(updated);
+      } else {
+        const reloadId = anchorId;
+        const reload = await apiClient.get(`${API_BASE}/purchases/${reloadId}`);
+        setPurchaseDetail(reload.data?.data || null);
       }
       fetchHistory();
       fetchStats();
@@ -490,7 +612,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     } finally {
       setEditSaving(false);
     }
-  }, [editForm, purchaseDetail?.id, fetchHistory, fetchStats]);
+  }, [editForm, purchaseDetail?.id, editPaidFrom.paidFrom, fetchHistory, fetchStats]);
 
   const requestDeletePurchaseLine = useCallback((purchaseId: string, label: string) => {
     setDeleteConfirm({
@@ -891,6 +1013,16 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
   const [settleReference, setSettleReference] = useState("");
   // Cash / bank account the paid part comes out of (follows the method).
   const stockInPaidFrom = usePaidFrom(settleMethod);
+  const {
+    holdPurchases,
+    holdPurchase,
+    retrieveHoldPurchase,
+    deleteHoldPurchase,
+    holdPurchasesLoading,
+  } = useHoldPurchases(warehouseBranchId);
+  const [isHoldingPurchase, setIsHoldingPurchase] = useState(false);
+  const [showHeldPurchases, setShowHeldPurchases] = useState(false);
+  const [resumingHoldIndex, setResumingHoldIndex] = useState<number | null>(null);
 
   const clearError = (key: keyof PurchaseFieldErrors) =>
     setFormErrors((prev) => {
@@ -1065,6 +1197,149 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     setPaidNowInput("");
     setSettleMethod("CASH");
     setSettleReference("");
+  };
+
+  const buildHoldPayload = useCallback((): HoldPurchasePayload => {
+    return {
+      supplierId,
+      warehouseBranchId,
+      purchaseDate: purchaseDate.toISOString(),
+      referenceNumber,
+      stockInSource,
+      batchNo,
+      expiryDate: expiryDate ? expiryDate.toISOString() : null,
+      notes,
+      paymentMode,
+      paidNowInput,
+      settleMethod,
+      settleReference,
+      paidFromAccountId: stockInPaidFrom.paidFrom || null,
+      bills: billDrafts.map((b) => ({
+        id: b.id,
+        invoiceRef: b.invoiceRef,
+        lines: b.lines.map((l) => ({
+          productId: l.productId,
+          productName: l.productName,
+          sku: l.sku,
+          quantity: l.quantity,
+          costPrice: l.costPrice,
+        })),
+      })),
+      activeBillId,
+    };
+  }, [
+    supplierId,
+    warehouseBranchId,
+    purchaseDate,
+    referenceNumber,
+    stockInSource,
+    batchNo,
+    expiryDate,
+    notes,
+    paymentMode,
+    paidNowInput,
+    settleMethod,
+    settleReference,
+    stockInPaidFrom.paidFrom,
+    billDrafts,
+    activeBillId,
+  ]);
+
+  const handleHoldPurchase = async () => {
+    if (isHoldingPurchase) return;
+    if (allDraftLines.length === 0) {
+      toast.error("Add at least one product before holding");
+      return;
+    }
+    if (!warehouseBranchId) {
+      toast.error("Choose a branch before holding");
+      return;
+    }
+    setIsHoldingPurchase(true);
+    try {
+      const ok = await holdPurchase(buildHoldPayload());
+      if (ok) {
+        toast.success("Stock In held — resume anytime from this branch");
+        resetDraft();
+        setShowHeldPurchases(true);
+      } else {
+        toast.error("Could not hold Stock In");
+      }
+    } finally {
+      setIsHoldingPurchase(false);
+    }
+  };
+
+  const handleResumeHoldPurchase = async (index: number) => {
+    setResumingHoldIndex(index);
+    try {
+      const held = await retrieveHoldPurchase(index);
+      if (!held) {
+        toast.error("Could not resume held Stock In");
+        return;
+      }
+      const p = held.payload || {};
+      if (p.supplierId) setSupplierId(p.supplierId);
+      if (p.warehouseBranchId) setWarehouseBranchId(p.warehouseBranchId);
+      if (p.purchaseDate) {
+        const d = new Date(p.purchaseDate);
+        if (!Number.isNaN(d.getTime())) setPurchaseDate(d);
+      }
+      setReferenceNumber(p.referenceNumber || "");
+      setStockInSource(p.stockInSource || "SUPPLIER_DELIVERY");
+      setBatchNo(p.batchNo || "");
+      if (p.expiryDate) {
+        const d = new Date(p.expiryDate);
+        setExpiryDate(Number.isNaN(d.getTime()) ? undefined : d);
+      } else {
+        setExpiryDate(undefined);
+      }
+      setNotes(p.notes || "");
+      if (p.paymentMode === "CASH" || p.paymentMode === "CREDIT" || p.paymentMode === "MIX") {
+        setPaymentMode(p.paymentMode);
+      }
+      setPaidNowInput(p.paidNowInput || "");
+      if (
+        p.settleMethod === "CASH" ||
+        p.settleMethod === "BANK_TRANSFER" ||
+        p.settleMethod === "CHEQUE" ||
+        p.settleMethod === "CARD" ||
+        p.settleMethod === "OTHER"
+      ) {
+        setSettleMethod(p.settleMethod);
+      }
+      setSettleReference(p.settleReference || "");
+      if (p.paidFromAccountId) {
+        stockInPaidFrom.setPaidFrom(p.paidFromAccountId);
+      }
+      const restoredBills =
+        Array.isArray(p.bills) && p.bills.length > 0
+          ? p.bills.map((b) => ({
+              id: b.id || createEmptyStockInBill().id,
+              invoiceRef: b.invoiceRef || "",
+              lines: Array.isArray(b.lines)
+                ? b.lines.map((l) => ({
+                    productId: l.productId,
+                    productName: l.productName,
+                    sku: l.sku,
+                    quantity: Number(l.quantity) || 0,
+                    costPrice: Number(l.costPrice) || 0,
+                  }))
+                : [],
+            }))
+          : [createEmptyStockInBill()];
+      setBillDrafts(restoredBills);
+      setActiveBillId(
+        p.activeBillId && restoredBills.some((b) => b.id === p.activeBillId)
+          ? p.activeBillId
+          : restoredBills[0].id,
+      );
+      setFormErrors({});
+      setShowHeldPurchases(false);
+      toast.success("Held Stock In resumed — save when ready");
+    } finally {
+      setResumingHoldIndex(null);
+    }
   };
 
   const handleSave = async () => {
@@ -2506,8 +2781,32 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                 ) : null}
 
                 <div className="flex gap-2">
-                  <Button type="button" variant="outline" className="h-9 flex-1" onClick={() => setTab("history")}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 flex-1"
+                    onClick={() => setTab("history")}
+                  >
                     Cancel
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="h-9 flex-1"
+                    disabled={
+                      isHoldingPurchase ||
+                      saving ||
+                      allDraftLines.length === 0 ||
+                      !warehouseBranchId
+                    }
+                    onClick={() => void handleHoldPurchase()}
+                  >
+                    {isHoldingPurchase ? (
+                      <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Pause className="mr-1.5 h-3.5 w-3.5" />
+                    )}
+                    {isHoldingPurchase ? "Holding…" : "Hold"}
                   </Button>
                   <Button
                     onClick={handleSave}
@@ -2522,6 +2821,70 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                         : `Save${totals.value > 0 ? ` · Rs ${formatMoney(totals.value)}` : ""}`}
                   </Button>
                 </div>
+
+                {holdPurchases.length > 0 ? (
+                  <div className="space-y-1.5 border-t border-slate-100 pt-2">
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between text-[11px] font-medium text-slate-600 hover:text-slate-900"
+                      onClick={() => setShowHeldPurchases((v) => !v)}
+                    >
+                      <span>
+                        Held Stock In ({holdPurchases.length})
+                        {holdPurchasesLoading ? " · loading…" : ""}
+                      </span>
+                      <ChevronDown
+                        className={cn(
+                          "h-3.5 w-3.5 transition-transform",
+                          showHeldPurchases && "rotate-180",
+                        )}
+                      />
+                    </button>
+                    {showHeldPurchases ? (
+                      <ul className="max-h-40 space-y-1 overflow-y-auto">
+                        {holdPurchases.map((hp, index) => (
+                          <li
+                            key={hp.id}
+                            className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-[11px] font-medium text-slate-800">
+                                {hp.supplierName || "No supplier"} · {hp.lineCount} line
+                                {hp.lineCount === 1 ? "" : "s"}
+                              </p>
+                              <p className="text-[10px] tabular-nums text-slate-500">
+                                {new Date(hp.createdAt).toLocaleString(undefined, {
+                                  dateStyle: "short",
+                                  timeStyle: "short",
+                                })}
+                              </p>
+                            </div>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-7 px-2 text-[11px]"
+                              disabled={resumingHoldIndex === index}
+                              onClick={() => void handleResumeHoldPurchase(index)}
+                            >
+                              {resumingHoldIndex === index ? "…" : "Resume"}
+                            </Button>
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="ghost"
+                              className="h-7 w-7 p-0 text-slate-400 hover:text-red-600"
+                              onClick={() => void deleteHoldPurchase(index)}
+                              title="Delete hold"
+                            >
+                              <Trash2 className="h-3.5 w-3.5" />
+                            </Button>
+                          </li>
+                        ))}
+                      </ul>
+                    ) : null}
+                  </div>
+                ) : null}
               </div>
             }
           />
@@ -2610,7 +2973,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             setEditForm(null);
           }
         }}
-        size="lg"
+        size="2xl"
       >
         <DetailSheetHeader
           title={editingDetail ? "Edit purchase" : "Stock In receipt"}
@@ -2622,7 +2985,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                 : "Supplier delivery details"
           }
         />
-        <DetailSheetBody>
+        <DetailSheetBody className="px-6 py-5">
 
           {detailLoading ? (
             <div className="flex flex-col items-center justify-center py-20 px-6 gap-3">
@@ -2663,9 +3026,75 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                     s + (Number(l.quantity) || 0) * (Number(l.costPrice) || 0),
                   0,
                 );
+                const editPaidNow =
+                  editForm.paymentMode === "CASH"
+                    ? editBillValue
+                    : editForm.paymentMode === "CREDIT"
+                      ? 0
+                      : Number(editForm.paidNowInput) || 0;
+                const editCredit = Math.max(0, editBillValue - editPaidNow);
+                const productsNotOnBill = products.filter(
+                  (p) => !editForm.lines.some((l) => l.productId === p.id),
+                );
+                const editAddProductFiltered = (() => {
+                  const q = editAddProductQuery.trim();
+                  const list = q
+                    ? productsNotOnBill.filter((p) => productMatchesSearch(p as any, q))
+                    : productsNotOnBill;
+                  return list.slice(0, 80);
+                })();
+                const editAddProductSelected = products.find(
+                  (p) => p.id === editAddProductId,
+                );
                 return (
-                  <div className="px-6 py-5 space-y-5">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <div className="space-y-5">
+                    <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-gray-500">
+                          Supplier <span className="text-red-500">*</span>
+                        </Label>
+                        <Select
+                          value={editForm.supplierId}
+                          onValueChange={(v) =>
+                            setEditForm((f) => (f ? { ...f, supplierId: v } : f))
+                          }
+                        >
+                          <SelectTrigger className="h-9">
+                            <SelectValue placeholder="Choose supplier" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {visibleSuppliers.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                {s.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-gray-500">
+                          Branch <span className="text-red-500">*</span>
+                        </Label>
+                        <Select
+                          value={editForm.warehouseBranchId}
+                          onValueChange={(v) =>
+                            setEditForm((f) =>
+                              f ? { ...f, warehouseBranchId: v } : f,
+                            )
+                          }
+                        >
+                          <SelectTrigger className="h-9">
+                            <SelectValue placeholder="Select branch" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {branches.map((b) => (
+                              <SelectItem key={b.id} value={b.id}>
+                                {b.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                       <div className="space-y-1.5">
                         <Label className="text-xs text-gray-500">Invoice / reference</Label>
                         <Input
@@ -2716,120 +3145,390 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                           </SelectContent>
                         </Select>
                       </div>
-                      <DetailRow
-                        label="Branch / Supplier"
-                        value={`${purchaseDetail.warehouse_branch?.name || "—"} · ${
-                          purchaseDetail.supplier?.name &&
-                          !isUnknownName(purchaseDetail.supplier.name)
-                            ? purchaseDetail.supplier.name
-                            : "—"
-                        }`}
-                      />
                     </div>
 
-                    <div className="border border-gray-200 rounded-xl overflow-hidden">
-                      <div className="bg-slate-50 px-4 py-2 border-b border-gray-200">
-                        <span className="text-xs font-semibold text-gray-700 uppercase tracking-wider">
+                    <div className="space-y-2.5 rounded-xl border border-slate-200 bg-slate-50/80 p-3.5">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Label className="text-xs text-gray-500">Payment</Label>
+                        <div className="inline-flex rounded-md border border-slate-200 bg-white p-0.5">
+                          {(
+                            [
+                              { key: "CASH" as const, label: "Paid" },
+                              { key: "CREDIT" as const, label: "Credit" },
+                              { key: "MIX" as const, label: "Part" },
+                            ] as const
+                          ).map((opt) => (
+                            <button
+                              key={opt.key}
+                              type="button"
+                              onClick={() =>
+                                setEditForm((f) =>
+                                  f
+                                    ? {
+                                        ...f,
+                                        paymentMode: opt.key,
+                                        paidNowInput:
+                                          opt.key !== "MIX" ? "" : f.paidNowInput,
+                                      }
+                                    : f,
+                                )
+                              }
+                              className={cn(
+                                "rounded px-2.5 py-1 text-[11px] font-semibold transition-colors",
+                                editForm.paymentMode === opt.key
+                                  ? "bg-slate-900 text-white shadow-sm"
+                                  : "text-slate-600 hover:bg-slate-50",
+                              )}
+                            >
+                              {opt.label}
+                            </button>
+                          ))}
+                        </div>
+                        {editForm.paymentMode === "MIX" ? (
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.01"
+                            value={editForm.paidNowInput}
+                            onChange={(e) =>
+                              setEditForm((f) =>
+                                f ? { ...f, paidNowInput: e.target.value } : f,
+                              )
+                            }
+                            placeholder="Paid now"
+                            className="h-8 w-28 bg-white text-xs tabular-nums"
+                          />
+                        ) : null}
+                        <p className="ml-auto text-xs tabular-nums text-slate-500">
+                          Now{" "}
+                          <span className="font-semibold text-emerald-700">
+                            Rs {formatMoney(editPaidNow)}
+                          </span>
+                          {" · "}Credit{" "}
+                          <span
+                            className={cn(
+                              "font-semibold",
+                              editCredit > 0 ? "text-rose-700" : "text-slate-800",
+                            )}
+                          >
+                            Rs {formatMoney(editCredit)}
+                          </span>
+                        </p>
+                      </div>
+                      {editForm.paymentMode !== "CREDIT" ? (
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-[9rem_minmax(0,1.6fr)_minmax(0,1fr)]">
+                          <div className="space-y-1">
+                            <Label className="text-[11px] text-slate-500">Method</Label>
+                            <Select
+                              value={editForm.settleMethod}
+                              onValueChange={(v) => {
+                                const method = v as EditPurchaseForm["settleMethod"];
+                                setEditSettleMethodForAccounts(method);
+                                setEditForm((f) =>
+                                  f ? { ...f, settleMethod: method } : f,
+                                );
+                              }}
+                            >
+                              <SelectTrigger className="h-9 w-full bg-white text-sm">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="CASH">Cash</SelectItem>
+                                <SelectItem value="BANK_TRANSFER">Bank transfer</SelectItem>
+                                <SelectItem value="CHEQUE">Cheque</SelectItem>
+                                <SelectItem value="CARD">Card</SelectItem>
+                                <SelectItem value="OTHER">Other</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[11px] text-slate-500">Paid from</Label>
+                            <PaidFromSelect
+                              value={editPaidFrom.paidFrom}
+                              onChange={editPaidFrom.setPaidFrom}
+                              accounts={editPaidFrom.accounts}
+                              triggerClassName="h-9 w-full bg-white text-sm"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-[11px] text-slate-500">Txn ref</Label>
+                            <Input
+                              value={editForm.settleReference}
+                              onChange={(e) =>
+                                setEditForm((f) =>
+                                  f ? { ...f, settleReference: e.target.value } : f,
+                                )
+                              }
+                              placeholder="Optional"
+                              className="h-9 w-full bg-white text-sm"
+                            />
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className="overflow-hidden rounded-xl border border-gray-200">
+                      <div className="flex items-center justify-between gap-2 border-b border-gray-200 bg-slate-50 px-4 py-2.5">
+                        <span className="text-xs font-semibold uppercase tracking-wider text-gray-700">
                           Line items
                         </span>
+                        <span className="text-[11px] tabular-nums text-slate-500">
+                          {editForm.lines.length} line
+                          {editForm.lines.length === 1 ? "" : "s"}
+                        </span>
                       </div>
-                      <Table>
-                        <TableHeader>
-                          <TableRow className="bg-white hover:bg-white">
-                            <TableHead className="text-xs font-semibold text-gray-600">
-                              Product
-                            </TableHead>
-                            <TableHead className="text-xs font-semibold text-gray-600 text-right w-28">
-                              Qty
-                            </TableHead>
-                            <TableHead className="text-xs font-semibold text-gray-600 text-right w-32">
-                              Cost
-                            </TableHead>
-                            <TableHead className="text-xs font-semibold text-gray-600 text-right w-32">
-                              Sale
-                            </TableHead>
-                            <TableHead className="text-xs font-semibold text-gray-600 text-right">
-                              Total
-                            </TableHead>
-                          </TableRow>
-                        </TableHeader>
-                        <TableBody>
-                          {editForm.lines.map((line, idx) => {
-                            const lqty = Number(line.quantity) || 0;
-                            const lcost = Number(line.costPrice) || 0;
-                            return (
-                              <TableRow key={line.id}>
-                                <TableCell className="text-sm font-medium text-gray-900">
-                                  {line.productName}
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <Input
-                                    type="number"
-                                    min={0.01}
-                                    step="any"
-                                    value={line.quantity}
-                                    onChange={(e) =>
-                                      setEditForm((f) => {
-                                        if (!f) return f;
-                                        const lines = [...f.lines];
-                                        lines[idx] = {
-                                          ...lines[idx],
-                                          quantity: e.target.value,
-                                        };
-                                        return { ...f, lines };
-                                      })
-                                    }
-                                    className="h-8 text-right tabular-nums"
-                                  />
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <Input
-                                    type="number"
-                                    min={0}
-                                    step="any"
-                                    value={line.costPrice}
-                                    onChange={(e) =>
-                                      setEditForm((f) => {
-                                        if (!f) return f;
-                                        const lines = [...f.lines];
-                                        lines[idx] = {
-                                          ...lines[idx],
-                                          costPrice: e.target.value,
-                                        };
-                                        return { ...f, lines };
-                                      })
-                                    }
-                                    className="h-8 text-right tabular-nums"
-                                  />
-                                </TableCell>
-                                <TableCell className="text-right">
-                                  <Input
-                                    type="number"
-                                    min={0}
-                                    step="any"
-                                    value={line.salePrice}
-                                    onChange={(e) =>
-                                      setEditForm((f) => {
-                                        if (!f) return f;
-                                        const lines = [...f.lines];
-                                        lines[idx] = {
-                                          ...lines[idx],
-                                          salePrice: e.target.value,
-                                        };
-                                        return { ...f, lines };
-                                      })
-                                    }
-                                    className="h-8 text-right tabular-nums"
-                                  />
-                                </TableCell>
-                                <TableCell className="text-sm font-semibold text-right tabular-nums">
-                                  {formatMoney(lqty * lcost)}
-                                </TableCell>
-                              </TableRow>
+                      <div className="overflow-x-auto">
+                        <Table className="w-full min-w-[720px] table-fixed">
+                          <TableHeader>
+                            <TableRow className="bg-white hover:bg-white">
+                              <TableHead className="w-auto text-xs font-semibold text-gray-600">
+                                Product
+                              </TableHead>
+                              <TableHead className="w-[88px] text-right text-xs font-semibold text-gray-600">
+                                Qty
+                              </TableHead>
+                              <TableHead className="w-[112px] text-right text-xs font-semibold text-gray-600">
+                                Cost
+                              </TableHead>
+                              <TableHead className="w-[112px] text-right text-xs font-semibold text-gray-600">
+                                Sale
+                              </TableHead>
+                              <TableHead className="w-[104px] text-right text-xs font-semibold text-gray-600">
+                                Total
+                              </TableHead>
+                              <TableHead className="w-11" />
+                            </TableRow>
+                          </TableHeader>
+                          <TableBody>
+                            {editForm.lines.map((line, idx) => {
+                              const lqty = Number(line.quantity) || 0;
+                              const lcost = Number(line.costPrice) || 0;
+                              return (
+                                <TableRow key={line.clientKey} className="align-top">
+                                  <TableCell className="py-2.5 pr-3">
+                                    <p
+                                      className="line-clamp-2 text-sm font-medium leading-snug text-gray-900"
+                                      title={line.productName}
+                                    >
+                                      {line.productName}
+                                    </p>
+                                    {!line.id ? (
+                                      <span className="mt-0.5 inline-block text-[10px] font-medium text-emerald-600">
+                                        New line
+                                      </span>
+                                    ) : null}
+                                  </TableCell>
+                                  <TableCell className="py-2.5 text-right">
+                                    <Input
+                                      type="number"
+                                      min={0.01}
+                                      step="any"
+                                      value={line.quantity}
+                                      onChange={(e) =>
+                                        setEditForm((f) => {
+                                          if (!f) return f;
+                                          const lines = [...f.lines];
+                                          lines[idx] = {
+                                            ...lines[idx],
+                                            quantity: e.target.value,
+                                          };
+                                          return { ...f, lines };
+                                        })
+                                      }
+                                      className="ml-auto h-8 w-full max-w-[4.5rem] text-right tabular-nums"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="py-2.5 text-right">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      step="any"
+                                      value={line.costPrice}
+                                      onChange={(e) =>
+                                        setEditForm((f) => {
+                                          if (!f) return f;
+                                          const lines = [...f.lines];
+                                          lines[idx] = {
+                                            ...lines[idx],
+                                            costPrice: e.target.value,
+                                          };
+                                          return { ...f, lines };
+                                        })
+                                      }
+                                      className="ml-auto h-8 w-full max-w-[6.5rem] text-right tabular-nums"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="py-2.5 text-right">
+                                    <Input
+                                      type="number"
+                                      min={0}
+                                      step="any"
+                                      value={line.salePrice}
+                                      onChange={(e) =>
+                                        setEditForm((f) => {
+                                          if (!f) return f;
+                                          const lines = [...f.lines];
+                                          lines[idx] = {
+                                            ...lines[idx],
+                                            salePrice: e.target.value,
+                                          };
+                                          return { ...f, lines };
+                                        })
+                                      }
+                                      className="ml-auto h-8 w-full max-w-[6.5rem] text-right tabular-nums"
+                                    />
+                                  </TableCell>
+                                  <TableCell className="py-2.5 text-right text-sm font-semibold tabular-nums text-slate-900">
+                                    {formatMoney(lqty * lcost)}
+                                  </TableCell>
+                                  <TableCell className="py-2.5 text-right">
+                                    <Button
+                                      type="button"
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-8 w-8 text-slate-400 hover:text-red-600"
+                                      disabled={editForm.lines.length <= 1}
+                                      onClick={() =>
+                                        setEditForm((f) =>
+                                          f
+                                            ? {
+                                                ...f,
+                                                lines: f.lines.filter(
+                                                  (_, i) => i !== idx,
+                                                ),
+                                              }
+                                            : f,
+                                        )
+                                      }
+                                      title="Remove line"
+                                    >
+                                      <Trash2 className="h-3.5 w-3.5" />
+                                    </Button>
+                                  </TableCell>
+                                </TableRow>
+                              );
+                            })}
+                          </TableBody>
+                        </Table>
+                      </div>
+                      <div className="flex flex-wrap items-end gap-2 border-t border-gray-200 bg-white px-4 py-3">
+                        <div className="min-w-[14rem] flex-1 space-y-1">
+                          <Label className="text-[11px] text-gray-500">Add product</Label>
+                          <Popover
+                            open={editAddProductOpen}
+                            onOpenChange={(open) => {
+                              setEditAddProductOpen(open);
+                              if (!open) setEditAddProductQuery("");
+                            }}
+                          >
+                            <PopoverTrigger asChild>
+                              <Button
+                                type="button"
+                                variant="outline"
+                                role="combobox"
+                                aria-expanded={editAddProductOpen}
+                                className="h-9 w-full justify-between font-normal"
+                              >
+                                <span className="truncate text-left">
+                                  {editAddProductSelected
+                                    ? formatProductSearchLabel(editAddProductSelected as any)
+                                    : "Search & choose product…"}
+                                </span>
+                                <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                              </Button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              className="w-[var(--radix-popover-trigger-width)] min-w-[20rem] p-0"
+                              align="start"
+                            >
+                              <Command shouldFilter={false}>
+                                <CommandInput
+                                  placeholder="Search name, SKU, barcode…"
+                                  value={editAddProductQuery}
+                                  onValueChange={setEditAddProductQuery}
+                                />
+                                <CommandList>
+                                  <CommandEmpty>
+                                    {productsNotOnBill.length === 0
+                                      ? "All products are already on this bill"
+                                      : "No products match"}
+                                  </CommandEmpty>
+                                  <CommandGroup>
+                                    {editAddProductFiltered.map((p) => (
+                                      <CommandItem
+                                        key={p.id}
+                                        value={p.id}
+                                        onSelect={() => {
+                                          setEditAddProductId(p.id);
+                                          setEditAddProductOpen(false);
+                                          setEditAddProductQuery("");
+                                        }}
+                                      >
+                                        <Check
+                                          className={cn(
+                                            "mr-2 h-4 w-4 shrink-0",
+                                            editAddProductId === p.id
+                                              ? "opacity-100"
+                                              : "opacity-0",
+                                          )}
+                                        />
+                                        <span className="truncate">
+                                          {formatProductSearchLabel(p as any)}
+                                        </span>
+                                      </CommandItem>
+                                    ))}
+                                  </CommandGroup>
+                                </CommandList>
+                              </Command>
+                            </PopoverContent>
+                          </Popover>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="h-9"
+                          disabled={!editAddProductId}
+                          onClick={() => {
+                            const product = products.find(
+                              (p) => p.id === editAddProductId,
                             );
-                          })}
-                        </TableBody>
-                      </Table>
+                            if (!product) return;
+                            const cost =
+                              Number((product as any).cost) ||
+                              Number((product as any).purchase_price) ||
+                              0;
+                            const sale =
+                              Number((product as any).price) ||
+                              Number((product as any).sale_price) ||
+                              cost;
+                            setEditForm((f) =>
+                              f
+                                ? {
+                                    ...f,
+                                    lines: [
+                                      ...f.lines,
+                                      {
+                                        clientKey: `new_${Date.now()}_${Math.random()
+                                          .toString(36)
+                                          .slice(2, 7)}`,
+                                        productId: product.id,
+                                        productName: product.name,
+                                        quantity: "1",
+                                        costPrice: String(cost),
+                                        salePrice: String(sale),
+                                      },
+                                    ],
+                                  }
+                                : f,
+                            );
+                            setEditAddProductId("");
+                            setEditAddProductQuery("");
+                          }}
+                        >
+                          <Plus className="mr-1.5 h-3.5 w-3.5" />
+                          Add line
+                        </Button>
+                      </div>
                       <div className="bg-slate-50 px-4 py-3 flex justify-between items-center border-t border-gray-200">
                         <span className="text-xs text-gray-500">
                           {formatQty(editBillQty)} units · {editForm.lines.length} line
@@ -2882,15 +3581,16 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                     </div>
 
                     <p className="text-xs text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2">
-                      Changing quantity adjusts on-hand stock by the difference. You cannot
-                      reduce below stock already sold or returned.
+                      Saving syncs stock, supplier ledger, and cash/bank for this bill.
+                      Changing branch moves on-hand for these lines. You cannot reduce qty
+                      below returned stock.
                     </p>
                   </div>
                 );
               }
 
               return (
-                <div className="px-5 sm:px-6 py-5 space-y-5">
+                <div className="space-y-5">
                   {/* Receipt header card */}
                   <div className="rounded-xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white p-4 sm:p-5 shadow-sm">
                     <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2996,52 +3696,60 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                         {formatQty(billQty)} units
                       </span>
                     </div>
-                    <Table>
-                      <TableHeader>
-                        <TableRow className="hover:bg-white">
-                          <TableHead className="text-xs font-semibold text-slate-600">
-                            Product
-                          </TableHead>
-                          <TableHead className="text-center text-xs font-semibold text-slate-600">
-                            SKU
-                          </TableHead>
-                          <TableHead className="text-right text-xs font-semibold text-slate-600">
-                            Qty
-                          </TableHead>
-                          <TableHead className="text-right text-xs font-semibold text-slate-600">
-                            Cost
-                          </TableHead>
-                          <TableHead className="text-right text-xs font-semibold text-slate-600">
-                            Total
-                          </TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {billLines.map((line: any) => {
-                          const lqty = Number(line.quantity) || 0;
-                          const lcost = Number(line.cost_price) || 0;
-                          return (
-                            <TableRow key={line.id} className="border-slate-100">
-                              <TableCell className="text-sm font-medium text-slate-900">
-                                {line.product?.name || "—"}
-                              </TableCell>
-                              <TableCell className="text-center font-mono text-xs text-slate-500">
-                                {line.product?.sku || "—"}
-                              </TableCell>
-                              <TableCell className="text-right text-sm tabular-nums">
-                                {formatQty(lqty)}
-                              </TableCell>
-                              <TableCell className="text-right text-sm tabular-nums text-slate-700">
-                                {formatMoney(lcost)}
-                              </TableCell>
-                              <TableCell className="text-right text-sm font-semibold tabular-nums text-slate-900">
-                                {formatMoney(lqty * lcost)}
-                              </TableCell>
-                            </TableRow>
-                          );
-                        })}
-                      </TableBody>
-                    </Table>
+                    <div className="overflow-x-auto">
+                      <Table className="w-full min-w-[560px] table-fixed">
+                        <TableHeader>
+                          <TableRow className="hover:bg-white">
+                            <TableHead className="w-auto text-xs font-semibold text-slate-600">
+                              Product
+                            </TableHead>
+                            <TableHead className="w-28 text-center text-xs font-semibold text-slate-600">
+                              SKU
+                            </TableHead>
+                            <TableHead className="w-20 text-right text-xs font-semibold text-slate-600">
+                              Qty
+                            </TableHead>
+                            <TableHead className="w-24 text-right text-xs font-semibold text-slate-600">
+                              Cost
+                            </TableHead>
+                            <TableHead className="w-28 text-right text-xs font-semibold text-slate-600">
+                              Total
+                            </TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {billLines.map((line: any) => {
+                            const lqty = Number(line.quantity) || 0;
+                            const lcost = Number(line.cost_price) || 0;
+                            const name = line.product?.name || "—";
+                            return (
+                              <TableRow key={line.id} className="border-slate-100">
+                                <TableCell className="py-2.5 pr-3">
+                                  <p
+                                    className="line-clamp-2 text-sm font-medium leading-snug text-slate-900"
+                                    title={name}
+                                  >
+                                    {name}
+                                  </p>
+                                </TableCell>
+                                <TableCell className="text-center font-mono text-xs text-slate-500">
+                                  {line.product?.sku || "—"}
+                                </TableCell>
+                                <TableCell className="text-right text-sm tabular-nums">
+                                  {formatQty(lqty)}
+                                </TableCell>
+                                <TableCell className="text-right text-sm tabular-nums text-slate-700">
+                                  {formatMoney(lcost)}
+                                </TableCell>
+                                <TableCell className="text-right text-sm font-semibold tabular-nums text-slate-900">
+                                  {formatMoney(lqty * lcost)}
+                                </TableCell>
+                              </TableRow>
+                            );
+                          })}
+                        </TableBody>
+                      </Table>
+                    </div>
                     <div className="flex items-center justify-between border-t border-slate-200 bg-slate-50 px-4 py-3">
                       <span className="text-xs text-slate-500">
                         {formatQty(billQty)} units · {billLines.length} line

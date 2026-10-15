@@ -11,7 +11,12 @@ router.post('/', (0, validation_middleware_1.validate)(purchase_validation_1.cre
 router.post('/bulk', (0, validation_middleware_1.validate)(purchase_validation_1.createBulkPurchaseSchema), purchase_controller_1.createBulkPurchase);
 router.get('/', (0, validation_middleware_1.validate)(purchase_validation_1.listPurchasesSchema), purchase_controller_1.listPurchases);
 router.get('/stats', purchase_controller_1.getMonthlyStats);
+router.get('/hold', (0, validation_middleware_1.validate)(purchase_validation_1.listHoldPurchasesSchema), purchase_controller_1.getHoldPurchases);
+router.post('/hold', (0, validation_middleware_1.validate)(purchase_validation_1.createHoldPurchaseSchema), purchase_controller_1.createHoldPurchase);
+router.post('/hold/:holdId/retrieve', (0, validation_middleware_1.validate)(purchase_validation_1.holdPurchaseParamSchema), purchase_controller_1.retrieveHoldPurchase);
+router.delete('/hold/:holdId', (0, validation_middleware_1.validate)(purchase_validation_1.holdPurchaseParamSchema), purchase_controller_1.deleteHoldPurchase);
 router.post('/bills/:anchorId/lines', (0, validation_middleware_1.validate)(purchase_validation_1.appendBillLineSchema), purchase_controller_1.appendBillLine);
+router.patch('/bills/:anchorId', (0, validation_middleware_1.validate)(purchase_validation_1.updateStockInBillSchema), purchase_controller_1.updateStockInBill);
 router.delete('/bills/:anchorId', (0, validation_middleware_1.validate)(purchase_validation_1.billAnchorParamSchema), purchase_controller_1.deleteBill);
 router.get('/:id', purchase_controller_1.getPurchaseById);
 router.patch('/:id', (0, validation_middleware_1.validate)(purchase_validation_1.updatePurchaseSchema), purchase_controller_1.updatePurchase);
