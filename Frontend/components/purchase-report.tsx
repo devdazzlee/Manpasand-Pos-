@@ -116,8 +116,19 @@ const TYPE_META: Record<Exclude<LineType, "ALL">, { label: string; tone: string 
 const DEFAULT_PRESET = "last30" as const satisfies Exclude<Preset, "custom">;
 
 const rangeFor = (preset: Exclude<Preset, "custom">) => rangeForPreset(preset);
+/** Amount only — no PKR/Rs prefix (Pakistani POS; currency is implied). */
 const money = (value: number) =>
-  `PKR ${Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+  Number(value || 0).toLocaleString("en-US", {
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  });
+/** Compact Lac / Crore label for large totals (1 Lac = 1,00,000 · 1 Cr = 1,00,00,000). */
+const moneyScale = (value: number): string | null => {
+  const n = Math.abs(Number(value || 0));
+  if (n >= 10_000_000) return `${(n / 10_000_000).toFixed(2)} Cr`;
+  if (n >= 100_000) return `${(n / 100_000).toFixed(2)} Lac`;
+  return null;
+};
 const qty = (value: number) => Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 2 });
 const periodLabel = (from: string, to: string) =>
   from === "2000-01-01"
@@ -376,17 +387,83 @@ export function PurchaseReport() {
     }
   };
 
-  const heroCards: Array<{ label: string; value: string; hint: string; icon: ComponentType<{ className?: string }>; tone: string; accent: string }> = [
-    { label: "Net purchases", value: money(totals?.amount || 0), hint: "After purchase returns", icon: Wallet, tone: "bg-emerald-50 text-emerald-600", accent: "bg-emerald-500" },
-    { label: "Vouchers", value: qty(voucherCount), hint: `Avg ${money(avgVoucher)} each`, icon: Receipt, tone: "bg-blue-50 text-blue-600", accent: "bg-blue-500" },
-    { label: "Net quantity", value: qty(totals?.quantity || 0), hint: `${qty(totals?.itemCount || 0)} different items`, icon: Boxes, tone: "bg-violet-50 text-violet-600", accent: "bg-violet-500" },
-    { label: "Vendors", value: qty(totals?.vendorCount || 0), hint: "Supplied in this period", icon: Users, tone: "bg-amber-50 text-amber-600", accent: "bg-amber-500" },
+  const netPurchases = totals?.amount || 0;
+  const netPurchasesScale = moneyScale(netPurchases);
+  const purchasesScale = moneyScale(purchasesAmount);
+  const heroCards: Array<{
+    label: string;
+    value: string;
+    hint: string;
+    scale?: string | null;
+    icon: ComponentType<{ className?: string }>;
+    tone: string;
+    accent: string;
+  }> = [
+    {
+      label: "Net purchases",
+      value: money(netPurchases),
+      scale: netPurchasesScale,
+      hint: "After purchase returns",
+      icon: Wallet,
+      tone: "bg-emerald-50 text-emerald-600",
+      accent: "bg-emerald-500",
+    },
+    {
+      label: "Vouchers",
+      value: qty(voucherCount),
+      hint: `Avg ${money(avgVoucher)} each`,
+      icon: Receipt,
+      tone: "bg-blue-50 text-blue-600",
+      accent: "bg-blue-500",
+    },
+    {
+      label: "Net quantity",
+      value: qty(totals?.quantity || 0),
+      hint: `${qty(totals?.itemCount || 0)} different items`,
+      icon: Boxes,
+      tone: "bg-violet-50 text-violet-600",
+      accent: "bg-violet-500",
+    },
+    {
+      label: "Vendors",
+      value: qty(totals?.vendorCount || 0),
+      hint: "Supplied in this period",
+      icon: Users,
+      tone: "bg-amber-50 text-amber-600",
+      accent: "bg-amber-500",
+    },
   ];
   const minorCards = [
-    { label: "Purchases", value: money(purchasesAmount), icon: ShoppingCart, tone: "text-emerald-500", valueClass: undefined as string | undefined },
-    { label: "Returns to vendor", value: returnsAmount ? `− ${money(returnsAmount)}` : money(0), icon: Undo2, tone: "text-rose-500", valueClass: returnsAmount ? "text-rose-700" : undefined },
-    { label: "Units purchased", value: qty(totals?.purchasesQuantity ?? totals?.quantity ?? 0), icon: Package, tone: "text-sky-500", valueClass: undefined },
-    { label: "Units returned", value: qty(totals?.returnsQuantity ?? 0), icon: Truck, tone: "text-slate-500", valueClass: undefined },
+    {
+      label: "Purchases",
+      value: money(purchasesAmount),
+      scale: purchasesScale,
+      icon: ShoppingCart,
+      tone: "text-emerald-500",
+      valueClass: undefined as string | undefined,
+    },
+    {
+      label: "Returns to vendor",
+      value: returnsAmount ? `− ${money(returnsAmount)}` : money(0),
+      scale: moneyScale(returnsAmount),
+      icon: Undo2,
+      tone: "text-rose-500",
+      valueClass: returnsAmount ? "text-rose-700" : undefined,
+    },
+    {
+      label: "Units purchased",
+      value: qty(totals?.purchasesQuantity ?? totals?.quantity ?? 0),
+      icon: Package,
+      tone: "text-sky-500",
+      valueClass: undefined,
+    },
+    {
+      label: "Units returned",
+      value: qty(totals?.returnsQuantity ?? 0),
+      icon: Truck,
+      tone: "text-slate-500",
+      valueClass: undefined,
+    },
   ];
 
   const filterLabelCls = "text-xs font-semibold text-indigo-900/80";
@@ -478,12 +555,23 @@ export function PurchaseReport() {
                 <div key={card.label} className="relative min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
                   <span className={cn("absolute inset-x-0 top-0 h-1", card.accent)} aria-hidden />
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex-1">
                       <p className="text-xs font-medium uppercase tracking-wider text-slate-500">{card.label}</p>
-                      <p className={cn("mt-2 truncate text-2xl font-semibold tracking-tight tabular-nums text-slate-900 transition-opacity", isRefreshing && "opacity-40")}>
+                      <p
+                        className={cn(
+                          "mt-2 break-words text-xl font-semibold leading-snug tracking-tight tabular-nums text-slate-900 transition-opacity sm:text-2xl",
+                          isRefreshing && "opacity-40",
+                        )}
+                        title={card.value}
+                      >
                         {card.value}
                       </p>
-                      <p className="mt-1 truncate text-xs text-slate-500">{card.hint}</p>
+                      {card.scale ? (
+                        <p className="mt-0.5 text-xs font-semibold tabular-nums text-emerald-700">
+                          ≈ {card.scale}
+                        </p>
+                      ) : null}
+                      <p className="mt-1 text-xs text-slate-500">{card.hint}</p>
                     </div>
                     <div className={cn("flex h-10 w-10 shrink-0 items-center justify-center rounded-lg", card.tone)}>
                       {isRefreshing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Icon className="h-5 w-5" />}
@@ -507,7 +595,23 @@ export function PurchaseReport() {
               {isFirstLoad ? (
                 <Skeleton className="mt-2 h-5 w-24" />
               ) : (
-                <p className={cn("mt-1 truncate text-base font-semibold tabular-nums text-slate-900 transition-opacity", card.valueClass, isRefreshing && "opacity-40")}>{card.value}</p>
+                <>
+                  <p
+                    className={cn(
+                      "mt-1 break-words text-base font-semibold leading-snug tabular-nums text-slate-900 transition-opacity",
+                      card.valueClass,
+                      isRefreshing && "opacity-40",
+                    )}
+                    title={card.value}
+                  >
+                    {card.value}
+                  </p>
+                  {card.scale ? (
+                    <p className="mt-0.5 text-[11px] font-medium tabular-nums text-slate-500">
+                      ≈ {card.scale}
+                    </p>
+                  ) : null}
+                </>
               )}
             </div>
           );

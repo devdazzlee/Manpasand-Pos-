@@ -1,0 +1,608 @@
+Purchase Report
+16 Sep 2026 – 15 Oct 2026
+•
+All vendors
+
+Refresh
+Print
+Export
+Net purchases
+
+1,496,300.00
+
+≈ 14.96 Lac
+
+After purchase returns
+
+Vouchers
+
+5
+
+Avg 299,260.00 each
+
+Net quantity
+
+202
+
+81 different items
+
+Vendors
+
+2
+
+Supplied in this period
+
+Purchases
+
+1,496,300.00
+
+≈ 14.96 Lac
+
+Returns to vendor
+
+0.00
+
+Units purchased
+
+202
+
+Units returned
+
+0
+
+Filters
+
+Pick a period, then report by vendor or by stock item
+
+Period
+All dates
+Today
+Yesterday
+Last 7 Days
+Last 30 Days
+Custom Range
+Report by
+Vendor
+Stock item
+Vendor
+All vendors
+Branch
+All branches
+Top vendors
+Biggest suppliers by amount · click to drill in
+
+
+1
+Araast
+
+1,351,000.00
+
+4 vouchers · 187 units
+
+
+2
+Pehnawa
+
+145,300.00
+
+1 voucher · 15 units
+
+Top items
+Most bought by amount · click to drill in
+
+
+1
+Alizay Saad Luxury Raw Silk Embroidered 3 Piece Unstitched - Ivories Festive · Unknown · Unknown
+
+66,000.00
+
+8 units
+
+
+2
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+55,500.00
+
+6 units
+
+
+3
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+55,500.00
+
+6 units
+
+
+4
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+46,200.00
+
+7 units
+
+
+5
+Muse Lambs Crème Embellished Raw Silk Addawork Hand Embellished Wedding Collection-Beige · Unknown · Unknown
+
+44,000.00
+
+4 units
+
+Purchase lines
+81 lines in this period
+
+Search voucher, vendor, item…
+
+Newest first
+All
+81
+Purchases
+81
+Returns
+0
+Date	Voucher	Type	Vendor	Item	Qty	Rate	Amount
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+QALAMKAR SB09 · Unknown · Unknown
+
+396666467
+
+5 Pcs	6,800.00	34,000.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+QALAMKAR SB09 · Unknown · Unknown
+
+310074886
+
+5 Pcs	6,800.00	34,000.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+QALAMKAR SB09 · Unknown · Unknown
+
+157676237
+
+2 Pcs	6,800.00	13,600.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+CRIMSON-CR-1790 · Unknown · Unknown
+
+990114281
+
+2 Pcs	4,200.00	8,400.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Qalamkar - Zarish - Luxury Lawn Embroidered 3 Piece Unstitched · Unknown · Unknown
+
+967126199
+
+2 Pcs	7,000.00	14,000.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+Rosepink-M
+
+3 Pcs	6,600.00	19,800.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+CRIMSON-CR-1790 · Unknown · Unknown
+
+746906732
+
+3 Pcs	4,200.00	12,600.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+Rosepink-S
+
+7 Pcs	6,600.00	46,200.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+Rosepink-L
+
+5 Pcs	6,600.00	33,000.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Qalamkar - Zarish - Luxury Lawn Embroidered 3 Piece Unstitched · Unknown · Unknown
+
+892975573
+
+2 Pcs	7,000.00	14,000.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Qalamkar - Zarish - Luxury Lawn Embroidered 3 Piece Unstitched · Unknown · Unknown
+
+890045988
+
+2 Pcs	7,000.00	14,000.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Qalamkar Luxury Lawn Embroidered 3 Piece Unstitched FK-15 Hannah · Unknown · Unknown
+
+483916590
+
+2 Pcs	7,200.00	14,400.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Qalamkar Luxury Lawn Embroidered 3 Piece Unstitched FK-15 Hannah · Unknown · Unknown
+
+461952694
+
+4 Pcs	7,200.00	28,800.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Qalamkar Luxury Lawn Embroidered 3 Piece Unstitched FK-15 Hannah · Unknown · Unknown
+
+279059354
+
+3 Pcs	7,200.00	21,600.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-B
+
+D-2605-B-S
+
+1 Pcs	8,050.00	8,050.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-B
+
+D-2605-B-M
+
+1 Pcs	8,050.00	8,050.00
+15 Oct 26	644 7/10/26	
+Purchase	
+Araast
+
+CRIMSON-CR-1790 · Unknown · Unknown
+
+400872297
+
+2 Pcs	4,200.00	8,400.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Lulusar Luxury Silk Hand Embroidered Unstitched Collection SEO Long · Unknown · Unknown
+
+279851163
+
+1 Pcs	4,500.00	4,500.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Crimson Luxury Lawn Embroidered Unstitched Suits Marori Tales - CRWP · Unknown · Unknown
+
+863439308
+
+2 Pcs	5,900.00	11,800.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Crimson Luxury Lawn Embroidered Unstitched Suits Marori Tales - CRWP · Unknown · Unknown
+
+640395852
+
+3 Pcs	5,900.00	17,700.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Bin Ilyas - 103 - B - Luxury Lawn Embroidered 3 Piece Unstitched Fareesa · Unknown · Unknown
+
+924754041
+
+2 Pcs	6,700.00	13,400.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Bin Ilyas - 10 - B - Luxury Lawn Embroidered 3 Piece Unstitched Fareesa · Unknown · Unknown
+
+457280526
+
+2 Pcs	6,700.00	13,400.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Bin Ilyas - 103 - B - Luxury Lawn Embroidered 3 Piece Unstitched Fareesa · Unknown · Unknown
+
+285725779
+
+2 Pcs	6,700.00	13,400.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Baroque UF-295 - Luxury Chiffon Embroidered 3 Piece Unstitched · Unknown · Unknown
+
+239082787
+
+2 Pcs	5,800.00	11,600.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Baroque UF-295 - Luxury Chiffon Embroidered 3 Piece Unstitched · Unknown · Unknown
+
+694740900
+
+5 Pcs	5,800.00	29,000.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Baroque UF-295 - Luxury Chiffon Embroidered 3 Piece Unstitched · Unknown · Unknown
+
+115866725
+
+5 Pcs	5,800.00	29,000.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Muse Lambs Crème Embellished Raw Silk Addawork Hand Embellished Wedding Collection-Beige · Unknown · Unknown
+
+810646912
+
+2 Pcs	11,000.00	22,000.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Muse Lambs Crème Embellished Raw Silk Addawork Hand Embellished Wedding Collection-Beige · Unknown · Unknown
+
+752634900
+
+2 Pcs	11,000.00	22,000.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Muse Lambs Crème Embellished Raw Silk Addawork Hand Embellished Wedding Collection-Beige · Unknown · Unknown
+
+317283136
+
+4 Pcs	11,000.00	44,000.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+ZAIB SONA · Unknown · Unknown
+
+602235759
+
+3 Pcs	6,150.00	18,450.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+LULUSAR GREEN SILK · Unknown · Unknown
+
+479377965
+
+1 Pcs	4,900.00	4,900.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+LULUSAR NUAL · Unknown · Unknown
+
+470817828
+
+1 Pcs	4,500.00	4,500.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+LULUSAR NUAL · Unknown · Unknown
+
+880484485
+
+1 Pcs	4,500.00	4,500.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+LULUSAR NUAL · Unknown · Unknown
+
+200030433
+
+1 Pcs	4,500.00	4,500.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Lulusar Luxury Silk Hand Embroidered Unstitched Collection SEO Long · Unknown · Unknown
+
+148734528
+
+1 Pcs	4,500.00	4,500.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Bin Ilyas - Luxury Lawn Embroidered 3 Piece Unstitched - 313-B · Unknown · Unknown
+
+519112372
+
+1 Pcs	5,750.00	5,750.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Bin Ilyas - Luxury Lawn Embroidered 3 Piece Unstitched - 313-B · Unknown · Unknown
+
+308840551
+
+1 Pcs	5,750.00	5,750.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Bin Ilyas - Luxury Lawn Embroidered 3 Piece Unstitched - 313-B · Unknown · Unknown
+
+320095550
+
+1 Pcs	5,750.00	5,750.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Bin Ilyas Luxury Lawn Embroidered 3 Piece Unstitched 216 - A KLARA · Unknown · Unknown
+
+534219002
+
+1 Pcs	6,000.00	6,000.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Bin Ilyas Luxury Lawn Embroidered 3 Piece Unstitched 216 - A KLARA · Unknown · Unknown
+
+170011922
+
+2 Pcs	6,000.00	12,000.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Bin Ilyas Luxury Lawn Embroidered 3 Piece Unstitched 216 - A KLARA · Unknown · Unknown
+
+185320012
+
+2 Pcs	6,000.00	12,000.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+BAROQUE-UF357 · Unknown · Unknown
+
+120820766
+
+1 Pcs	4,200.00	4,200.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+BAROQUE-UF357 · Unknown · Unknown
+
+169168092
+
+2 Pcs	4,200.00	8,400.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+BAROQUE-UF357 · Unknown · Unknown
+
+586623840
+
+2 Pcs	4,200.00	8,400.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-A · Unknown · Unknown
+
+734985435
+
+2 Pcs	8,050.00	16,100.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-A
+
+D-2605-A-S
+
+5 Pcs	8,050.00	40,250.00
+14 Oct 26	643 7/10/26	
+Purchase	
+Araast
+
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-A
+
+D-2605-A-L
+
+5 Pcs	8,050.00	40,250.00
+14 Oct 26	642 7/10/26	
+Purchase	
+Araast
+
+Abeera Usman Raw Silk Handwork Embroidered 3 Pcs Unstitched Burgundy Dusk · Unknown · Unknown
+
+811786142
+
+1 Pcs	12,000.00	12,000.00
+14 Oct 26	642 7/10/26	
+Purchase	
+Araast
+
+Abeera Usman Raw Silk Handwork Embroidered 3 Pcs Unstitched Burgundy Dusk · Unknown · Unknown
+
+809544792
+
+1 Pcs	12,000.00	12,000.00
+14 Oct 26	642 7/10/26	
+Purchase	
+Araast
+
+Baroque Luxury Silk Embroidered 3 Piece Unstitched SF-4036 · Unknown · Unknown
+
+574943530
+
+2 Pcs	9,350.00	18,700.00
+Total · all 81 matching lines	202		1,496,300.00
+Showing 1–50 of 81
+
+Rows
+
+50
+First
+
+1
+2
+
+Last
+Purchase = goods received from a vendor · Return = goods sent back, which reduces quantity and amount.

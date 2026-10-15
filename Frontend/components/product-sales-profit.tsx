@@ -85,42 +85,6 @@ const money = (value: number) =>
 const qty = (value: number) =>
   Number(value || 0).toLocaleString("en-US", { maximumFractionDigits: 2 });
 
-const MoneyCell = ({
-  value,
-  tone = "neutral",
-  strong,
-  signed,
-}: {
-  value: number;
-  tone?: "neutral" | "danger" | "success" | "accent";
-  strong?: boolean;
-  /** Show as negative with minus when value > 0 (returns) */
-  signed?: boolean;
-}) => {
-  const amount = Math.abs(value);
-  if (amount === 0 && tone !== "success") {
-    return <span className="text-slate-300">—</span>;
-  }
-  const showDanger = tone === "danger" && amount > 0;
-  const showSuccess = tone === "success";
-  const prefix = signed && amount > 0 ? "−" : value < 0 ? "−" : "";
-  return (
-    <span
-      className={cn(
-        "whitespace-nowrap tabular-nums tracking-tight",
-        strong ? "font-semibold" : "font-medium",
-        showDanger && "text-rose-600",
-        showSuccess && (value >= 0 ? "text-emerald-700" : "text-rose-600"),
-        tone === "accent" && "text-amber-800",
-        !showDanger && !showSuccess && tone === "neutral" && "text-slate-700",
-      )}
-    >
-      {prefix}
-      {money(amount)}
-    </span>
-  );
-};
-
 const periodLabel = (from: string, to: string) =>
   from === "2000-01-01"
     ? "All dates"
@@ -433,235 +397,68 @@ export function ProductSalesProfit() {
             />
           </div>
 
-          <Card className="overflow-hidden rounded-xl border-slate-200/80 shadow-sm">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 bg-white px-5 py-3.5">
+          <div className="space-y-4">
+            <div className="flex flex-wrap items-end justify-between gap-3">
               <div className="min-w-0">
                 <p className="text-sm font-semibold tracking-tight text-slate-900">
                   Dress-wise performance
                 </p>
                 <p className="mt-0.5 text-xs text-slate-500">
-                  Product & profit stay pinned · scroll sideways for the rest
+                  One card per product · no sideways scrolling
                 </p>
               </div>
-              <span className="rounded-full border border-slate-200 bg-slate-50 px-2.5 py-1 text-[11px] font-medium text-slate-500">
-                Amounts in Rs
+              <span className="rounded-full border border-slate-200 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-500">
+                Amounts in Rs · {rows.length} shown
               </span>
             </div>
 
-            <div className="relative max-h-[min(70vh,720px)] overflow-auto">
-              <table className="w-full min-w-[1180px] border-separate border-spacing-0 text-[13px]">
-                <thead className="sticky top-0 z-30">
-                  <tr className="bg-slate-100/95 text-[10px] font-semibold uppercase tracking-[0.08em] text-slate-500 backdrop-blur">
-                    <th className="sticky left-0 z-40 min-w-[240px] border-b border-slate-200 bg-slate-100 px-4 py-2.5 text-left shadow-[4px_0_10px_-6px_rgba(15,23,42,0.18)]">
-                      Product
-                    </th>
-                    <th className="border-b border-slate-200 px-3 py-2.5 text-right">Orders</th>
-                    <th className="border-b border-slate-200 bg-slate-100/80 px-3 py-2.5 text-right">
-                      <span className="block text-slate-600">Gross</span>
-                      <span className="font-normal normal-case tracking-normal text-slate-400">qty</span>
-                    </th>
-                    <th className="border-b border-slate-200 bg-slate-100/80 px-3 py-2.5 text-right">
-                      <span className="block text-slate-600">Returns</span>
-                      <span className="font-normal normal-case tracking-normal text-slate-400">qty</span>
-                    </th>
-                    <th className="border-b border-slate-200 bg-slate-100/80 px-3 py-2.5 text-right">
-                      <span className="block text-slate-600">Net</span>
-                      <span className="font-normal normal-case tracking-normal text-slate-400">qty</span>
-                    </th>
-                    <th className="border-b border-slate-200 px-3 py-2.5 text-right">
-                      <span className="block text-slate-600">Stock</span>
-                      <span className="font-normal normal-case tracking-normal text-slate-400">left</span>
-                    </th>
-                    <th className="min-w-[108px] border-b border-slate-200 px-3 py-2.5 text-right">Gross sales</th>
-                    <th className="min-w-[92px] border-b border-slate-200 px-3 py-2.5 text-right">Discount</th>
-                    <th className="min-w-[108px] border-b border-slate-200 px-3 py-2.5 text-right">Returns val</th>
-                    <th className="min-w-[108px] border-b border-slate-200 bg-slate-200/40 px-3 py-2.5 text-right text-slate-600">
-                      Net sales
-                    </th>
-                    <th className="min-w-[100px] border-b border-slate-200 px-3 py-2.5 text-right">Cost</th>
-                    <th className="sticky right-[76px] z-40 min-w-[110px] border-b border-slate-200 bg-slate-100 px-3 py-2.5 text-right shadow-[-4px_0_10px_-6px_rgba(15,23,42,0.15)]">
-                      Profit
-                    </th>
-                    <th className="sticky right-0 z-40 min-w-[76px] border-b border-slate-200 bg-slate-100 px-3 py-2.5 text-right">
-                      Margin
-                    </th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.length === 0 ? (
-                    <tr>
-                      <td colSpan={13} className="px-4 py-16 text-center text-sm text-slate-500">
-                        No product sales in this period. Try another date range or clear filters.
-                      </td>
-                    </tr>
-                  ) : (
-                    rows.map((row, index) => {
-                      const zebra = index % 2 === 1;
-                      const rowBg = zebra ? "bg-slate-50/70" : "bg-white";
-                      const stickyBg = zebra ? "bg-slate-50" : "bg-white";
-                      const lowStock = row.remainingQty < 0;
-                      return (
-                        <tr
-                          key={row.productId}
-                          className={cn(
-                            "border-b border-slate-100/80 transition-colors hover:bg-amber-50/40",
-                            rowBg,
-                          )}
-                        >
-                          <td
-                            className={cn(
-                              "sticky left-0 z-20 max-w-[280px] px-4 py-3 shadow-[4px_0_10px_-6px_rgba(15,23,42,0.1)]",
-                              stickyBg,
-                            )}
-                          >
-                            <div
-                              className="truncate text-[13px] font-semibold leading-snug text-slate-900"
-                              title={row.product}
-                            >
-                              {row.product}
-                            </div>
-                            <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                              <span className="rounded-md bg-slate-100 px-1.5 py-0.5 font-mono text-[10px] text-slate-600">
-                                {row.sku}
-                              </span>
-                              {row.category ? (
-                                <span className="rounded-full border border-slate-200 bg-white px-1.5 py-0.5 text-[10px] font-medium text-slate-500">
-                                  {row.category}
-                                </span>
-                              ) : null}
-                            </div>
-                          </td>
-                          <td className="px-3 py-3 text-right tabular-nums text-slate-600">
-                            {row.orders}
-                          </td>
-                          <td className="bg-slate-50/50 px-3 py-3 text-right tabular-nums text-slate-600">
-                            {qty(row.grossQty)}
-                          </td>
-                          <td
-                            className={cn(
-                              "bg-slate-50/50 px-3 py-3 text-right tabular-nums",
-                              row.returnsQty > 0 ? "font-medium text-rose-600" : "text-slate-300",
-                            )}
-                          >
-                            {row.returnsQty > 0 ? `−${qty(row.returnsQty)}` : "—"}
-                          </td>
-                          <td className="bg-slate-50/50 px-3 py-3 text-right font-semibold tabular-nums text-slate-900">
-                            {qty(row.netQty)}
-                          </td>
-                          <td className="px-3 py-3 text-right">
-                            <span
-                              className={cn(
-                                "inline-flex min-w-[2.25rem] justify-end rounded-md px-1.5 py-0.5 tabular-nums",
-                                lowStock
-                                  ? "bg-rose-50 font-semibold text-rose-700 ring-1 ring-inset ring-rose-200"
-                                  : "text-slate-600",
-                              )}
-                            >
-                              {qty(row.remainingQty)}
-                            </span>
-                          </td>
-                          <td className="px-3 py-3 text-right">
-                            <MoneyCell value={row.grossSales} />
-                          </td>
-                          <td className="px-3 py-3 text-right">
-                            <MoneyCell value={row.discounts} />
-                          </td>
-                          <td className="px-3 py-3 text-right">
-                            {row.returnsValue > 0 ? (
-                              <MoneyCell value={row.returnsValue} tone="danger" signed />
-                            ) : (
-                              <span className="text-slate-300">—</span>
-                            )}
-                          </td>
-                          <td className="bg-slate-50/80 px-3 py-3 text-right">
-                            <MoneyCell value={row.netSales} strong />
-                          </td>
-                          <td className="px-3 py-3 text-right">
-                            <MoneyCell value={row.cost} />
-                          </td>
-                          <td
-                            className={cn(
-                              "sticky right-[76px] z-20 px-3 py-3 text-right shadow-[-4px_0_10px_-6px_rgba(15,23,42,0.1)]",
-                              stickyBg,
-                            )}
-                          >
-                            <MoneyCell value={row.grossProfit} tone="success" strong />
-                          </td>
-                          <td
-                            className={cn(
-                              "sticky right-0 z-20 px-3 py-3 text-right",
-                              stickyBg,
-                            )}
-                          >
-                            <span
-                              className={cn(
-                                "inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums",
-                                row.marginPercent >= 40
-                                  ? "bg-emerald-50 text-emerald-700"
-                                  : row.marginPercent >= 20
-                                    ? "bg-amber-50 text-amber-800"
-                                    : "bg-rose-50 text-rose-700",
-                              )}
-                            >
-                              {row.marginPercent.toFixed(1)}%
-                            </span>
-                          </td>
-                        </tr>
-                      );
-                    })
-                  )}
-                </tbody>
-                {totals && rows.length > 0 ? (
-                  <tfoot className="sticky bottom-0 z-30">
-                    <tr className="border-t border-slate-200 bg-slate-900 text-[13px] font-semibold text-white">
-                      <td className="sticky left-0 z-40 bg-slate-900 px-4 py-3 shadow-[4px_0_10px_-6px_rgba(0,0,0,0.35)]">
-                        Total · {totals.products} products
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-white/90">{totals.orders}</td>
-                      <td className="px-3 py-3 text-right tabular-nums text-white/90">
-                        {qty(totals.grossQty)}
-                      </td>
-                      <td
-                        className={cn(
-                          "px-3 py-3 text-right tabular-nums",
-                          totals.returnsQty > 0 ? "text-rose-300" : "text-white/40",
-                        )}
-                      >
-                        {totals.returnsQty > 0 ? `−${qty(totals.returnsQty)}` : "—"}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums">{qty(totals.netQty)}</td>
-                      <td className="px-3 py-3 text-right tabular-nums text-white/90">
-                        {qty(totals.remainingQty)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-white/90">
-                        {money(totals.grossSales)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-white/90">
-                        {money(totals.discounts)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-white/90">
-                        {totals.returnsValue > 0 ? `−${money(totals.returnsValue)}` : "—"}
-                      </td>
-                      <td className="bg-white/10 px-3 py-3 text-right tabular-nums">
-                        {money(totals.netSales)}
-                      </td>
-                      <td className="px-3 py-3 text-right tabular-nums text-white/90">
-                        {money(totals.cost)}
-                      </td>
-                      <td className="sticky right-[76px] z-40 bg-slate-900 px-3 py-3 text-right tabular-nums text-emerald-300 shadow-[-4px_0_10px_-6px_rgba(0,0,0,0.35)]">
-                        {money(totals.grossProfit)}
-                      </td>
-                      <td className="sticky right-0 z-40 bg-slate-900 px-3 py-3 text-right">
-                        <span className="inline-flex rounded-full bg-white/10 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-amber-200">
-                          {totals.marginPercent.toFixed(1)}%
-                        </span>
-                      </td>
-                    </tr>
-                  </tfoot>
-                ) : null}
-              </table>
-            </div>
-          </Card>
+            {totals && rows.length > 0 ? (
+              <div className="overflow-hidden rounded-2xl border border-slate-200 bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 shadow-sm">
+                <div className="flex flex-wrap items-center justify-between gap-4 px-5 py-4">
+                  <div>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-slate-500">
+                      Period total
+                    </p>
+                    <p className="mt-1 text-sm font-medium text-slate-800">
+                      {totals.products} products · {totals.orders} orders ·{" "}
+                      {qty(totals.netQty)} net qty
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-stretch gap-2 sm:gap-3">
+                    <TotalChip label="Net sales" value={money(totals.netSales)} />
+                    <TotalChip label="Cost" value={money(totals.cost)} />
+                    <TotalChip
+                      label="Profit"
+                      value={money(totals.grossProfit)}
+                      emphasis
+                    />
+                    <div className="flex items-center rounded-xl bg-emerald-600 px-3.5 py-2 text-white shadow-sm shadow-emerald-600/20">
+                      <span className="text-sm font-bold tabular-nums">
+                        {totals.marginPercent.toFixed(1)}%
+                      </span>
+                      <span className="ml-1.5 text-[10px] font-medium uppercase tracking-wide text-emerald-100">
+                        margin
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {rows.length === 0 ? (
+              <Card className="border-slate-200/80 shadow-sm">
+                <CardContent className="px-5 py-16 text-center text-sm text-slate-500">
+                  No product sales in this period. Try another date range or clear filters.
+                </CardContent>
+              </Card>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+                {rows.map((row) => (
+                  <ProductProfitCard key={row.productId} row={row} />
+                ))}
+              </div>
+            )}
+          </div>
         </>
       )}
     </div>
@@ -705,5 +502,197 @@ function SummaryCard({
         {hint ? <p className="mt-1 text-xs text-slate-500">{hint}</p> : null}
       </CardContent>
     </Card>
+  );
+}
+
+function marginTone(marginPercent: number) {
+  if (marginPercent >= 40) return "good" as const;
+  if (marginPercent >= 20) return "mid" as const;
+  if (marginPercent >= 0) return "low" as const;
+  return "bad" as const;
+}
+
+function TotalChip({
+  label,
+  value,
+  emphasis,
+}: {
+  label: string;
+  value: string;
+  emphasis?: boolean;
+}) {
+  return (
+    <div
+      className={cn(
+        "min-w-[7.5rem] rounded-xl border px-3.5 py-2",
+        emphasis
+          ? "border-emerald-200 bg-emerald-50/90"
+          : "border-slate-200/80 bg-white",
+      )}
+    >
+      <p className="text-[10px] font-medium uppercase tracking-wide text-slate-500">
+        {label}
+      </p>
+      <p
+        className={cn(
+          "mt-0.5 text-sm font-bold tabular-nums",
+          emphasis ? "text-emerald-700" : "text-slate-900",
+        )}
+      >
+        {value}
+      </p>
+    </div>
+  );
+}
+
+function ProductProfitCard({ row }: { row: Row }) {
+  const lowStock = row.remainingQty < 0;
+  const tone = marginTone(row.marginPercent);
+  return (
+    <article
+      className={cn(
+        "group relative flex flex-col overflow-hidden rounded-2xl border bg-white shadow-[0_1px_2px_rgba(15,23,42,0.04)]",
+        "transition-all duration-200 hover:-translate-y-0.5 hover:shadow-[0_12px_28px_-16px_rgba(15,23,42,0.28)]",
+        tone === "good" && "border-emerald-200/60",
+        tone === "mid" && "border-slate-200",
+        tone === "low" && "border-amber-200/70",
+        tone === "bad" && "border-rose-200/70",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cn(
+          "absolute inset-y-0 left-0 w-1",
+          tone === "good" && "bg-emerald-500",
+          tone === "mid" && "bg-slate-300",
+          tone === "low" && "bg-amber-400",
+          tone === "bad" && "bg-rose-500",
+        )}
+      />
+
+      <div className="flex items-start justify-between gap-3 bg-gradient-to-br from-slate-50/90 via-white to-white pl-5 pr-4 pt-4 pb-3">
+        <div className="min-w-0 flex-1">
+          <h3
+            className="line-clamp-2 text-[13.5px] font-semibold leading-snug tracking-tight text-slate-900"
+            title={row.product}
+          >
+            {row.product}
+          </h3>
+          <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <span className="rounded-md bg-slate-100/90 px-1.5 py-0.5 font-mono text-[10px] font-medium text-slate-600">
+              {row.sku || "—"}
+            </span>
+            {row.category ? (
+              <span className="rounded-full bg-white px-2 py-0.5 text-[10px] font-medium text-slate-500 ring-1 ring-slate-200/90">
+                {row.category}
+              </span>
+            ) : null}
+          </div>
+        </div>
+        <div
+          className={cn(
+            "flex shrink-0 flex-col items-end rounded-xl px-2.5 py-1.5",
+            tone === "good" && "bg-emerald-50 text-emerald-700",
+            tone === "mid" && "bg-slate-100 text-slate-700",
+            tone === "low" && "bg-amber-50 text-amber-800",
+            tone === "bad" && "bg-rose-50 text-rose-700",
+          )}
+        >
+          <span className="text-[10px] font-medium uppercase tracking-wide opacity-70">
+            Margin
+          </span>
+          <span className="text-sm font-bold tabular-nums leading-none">
+            {row.marginPercent.toFixed(1)}%
+          </span>
+        </div>
+      </div>
+
+      <div className="mx-4 mb-3 grid grid-cols-3 gap-2 rounded-xl bg-slate-50/90 p-2 ring-1 ring-slate-100">
+        <div className="rounded-lg bg-white px-2.5 py-2 shadow-sm shadow-slate-900/5">
+          <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+            Net sales
+          </p>
+          <p className="mt-1 text-[13px] font-bold tabular-nums tracking-tight text-slate-900">
+            {money(row.netSales)}
+          </p>
+        </div>
+        <div className="rounded-lg bg-white px-2.5 py-2 shadow-sm shadow-slate-900/5">
+          <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">Cost</p>
+          <p className="mt-1 text-[13px] font-semibold tabular-nums tracking-tight text-slate-600">
+            {money(row.cost)}
+          </p>
+        </div>
+        <div className="rounded-lg bg-white px-2.5 py-2 shadow-sm shadow-slate-900/5">
+          <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">
+            Profit
+          </p>
+          <p
+            className={cn(
+              "mt-1 text-[13px] font-bold tabular-nums tracking-tight",
+              row.grossProfit >= 0 ? "text-emerald-700" : "text-rose-600",
+            )}
+          >
+            {row.grossProfit < 0 ? "−" : ""}
+            {money(Math.abs(row.grossProfit))}
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-auto grid grid-cols-3 gap-y-2.5 border-t border-slate-100 px-4 py-3">
+        <Metric label="Orders" value={String(row.orders)} />
+        <Metric label="Net qty" value={qty(row.netQty)} strong />
+        <Metric
+          label="Stock left"
+          value={qty(row.remainingQty)}
+          className={lowStock ? "text-rose-700" : undefined}
+        />
+        <Metric label="Gross sales" value={money(row.grossSales)} />
+        <Metric
+          label="Discount"
+          value={row.discounts > 0 ? money(row.discounts) : "—"}
+          muted={row.discounts <= 0}
+        />
+        <Metric
+          label="Returns"
+          value={
+            row.returnsQty > 0
+              ? `${qty(row.returnsQty)} · −${money(row.returnsValue)}`
+              : "—"
+          }
+          className={row.returnsQty > 0 ? "text-rose-600" : undefined}
+          muted={row.returnsQty <= 0}
+        />
+      </div>
+    </article>
+  );
+}
+
+function Metric({
+  label,
+  value,
+  strong,
+  muted,
+  className,
+}: {
+  label: string;
+  value: string;
+  strong?: boolean;
+  muted?: boolean;
+  className?: string;
+}) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[9px] font-semibold uppercase tracking-wider text-slate-400">{label}</p>
+      <p
+        className={cn(
+          "mt-0.5 truncate text-[12px] tabular-nums text-slate-700",
+          strong ? "font-semibold text-slate-900" : "font-medium",
+          muted && "text-slate-300",
+          className,
+        )}
+      >
+        {value}
+      </p>
+    </div>
   );
 }

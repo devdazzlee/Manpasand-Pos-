@@ -1,0 +1,1916 @@
+Inventory Reports
+Stock Valuation
+•
+Live stock
+•
+All branches
+
+
+Export
+
+Valuation
+
+Purchases
+
+Transfers
+
+Outflow
+
+Low stock
+
+Aging
+
+Summary
+What your stock on hand is worth at cost and at selling price
+
+Stock at cost
+
+Rs 1.21 Cr
+
+1,588 pieces on hand
+
+Stock at retail
+
+Rs 1.77 Cr
+
+If everything sells at list price
+
+Potential profit
+
+Rs 55.10 Lac
+
+31.2% margin on stock
+
+Products in stock
+
+823
+
+1 location · 861 stock rows
+
+
+In stock
+
+823
+
+Has pieces
+
+
+Low
+
+118
+
+At or below minimum
+
+
+Out of stock
+
+36
+
+Zero pieces
+
+
+Negative
+
+2
+
+Needs a stock count
+
+Filters
+
+Filters apply to the cards, insights and table
+
+Period
+All
+Today
+Yesterday
+Last 7 days
+Last 30 days
+This month
+Custom
+Stock is valued as of the To date
+Search
+Search product, SKU, category…
+Branch
+All branches
+Category
+All categories
+Supplier
+All suppliers
+From
+Any date
+To
+Any date
+Value by branch
+Stock at cost · retail value below
+
+Warehouse 1
+
+Rs 12,142,322.78
+
+100%
+1,588 pcs · retail Rs 17,652,365
+
+Value by category
+Where your money is sitting
+
+Category 1536
+
+Rs 1,524,050
+
+29%
+206 pcs · 128 stock rows
+
+Category 3086
+
+Rs 662,450
+
+12%
+91 pcs · 41 stock rows
+
+Category 3097
+
+Rs 639,700
+
+12%
+89 pcs · 39 stock rows
+
+Category 2450
+
+Rs 613,877.78
+
+12%
+98 pcs · 43 stock rows
+
+Category 3135
+
+Rs 613,300
+
+12%
+120 pcs · 46 stock rows
+
+Lawn Embroidered
+
+Rs 560,000
+
+11%
+85 pcs · 39 stock rows
+
+Category 24
+
+Rs 357,900
+
+7%
+56 pcs · 38 stock rows
+
+Category 1108
+
+Rs 329,800
+
+6%
+50 pcs · 31 stock rows
+
+Stock Valuation
+861 rows · 1,586 pieces · Rs 12,113,222.78 · click a row for details
+
+
+Highest value
+Product	Branch	Qty	Unit cost	Sale price	Value at cost	Value at retail	Margin	Status
+Bin Ilyas Wedding Festive Luxury Raw Silk Collection D-607
+
+BI-D-607-U · Category 1555
+
+Warehouse 1	17	Rs 7,900	Rs 11,950	Rs 134,300	Rs 203,150	33.9%	
+Healthy
+Suffuse Mehveen/M
+
+686913849 · Category 1556
+
+Warehouse 1	4	Rs 25,000	Rs 35,000	Rs 100,000	Rs 140,000	28.6%	
+Healthy
+Suffuse Mehveen/L
+
+496838910 · Category 1264
+
+Warehouse 1	4	Rs 25,000	Rs 35,000	Rs 100,000	Rs 140,000	28.6%	
+Healthy
+Maria.B Luxury Embroidered Velvet Collection Unstitched With Velvet Shawl
+
+MB-BLUE-PALACHI-U · Category 1536
+
+Warehouse 1	11	Rs 7,500	Rs 14,700	Rs 82,500	Rs 161,700	49.0%	
+Healthy
+Soraya ORIANA Luxury Hand Emblishment Masoori Bridal Collection REVERIE
+
+SRYA-RVR-U · Category 1798
+
+Warehouse 1	2	Rs 40,000	Rs 48,500	Rs 80,000	Rs 97,000	17.5%	
+Healthy
+QALAMKAR SAGE AURA QLM-02
+
+AR-QLM02 · Category 3114
+
+Warehouse 1	5	Rs 15,250	Rs 22,300	Rs 76,250	Rs 111,500	31.6%	
+Healthy
+ELAF DIANA MINT
+
+AR-ESH-10 · Category 3025
+
+Warehouse 1	5	Rs 14,759	Rs 21,800	Rs 73,795	Rs 109,000	32.3%	
+Healthy
+CRIMSON STAR DUST FONE
+
+AR--CW24-D5 · Category 2876
+
+Warehouse 1	5	Rs 14,050	Rs 20,990	Rs 70,250	Rs 104,950	33.1%	
+Healthy
+Alizay Saad Luxury Raw Silk Embroidered 3 Piece Unstitched - Ivories Festive
+
+880963938 · Silk
+
+Warehouse 1	8	Rs 8,250	Rs 12,350	Rs 66,000	Rs 98,800	33.2%	
+Low
+Maria B Luxury Embroidered Lawn Unstitched 3PC Suit D-2610A
+
+D-2610-A-U · Category 3135
+
+Warehouse 1	9	Rs 6,350	Rs 8,950	Rs 57,150	Rs 80,550	29.1%	
+Healthy
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-A
+
+D-2605-A-S · Lawn Embroidered
+
+Warehouse 1	7	Rs 8,050	Rs 10,850	Rs 56,350	Rs 75,950	25.8%	
+Healthy
+ELAF SKY FALL BLUE
+
+AR-ESH-06 · Category 3079
+
+Warehouse 1	5	Rs 11,100	Rs 18,990	Rs 55,500	Rs 94,950	41.5%	
+Healthy
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+ENC-OW-01-M · Raw Silk Embroidered
+
+Warehouse 1	6	Rs 9,250	Rs 12,450	Rs 55,500	Rs 74,700	25.7%	
+Healthy
+Maria.B Cobalt Blue BD-2704 Luxury Pure Chiffon Embroidered 3 Pc Unstitched Saree
+
+662228450 · Category 125
+
+Warehouse 1	3	Rs 18,000	Rs 22,900	Rs 54,000	Rs 68,700	21.4%	
+Healthy
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+Rosepink-S · Category 2450
+
+Warehouse 1	8	Rs 6,483.33	Rs 8,750	Rs 51,866.67	Rs 70,000	25.9%	
+Healthy
+Iznik Luxury Chiffon Embroidered Collection Unstitched UE-321
+
+UE-321-M · Category 3097
+
+Warehouse 1	6	Rs 8,500	Rs 11,150	Rs 51,000	Rs 66,900	23.8%	
+Healthy
+Maria.B Embroidered Luxury Chiffon 3Pc Suit MPC-26-107
+
+MPC-26-107-U · Category 3088
+
+Warehouse 1	6	Rs 8,400	Rs 10,250	Rs 50,400	Rs 61,500	18.0%	
+Healthy
+Soraya ANNE/M
+
+220022518 · Category 2445
+
+Warehouse 1	2	Rs 25,000	Rs 35,000	Rs 50,000	Rs 70,000	28.6%	
+Healthy
+Soraya ANNE Net Hand Embellished & Embroidered Maxi - J0218
+
+SORAYA-ANNE-U · Category 1536
+
+Warehouse 1	2	Rs 24,000	Rs 31,800	Rs 48,000	Rs 63,600	24.5%	
+Healthy
+Mina Kashif - Raw Silk Embroidered 3 Piece Unstitched - Zah e Naseeb
+
+MK-ZH-NSB · Category 3086
+
+Warehouse 1	6	Rs 8,000	Rs 10,950	Rs 48,000	Rs 65,700	26.9%	
+Healthy
+Faiza Saqlain Ayana
+
+FS-AYANA-U · Category 1798
+
+Warehouse 1	2	Rs 23,500	Rs 29,500	Rs 47,000	Rs 59,000	20.3%	
+Healthy
+AYA Embroidered Luxury Lawn Unstitched 3Pc Suit - ASJA
+
+FS-ASJA-U · Category 3135
+
+Warehouse 1	6	Rs 7,800	Rs 9,850	Rs 46,800	Rs 59,100	20.8%	
+Healthy
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+ENC-OW-01-S · Raw Silk Embroidered
+
+Warehouse 1	5	Rs 9,250	Rs 12,450	Rs 46,250	Rs 62,250	25.7%	
+Healthy
+Republic Womenswear Fairoz Demi – Couture – B15 – Bridal Collection
+
+PA-B15 · Category 3101
+
+Warehouse 1	2	Rs 23,000	Rs 32,700	Rs 46,000	Rs 65,400	29.7%	
+Healthy
+Hussain Rehar Tropica/M
+
+552204938 · Category 1264
+
+Warehouse 1	2	Rs 23,000	Rs 33,000	Rs 46,000	Rs 66,000	30.3%	
+Healthy
+
+
+Inventory Reports
+Procurement
+•
+16 Sep 2026 – 15 Oct 2026
+•
+All branches
+
+
+Export
+
+Valuation
+
+Purchases
+
+Transfers
+
+Outflow
+
+Low stock
+
+Aging
+
+Summary
+Stock bought in — bills, suppliers, cost and expected margin
+
+Total spend
+
+Rs 14.96 Lac
+
+81 purchase lines
+
+Bills
+
+5
+
+Avg bill Rs 299,260
+
+Pieces received
+
+202
+
+Avg cost Rs 7,407.43 / piece
+
+Suppliers
+
+2
+
+All deliveries complete
+
+Filters
+
+Filters apply to the cards, insights and table
+
+Period
+All time
+Today
+Yesterday
+Last 7 days
+Last 30 days
+This month
+Custom
+Search
+Search product, supplier, invoice…
+Branch
+All branches
+Category
+All categories
+Supplier
+All suppliers
+From16 Sep 2026
+To15 Oct 2026
+Spend over time
+Purchase value per day
+
+13 Oct
+15 Oct
+0
+350k
+700k
+1050k
+1400k
+
+Top suppliers
+By amount bought
+
+Araast
+
+Rs 1,351,000
+
+90%
+72 lines · 187 pcs
+
+Pehnawa
+
+Rs 145,300
+
+10%
+9 lines · 15 pcs
+
+Top products
+By amount bought
+
+Alizay Saad Luxury Raw Silk Embroidered 3 Piece Unstitched - Ivories Festive
+
+Rs 66,000
+
+17%
+8 pcs
+
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+Rs 55,500
+
+14%
+6 pcs
+
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+Rs 55,500
+
+14%
+6 pcs
+
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+Rs 46,200
+
+12%
+7 pcs
+
+Muse Lambs Crème Embellished Raw Silk Addawork Hand Embellished Wedding Collection-Beige
+
+Rs 44,000
+
+11%
+4 pcs
+
+Sardinia - Luxury Lawn Embroidered 3 Piece Unstitched - Cloud Whisper
+
+Rs 41,000
+
+11%
+5 pcs
+
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-A
+
+Rs 40,250
+
+10%
+5 pcs
+
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-A
+
+Rs 40,250
+
+10%
+5 pcs
+
+By category
+Spend per category
+
+Lawn Embroidered
+
+Rs 501,200
+
+39%
+76 pcs
+
+Raw Silk Embroidered
+
+Rs 184,000
+
+14%
+19 pcs
+
+Silk
+
+Rs 153,350
+
+12%
+21 pcs
+
+Chiffon Embroidered
+
+Rs 115,800
+
+9%
+19 pcs
+
+Category 2450
+
+Rs 99,000
+
+8%
+15 pcs
+
+Raw Slik
+
+Rs 88,000
+
+7%
+8 pcs
+
+maisuri
+
+Rs 74,000
+
+6%
+9 pcs
+
+Pure Chiffon Embroidered
+
+Rs 65,600
+
+5%
+9 pcs
+
+Procurement
+81 rows · 202 pieces · Rs 1,496,300 · click a row for details
+
+
+Newest first
+Date	Product	Supplier	Invoice	Received at	Qty	Unit cost	Sale price	Total	Exp. margin
+15 Oct 2026	
+QALAMKAR SB09
+
+396666467 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	5	Rs 6,800	Rs 6,800	Rs 34,000	0.0%
+15 Oct 2026	
+CRIMSON-CR-1790
+
+400872297 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	2	Rs 4,200	Rs 4,200	Rs 8,400	0.0%
+15 Oct 2026	
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-B
+
+D-2605-B-M · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	1	Rs 8,050	Rs 8,050	Rs 8,050	0.0%
+15 Oct 2026	
+Maria.B Luxury Embroidered Jacquard Lawn Unstitched 3Pc Suit D-2605-B
+
+D-2605-B-S · Category 2710
+
+Araast	644 7/10/26	Warehouse 1	1	Rs 8,050	Rs 8,050	Rs 8,050	0.0%
+15 Oct 2026	
+Qalamkar Luxury Lawn Embroidered 3 Piece Unstitched FK-15 Hannah
+
+279059354 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	3	Rs 7,200	Rs 7,200	Rs 21,600	0.0%
+15 Oct 2026	
+Qalamkar Luxury Lawn Embroidered 3 Piece Unstitched FK-15 Hannah
+
+461952694 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	4	Rs 7,200	Rs 7,200	Rs 28,800	0.0%
+15 Oct 2026	
+Qalamkar Luxury Lawn Embroidered 3 Piece Unstitched FK-15 Hannah
+
+483916590 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	2	Rs 7,200	Rs 7,200	Rs 14,400	0.0%
+15 Oct 2026	
+Qalamkar - Zarish - Luxury Lawn Embroidered 3 Piece Unstitched
+
+890045988 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	2	Rs 7,000	Rs 7,000	Rs 14,000	0.0%
+15 Oct 2026	
+Qalamkar - Zarish - Luxury Lawn Embroidered 3 Piece Unstitched
+
+892975573 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	2	Rs 7,000	Rs 7,000	Rs 14,000	0.0%
+15 Oct 2026	
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+Rosepink-L · Category 2450
+
+Araast	644 7/10/26	Warehouse 1	5	Rs 6,600	Rs 6,600	Rs 33,000	0.0%
+15 Oct 2026	
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+Rosepink-S · Category 2450
+
+Araast	644 7/10/26	Warehouse 1	7	Rs 6,600	Rs 6,600	Rs 46,200	0.0%
+15 Oct 2026	
+CRIMSON-CR-1790
+
+746906732 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	3	Rs 4,200	Rs 4,200	Rs 12,600	0.0%
+15 Oct 2026	
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+Rosepink-M · Category 2450
+
+Araast	644 7/10/26	Warehouse 1	3	Rs 6,600	Rs 6,600	Rs 19,800	0.0%
+15 Oct 2026	
+Qalamkar - Zarish - Luxury Lawn Embroidered 3 Piece Unstitched
+
+967126199 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	2	Rs 7,000	Rs 7,000	Rs 14,000	0.0%
+15 Oct 2026	
+CRIMSON-CR-1790
+
+990114281 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	2	Rs 4,200	Rs 4,200	Rs 8,400	0.0%
+15 Oct 2026	
+QALAMKAR SB09
+
+157676237 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	2	Rs 6,800	Rs 6,800	Rs 13,600	0.0%
+15 Oct 2026	
+QALAMKAR SB09
+
+310074886 · Lawn Embroidered
+
+Araast	644 7/10/26	Warehouse 1	5	Rs 6,800	Rs 6,800	Rs 34,000	0.0%
+14 Oct 2026	
+Lulusar Luxury Silk Hand Embroidered Unstitched Collection SEO Long
+
+279851163 · Silk
+
+Araast	643 7/10/26	Warehouse 1	1	Rs 4,500	Rs 4,500	Rs 4,500	0.0%
+14 Oct 2026	
+Crimson Luxury Lawn Embroidered Unstitched Suits Marori Tales - CRWP
+
+863439308 · Lawn Embroidered
+
+Araast	643 7/10/26	Warehouse 1	2	Rs 5,900	Rs 5,900	Rs 11,800	0.0%
+14 Oct 2026	
+Crimson Luxury Lawn Embroidered Unstitched Suits Marori Tales - CRWP
+
+640395852 · Lawn Embroidered
+
+Araast	643 7/10/26	Warehouse 1	3	Rs 5,900	Rs 5,900	Rs 17,700	0.0%
+14 Oct 2026	
+Bin Ilyas - 103 - B - Luxury Lawn Embroidered 3 Piece Unstitched Fareesa
+
+924754041 · Lawn Embroidered
+
+Araast	643 7/10/26	Warehouse 1	2	Rs 6,700	Rs 6,700	Rs 13,400	0.0%
+14 Oct 2026	
+Bin Ilyas - 10 - B - Luxury Lawn Embroidered 3 Piece Unstitched Fareesa
+
+457280526 · Lawn Embroidered
+
+Araast	643 7/10/26	Warehouse 1	2	Rs 6,700	Rs 6,700	Rs 13,400	0.0%
+14 Oct 2026	
+Bin Ilyas - 103 - B - Luxury Lawn Embroidered 3 Piece Unstitched Fareesa
+
+285725779 · Lawn Embroidered
+
+Araast	643 7/10/26	Warehouse 1	2	Rs 6,700	Rs 6,700	Rs 13,400	0.0%
+14 Oct 2026	
+Baroque UF-295 - Luxury Chiffon Embroidered 3 Piece Unstitched
+
+239082787 · Chiffon Embroidered
+
+Araast	643 7/10/26	Warehouse 1	2	Rs 5,800	Rs 5,800	Rs 11,600	0.0%
+14 Oct 2026	
+Baroque UF-295 - Luxury Chiffon Embroidered 3 Piece Unstitched
+
+694740900 · Chiffon Embroidered
+
+Araast	643 7/10/26	Warehouse 1	5	Rs 5,800	Rs 5,800	Rs 29,000	0.0%
+Showing 1–25 of 81
+
+25 / page
+
+
+1
+2
+3
+4
+
+
+
+Inventory Reports
+Transfers
+•
+16 Sep 2026 – 15 Oct 2026
+•
+All branches
+
+
+Export
+
+Valuation
+
+Purchases
+
+Transfers
+
+Outflow
+
+Low stock
+
+Aging
+
+Summary
+Stock moved between branches, status and delivery time
+
+Transfers
+
+0
+
+0 pieces moved
+
+Value moved
+
+Rs 0
+
+At cost, excluding cancelled
+
+Still in transit
+
+Rs 0
+
+0 not yet received
+
+Avg delivery time
+
+—
+
+Nothing overdue
+
+
+Pending
+
+0
+
+Not dispatched yet
+
+
+In transit
+
+0
+
+On the way
+
+
+Received
+
+0
+
+Delivered
+
+
+Cancelled
+
+0
+
+Stock returned
+
+Filters
+
+Filters apply to the cards, insights and table
+
+Period
+All time
+Today
+Yesterday
+Last 7 days
+Last 30 days
+This month
+Custom
+Search
+Search product, reference, branch…
+Branch
+All branches
+Category
+All categories
+From16 Sep 2026
+To15 Oct 2026
+Busiest routes
+Pieces moved per route
+
+No transfers
+
+Most transferred products
+Pieces moved
+
+No transfers
+
+Transfers
+0 rows · 0 pieces · Rs 0 · click a row for details
+
+
+Newest first
+No records for these filters
+
+Nothing has been recorded yet.
+
+Inventory Reports
+Outflow
+•
+16 Sep 2026 – 15 Oct 2026
+•
+All branches
+
+
+Export
+
+Valuation
+
+Purchases
+
+Transfers
+
+Outflow
+
+Low stock
+
+Aging
+
+Summary
+Stock that left — sales, damage, loss and expiry, with cost
+
+Pieces out
+
+99
+
+94 events
+
+Cost of outflow
+
+Rs 7.45 Lac
+
+Sales + shrinkage at cost
+
+Shrinkage cost
+
+Rs 19,000
+
+3 pieces damaged, lost or expired
+
+Shrinkage rate
+
+3.0%
+
+Share of outflow that wasn't a sale
+
+
+Sale
+
+91
+
+96 pcs · Rs 725,949
+
+
+Damage
+
+3
+
+3 pcs · Rs 19,000
+
+
+Loss
+
+0
+
+0 pcs · Rs 0
+
+
+Expired
+
+0
+
+0 pcs · Rs 0
+
+Filters
+
+Filters apply to the cards, insights and table
+
+Period
+All time
+Today
+Yesterday
+Last 7 days
+Last 30 days
+This month
+Custom
+Search
+Search product, branch, note…
+Branch
+All branches
+Category
+All categories
+Supplier
+All suppliers
+From16 Sep 2026
+To15 Oct 2026
+Reason
+All reasons
+Outflow over time
+Pieces out per day — sales vs shrinkage
+
+12 Oct
+13 Oct
+14 Oct
+15 Oct
+0
+15
+30
+45
+60
+SoldDamaged / lost / expired
+
+Biggest shrinkage
+Products losing the most value to damage, loss or expiry
+
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+Rs 9,250
+
+49%
+1 pcs · 1 events
+
+Kaida Tie N Die Luxury Silk Embroidered 3Pc Unstitched Suit Amani PA-0031
+
+Rs 5,950
+
+31%
+1 pcs · 1 events
+
+maria b m print white with black dots
+
+Rs 3,800
+
+20%
+1 pcs · 1 events
+
+Outflow by branch
+Pieces out per branch
+
+Warehouse 1
+
+99
+
+100%
+94 events · Rs 744,949 at cost
+
+Outflow
+94 rows · 99 pieces · Rs 744,949 · click a row for details
+
+
+Newest first
+Date	Product	Branch	Reason	Qty	Cost	Stock after
+14 Oct 2026, 03:38 PM	
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+ENC-OW-01-S · Raw Silk Embroidered
+
+Warehouse 1	
+Damage	1	Rs 9,250	5
+14 Oct 2026, 10:40 AM	
+Maria B Luxury Embroidered Chiffon 3Pc Unstitched Suit MPC-26-105-Pistachio Green
+
+MB-MPC-26-105 · Category 1536
+
+Warehouse 1	
+Sale	1	Rs 8,250	1
+14 Oct 2026, 10:27 AM	
+Mina Kashif - Raw Silk Embroidered 3 Piece Unstitched - Zah e Naseeb
+
+MK-ZH-NSB · Category 3086
+
+Warehouse 1	
+Sale	1	Rs 8,000	6
+14 Oct 2026, 10:09 AM	
+Sobia Nazir Luxury Lawn Embroidered 3 PIece Unstitched - 4B
+
+SN-4-B-U · Category 1536
+
+Warehouse 1	
+Sale	1	Rs 6,700	1
+14 Oct 2026, 10:09 AM	
+Baroque Luxury Chiffon Embroidered Unstitched Suit PR-1154 Powder Pink
+
+PR-1154-U · Category 33
+
+Warehouse 1	
+Sale	1	Rs 4,700	3
+14 Oct 2026, 08:34 AM	
+kaftan neckline zinc stiched
+
+PK-002-xL · Category 3124
+
+Warehouse 1	
+Sale	1	Rs 5,800	0
+14 Oct 2026, 08:34 AM	
+LUXURY SILK PISTA FULLY EMB ALL OVER
+
+BF-482P-XL · Category 3116
+
+Warehouse 1	
+Sale	1	Rs 6,000	0
+14 Oct 2026, 08:16 AM	
+maria b m print white with black dots
+
+871746958 · Lawn Embroidered
+
+Warehouse 1	
+Damage	1	Rs 3,800	1
+14 Oct 2026, 08:12 AM	
+gulminay Bareeze-✦-Winter Karandi Embroidered Shawl
+
+933334053 · Category 1108
+
+Warehouse 1	
+Sale	1	Rs 3,000	1
+14 Oct 2026, 08:10 AM	
+Haris Shakeel Mesuri Hand Embellished & Embroidered Maxi - J0507
+
+HS-J0507-U · Category 1558
+
+Warehouse 1	
+Sale	1	Rs 8,500	1
+14 Oct 2026, 08:10 AM	
+Pehnawa Luxury Chiffon PTA-0056-M
+
+PTA-0056-M · Category 1536
+
+Warehouse 1	
+Sale	1	Rs 12,800	1
+14 Oct 2026, 08:10 AM	
+Baroque BQU-Ch13-08 Luxury Pure Chiffon Embroidered 3 Piece Unstitched PA-137
+
+PA-137 · Pure Chiffon Embroidered
+
+Warehouse 1	
+Sale	1	Rs 9,500	1
+14 Oct 2026, 08:10 AM	
+Pehnawa Luxury Raw Silk PTA-0053-m
+
+PTA-0053-m · Category 1536
+
+Warehouse 1	
+Sale	1	Rs 12,500	1
+14 Oct 2026, 08:10 AM	
+Haris Shakeel HR-69 Aisha Afridi
+
+HR-69-M · Category 3097
+
+Warehouse 1	
+Sale	1	Rs 6,800	0
+14 Oct 2026, 08:10 AM	
+3-piece embroidered chiffon formal outfit from Baroque's Chantelle Vol. 14 collection
+
+CH14-08 · Category 3097
+
+Warehouse 1	
+Sale	1	Rs 11,050	1
+14 Oct 2026, 08:10 AM	
+Farha Talib Aziz Wedding Festive Raw Silk Hand Embroidered Collection Unstitched Avisa Emerald Kurta
+
+FTA-G-U · Category 3095
+
+Warehouse 1	
+Sale	1	Rs 13,500	0
+14 Oct 2026, 08:10 AM	
+Maria B Luxury Lava Silk Embroidered 3Pc Unstitched Suit PA-156
+
+PA-156 · Shisha Silk
+
+Warehouse 1	
+Sale	1	Rs 7,000	1
+14 Oct 2026, 07:06 AM	
+LUXURY SILK MEHROON SEQUANCE NECK
+
+BF-385-S · Category 3116
+
+Warehouse 1	
+Sale	1	Rs 5,000	0
+14 Oct 2026, 07:06 AM	
+Pehnawa Luxury Lawn PTA-0024-M
+
+PTA-0024-M · Category 1536
+
+Warehouse 1	
+Sale	1	Rs 5,600	1
+14 Oct 2026, 07:06 AM	
+PEHNAWA LUXURY LAWN PTA-0051-S
+
+PTA-0051-S · Category 1536
+
+Warehouse 1	
+Sale	1	Rs 10,000	1
+14 Oct 2026, 07:06 AM	
+LUXURY SILK PLANE EMB
+
+BF-461-S · Category 3116
+
+Warehouse 1	
+Sale	1	Rs 5,000	0
+14 Oct 2026, 07:00 AM	
+HR-BLOOM-U - Hussain Rehar Luxury Lawn Embroidered Unstitched Suit BLOOM
+
+HR · Imported / General
+
+Warehouse 1	
+Sale	1	Rs 5,100	-1
+14 Oct 2026, 07:00 AM	
+Zona Shaham Luxury Embroidered Raw Silk 3Pc Unstitched Suit PA - 103
+
+PA-103-U · Category 3086
+
+Warehouse 1	
+Sale	1	Rs 7,050	2
+14 Oct 2026, 07:00 AM	
+Bin Ilyas Luxury Lawn Embroidered 3 Piece Unstitched 713-B
+
+AR-713B-U · Category 3135
+
+Warehouse 1	
+Sale	1	Rs 3,950	4
+14 Oct 2026, 07:00 AM	
+BATIK Naisha Sky Blue
+
+B-NAISHA · Category 3135
+
+Warehouse 1	
+Sale	1	Rs 4,950	0
+Showing 1–25 of 94
+
+25 / page
+
+
+1
+2
+3
+4
+
+
+Inventory Reports
+Low Stock & Reorder
+•
+Live stock today
+•
+All branches
+
+
+Export
+
+Valuation
+
+Purchases
+
+Transfers
+
+Outflow
+
+Low stock
+
+Aging
+
+Summary
+Items at or below minimum, how long they last and what to reorder
+
+Items needing stock
+
+126
+
+At or below their minimum
+
+Out of stock
+
+8
+
+Nothing left to sell
+
+Suggested reorder
+
+Rs 1.31 Cr
+
+1,724 pieces at cost
+
+Runs out this week
+
+0
+
+Based on last 30 days of sales
+
+
+Out of stock
+
+8
+
+Reorder now
+
+
+Critical
+
+91
+
+Below half of minimum
+
+
+Low
+
+27
+
+At or below minimum
+
+Filters
+
+Filters apply to the cards, insights and table
+
+Search
+Search product, supplier, branch…
+Branch
+All branches
+Category
+All categories
+Supplier
+All suppliers
+Reorder by supplier
+Suggested purchase per supplier, at cost
+
+Unknown
+
+Rs 9,835,750
+
+75%
+81 items · 1,310 pcs to order
+
+General Supplier
+
+Rs 2,716,000
+
+21%
+31 items · 343 pcs to order
+
+Pehnawa
+
+Rs 524,950
+
+4%
+5 items · 61 pcs to order
+
+No supplier
+
+Rs 72,950
+
+1%
+9 items · 10 pcs to order
+
+Alerts by branch
+Items below minimum per branch
+
+Warehouse 1
+
+126
+
+100%
+1,724 pcs to order · Rs 13,149,650
+
+Low Stock & Reorder
+126 rows · click a row for details
+
+
+Most urgent
+Product	Branch	Supplier	In stock / min	Sold 30d	Lasts	Reorder	Reorder cost	Status
+Ethnc Luxury Silk Embroidered 3Pc Unstitched Suit Nainpreet PA-0032
+
+PA-0032-U · Category 3134
+
+Warehouse 1	Pehnawa	0 / 1	3	Empty	3	Rs 18,750	
+Out of stock
+Crimson Luxury Organza Embroidered 3Pc Unstitched Suit Mehndi Galore
+
+PA-0042 · Category 35
+
+Warehouse 1	No supplier	0 / 1	1	Empty	2	Rs 16,000	
+Out of stock
+Zainab Chottani Skin Formal Brocade Tissue With 9000 MICRO VELVET SHAWL 3PC PA-198
+
+123018594 · Category 24
+
+Warehouse 1	General Supplier	0 / 1	1	Empty	2	Rs 13,000	
+Out of stock
+Ela Luxury Organza Embroidered Unstitched 3PC Suit PA-221
+
+306537439 · Organza
+
+Warehouse 1	Unknown	0 / 10	0	Empty	20	Rs 225,000	
+Out of stock
+test-123
+
+263012532 · Category 1141
+
+Warehouse 1	Unknown	0 / 2	0	Empty	4	Rs 200	
+Out of stock
+Jazmin - UC-3069
+
+679076397 · Chiffon Embroidered
+
+Warehouse 1	Unknown	0 / 1	0	Empty	2	Rs 13,200	
+Out of stock
+Jazmin - UC-3069
+
+276888043 · Chiffon Embroidered
+
+Warehouse 1	Unknown	0 / 1	0	Empty	2	Rs 13,200	
+Out of stock
+Jazmin - UC-3069
+
+691623129 · Chiffon Embroidered
+
+Warehouse 1	Unknown	0 / 1	0	Empty	2	Rs 13,200	
+Out of stock
+gulminay Bareeze-✦-Winter Karandi Embroidered Shawl
+
+933334053 · Category 1108
+
+Warehouse 1	General Supplier	1 / 10	2	15 days	19	Rs 57,000	
+Critical
+maria b bd-3002 net maxxi
+
+764733952 · Category 1108
+
+Warehouse 1	General Supplier	1 / 10	1	30 days	19	Rs 161,500	
+Critical
+Erum khan minty breeze
+
+324559680 · Raw Slik
+
+Warehouse 1	Pehnawa	1 / 10	1	30 days	19	Rs 199,500	
+Critical
+Bareeze-✦-Winter Karandi Embroidered Shawl zinc
+
+354597604 · Category 1108
+
+Warehouse 1	General Supplier	3 / 10	1	90 days	17	Rs 51,000	
+Critical
+Asim Jofa AJLFF-10 Luxury Mysoori Embroidered Unstitched Suit PA-169
+
+413043318 · Category 1108
+
+Warehouse 1	General Supplier	1 / 10	0	No sales	19	Rs 110,200	
+Critical
+Baroque CH13-01 Luxury Chiffon Embroidered 3Pc Unstitched Suit PA-190
+
+731161173 · Category 1108
+
+Warehouse 1	General Supplier	1 / 10	0	No sales	19	Rs 136,800	
+Critical
+Pehnawa Luxury Silk Embroidered 3Pc Unstitched Kaftan Suit PA-168
+
+570729132 · Category 1108
+
+Warehouse 1	General Supplier	1 / 10	0	No sales	19	Rs 89,300	
+Critical
+Zinnia Fatima Mustafa – Minal Mint Luxury Embroidered Sheesha Silk 3Pc Unstitched Kaftan Suit PA-154
+
+871112846 · Category 1108
+
+Warehouse 1	General Supplier	1 / 10	0	No sales	19	Rs 152,950	
+Critical
+Poshkari Spade Luxury Silk Embroidered Unstitched 3PC Suit PA-218
+
+287583489 · Category 1108
+
+Warehouse 1	General Supplier	1 / 10	0	No sales	19	Rs 94,050	
+Critical
+Maria b d3 row silk
+
+739114341 · Category 1108
+
+Warehouse 1	Pehnawa	1 / 10	0	No sales	19	Rs 161,500	
+Critical
+mnr luxury silk
+
+458883215 · Category 1108
+
+Warehouse 1	General Supplier	1 / 10	0	No sales	19	Rs 142,500	
+Critical
+maria b mc-1008 net maxxi
+
+516198854 · Category 1108
+
+Warehouse 1	General Supplier	1 / 10	0	No sales	19	Rs 313,500	
+Critical
+Charizma Dastan-E-Jashan DJ5-08 Embroidered Chiffon Unstitched / Stitched 3Pc Suit PA - 235
+
+196648176 · Chiffon Embroidered
+
+Warehouse 1	Unknown	1 / 10	0	No sales	19	Rs 172,900	
+Critical
+Charizma Dastan-E-Jashan DJ5-08 Embroidered Chiffon Unstitched / Stitched 3Pc Suit PA - 235
+
+379278881 · Chiffon Embroidered
+
+Warehouse 1	Unknown	1 / 10	0	No sales	19	Rs 172,900	
+Critical
+Iznik UE-620 Luxury Embroidered Chiffon 3Pc Unstitched / Stitched Suit PA-0054
+
+122575436 · Chiffon Embroidered
+
+Warehouse 1	Unknown	1 / 10	0	No sales	19	Rs 169,100	
+Critical
+Iznik UE-620 Luxury Embroidered Chiffon 3Pc Unstitched / Stitched Suit PA-0054
+
+137607388 · Chiffon Embroidered
+
+Warehouse 1	Unknown	1 / 10	0	No sales	19	Rs 169,100	
+Critical
+Lulusar - Namil Top Luxury Raw Silk Embroidered Unstitched / Stitched 3Pc Suit PA - 236
+
+525614535 · Raw Silk Embroidered
+
+Warehouse 1	Unknown	1 / 10	0	No sales	19	Rs 119,700	
+Critical
+Showing 1–25 of 126
+
+25 / page
+
+
+1
+2
+3
+4
+5
+
+
+
+Inventory Reports
+Stock Aging
+•
+Live stock today
+•
+All branches
+
+
+Export
+
+Valuation
+
+Purchases
+
+Transfers
+
+Outflow
+
+Low stock
+
+Aging
+
+Summary
+How long stock has been sitting since it last sold
+
+Stock value
+
+Rs 1.21 Cr
+
+823 stock rows with pieces
+
+Average idle time
+
+2 days
+
+Value-weighted · simple avg 3 days
+
+Dead stock (90d+)
+
+Rs 0
+
+0 items · 0.0% of stock value
+
+Never sold
+
+775
+
+Received but not one sale yet
+
+
+0-30 days
+
+823
+
+Rs 12,142,322.78
+
+
+31-60 days
+
+0
+
+Rs 0
+
+
+61-90 days
+
+0
+
+Rs 0
+
+
+91-180 days
+
+0
+
+Rs 0
+
+
+180+ days
+
+0
+
+Rs 0
+
+Filters
+
+Filters apply to the cards, insights and table
+
+Search
+Search product, SKU, branch…
+Branch
+All branches
+Category
+All categories
+Supplier
+All suppliers
+Age
+Any age
+Stock value by age
+Days since each item last sold (or arrived, if never sold)
+
+0-30 days
+
+Rs 12,142,322.78
+
+823 items · 1,588 pcs · 100%
+
+31-60 days
+
+Rs 0
+
+0 items · 0 pcs · 0%
+
+61-90 days
+
+Rs 0
+
+0 items · 0 pcs · 0%
+
+91-180 days
+
+Rs 0
+
+0 items · 0 pcs · 0%
+
+180+ days
+
+Rs 0
+
+0 items · 0 pcs · 0%
+
+Stock Aging
+823 rows · click a row for details
+
+
+Oldest first
+Product	Branch	Qty	Value at cost	Last sold	Last received	Idle
+Élegance Aziya Luxury Chiffon Embroidered 3Pc Unstitched Suit P-155A
+
+Pa-155 · Category 33
+
+Warehouse 1	1	Rs 6,650	Never sold	—	3 days
+Zaib - Luxury Lawn Embroidered Unstitched 3 Piece - Maroon
+
+Zaib-Maroon-U · Category 1536
+
+Warehouse 1	1	Rs 4,900	Never sold	—	3 days
+Esmel Nouveau Chapitre Unstitched 3Pc Lawn Suit EUNSS25-05 Amarin
+
+EUNSS25-05 · Category 1536
+
+Warehouse 1	1	Rs 6,200	Never sold	—	3 days
+Maria B Luxury Embroidered Lawn 3Pc Unstitched Suit EL-26-11
+
+EL-26-11-D-11-U · Category 2508
+
+Warehouse 1	1	Rs 6,700	Never sold	—	3 days
+Crimson - Floral Serenity - Lawn Embroidered 3 Piece Unstitched
+
+Floral-Serenity · Category 1536
+
+Warehouse 1	1	Rs 7,000	Never sold	—	3 days
+Maria.B Luxury Lawn Embroidered 3 Piece Unstitched DS-2514-B Eid Collection
+
+DS-2514B · Category 3135
+
+Warehouse 1	1	Rs 5,200	Never sold	—	3 days
+Sardinia - Pink Breeze - Luxury Lawn Embroidered 3 Piece Unstitched
+
+SRD-PinkBreeze-U · Category 1557
+
+Warehouse 1	1	Rs 7,000	Never sold	—	3 days
+Parishay - SQ-02 - Luxury Lawn Embroidered 3 Piece Unstitched
+
+SQ-02-U · Category 1108
+
+Warehouse 1	1	Rs 4,350	Never sold	—	3 days
+Mahnur Luxury Embroidered Unstitched Lawn Collection Eirene
+
+M82739 · Category 3135
+
+Warehouse 1	1	Rs 5,000	Never sold	—	3 days
+Hussain Rehar Luxury Embroidered Lawn 3Pc Unstitched Suit-Anjas
+
+HR-ANJAS-U · Category 1536
+
+Warehouse 1	1	Rs 7,500	Never sold	—	3 days
+Mahnur - Luxury Lawn Embroidered 3 Piece Unstitched - Iris
+
+irisblue-u · Category 3011
+
+Warehouse 1	1	Rs 5,000	Never sold	—	3 days
+Cross Stitch Luxury Embroidered Lawn Stitched 3Pc Suit AMBER MIST
+
+CS-AmberMist-U · Category 71
+
+Warehouse 1	1	Rs 5,900	Never sold	—	3 days
+Baroque Embroidered Luxury Lawn 3Pc Suit BQU - D10
+
+BQ24-10-U · Category 2450
+
+Warehouse 1	1	Rs 5,150	Never sold	—	3 days
+Saira Shakira Embroidered Luxury Lawn Unstitched 3Pc Suit SAMARA-A
+
+samara-a · Category 24
+
+Warehouse 1	1	Rs 6,600	Never sold	—	3 days
+Amaryllis- Luxury Lawn Embroidered 3 Piece Unstitched -
+
+Amaryllis-U · Category 1536
+
+Warehouse 1	1	Rs 4,250	Never sold	—	3 days
+Qalamkar Luxury Lawn Embroidered Unstitched 3 Piece Sahil Kinare -FP-16-Kira new
+
+FP-16-U · Category 3135
+
+Warehouse 1	2	Rs 10,100	Never sold	—	3 days
+Mushq Luxury Lawn Embroidered Unstitched 3PC Suit Lily Veil
+
+MUSHQ-LilyVeil-U · Category 1557
+
+Warehouse 1	1	Rs 4,100	Never sold	—	3 days
+Maria B Luxury Lawn Embroidered Unstitched 3PC Suit Butterfly Pink
+
+MB-BP · Category 3135
+
+Warehouse 1	1	Rs 4,800	Never sold	—	3 days
+Zaib - Luxury Lawn Embroidered 3 Piece Unstitched - NEL-26602
+
+NEL-26602-U · Category 1108
+
+Warehouse 1	1	Rs 4,350	Never sold	—	3 days
+Sobia Nazir - Luxury Lawn Embroidered Unstitched 3 Piece - 6A
+
+PEh-6a · Category 24
+
+Warehouse 1	1	Rs 6,000	Never sold	—	3 days
+Bin Ilyas Luxury Lawn Chikankari Luxury Embroidered 3 Piece Suit - J1547
+
+J1547-U · Category 1233
+
+Warehouse 1	1	Rs 4,500	Never sold	—	3 days
+Crimson - Luxury Swiss Lawn Embroidered 3 Piece Unstitched- OMBRE LOVE - D8B
+
+D8B-OL · Category 3135
+
+Warehouse 1	1	Rs 4,100	Never sold	—	3 days
+Hussain Rehar Luxury Lawn Embroidered Suit GULPOSH
+
+HR-GULPOSH-U · Category 1560
+
+Warehouse 1	1	Rs 6,200	Never sold	—	3 days
+Qalamkar Luxury Lawn Embroidered 3 Piece Unstitched SA-01 ZARA
+
+SA-01 · Category 3135
+
+Warehouse 1	1	Rs 5,600	Never sold	—	3 days
+JAZMIN sl26-d01
+
+SL26-D01-U · Category 2450
+
+Warehouse 1	3	Rs 17,250	Never sold	—	3 days
+Showing 1–25 of 823
+
+25 / page
+
+
+1
+2
+3
+4
+5
+
+
+Inventory Reports
+Movement Summary
+•
+16 Sep 2026 – 15 Oct 2026
+•
+All branches
+
+
+Export
+
+Valuation
+
+Purchases
+
+Transfers
+
+Outflow
+
+Low stock
+
+Aging
+
+Summary
+Every stock movement grouped by type — in, out and net
+
+Movements
+
+994
+
+4 movement types
+
+Pieces in
+
+1,724
+
+Purchases, transfers in, returns
+
+Pieces out
+
+138
+
+Sales, transfers out, write-offs
+
+Net change
+
++1,586
+
+861 products moved
+
+Filters
+
+Filters apply to the cards, insights and table
+
+Period
+All time
+Today
+Yesterday
+Last 7 days
+Last 30 days
+This month
+Custom
+Search
+Search movement type…
+Branch
+All branches
+Category
+All categories
+Supplier
+All suppliers
+From16 Sep 2026
+To15 Oct 2026
+Stock in vs out
+Pieces per day
+
+12 Oct
+13 Oct
+14 Oct
+15 Oct
+0
+400
+800
+1k
+2k
+InOut
+
+By branch
+Pieces in and out per branch
+
+Warehouse 1
+
+994 movements
+
++1,724
+−138
+Most active products
+Pieces moved (in + out)
+
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+21
+
+19%
+6 movements · Rs 194,250
+
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+18
+
+16%
+3 movements · Rs 166,500
+
+Bin Ilyas Wedding Festive Luxury Raw Silk Collection D-607
+
+17
+
+15%
+1 movements · Rs 134,300
+
+Sardinia - Luxury Lawn Embroidered 3 Piece Unstitched - Cloud Whisper
+
+12
+
+11%
+3 movements · Rs 98,400
+
+Ethnc Luxury Raw Silk HAnd Made Collection Ethnc - Off White - ENC-OW-01
+
+12
+
+11%
+3 movements · Rs 111,000
+
+Maria.B Luxury Embroidered Velvet Collection Unstitched With Velvet Shawl
+
+11
+
+10%
+1 movements · Rs 82,500
+
+Crimson Luxury Lawn Embroidered 3 Piece Unstitched A Floral Mesh - Rose Pink
+
+11
+
+10%
+3 movements · Rs 71,200
+
+Mina Kashif - Raw Silk Embroidered 3 Piece Unstitched - Zah e Naseeb
+
+10
+
+9%
+3 movements · Rs 80,000
+
+Movement Summary
+4 rows
+
+
+Most events
+Movement type	Events	Share	Units in	Units out	Net	Value at cost	Last activity
+Adjustment	779	
+78.4%
+1,457	39	+1,418	Rs 11,929,680	14 Oct 2026, 10:55 PM
+Purchase	121	
+12.2%
+267	0	+267	Rs 2,008,625	14 Oct 2026, 10:55 PM
+Sale	91	
+9.2%
+0	96	-96	Rs 725,949	14 Oct 2026, 10:40 AM
+Damage	3	
+0.3%
+0	3	-3	Rs 19,000	14 Oct 2026, 03:38 PM
+Showing 1–4 of 4
+
+25 / page
+
+
+1
+
+

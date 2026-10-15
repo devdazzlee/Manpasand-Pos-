@@ -1,0 +1,121 @@
+Profit & Loss
+16 Sep 2026 – 15 Oct 2026 · All branches
+
+Refresh
+Print
+PDF
+
+Filters
+16 Sep 2026 – 15 Oct 2026 · All branches · All payments
+Apply
+Clear
+Revenue
+
+PKR 1,006,094.00
+
+Gross profit
+
+PKR 264,895.00
+
+Margin 26.3%
+
+Operating profit
+
+PKR 216,495.00
+
+Net profit / (loss)
+
+PKR 216,495.00
+
+Net margin 21.5%
+
+Revenue vs previous
+
++PKR 1,006,094.00
+
+100.0% · 16 Aug 2026 – 15 Sep 2026
+
+Gross profit vs previous
+
++PKR 264,895.00
+
+100.0%
+
+Expenses vs previous
+
++PKR 48,400.00
+
+100.0%
+
+Net profit vs previous
+
++PKR 216,495.00
+
+100.0%
+
+Profit & loss statement
+Particulars	Current	Previous
+Revenue	PKR 1,006,094.00	PKR 0.00
+Gross sales	PKR 1,058,349.00	PKR 0.00
+Discounts	PKR -52,255.00	PKR 0.00
+Returns	PKR 0.00	PKR 0.00
+Cost of goods sold	PKR -741,199.00	PKR 0.00
+Gross profit	PKR 264,895.00	PKR 0.00
+Operating expenses	PKR -48,400.00	PKR 0.00
+food	PKR -16,650.00	PKR 0.00
+packaging	PKR -10,000.00	PKR 0.00
+Salman commission	PKR -5,100.00	PKR 0.00
+employees Extra pay	PKR -4,500.00	PKR 0.00
+repairing	PKR -4,500.00	PKR 0.00
+transport	PKR -2,600.00	PKR 0.00
+Miscellaneous Expense	PKR -2,550.00	PKR 0.00
+water tanker	PKR -1,500.00	PKR 0.00
+dawood advance	PKR -1,000.00	PKR 0.00
+Operating profit	PKR 216,495.00	PKR 0.00
+Net profit / (loss)	PKR 216,495.00	PKR 0.00
+P&L snapshot
+Bills
+58
+Gross sales
+PKR 1,058,349.00
+Discounts
+PKR 52,255.00
+Returns
+PKR 0.00
+COGS
+PKR 741,199.00
+Operating expenses
+PKR 48,400.00
+Salaries
+PKR 0.00
+Buying memo
+Purchases in period
+PKR 1,496,300.00
+Purchase returns
+PKR 0.00
+Monthly profit & loss
+Month	Bills	Revenue	COGS	Expenses	Gross profit	Net profit
+Oct 2026	58	PKR 1,006,094.00	PKR 741,199.00	PKR 48,400.00	PKR 264,895.00	PKR 216,495.00
+Expenses by category
+Category	Entries	Amount
+food	7	PKR 16,650.00
+packaging	1	PKR 10,000.00
+Salman commission	3	PKR 5,100.00
+employees Extra pay	1	PKR 4,500.00
+repairing	1	PKR 4,500.00
+transport	5	PKR 2,600.00
+Miscellaneous Expense	3	PKR 2,550.00
+water tanker	1	PKR 1,500.00
+dawood advance	1	PKR 1,000.00
+By payment method
+Method	Bills	Revenue
+Cash	39	PKR 577,240.00
+Card	21	PKR 428,854.00
+By branch
+Branch	Revenue	Gross profit
+Warehouse 1
+58 bills
+PKR 1,006,094.00	PKR 264,895.00
+By cashier
+Cashier	Bills	Revenue	Gross profit
+admin	58	PKR 1,006,094.00	PKR 264,895.00

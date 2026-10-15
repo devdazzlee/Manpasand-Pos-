@@ -2,7 +2,17 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { format } from "date-fns";
-import { Download, Printer, RefreshCw, X } from "lucide-react";
+import {
+  CalendarDays,
+  Download,
+  FileSpreadsheet,
+  Printer,
+  RefreshCw,
+  TrendingDown,
+  TrendingUp,
+  Wallet,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -27,8 +37,19 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
-import { ymd, rangeForPreset } from "@/lib/business-timezone";
+import { rangeForPreset } from "@/lib/business-timezone";
 import { downloadProfitLossPdf } from "@/lib/profit-loss-pdf";
+import { money, moneyWithScale, signedMoney } from "@/lib/report-money";
+import {
+  KpiCard,
+  MetricRow,
+  MoneyCell,
+  ReportHeader,
+  ReportShell,
+  SectionCard,
+  SnapshotCard,
+  reportThCls,
+} from "@/components/report-chrome";
 import { CompactReportFilters } from "@/components/report-filters-shell";
 
 type Preset =
@@ -134,20 +155,13 @@ const SALE_TYPES = [
 
 const rangeFor = (preset: Exclude<Preset, "custom">) => rangeForPreset(preset);
 
-const money = (value: number) =>
-  `PKR ${Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-
-const signedMoney = (value: number) => {
-  const abs = money(Math.abs(value));
-  if (value > 0) return `+${abs}`;
-  if (value < 0) return `-${abs}`;
-  return abs;
-};
-
 const periodLabel = (from: string, to: string) =>
   from === "2000-01-01"
     ? "All dates"
     : `${format(new Date(`${from}T00:00:00`), "dd MMM yyyy")} – ${format(new Date(`${to}T00:00:00`), "dd MMM yyyy")}`;
+
+const isDeductionLine = (line: { label: string; amount: number; section: string }) =>
+  line.amount < 0 || line.section === "cogs" || line.section === "expense";
 
 export function ProfitLoss() {
   const { toast } = useToast();
@@ -264,10 +278,10 @@ export function ProfitLoss() {
       .map(
         (line) => `<tr class="${line.emphasis ? "emph" : ""}">
           <td>${line.label}</td>
-          <td style="text-align:right">${money(line.amount)}</td>
+          <td style="text-align:right">${moneyWithScale(line.amount)}</td>
           ${
             report.previous
-              ? `<td style="text-align:right">${money(
+              ? `<td style="text-align:right">${moneyWithScale(
                   report.previous.lines.find((row) => row.label === line.label)?.amount || 0,
                 )}</td>`
               : ""
@@ -293,10 +307,10 @@ export function ProfitLoss() {
       <p class="meta">${periodLabel(from, to)} · ${branchLabel}</p>
       <p class="meta">${paymentLabel}</p></div></div>
       <div class="cards">
-        <div class="card"><div>Revenue</div><strong>${money(report.income.netRevenue)}</strong></div>
-        <div class="card"><div>Gross profit</div><strong>${money(report.grossProfit)}</strong></div>
-        <div class="card"><div>Operating profit</div><strong>${money(report.pnl.operatingProfit)}</strong></div>
-        <div class="card"><div>Net profit</div><strong>${money(report.netProfit)}</strong></div>
+        <div class="card"><div>Revenue</div><strong>${moneyWithScale(report.income.netRevenue)}</strong></div>
+        <div class="card"><div>Gross profit</div><strong>${moneyWithScale(report.grossProfit)}</strong></div>
+        <div class="card"><div>Operating profit</div><strong>${moneyWithScale(report.pnl.operatingProfit)}</strong></div>
+        <div class="card"><div>Net profit</div><strong>${moneyWithScale(report.netProfit)}</strong></div>
       </div>
       <table><thead><tr><th>Particulars</th><th>Current</th>${report.previous ? "<th>Previous</th>" : ""}</tr></thead>
       <tbody>${rows}</tbody></table>
@@ -307,46 +321,60 @@ export function ProfitLoss() {
   };
 
   return (
-    <div className="space-y-4 p-4 md:p-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Profit & Loss</h1>
-          <p className="text-sm text-gray-500">
-            {periodLabel(from, to)} · {branchLabel}
+    <ReportShell>
+      <ReportHeader
+        icon={TrendingUp}
+        iconClassName="bg-emerald-600"
+        title="Profit & Loss"
+        subtitle={
+          <p className="flex flex-wrap items-center gap-x-1.5">
+            <span className="inline-flex items-center gap-1">
+              <CalendarDays className="h-3.5 w-3.5" />
+              {periodLabel(from, to)}
+            </span>
+            <span className="text-slate-300">•</span>
+            <span className="truncate">{branchLabel}</span>
           </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={load}>
-            <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
-            {loading ? "Refreshing…" : "Refresh"}
-          </Button>
-          <Button variant="outline" onClick={printReport} disabled={!report || loading}>
-            <Printer className="mr-2 h-4 w-4" />
-            Print
-          </Button>
-          <Button
-            variant="outline"
-            disabled={!report || loading}
-            onClick={() =>
-              report &&
-              downloadProfitLossPdf(
-                {
-                  lines: report.pnl.lines,
-                  income: report.income,
-                  grossProfit: report.grossProfit,
-                  netProfit: report.netProfit,
-                  marginPercent: report.marginPercent,
-                  pnl: report.pnl,
-                },
-                { from, to, branchLabel: `${branchLabel} · ${paymentLabel}` },
-              )
-            }
-          >
-            <Download className="mr-2 h-4 w-4" />
-            PDF
-          </Button>
-        </div>
-      </div>
+        }
+        actions={
+          <>
+            <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={load} disabled={loading}>
+              <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
+              {loading ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button
+              variant="outline"
+              className="h-9 bg-white shadow-sm"
+              onClick={printReport}
+              disabled={!report || loading}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+            <Button
+              className="h-9 shadow-sm"
+              disabled={!report || loading}
+              onClick={() =>
+                report &&
+                downloadProfitLossPdf(
+                  {
+                    lines: report.pnl.lines,
+                    income: report.income,
+                    grossProfit: report.grossProfit,
+                    netProfit: report.netProfit,
+                    marginPercent: report.marginPercent,
+                    pnl: report.pnl,
+                  },
+                  { from, to, branchLabel: `${branchLabel} · ${paymentLabel}` },
+                )
+              }
+            >
+              <Download className="mr-2 h-4 w-4" />
+              PDF
+            </Button>
+          </>
+        }
+      />
 
       <CompactReportFilters
         summary={`${periodLabel(from, to)} · ${branchLabel} · ${paymentLabel}`}
@@ -521,325 +549,400 @@ export function ProfitLoss() {
         }
       />
 
-      {loading ? (
-        <Card>
+      {loading && !report ? (
+        <Card className="border-slate-200 shadow-sm">
           <CardContent className="p-0">
             <PageLoader message="Loading profit & loss..." />
           </CardContent>
         </Card>
       ) : (
         <>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <SummaryCard label="Revenue" value={money(report?.income.netRevenue || 0)} />
-        <SummaryCard
-          label="Gross profit"
-          value={money(report?.grossProfit || 0)}
-          hint={report ? `Margin ${report.marginPercent.toFixed(1)}%` : undefined}
-        />
-        <SummaryCard label="Operating profit" value={money(report?.pnl?.operatingProfit || 0)} />
-        <SummaryCard
-          label="Net profit / (loss)"
-          value={money(report?.netProfit || 0)}
-          emphasis
-          hint={report ? `Net margin ${(report.pnl?.netMarginPercent || 0).toFixed(1)}%` : undefined}
-        />
-      </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 md:gap-4">
+            <KpiCard
+              label="Revenue"
+              value={money(report?.income.netRevenue || 0)}
+              rawValue={report?.income.netRevenue || 0}
+              hint={report ? `${report.income.billCount} bills` : undefined}
+              accent="bg-emerald-500"
+              tone="bg-emerald-50 text-emerald-600"
+              icon={Wallet}
+              loading={loading}
+            />
+            <KpiCard
+              label="Gross profit"
+              value={money(report?.grossProfit || 0)}
+              rawValue={report?.grossProfit || 0}
+              hint={report ? `Margin ${report.marginPercent.toFixed(1)}%` : undefined}
+              accent="bg-amber-500"
+              tone="bg-amber-50 text-amber-600"
+              icon={TrendingUp}
+              loading={loading}
+            />
+            <KpiCard
+              label="Operating profit"
+              value={money(report?.pnl?.operatingProfit || 0)}
+              rawValue={report?.pnl?.operatingProfit || 0}
+              accent="bg-sky-500"
+              tone="bg-sky-50 text-sky-600"
+              icon={FileSpreadsheet}
+              loading={loading}
+            />
+            <KpiCard
+              label="Net profit / (loss)"
+              value={money(report?.netProfit || 0)}
+              rawValue={report?.netProfit || 0}
+              hint={report ? `Net margin ${(report.pnl?.netMarginPercent || 0).toFixed(1)}%` : undefined}
+              accent="bg-[#a67c2e]"
+              tone="bg-[#fcf8f2] text-[#a67c2e]"
+              icon={FileSpreadsheet}
+              loading={loading}
+              emphasis
+            />
+          </div>
 
-      {report?.previous ? (
-        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-          <SummaryCard
-            label="Revenue vs previous"
-            value={signedMoney(report.previous.comparison.netRevenue.delta)}
-            hint={`${report.previous.comparison.netRevenue.percent.toFixed(1)}% · ${periodLabel(report.previous.period.from, report.previous.period.to)}`}
-          />
-          <SummaryCard
-            label="Gross profit vs previous"
-            value={signedMoney(report.previous.comparison.grossProfit.delta)}
-            hint={`${report.previous.comparison.grossProfit.percent.toFixed(1)}%`}
-          />
-          <SummaryCard
-            label="Expenses vs previous"
-            value={signedMoney(report.previous.comparison.expenses.delta)}
-            hint={`${report.previous.comparison.expenses.percent.toFixed(1)}%`}
-          />
-          <SummaryCard
-            label="Net profit vs previous"
-            value={signedMoney(report.previous.comparison.netProfit.delta)}
-            hint={`${report.previous.comparison.netProfit.percent.toFixed(1)}%`}
-            emphasis
-          />
-        </div>
-      ) : null}
+          {report?.previous ? (
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4 md:gap-4">
+              <KpiCard
+                label="Revenue vs previous"
+                value={signedMoney(report.previous.comparison.netRevenue.delta)}
+                rawValue={report.previous.comparison.netRevenue.delta}
+                hint={`${report.previous.comparison.netRevenue.percent.toFixed(1)}% · ${periodLabel(report.previous.period.from, report.previous.period.to)}`}
+                accent="bg-emerald-500"
+                tone="bg-emerald-50 text-emerald-600"
+                icon={TrendingUp}
+                loading={loading}
+              />
+              <KpiCard
+                label="Gross profit vs previous"
+                value={signedMoney(report.previous.comparison.grossProfit.delta)}
+                rawValue={report.previous.comparison.grossProfit.delta}
+                hint={`${report.previous.comparison.grossProfit.percent.toFixed(1)}%`}
+                accent="bg-amber-500"
+                tone="bg-amber-50 text-amber-600"
+                icon={TrendingUp}
+                loading={loading}
+              />
+              <KpiCard
+                label="Expenses vs previous"
+                value={signedMoney(report.previous.comparison.expenses.delta)}
+                rawValue={report.previous.comparison.expenses.delta}
+                hint={`${report.previous.comparison.expenses.percent.toFixed(1)}%`}
+                accent="bg-rose-500"
+                tone="bg-rose-50 text-rose-600"
+                icon={TrendingDown}
+                loading={loading}
+              />
+              <KpiCard
+                label="Net profit vs previous"
+                value={signedMoney(report.previous.comparison.netProfit.delta)}
+                rawValue={report.previous.comparison.netProfit.delta}
+                hint={`${report.previous.comparison.netProfit.percent.toFixed(1)}%`}
+                accent="bg-[#a67c2e]"
+                tone="bg-[#fcf8f2] text-[#a67c2e]"
+                icon={FileSpreadsheet}
+                loading={loading}
+                emphasis
+              />
+            </div>
+          ) : null}
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">Profit & loss statement</div>
+          <div className="grid gap-4 xl:grid-cols-3">
+            <SectionCard
+              className="xl:col-span-2"
+              title="Profit & loss statement"
+              caption="Current and previous period when comparison is enabled"
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Particulars</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Current</TableHead>
+                    {report?.previous ? (
+                      <TableHead className={cn(reportThCls, "text-right")}>Previous</TableHead>
+                    ) : null}
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {!report || (report.pnl?.lines || []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={report?.previous ? 3 : 2} className="py-10 text-center text-slate-500">
+                        No activity in this period.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    report.pnl.lines.map((line, index) => {
+                      const deduction = isDeductionLine(line);
+                      return (
+                        <TableRow
+                          key={`${line.label}-${index}`}
+                          className={cn(
+                            line.emphasis && "bg-slate-50/90",
+                            !line.emphasis && index % 2 === 1 && "bg-slate-50/40",
+                          )}
+                        >
+                          <TableCell
+                            className={cn(
+                              "text-slate-700",
+                              line.emphasis && "font-semibold text-slate-900",
+                            )}
+                          >
+                            {line.label}
+                          </TableCell>
+                          <TableCell
+                            className={cn(
+                              "text-right tabular-nums",
+                              line.emphasis
+                                ? "font-semibold text-slate-900"
+                                : deduction
+                                  ? "text-rose-700"
+                                  : "text-slate-800",
+                            )}
+                          >
+                            <MoneyCell value={line.amount} />
+                          </TableCell>
+                          {report.previous ? (
+                            <TableCell className="text-right tabular-nums text-slate-600">
+                              <MoneyCell
+                                value={
+                                  report.previous.lines.find((row) => row.label === line.label)?.amount || 0
+                                }
+                              />
+                            </TableCell>
+                          ) : null}
+                        </TableRow>
+                      );
+                    })
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
+
+            <div className="space-y-4">
+              <SnapshotCard title="P&L snapshot" caption="Bills, revenue, and costs">
+                <MetricRow label="Bills" value={String(report?.income.billCount || 0)} />
+                <MetricRow
+                  label="Gross sales"
+                  value={money(report?.income.grossSales || 0)}
+                  rawValue={report?.income.grossSales || 0}
+                />
+                <MetricRow label="Discounts" value={money(report?.income.discounts || 0)} muted />
+                <MetricRow label="Returns" value={money(report?.income.returns || 0)} muted />
+                <MetricRow
+                  label="COGS"
+                  value={money(report?.cogs.soldCost || 0)}
+                  rawValue={report?.cogs.soldCost || 0}
+                  muted
+                />
+                <MetricRow
+                  label="Operating expenses"
+                  value={money(report?.expenses.operating || 0)}
+                  rawValue={report?.expenses.operating || 0}
+                  muted
+                />
+                <MetricRow label="Salaries" value={money(report?.expenses.salaries || 0)} muted />
+              </SnapshotCard>
+              <SnapshotCard title="Buying memo" caption="Purchases in the selected period">
+                <MetricRow
+                  label="Purchases in period"
+                  value={money(report?.cogs.purchasesInPeriod || 0)}
+                  rawValue={report?.cogs.purchasesInPeriod || 0}
+                />
+                <MetricRow
+                  label="Purchase returns"
+                  value={money(report?.cogs.purchaseReturnsInPeriod || 0)}
+                  muted
+                />
+              </SnapshotCard>
+            </div>
+          </div>
+
+          <SectionCard title="Monthly profit & loss" caption="Revenue, costs, and profit by month">
             <Table>
               <TableHeader>
-                <TableRow>
-                  <TableHead>Particulars</TableHead>
-                  <TableHead className="text-right">Current</TableHead>
-                  {report?.previous ? <TableHead className="text-right">Previous</TableHead> : null}
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className={reportThCls}>Month</TableHead>
+                  <TableHead className={cn(reportThCls, "text-right")}>Bills</TableHead>
+                  <TableHead className={cn(reportThCls, "text-right")}>Revenue</TableHead>
+                  <TableHead className={cn(reportThCls, "text-right")}>COGS</TableHead>
+                  <TableHead className={cn(reportThCls, "text-right")}>Expenses</TableHead>
+                  <TableHead className={cn(reportThCls, "text-right")}>Gross profit</TableHead>
+                  <TableHead className={cn(reportThCls, "text-right")}>Net profit</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {!report || (report.pnl?.lines || []).length === 0 ? (
+                {(report?.pnl?.monthly || []).length === 0 ? (
                   <TableRow>
-                    <TableCell colSpan={report?.previous ? 3 : 2} className="py-10 text-center text-gray-500">
-                      {loading ? "Loading profit & loss…" : "No activity in this period."}
+                    <TableCell colSpan={7} className="py-8 text-center text-slate-500">
+                      No monthly activity in this period.
                     </TableCell>
                   </TableRow>
                 ) : (
-                  report.pnl.lines.map((line, index) => (
-                    <TableRow key={`${line.label}-${index}`} className={line.emphasis ? "bg-[#fcf8f2]" : undefined}>
-                      <TableCell className={line.emphasis ? "font-semibold" : undefined}>{line.label}</TableCell>
-                      <TableCell className={cn("text-right", line.emphasis && "font-semibold")}>
-                        {money(line.amount)}
+                  report?.pnl.monthly.map((row, i) => (
+                    <TableRow key={row.month} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                      <TableCell className="font-medium text-slate-800">{row.label}</TableCell>
+                      <TableCell className="text-right tabular-nums text-slate-600">{row.bills}</TableCell>
+                      <TableCell className="text-right tabular-nums text-slate-800">
+                        <MoneyCell value={row.revenue} />
                       </TableCell>
-                      {report.previous ? (
-                        <TableCell className="text-right text-gray-600">
-                          {money(report.previous.lines.find((row) => row.label === line.label)?.amount || 0)}
+                      <TableCell className="text-right tabular-nums text-rose-700">
+                        <MoneyCell value={row.cogs} />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-rose-700">
+                        <MoneyCell value={row.expenses} />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-slate-800">
+                        <MoneyCell value={row.grossProfit} />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums font-medium text-slate-900">
+                        <MoneyCell value={row.netProfit} />
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </SectionCard>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <SectionCard title="Expenses by category" caption="Operating spend by category">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Category</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Entries</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Amount</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(report?.expenses.byCategory || []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="py-8 text-center text-slate-500">
+                        No expenses in this period.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    report?.expenses.byCategory.map((row, i) => (
+                      <TableRow key={row.name} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                        <TableCell className="font-medium text-slate-800">{row.name}</TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-600">{row.count}</TableCell>
+                        <TableCell className="text-right tabular-nums text-rose-700">
+                          <MoneyCell value={row.amount} />
                         </TableCell>
-                      ) : null}
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
 
-        <div className="space-y-4">
-          <Card>
-            <CardContent className="space-y-2 p-4">
-              <h2 className="font-semibold">P&L snapshot</h2>
-              <Row label="Bills" value={String(report?.income.billCount || 0)} />
-              <Row label="Gross sales" value={money(report?.income.grossSales || 0)} />
-              <Row label="Discounts" value={money(report?.income.discounts || 0)} />
-              <Row label="Returns" value={money(report?.income.returns || 0)} />
-              <Row label="COGS" value={money(report?.cogs.soldCost || 0)} />
-              <Row label="Operating expenses" value={money(report?.expenses.operating || 0)} />
-              <Row label="Salaries" value={money(report?.expenses.salaries || 0)} />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="space-y-2 p-4">
-              <h2 className="font-semibold">Buying memo</h2>
-              <Row label="Purchases in period" value={money(report?.cogs.purchasesInPeriod || 0)} />
-              <Row label="Purchase returns" value={money(report?.cogs.purchaseReturnsInPeriod || 0)} />
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      <Card>
-        <CardContent className="p-0">
-          <div className="border-b px-4 py-3 font-semibold">Monthly profit & loss</div>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Month</TableHead>
-                <TableHead className="text-right">Bills</TableHead>
-                <TableHead className="text-right">Revenue</TableHead>
-                <TableHead className="text-right">COGS</TableHead>
-                <TableHead className="text-right">Expenses</TableHead>
-                <TableHead className="text-right">Gross profit</TableHead>
-                <TableHead className="text-right">Net profit</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {(report?.pnl?.monthly || []).length === 0 ? (
-                <TableRow>
-                  <TableCell colSpan={7} className="py-8 text-center text-gray-500">
-                    {loading ? "Loading…" : "No monthly activity in this period."}
-                  </TableCell>
-                </TableRow>
-              ) : (
-                report?.pnl.monthly.map((row) => (
-                  <TableRow key={row.month}>
-                    <TableCell>{row.label}</TableCell>
-                    <TableCell className="text-right">{row.bills}</TableCell>
-                    <TableCell className="text-right">{money(row.revenue)}</TableCell>
-                    <TableCell className="text-right">{money(row.cogs)}</TableCell>
-                    <TableCell className="text-right">{money(row.expenses)}</TableCell>
-                    <TableCell className="text-right">{money(row.grossProfit)}</TableCell>
-                    <TableCell className="text-right font-medium">{money(row.netProfit)}</TableCell>
+            <SectionCard title="By payment method" caption="Revenue collected by tender">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Method</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Bills</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Revenue</TableHead>
                   </TableRow>
-                ))
-              )}
-            </TableBody>
-          </Table>
-        </CardContent>
-      </Card>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">Expenses by category</div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Category</TableHead>
-                  <TableHead className="text-right">Entries</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(report?.expenses.byCategory || []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="py-8 text-center text-gray-500">
-                      No expenses in this period.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  report?.expenses.byCategory.map((row) => (
-                    <TableRow key={row.name}>
-                      <TableCell>{row.name}</TableCell>
-                      <TableCell className="text-right">{row.count}</TableCell>
-                      <TableCell className="text-right">{money(row.amount)}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">By payment method</div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Method</TableHead>
-                  <TableHead className="text-right">Bills</TableHead>
-                  <TableHead className="text-right">Revenue</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(report?.byPaymentMethod || []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="py-8 text-center text-gray-500">
-                      No payment breakdown.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  report?.byPaymentMethod.map((row) => (
-                    <TableRow key={row.method}>
-                      <TableCell>{PAYMENT_LABELS[row.method] || row.method}</TableCell>
-                      <TableCell className="text-right">{row.bills}</TableCell>
-                      <TableCell className="text-right">{money(row.revenue)}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">By branch</div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Branch</TableHead>
-                  <TableHead className="text-right">Revenue</TableHead>
-                  <TableHead className="text-right">Gross profit</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(report?.byBranch || []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="py-8 text-center text-gray-500">
-                      No branch sales.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  report?.byBranch.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
-                        <div>{row.name}</div>
-                        <div className="text-xs text-gray-500">{row.bills} bills</div>
+                </TableHeader>
+                <TableBody>
+                  {(report?.byPaymentMethod || []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="py-8 text-center text-slate-500">
+                        No payment breakdown.
                       </TableCell>
-                      <TableCell className="text-right">{money(row.revenue)}</TableCell>
-                      <TableCell className="text-right">{money(row.grossProfit)}</TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">By cashier</div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Cashier</TableHead>
-                  <TableHead className="text-right">Bills</TableHead>
-                  <TableHead className="text-right">Revenue</TableHead>
-                  <TableHead className="text-right">Gross profit</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(report?.byCashier || []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={4} className="py-8 text-center text-gray-500">
-                      No cashier sales.
-                    </TableCell>
+                  ) : (
+                    report?.byPaymentMethod.map((row, i) => (
+                      <TableRow key={row.method} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                        <TableCell className="font-medium text-slate-800">
+                          {PAYMENT_LABELS[row.method] || row.method}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-600">{row.bills}</TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={row.revenue} />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <SectionCard title="By branch" caption="Revenue and gross profit by store">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Branch</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Revenue</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Gross profit</TableHead>
                   </TableRow>
-                ) : (
-                  report?.byCashier.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>{row.name}</TableCell>
-                      <TableCell className="text-right">{row.bills}</TableCell>
-                      <TableCell className="text-right">{money(row.revenue)}</TableCell>
-                      <TableCell className="text-right">{money(row.grossProfit)}</TableCell>
+                </TableHeader>
+                <TableBody>
+                  {(report?.byBranch || []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="py-8 text-center text-slate-500">
+                        No branch sales.
+                      </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
+                  ) : (
+                    report?.byBranch.map((row, i) => (
+                      <TableRow key={row.id} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                        <TableCell>
+                          <div className="font-medium text-slate-800">{row.name}</div>
+                          <div className="text-xs text-slate-500">{row.bills} bills</div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={row.revenue} />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={row.grossProfit} />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
+
+            <SectionCard title="By cashier" caption="Sales performance by cashier">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Cashier</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Bills</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Revenue</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Gross profit</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(report?.byCashier || []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={4} className="py-8 text-center text-slate-500">
+                        No cashier sales.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    report?.byCashier.map((row, i) => (
+                      <TableRow key={row.id} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                        <TableCell className="font-medium text-slate-800">{row.name}</TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-600">{row.bills}</TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={row.revenue} />
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={row.grossProfit} />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
+          </div>
         </>
       )}
-    </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  emphasis,
-  hint,
-}: {
-  label: string;
-  value: string;
-  emphasis?: boolean;
-  hint?: string;
-}) {
-  return (
-    <Card className={emphasis ? "border-[#a67c2e]/40 bg-[#fcf8f2]" : undefined}>
-      <CardContent className="p-4">
-        <p className="text-xs uppercase tracking-wide text-gray-500">{label}</p>
-        <p className="mt-1 text-xl font-semibold text-gray-900">{value}</p>
-        {hint ? <p className="mt-1 text-xs text-gray-500">{hint}</p> : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-gray-600">{label}</span>
-      <span className="font-medium">{value}</span>
-    </div>
+    </ReportShell>
   );
 }

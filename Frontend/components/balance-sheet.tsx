@@ -2,7 +2,18 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { format } from "date-fns";
-import { Download, Printer, RefreshCw, X } from "lucide-react";
+import {
+  CalendarDays,
+  Download,
+  Landmark,
+  Package,
+  Printer,
+  Receipt,
+  RefreshCw,
+  Scale,
+  Wallet,
+  X,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
@@ -27,9 +38,20 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
-import { ymd, rangeForPreset } from "@/lib/business-timezone";
+import { rangeForPreset } from "@/lib/business-timezone";
 import { CompactReportFilters } from "@/components/report-filters-shell";
 import { downloadBalanceSheetPdf } from "@/lib/balance-sheet-pdf";
+import { money, moneyWithScale } from "@/lib/report-money";
+import {
+  KpiCard,
+  MetricRow,
+  MoneyCell,
+  ReportHeader,
+  ReportShell,
+  SectionCard,
+  SnapshotCard,
+  reportThCls,
+} from "@/components/report-chrome";
 
 type Preset = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
 
@@ -81,9 +103,6 @@ const PRESETS: { id: Preset; label: string }[] = [
 ];
 
 const rangeFor = (preset: Exclude<Preset, "custom">) => rangeForPreset(preset);
-
-const money = (value: number) =>
-  `PKR ${Number(value || 0).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 const periodLabel = (from: string, to: string) =>
   from === "2000-01-01"
@@ -148,6 +167,8 @@ export function BalanceSheet() {
       ? "All branches"
       : report?.branches.find((branch) => branch.id === branchId)?.name || "Branch";
 
+  const asOfLabel = format(new Date(`${to}T00:00:00`), "dd MMM yyyy");
+
   const printReport = () => {
     if (!report) return;
     const win = window.open("", "_blank");
@@ -156,32 +177,32 @@ export function BalanceSheet() {
       .map(
         (line) => `<tr class="${line.emphasis ? "emph" : ""}">
           <td>${line.label}</td>
-          <td style="text-align:right">${money(line.amount)}</td>
+          <td style="text-align:right">${moneyWithScale(line.amount)}</td>
         </tr>`,
       )
       .join("");
     win.document.write(`<!DOCTYPE html><html><head><title>Balance Sheet</title>
       <style>
-        body{font-family:Georgia,serif;color:#2a2012;padding:28px}
-        .top{display:flex;justify-content:space-between;align-items:center;border-bottom:3px solid #a67c2e;padding-bottom:12px}
+        body{font-family:system-ui,sans-serif;color:#0f172a;padding:28px}
+        .top{display:flex;justify-content:space-between;align-items:center;border-bottom:2px solid #e2e8f0;padding-bottom:12px}
         img{height:56px}
         table{width:100%;border-collapse:collapse;margin-top:16px;font-size:13px}
-        th{background:#2a2012;color:#fff;text-align:left;padding:8px}
-        td{border-bottom:1px solid #e8dcc4;padding:8px}
-        tr.emph td{font-weight:bold;background:#fcf8f2}
-        .cards{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-top:16px}
-        .card{border:1px solid #e8dcc4;padding:12px;background:#fcf8f2}
+        th{background:#f8fafc;color:#64748b;text-align:left;padding:8px;font-size:11px;text-transform:uppercase}
+        td{border-bottom:1px solid #f1f5f9;padding:8px}
+        tr.emph td{font-weight:600;background:#f8fafc}
+        .cards{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-top:16px}
+        .card{border:1px solid #e2e8f0;padding:12px;background:#fff;border-radius:8px}
       </style></head><body>
       <div class="top"><img src="${window.location.origin}/logo.png" alt="Pehnawa" />
       <div style="text-align:right"><h1 style="margin:0">Balance Sheet</h1>
-      <p style="margin:4px 0 0;color:#786448">As of ${format(new Date(`${report.asOf}T00:00:00`), "dd MMM yyyy")} · ${branchLabel}</p>
-      <p style="margin:2px 0 0;color:#786448">${periodLabel(from, to)}</p></div></div>
+      <p style="margin:4px 0 0;color:#64748b">As of ${format(new Date(`${report.asOf}T00:00:00`), "dd MMM yyyy")} · ${branchLabel}</p>
+      <p style="margin:2px 0 0;color:#64748b">${periodLabel(from, to)}</p></div></div>
       <div class="cards">
-        <div class="card"><div>Cash in hand</div><strong>${money(report.assets.cashOnHand)}</strong></div>
-        <div class="card"><div>Bank</div><strong>${money(report.assets.bank)}</strong></div>
-        <div class="card"><div>Inventory</div><strong>${money(report.assets.inventory)}</strong></div>
-        <div class="card"><div>Receivables</div><strong>${money(report.assets.accountsReceivable)}</strong></div>
-        <div class="card"><div>Total assets</div><strong>${money(report.assets.total)}</strong></div>
+        <div class="card"><div>Cash in hand</div><strong>${moneyWithScale(report.assets.cashOnHand)}</strong></div>
+        <div class="card"><div>Bank</div><strong>${moneyWithScale(report.assets.bank)}</strong></div>
+        <div class="card"><div>Inventory</div><strong>${moneyWithScale(report.assets.inventory)}</strong></div>
+        <div class="card"><div>Receivables</div><strong>${moneyWithScale(report.assets.accountsReceivable)}</strong></div>
+        <div class="card"><div>Total assets</div><strong>${moneyWithScale(report.assets.total)}</strong></div>
       </div>
       <table><thead><tr><th>Particulars</th><th>Amount</th></tr></thead>
       <tbody>${rows}</tbody></table>
@@ -192,39 +213,54 @@ export function BalanceSheet() {
   };
 
   return (
-    <div className="space-y-4 p-4 md:p-6">
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-        <div>
-          <h1 className="text-2xl font-bold text-gray-900">Balance Sheet</h1>
-          <p className="text-sm text-gray-500">
-            As of {format(new Date(`${to}T00:00:00`), "dd MMM yyyy")} · {branchLabel}
+    <ReportShell>
+      <ReportHeader
+        icon={Landmark}
+        iconClassName="bg-slate-800"
+        title="Balance Sheet"
+        subtitle={
+          <p className="flex flex-wrap items-center gap-x-1.5">
+            <span className="inline-flex items-center gap-1">
+              <CalendarDays className="h-3.5 w-3.5" />
+              As of {asOfLabel}
+            </span>
+            <span className="text-slate-300">•</span>
+            <span className="truncate">{branchLabel}</span>
+            <span className="text-slate-300">•</span>
+            <span className="truncate">{periodLabel(from, to)}</span>
+            <span className="hidden text-slate-400 sm:inline">(net profit memo)</span>
           </p>
-          <p className="text-xs text-gray-400">Period {periodLabel(from, to)} (for net profit memo)</p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={load}>
-            <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
-            {loading ? "Refreshing…" : "Refresh"}
-          </Button>
-          <Button variant="outline" onClick={printReport} disabled={!report || loading}>
-            <Printer className="mr-2 h-4 w-4" />
-            Print
-          </Button>
-          <Button
-            variant="outline"
-            disabled={!report || loading}
-            onClick={() =>
-              report && downloadBalanceSheetPdf(report, { from, to, branchLabel })
-            }
-          >
-            <Download className="mr-2 h-4 w-4" />
-            PDF
-          </Button>
-        </div>
-      </div>
+        }
+        actions={
+          <>
+            <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={load} disabled={loading}>
+              <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
+              {loading ? "Refreshing…" : "Refresh"}
+            </Button>
+            <Button
+              variant="outline"
+              className="h-9 bg-white shadow-sm"
+              onClick={printReport}
+              disabled={!report || loading}
+            >
+              <Printer className="mr-2 h-4 w-4" />
+              Print
+            </Button>
+            <Button
+              className="h-9 shadow-sm"
+              disabled={!report || loading}
+              onClick={() => report && downloadBalanceSheetPdf(report, { from, to, branchLabel })}
+            >
+              <Download className="mr-2 h-4 w-4" />
+              PDF
+            </Button>
+          </>
+        }
+      />
 
       <CompactReportFilters
-        summary={`As of ${format(new Date(`${to}T00:00:00`), "dd MMM yyyy")} · ${branchLabel}`}
+        summary={`As of ${asOfLabel} · ${branchLabel}`}
+        loading={loading && !!report}
         actions={
           <>
             {preset === "custom" ? (
@@ -232,7 +268,12 @@ export function BalanceSheet() {
                 Apply
               </Button>
             ) : null}
-            <Button size="sm" variant="outline" className="h-8 border-rose-200 bg-rose-50 text-rose-700 shadow-sm hover:border-rose-300 hover:bg-rose-100 hover:text-rose-800" onClick={() => applyPreset("last30")}>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 border-rose-200 bg-rose-50 text-rose-700 shadow-sm hover:border-rose-300 hover:bg-rose-100 hover:text-rose-800"
+              onClick={() => applyPreset("last30")}
+            >
               <X className="mr-1 h-3.5 w-3.5" />
               Clear
             </Button>
@@ -255,8 +296,22 @@ export function BalanceSheet() {
                 </SelectContent>
               </Select>
             </div>
-            <DateField label="From date" value={draftFrom} onChange={(value) => { setDraftFrom(value); setPreset("custom"); }} />
-            <DateField label="To date" value={draftTo} onChange={(value) => { setDraftTo(value); setPreset("custom"); }} />
+            <DateField
+              label="From date"
+              value={draftFrom}
+              onChange={(value) => {
+                setDraftFrom(value);
+                setPreset("custom");
+              }}
+            />
+            <DateField
+              label="To date"
+              value={draftTo}
+              onChange={(value) => {
+                setDraftTo(value);
+                setPreset("custom");
+              }}
+            />
             <div className="space-y-1">
               <Label>Branch</Label>
               {loading && !report ? (
@@ -281,290 +336,339 @@ export function BalanceSheet() {
         }
       />
 
-      {loading ? (
-        <Card>
+      {loading && !report ? (
+        <Card className="border-slate-200 shadow-sm">
           <CardContent className="p-0">
             <PageLoader message="Loading balance sheet..." />
           </CardContent>
         </Card>
       ) : (
         <>
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-        <SummaryCard label="Cash in hand" value={money(report?.assets.cashOnHand || 0)} hint="Chart of Accounts" />
-        <SummaryCard label="Bank" value={money(report?.assets.bank || 0)} hint="Chart of Accounts" />
-        <SummaryCard label="Inventory" value={money(report?.assets.inventory || 0)} hint={report ? `${report.assets.inventoryQty.toLocaleString()} pcs` : undefined} />
-        <SummaryCard label="Receivables" value={money(report?.assets.accountsReceivable || 0)} />
-        <SummaryCard label="Total assets" value={money(report?.assets.total || 0)} emphasis />
-      </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5 md:gap-4">
+            <KpiCard
+              label="Cash in hand"
+              value={money(report?.assets.cashOnHand || 0)}
+              rawValue={report?.assets.cashOnHand || 0}
+              hint="Chart of Accounts"
+              accent="bg-emerald-500"
+              tone="bg-emerald-50 text-emerald-600"
+              icon={Wallet}
+              loading={loading}
+            />
+            <KpiCard
+              label="Bank"
+              value={money(report?.assets.bank || 0)}
+              rawValue={report?.assets.bank || 0}
+              hint="Chart of Accounts"
+              accent="bg-sky-500"
+              tone="bg-sky-50 text-sky-600"
+              icon={Landmark}
+              loading={loading}
+            />
+            <KpiCard
+              label="Inventory"
+              value={money(report?.assets.inventory || 0)}
+              rawValue={report?.assets.inventory || 0}
+              hint={report ? `${report.assets.inventoryQty.toLocaleString()} pcs` : undefined}
+              accent="bg-amber-500"
+              tone="bg-amber-50 text-amber-600"
+              icon={Package}
+              loading={loading}
+            />
+            <KpiCard
+              label="Receivables"
+              value={money(report?.assets.accountsReceivable || 0)}
+              rawValue={report?.assets.accountsReceivable || 0}
+              accent="bg-violet-500"
+              tone="bg-violet-50 text-violet-600"
+              icon={Receipt}
+              loading={loading}
+            />
+            <KpiCard
+              label="Total assets"
+              value={money(report?.assets.total || 0)}
+              rawValue={report?.assets.total || 0}
+              accent="bg-[#a67c2e]"
+              tone="bg-amber-50 text-[#8a6524]"
+              icon={Scale}
+              loading={loading}
+              emphasis
+            />
+          </div>
 
-      <div className="grid gap-4 xl:grid-cols-3">
-        <Card className="xl:col-span-2">
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">Statement of financial position</div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Particulars</TableHead>
-                  <TableHead className="text-right">Amount</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {!report || report.lines.length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={2} className="py-10 text-center text-gray-500">
-                      {loading ? "Loading balance sheet…" : "No balances available."}
-                    </TableCell>
+          <div className="grid gap-4 xl:grid-cols-3">
+            <SectionCard
+              className="xl:col-span-2"
+              title="Statement of financial position"
+              footer={
+                report
+                  ? report.totals.balanced
+                    ? "Assets balance with liabilities + equity."
+                    : "Totals need review — assets and liabilities + equity differ."
+                  : undefined
+              }
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Particulars</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Amount</TableHead>
                   </TableRow>
-                ) : (
-                  report.lines.map((line, index) => (
-                    <TableRow key={`${line.label}-${index}`} className={line.emphasis ? "bg-[#fcf8f2]" : undefined}>
-                      <TableCell className={line.emphasis ? "font-semibold" : undefined}>{line.label}</TableCell>
-                      <TableCell className={cn("text-right", line.emphasis && "font-semibold")}>
-                        {money(line.amount)}
+                </TableHeader>
+                <TableBody>
+                  {!report || report.lines.length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={2} className="py-10 text-center text-slate-500">
+                        No balances available.
                       </TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-            {report ? (
-              <div className="border-t px-4 py-3 text-sm text-gray-600">
-                {report.totals.balanced
-                  ? "Assets balance with liabilities + equity."
-                  : "Totals need review — assets and liabilities + equity differ."}
+                  ) : (
+                    report.lines.map((line, index) => (
+                      <TableRow
+                        key={`${line.label}-${index}`}
+                        className={
+                          line.emphasis ? "bg-slate-50 font-semibold" : index % 2 === 1 ? "bg-slate-50/40" : undefined
+                        }
+                      >
+                        <TableCell className={line.emphasis ? "text-slate-900" : "text-slate-800"}>
+                          {line.label}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={line.amount} />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
+
+            <div className="space-y-4">
+              <SnapshotCard title="Assets" caption="Summary as of end date">
+                <MetricRow
+                  label="Cash in hand"
+                  value={money(report?.assets.cashOnHand || 0)}
+                  rawValue={report?.assets.cashOnHand || 0}
+                />
+                <MetricRow label="Bank" value={money(report?.assets.bank || 0)} rawValue={report?.assets.bank || 0} />
+                <MetricRow
+                  label="Inventory"
+                  value={money(report?.assets.inventory || 0)}
+                  rawValue={report?.assets.inventory || 0}
+                />
+                <MetricRow
+                  label="Accounts receivable"
+                  value={money(report?.assets.accountsReceivable || 0)}
+                  rawValue={report?.assets.accountsReceivable || 0}
+                />
+                <MetricRow
+                  label="Total assets"
+                  value={money(report?.assets.total || 0)}
+                  rawValue={report?.assets.total || 0}
+                />
+              </SnapshotCard>
+              <SnapshotCard title="Liabilities & equity" caption="Obligations and owner position">
+                <MetricRow
+                  label="Accounts payable"
+                  value={money(report?.liabilities.accountsPayable || 0)}
+                  rawValue={report?.liabilities.accountsPayable || 0}
+                />
+                <MetricRow
+                  label="Customer credits"
+                  value={money(report?.liabilities.customerCredits || 0)}
+                  rawValue={report?.liabilities.customerCredits || 0}
+                />
+                <MetricRow
+                  label="Owner's equity"
+                  value={money(report?.equity.ownersEquity || 0)}
+                  rawValue={report?.equity.ownersEquity || 0}
+                />
+                <MetricRow
+                  label="Period net profit (memo)"
+                  value={money(report?.equity.periodNetProfit || 0)}
+                  rawValue={report?.equity.periodNetProfit || 0}
+                />
+                <p className="py-2.5 text-xs text-slate-500">
+                  Position is as of the end date. Period range feeds the net profit memo only.
+                </p>
+              </SnapshotCard>
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-2">
+            <SectionCard
+              title="Cash & bank accounts"
+              caption="Ledger balances from Chart of Accounts: opening balance + sales and customer receipts − refunds, expenses, supplier, salary and advance payments."
+            >
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Account</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Balance</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(report?.assets.moneyAccounts || []).map((row, i) => (
+                    <TableRow key={row.id} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                      <TableCell>
+                        <div className="font-medium text-slate-800">{row.name}</div>
+                        <div className="text-xs text-slate-500">
+                          {row.code} · {row.kind === "BANK" ? "Bank" : "Cash"}
+                        </div>
+                      </TableCell>
+                      <TableCell
+                        className={cn(
+                          "text-right tabular-nums",
+                          row.balance < 0 ? "text-rose-700" : "text-slate-800",
+                        )}
+                      >
+                        <MoneyCell value={row.balance} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+              <div className="border-y border-slate-100 bg-slate-50/60 px-4 py-3">
+                <div className="text-sm font-semibold text-slate-900">In register drawers (memo)</div>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Counted / expected cash in each till — part of Cash in hand. Total{" "}
+                  {money(report?.assets.cashInRegisters || 0)}.
+                </p>
               </div>
-            ) : null}
-          </CardContent>
-        </Card>
-
-        <div className="space-y-4">
-          <Card>
-            <CardContent className="space-y-2 p-4">
-              <h2 className="font-semibold">Assets</h2>
-              <Row label="Cash in hand" value={money(report?.assets.cashOnHand || 0)} />
-              <Row label="Bank" value={money(report?.assets.bank || 0)} />
-              <Row label="Inventory" value={money(report?.assets.inventory || 0)} />
-              <Row label="Accounts receivable" value={money(report?.assets.accountsReceivable || 0)} />
-              <Row label="Total assets" value={money(report?.assets.total || 0)} />
-            </CardContent>
-          </Card>
-          <Card>
-            <CardContent className="space-y-2 p-4">
-              <h2 className="font-semibold">Liabilities & equity</h2>
-              <Row label="Accounts payable" value={money(report?.liabilities.accountsPayable || 0)} />
-              <Row label="Customer credits" value={money(report?.liabilities.customerCredits || 0)} />
-              <Row label="Owner's equity" value={money(report?.equity.ownersEquity || 0)} />
-              <Row label="Period net profit (memo)" value={money(report?.equity.periodNetProfit || 0)} />
-              <p className="pt-1 text-xs text-gray-500">
-                Position is as of the end date. Period range feeds the net profit memo only.
-              </p>
-            </CardContent>
-          </Card>
-        </div>
-      </div>
-
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3">
-              <div className="font-semibold">Cash &amp; bank accounts</div>
-              <p className="text-xs text-gray-500">
-                Ledger balances from Chart of Accounts: opening balance + sales and customer receipts − refunds, expenses,
-                supplier, salary and advance payments.
-              </p>
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Account</TableHead>
-                  <TableHead className="text-right">Balance</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(report?.assets.moneyAccounts || []).map((row) => (
-                  <TableRow key={row.id}>
-                    <TableCell>
-                      <div>{row.name}</div>
-                      <div className="text-xs text-gray-500">
-                        {row.code} · {row.kind === "BANK" ? "Bank" : "Cash"}
-                      </div>
-                    </TableCell>
-                    <TableCell className={`text-right ${row.balance < 0 ? "text-rose-600" : ""}`}>{money(row.balance)}</TableCell>
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Branch</TableHead>
+                    <TableHead className={reportThCls}>Status</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Cash</TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <div className="border-y bg-gray-50/60 px-4 py-3">
-              <div className="font-semibold">In register drawers (memo)</div>
-              <p className="text-xs text-gray-500">
-                Counted / expected cash in each till — part of Cash in hand. Total {money(report?.assets.cashInRegisters || 0)}.
-              </p>
-            </div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Branch</TableHead>
-                  <TableHead>Status</TableHead>
-                  <TableHead className="text-right">Cash</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(report?.assets.cashByBranch || []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="py-8 text-center text-gray-500">
-                      No till sessions found.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  report?.assets.cashByBranch.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
-                        <div>{row.name}</div>
-                        <div className="text-xs text-gray-500">{row.code}</div>
+                </TableHeader>
+                <TableBody>
+                  {(report?.assets.cashByBranch || []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="py-8 text-center text-slate-500">
+                        No till sessions found.
                       </TableCell>
-                      <TableCell>{row.status}</TableCell>
-                      <TableCell className="text-right">{money(row.amount)}</TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
+                  ) : (
+                    report?.assets.cashByBranch.map((row, i) => (
+                      <TableRow key={row.id} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                        <TableCell>
+                          <div className="font-medium text-slate-800">{row.name}</div>
+                          <div className="text-xs text-slate-500">{row.code}</div>
+                        </TableCell>
+                        <TableCell className="text-slate-600">{row.status}</TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={row.amount} />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
 
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">Inventory by branch</div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Branch</TableHead>
-                  <TableHead className="text-right">Qty</TableHead>
-                  <TableHead className="text-right">Value</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(report?.assets.inventoryByBranch || []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={3} className="py-8 text-center text-gray-500">
-                      No inventory value as of this date.
-                    </TableCell>
+            <SectionCard title="Inventory by branch">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Branch</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Qty</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Value</TableHead>
                   </TableRow>
-                ) : (
-                  report?.assets.inventoryByBranch.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
-                        <div>{row.name}</div>
-                        <div className="text-xs text-gray-500">{row.code}</div>
+                </TableHeader>
+                <TableBody>
+                  {(report?.assets.inventoryByBranch || []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={3} className="py-8 text-center text-slate-500">
+                        No inventory value as of this date.
                       </TableCell>
-                      <TableCell className="text-right">{row.qty.toLocaleString()}</TableCell>
-                      <TableCell className="text-right">{money(row.value)}</TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
+                  ) : (
+                    report?.assets.inventoryByBranch.map((row, i) => (
+                      <TableRow key={row.id} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                        <TableCell>
+                          <div className="font-medium text-slate-800">{row.name}</div>
+                          <div className="text-xs text-slate-500">{row.code}</div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          {row.qty.toLocaleString()}
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={row.value} />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
+          </div>
 
-      <div className="grid gap-4 xl:grid-cols-2">
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">Top receivables</div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Customer</TableHead>
-                  <TableHead className="text-right">Balance</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(report?.assets.topReceivables || []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={2} className="py-8 text-center text-gray-500">
-                      No receivables as of this date.
-                    </TableCell>
+          <div className="grid gap-4 xl:grid-cols-2">
+            <SectionCard title="Top receivables">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Customer</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Balance</TableHead>
                   </TableRow>
-                ) : (
-                  report?.assets.topReceivables.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>{row.name}</TableCell>
-                      <TableCell className="text-right">{money(row.balance)}</TableCell>
-                    </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-
-        <Card>
-          <CardContent className="p-0">
-            <div className="border-b px-4 py-3 font-semibold">Top payables</div>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Supplier / invoice</TableHead>
-                  <TableHead className="text-right">Balance</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {(report?.liabilities.topPayables || []).length === 0 ? (
-                  <TableRow>
-                    <TableCell colSpan={2} className="py-8 text-center text-gray-500">
-                      No payables as of this date.
-                    </TableCell>
-                  </TableRow>
-                ) : (
-                  report?.liabilities.topPayables.map((row) => (
-                    <TableRow key={row.id}>
-                      <TableCell>
-                        <div>{row.supplier}</div>
-                        <div className="text-xs text-gray-500">{row.invoice}</div>
+                </TableHeader>
+                <TableBody>
+                  {(report?.assets.topReceivables || []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={2} className="py-8 text-center text-slate-500">
+                        No receivables as of this date.
                       </TableCell>
-                      <TableCell className="text-right">{money(row.balance)}</TableCell>
                     </TableRow>
-                  ))
-                )}
-              </TableBody>
-            </Table>
-          </CardContent>
-        </Card>
-      </div>
+                  ) : (
+                    report?.assets.topReceivables.map((row, i) => (
+                      <TableRow key={row.id} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                        <TableCell className="text-slate-800">{row.name}</TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={row.balance} />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
+
+            <SectionCard title="Top payables">
+              <Table>
+                <TableHeader>
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className={reportThCls}>Supplier / invoice</TableHead>
+                    <TableHead className={cn(reportThCls, "text-right")}>Balance</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {(report?.liabilities.topPayables || []).length === 0 ? (
+                    <TableRow>
+                      <TableCell colSpan={2} className="py-8 text-center text-slate-500">
+                        No payables as of this date.
+                      </TableCell>
+                    </TableRow>
+                  ) : (
+                    report?.liabilities.topPayables.map((row, i) => (
+                      <TableRow key={row.id} className={i % 2 === 1 ? "bg-slate-50/40" : undefined}>
+                        <TableCell>
+                          <div className="font-medium text-slate-800">{row.supplier}</div>
+                          <div className="text-xs text-slate-500">{row.invoice}</div>
+                        </TableCell>
+                        <TableCell className="text-right tabular-nums text-slate-800">
+                          <MoneyCell value={row.balance} />
+                        </TableCell>
+                      </TableRow>
+                    ))
+                  )}
+                </TableBody>
+              </Table>
+            </SectionCard>
+          </div>
         </>
       )}
-    </div>
-  );
-}
-
-function SummaryCard({
-  label,
-  value,
-  emphasis,
-  hint,
-}: {
-  label: string;
-  value: string;
-  emphasis?: boolean;
-  hint?: string;
-}) {
-  return (
-    <Card className={emphasis ? "border-[#a67c2e]/40 bg-[#fcf8f2]" : undefined}>
-      <CardContent className="p-4">
-        <p className="text-xs uppercase tracking-wide text-gray-500">{label}</p>
-        <p className="mt-1 text-xl font-semibold text-gray-900">{value}</p>
-        {hint ? <p className="mt-1 text-xs text-gray-500">{hint}</p> : null}
-      </CardContent>
-    </Card>
-  );
-}
-
-function Row({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="flex items-center justify-between text-sm">
-      <span className="text-gray-600">{label}</span>
-      <span className="font-medium">{value}</span>
-    </div>
+    </ReportShell>
   );
 }
