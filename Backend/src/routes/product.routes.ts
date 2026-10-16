@@ -30,6 +30,9 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 import upload from '../utils/multer';
 import { parseFormData } from '../middleware/parse-formdata.middleware';
 import uploadBulk from '../utils/uploadBulk';
+import asyncHandler from '../middleware/asyncHandler';
+import { ApiResponse } from '../utils/apiResponse';
+import { barcodeAvailability } from '../services/barcode-availability.service';
 
 const router = express.Router();
 
@@ -62,6 +65,17 @@ router.post('/import-row', authenticate, productWriters, importProductRow);
 router.delete('/all', authenticate, authorize(['SUPER_ADMIN']), deleteAllProducts);
 router.get('/', validate(listProductsSchema), listProducts);
 router.get('/pos-catalog', authenticate, getPosCatalog);
+// Live check for the product form: is this custom barcode free? (+ next free suggestion)
+router.get(
+  '/barcode-availability',
+  authenticate,
+  asyncHandler(async (req: Request, res) => {
+    const code = String(req.query.code || '').trim();
+    if (!code) return new ApiResponse({ code, available: false, usedBy: null, suggestion: null }, 'Enter a code').send(res);
+    const excludeId = req.query.excludeId ? String(req.query.excludeId) : null;
+    new ApiResponse(await barcodeAvailability(code, excludeId), 'Barcode availability').send(res);
+  }),
+);
 router.get('/export/excel', exportProductsToExcel);
 router.get('/featured', getFeaturedProducts);
 router.get('/best-selling', authenticate, getBestSellingProducts);

@@ -13,6 +13,9 @@ const auth_middleware_1 = require("../middleware/auth.middleware");
 const multer_1 = __importDefault(require("../utils/multer"));
 const parse_formdata_middleware_1 = require("../middleware/parse-formdata.middleware");
 const uploadBulk_1 = __importDefault(require("../utils/uploadBulk"));
+const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
+const apiResponse_1 = require("../utils/apiResponse");
+const barcode_availability_service_1 = require("../services/barcode-availability.service");
 const router = express_1.default.Router();
 // router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
 const productWriters = (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']);
@@ -34,6 +37,14 @@ router.post('/import-row', auth_middleware_1.authenticate, productWriters, produ
 router.delete('/all', auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN']), product_controller_1.deleteAllProducts);
 router.get('/', (0, validation_middleware_1.validate)(product_validation_1.listProductsSchema), product_controller_1.listProducts);
 router.get('/pos-catalog', auth_middleware_1.authenticate, product_controller_1.getPosCatalog);
+// Live check for the product form: is this custom barcode free? (+ next free suggestion)
+router.get('/barcode-availability', auth_middleware_1.authenticate, (0, asyncHandler_1.default)(async (req, res) => {
+    const code = String(req.query.code || '').trim();
+    if (!code)
+        return new apiResponse_1.ApiResponse({ code, available: false, usedBy: null, suggestion: null }, 'Enter a code').send(res);
+    const excludeId = req.query.excludeId ? String(req.query.excludeId) : null;
+    new apiResponse_1.ApiResponse(await (0, barcode_availability_service_1.barcodeAvailability)(code, excludeId), 'Barcode availability').send(res);
+}));
 router.get('/export/excel', product_controller_1.exportProductsToExcel);
 router.get('/featured', product_controller_1.getFeaturedProducts);
 router.get('/best-selling', auth_middleware_1.authenticate, product_controller_1.getBestSellingProducts);

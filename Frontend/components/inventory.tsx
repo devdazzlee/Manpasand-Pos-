@@ -66,6 +66,7 @@ import {
   ChevronsUpDown,
   Copy,
   ExternalLink,
+  ArrowLeft,
   MoreHorizontal,
   Power,
   PowerOff,
@@ -77,7 +78,6 @@ import { cn } from "@/lib/utils"
 import { formatMoneyDisplay } from "@/lib/money"
 import {
   buildInventoryProductDuplicateHref,
-  buildInventoryProductEditHref,
   clearInventoryEditProductFromUrl,
   readInventoryDuplicateProductFromUrl,
   readInventoryEditProductFromUrl,
@@ -594,11 +594,20 @@ const ProductForm = ({
   productInternalCode,
   barcodeMode,
   setBarcodeMode,
+  barcodeHint,
+  autoFocusBarcode,
+  onBarcodeTakenChange,
 }: {
   productId?: string
   productInternalCode?: string
   barcodeMode: LabelBarcodeMode
   setBarcodeMode: (mode: LabelBarcodeMode) => void
+  /** Shown under the custom code, e.g. "Next free code after PA-144 (the original)" */
+  barcodeHint?: string | null
+  /** Focus + select the custom code on open (duplicate) */
+  autoFocusBarcode?: boolean
+  /** Lets the page block saving while the code belongs to another product */
+  onBarcodeTakenChange?: (taken: boolean) => void
   onSubmit: () => void
   loading: boolean
   submitText: string
@@ -671,6 +680,51 @@ const ProductForm = ({
   const numberInputClass =
     "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
 
+  // Live check: is the custom code free? Debounced while typing.
+  const barcodeInputRef = useRef<HTMLInputElement>(null)
+  const [barcodeCheck, setBarcodeCheck] = useState<{
+    status: "idle" | "checking" | "free" | "taken"
+    code?: string
+    usedBy?: { id: string; name: string } | null
+    suggestion?: string | null
+  }>({ status: "idle" })
+  const manualCode = barcodeMode === "manual" ? sanitizeManualBarcodeValue(formData.label_barcode || "") : ""
+  useEffect(() => {
+    if (!manualCode) {
+      setBarcodeCheck({ status: "idle" })
+      onBarcodeTakenChange?.(false)
+      return
+    }
+    setBarcodeCheck((prev) => ({ ...prev, status: "checking", code: manualCode }))
+    let cancelled = false
+    const t = setTimeout(() => {
+      apiClient
+        .get("/products/barcode-availability", { params: { code: manualCode, excludeId: productId || undefined } })
+        .then((res) => {
+          if (cancelled) return
+          const d = res.data?.data || {}
+          setBarcodeCheck({ status: d.available ? "free" : "taken", code: manualCode, usedBy: d.usedBy, suggestion: d.suggestion })
+          onBarcodeTakenChange?.(!d.available)
+        })
+        .catch(() => {
+          if (!cancelled) setBarcodeCheck({ status: "idle" })
+        })
+    }, 350)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onBarcodeTakenChange is a stable setter from the page
+  }, [manualCode, productId])
+  useEffect(() => {
+    if (!autoFocusBarcode || barcodeMode !== "manual") return
+    const t = setTimeout(() => {
+      barcodeInputRef.current?.focus()
+      barcodeInputRef.current?.select()
+    }, 150)
+    return () => clearTimeout(t)
+  }, [autoFocusBarcode, barcodeMode])
+
   const autoBarcodePreview = previewAutoBarcodeValue(
     formData.sku,
     productInternalCode || "",
@@ -726,16 +780,52 @@ const ProductForm = ({
               </div>
             ) : (
               <>
-                <Input
-                  id="label_barcode"
-                  value={formData.label_barcode || ""}
-                  onChange={(e) => updateFormData("label_barcode", e.target.value)}
-                  placeholder="e.g. TAKAFUL-12 or 123456789"
-                  className="font-mono"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Saved on the product for POS scan and label print.
-                </p>
+                <div className="relative">
+                  <Input
+                    ref={barcodeInputRef}
+                    id="label_barcode"
+                    value={formData.label_barcode || ""}
+                    onChange={(e) => updateFormData("label_barcode", e.target.value)}
+                    placeholder="e.g. TAKAFUL-12 or 123456789"
+                    className={cn(
+                      "font-mono pr-28",
+                      barcodeCheck.status === "taken" && "border-rose-400 focus-visible:ring-rose-300",
+                      barcodeCheck.status === "free" && "border-emerald-400 focus-visible:ring-emerald-300",
+                    )}
+                    aria-invalid={barcodeCheck.status === "taken"}
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium">
+                    {barcodeCheck.status === "checking" ? (
+                      <span className="text-muted-foreground">Checking…</span>
+                    ) : barcodeCheck.status === "free" ? (
+                      <span className="text-emerald-600">✓ Available</span>
+                    ) : barcodeCheck.status === "taken" ? (
+                      <span className="text-rose-600">Already used</span>
+                    ) : null}
+                  </span>
+                </div>
+                {barcodeCheck.status === "taken" ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                    <span>
+                      <span className="font-mono font-semibold">{barcodeCheck.code}</span> is already used by{" "}
+                      <span className="font-semibold">{barcodeCheck.usedBy?.name || "another product"}</span>.
+                    </span>
+                    {barcodeCheck.suggestion ? (
+                      <button
+                        type="button"
+                        className="rounded-md bg-white px-2 py-1 font-medium text-rose-800 ring-1 ring-rose-200 hover:bg-rose-100"
+                        onClick={() => updateFormData("label_barcode", barcodeCheck.suggestion)}
+                      >
+                        Use <span className="font-mono">{barcodeCheck.suggestion}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {barcodeHint ? <span className="font-medium text-slate-700">{barcodeHint} · </span> : null}
+                    Saved on the product for POS scan and label print.
+                  </p>
+                )}
               </>
             )}
           </div>
@@ -1273,6 +1363,9 @@ export default function Inventory() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   /** When set, Add form was opened via Duplicate — banner + clearer title. */
   const [duplicatingFromName, setDuplicatingFromName] = useState<string | null>(null)
+  // Custom-barcode helpers: hint under the field (duplicate) and "code already used" guard.
+  const [barcodeHint, setBarcodeHint] = useState<string | null>(null)
+  const [barcodeTaken, setBarcodeTaken] = useState(false)
   const deepLinkEditOpenedRef = useRef(false)
 
   // Delete-confirmation modal state. We track the product directly (so we can
@@ -1682,6 +1775,10 @@ export default function Inventory() {
   }
 
   const handleCreateProduct = async () => {
+    if (productBarcodeMode === "manual" && barcodeTaken) {
+      toast({ title: "Barcode already used", description: "Pick a different custom code (or use the suggested one).", variant: "destructive" })
+      return
+    }
     setFormLoading(true)
     try {
       // Backend requires exactly 9 digits or omit (auto-generate). There is no
@@ -1751,6 +1848,10 @@ export default function Inventory() {
 
   const handleUpdateProduct = async () => {
     if (!editingProduct) return
+    if (productBarcodeMode === "manual" && barcodeTaken) {
+      toast({ title: "Barcode already used", description: "Pick a different custom code (or use the suggested one).", variant: "destructive" })
+      return
+    }
 
     setFormLoading(true)
     try {
@@ -2052,10 +2153,13 @@ export default function Inventory() {
    * values — same pattern as professional POS size/variant workflows.
    */
   const openDuplicateDialog = async (product: Product) => {
+    setBarcodeTaken(false)
     setEditingProduct(null)
     setIsEditDialogOpen(false)
     setIsAddDialogOpen(true)
-    setDuplicatingFromName(product.name)
+    // Stub from a deep link has no name yet — set after the product loads.
+    setDuplicatingFromName(product.name || "…")
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" })
     setIsLoadingEditProduct(true)
     setStockQtyByBranch({})
     setCurrentBranchStocks({})
@@ -2065,15 +2169,34 @@ export default function Inventory() {
       const detail = await apiService.getProductById(product.id)
       const fresh = detail?.data ?? detail
       if (!fresh) throw new Error("Empty product detail response")
+      setDuplicatingFromName(fresh.name || product.name || "this product")
 
       const existingUrls = extractImageUrls(fresh)
 
-      // Auto barcode — never copy SKU / label_barcode (must stay unique).
-      setProductBarcodeMode("auto")
+      // SKU is always new. A custom barcode is carried over as the next free
+      // code (PA-144 → PA-145) so only the part that changes needs typing.
+      const sourceCode = String(fresh.label_barcode ?? fresh.custom_code ?? "").trim()
+      let nextCode = ""
+      if (sourceCode) {
+        try {
+          const res = await apiClient.get("/products/barcode-availability", { params: { code: sourceCode } })
+          nextCode = res.data?.data?.suggestion || ""
+        } catch {
+          nextCode = ""
+        }
+      }
+      setProductBarcodeMode(sourceCode ? "manual" : "auto")
+      setBarcodeHint(
+        sourceCode
+          ? nextCode
+            ? `Original: ${sourceCode} — next free code filled in, change it if needed`
+            : `Original: ${sourceCode} — enter a new code`
+          : null,
+      )
       setFormData({
         name: fresh.name ?? product.name ?? "",
         unit_id: fresh.unit?.id ?? "",
-        label_barcode: "",
+        label_barcode: nextCode || (sourceCode ? sourceCode : ""),
         pct_or_hs_code: fresh.pct_or_hs_code ?? "",
         description: fresh.description ?? "",
         sku: "",
@@ -2117,7 +2240,7 @@ export default function Inventory() {
       toast({
         title: "Duplicating product",
         description:
-          "Name, prices, and images are copied. Change size/name as needed — a new SKU and code are created on save.",
+          "Name, prices, images and barcode are copied — the barcode is set to the next free code. A new SKU is created on save.",
       })
     } catch {
       setIsAddDialogOpen(false)
@@ -2151,14 +2274,6 @@ export default function Inventory() {
     created_at: "",
     updated_at: "",
   })
-
-  const openProductInNewTab = (product: Product) => {
-    window.open(
-      buildInventoryProductEditHref(product.id),
-      "_blank",
-      "noopener,noreferrer",
-    )
-  }
 
   /** Duplicate opens in a new tab so the catalog list stays available. */
   const openDuplicateInNewTab = (product: Product) => {
@@ -2286,13 +2401,13 @@ export default function Inventory() {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-52">
-          <DropdownMenuItem onSelect={() => openDuplicateInNewTab(product)}>
+          <DropdownMenuItem onSelect={() => void openDuplicateDialog(product)}>
             <Copy className="mr-2 h-4 w-4" />
-            Duplicate in new tab
+            Duplicate
           </DropdownMenuItem>
-          <DropdownMenuItem onSelect={() => openProductInNewTab(product)}>
+          <DropdownMenuItem onSelect={() => openDuplicateInNewTab(product)}>
             <ExternalLink className="mr-2 h-4 w-4" />
-            Open in new tab
+            Duplicate in new tab
           </DropdownMenuItem>
           <DropdownMenuSeparator />
           <DropdownMenuItem
@@ -2353,6 +2468,15 @@ export default function Inventory() {
     const formBusy = isLoadingEditProduct || isFormDropdownsLoading
     return (
       <div className="p-4 md:p-6 space-y-4 min-w-0">
+        <button
+          type="button"
+          onClick={closeProductForm}
+          disabled={formLoading}
+          className="-mb-1 inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm font-medium text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to products
+        </button>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between pb-3 border-b">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
@@ -2375,7 +2499,7 @@ export default function Inventory() {
             <Copy className="h-4 w-4 text-blue-700" />
             <AlertTitle>Based on “{duplicatingFromName}”</AlertTitle>
             <AlertDescription>
-              Change the name or size for this variant. Stock starts empty; barcode uses Auto (new identity) unless you set Custom.
+              Change the name or size for this variant. Stock starts empty. A custom barcode is carried over as the next free code; a new SKU is created on save.
             </AlertDescription>
           </Alert>
         ) : null}
@@ -2431,6 +2555,9 @@ export default function Inventory() {
             productInternalCode={isEdit ? editingProduct?.code : undefined}
             barcodeMode={productBarcodeMode}
             setBarcodeMode={setProductBarcodeMode}
+            barcodeHint={isDuplicate ? barcodeHint : null}
+            autoFocusBarcode={isDuplicate}
+            onBarcodeTakenChange={setBarcodeTaken}
             currentBranchStocks={currentBranchStocks}
           />
         )}
