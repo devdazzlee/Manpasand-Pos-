@@ -88,6 +88,7 @@ import {
   sanitizeManualBarcodeValue,
   type LabelBarcodeMode,
 } from "@/lib/labelBarcode"
+import { isReadOnlyRole } from "@/lib/role-utils"
 
 // Image compression utility
 const compressImage = (file: File, quality = 0.7, maxWidth = 800, maxHeight = 600): Promise<File> => {
@@ -1363,6 +1364,8 @@ export default function Inventory() {
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
   /** When set, Add form was opened via Duplicate — banner + clearer title. */
   const [duplicatingFromName, setDuplicatingFromName] = useState<string | null>(null)
+  // View-only accounts never get the add / edit / duplicate forms.
+  const readOnly = typeof window !== "undefined" && isReadOnlyRole(localStorage.getItem("role"))
   // Custom-barcode helpers: hint under the field (duplicate) and "code already used" guard.
   const [barcodeHint, setBarcodeHint] = useState<string | null>(null)
   const [barcodeTaken, setBarcodeTaken] = useState(false)
@@ -2287,6 +2290,7 @@ export default function Inventory() {
   // Deep-link: editProduct / duplicateProduct open the matching form (new tab).
   useEffect(() => {
     if (deepLinkEditOpenedRef.current) return
+    if (readOnly) return
     const duplicateId = readInventoryDuplicateProductFromUrl()
     const editId = readInventoryEditProductFromUrl()
     if (!duplicateId && !editId) return
@@ -2372,7 +2376,9 @@ export default function Inventory() {
     { key: "HIDDEN_WEB", label: "Hidden on web", count: catalogStats.hiddenOnWeb },
   ]
 
-  const renderProductActions = (product: Product) => (
+  const renderProductActions = (product: Product) => readOnly ? (
+    <span className="text-xs text-muted-foreground">View only</span>
+  ) : (
     <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
       <Button
         size="sm"
@@ -2590,18 +2596,24 @@ export default function Inventory() {
           </p>
         </div>
 
-        <Button
-          className="self-start sm:self-auto bg-gray-900 hover:bg-gray-800"
-          onClick={() => {
-            resetForm()
-            setEditingProduct(null)
-            loadDropdownData()
-            setIsAddDialogOpen(true)
-          }}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Product
-        </Button>
+        {readOnly ? (
+          <span className="self-start rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 sm:self-auto">
+            View only
+          </span>
+        ) : (
+          <Button
+            className="self-start sm:self-auto bg-gray-900 hover:bg-gray-800"
+            onClick={() => {
+              resetForm()
+              setEditingProduct(null)
+              loadDropdownData()
+              setIsAddDialogOpen(true)
+            }}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Product
+          </Button>
+        )}
       </div>
 
       {/* KPI cards */}

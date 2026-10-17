@@ -82,6 +82,7 @@ import {
   getStockRowImage,
   yieldForUi,
 } from "@/components/inventory/stock-ops/export-utils";
+import { isReadOnlyRole } from "@/lib/role-utils";
 
 /** Sentinel values - must not match a real branch/category id from the API. */
 const ALL_WAREHOUSES = "__all_warehouses__";
@@ -143,6 +144,7 @@ function DetailSection({
 }
 
 export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+  const readOnly = typeof window !== "undefined" && isReadOnlyRole(localStorage.getItem("role"));
   const {
     stats: dashboardStats,
     branchSummary,
@@ -558,6 +560,7 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
           >
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
+          {!readOnly && (
           <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => onNavigate?.("transfers")}>
             <ArrowRightLeft className="mr-2 h-4 w-4 text-blue-600" />
             Transfers
@@ -567,6 +570,7 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
               </span>
             ) : null}
           </Button>
+          )}
           <StockOpsActions
             onExportExcel={exportExcel}
             onExportPdf={exportPdf}

@@ -1104,6 +1104,8 @@ enum Role {
   BRANCH_MANAGER
   SUPERVISOR
   CASHIER
+  /// Read-only: can only view products and stock
+  INVENTORY_VIEWER
 }
 
 enum OrderStatus {

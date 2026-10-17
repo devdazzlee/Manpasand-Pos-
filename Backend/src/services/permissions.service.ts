@@ -47,6 +47,7 @@ export const ROLES: { role: Role; label: string; description: string }[] = [
   { role: 'CASHIER', label: 'Cashier', description: 'Rings up sales and runs the till' },
   { role: 'WAREHOUSE_MANAGER', label: 'Warehouse manager', description: 'Stock, transfers and adjustments' },
   { role: 'PURCHASE_MANAGER', label: 'Purchase manager', description: 'Suppliers, purchasing and costs' },
+  { role: 'INVENTORY_VIEWER', label: 'Inventory viewer (view only)', description: 'Can only view products and stock — cannot add, edit or delete anything' },
 ];
 
 const ALL = ['SUPER_ADMIN'] as const;

@@ -22,6 +22,33 @@ declare global {
 // Pure JWT auth — no server-side session store. The signed token is the
 // session. Tokens are issued without expiry (see auth.service.ts), so a user
 // stays logged in until they explicitly clear the token on the client.
+/**
+ * INVENTORY_VIEWER is read-only: it may only GET product / stock data (plus the
+ * lookups those screens need) and log out or change its own password. Checked
+ * here so every route that authenticates is covered, whatever its role list.
+ */
+const VIEWER_READ_PREFIXES = [
+  '/products',
+  '/stock',
+  '/stock-quantity-report',
+  '/categories',
+  '/subcategories',
+  '/brands',
+  '/colors',
+  '/sizes',
+  '/units',
+  '/taxes',
+  '/branches',
+  '/auth/me',
+];
+const VIEWER_WRITE_PATHS = ['/auth/logout', '/auth/change-password'];
+const apiPath = (req: Request) => (req.baseUrl + req.path).replace(/^\/api\/v\d+/, '').replace(/\/+$/, '') || '/';
+const viewerMayRead = (req: Request) => {
+  const path = apiPath(req);
+  return ['GET', 'HEAD', 'OPTIONS'].includes(req.method) && VIEWER_READ_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+};
+const viewerAllowed = (req: Request) => viewerMayRead(req) || VIEWER_WRITE_PATHS.includes(apiPath(req));
+
 const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -59,6 +86,9 @@ const authenticate = async (req: Request, res: Response, next: NextFunction) => 
       branch_id: userExists.branch_id ?? undefined,
       email: userExists.email,
     };
+    if (userExists.role === 'INVENTORY_VIEWER' && !viewerAllowed(req)) {
+      throw new AppError(403, 'This account is view-only (products and stock)');
+    }
     next();
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError || error instanceof jwt.TokenExpiredError) {
@@ -72,7 +102,12 @@ const authorize = (roles: string[]) => {
   return (req: Request, res: Response, next: NextFunction) => {
     const role = req.user?.role;
     // A supervisor can reach everything a branch manager can; permissions then narrow it down.
-    const allowed = !!role && (roles.includes(role) || (role === 'SUPERVISOR' && roles.includes('BRANCH_MANAGER')));
+    const allowed =
+      !!role &&
+      (roles.includes(role) ||
+        (role === 'SUPERVISOR' && roles.includes('BRANCH_MANAGER')) ||
+        // View-only role may read the product / stock screens that other roles can.
+        (role === 'INVENTORY_VIEWER' && viewerMayRead(req)));
     if (!allowed) {
       return next(new AppError(403, 'Unauthorized access'));
     }
