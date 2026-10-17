@@ -2887,3 +2887,5 @@
 {"level":"error","message":"Error: This account is view-only (products and stock)\n    at authenticate (D:\\New folder\\Pehnawa-Store-Pos\\Backend\\src\\middleware\\auth.middleware.ts:90:13)","timestamp":"2026-10-17T17:01:11.881Z"}
 {"level":"error","message":"Error: This account is view-only (products and stock)\n    at authenticate (D:\\New folder\\Pehnawa-Store-Pos\\Backend\\src\\middleware\\auth.middleware.ts:90:13)","timestamp":"2026-10-17T17:01:48.402Z"}
 {"level":"error","message":"Error: This account is view-only (products and stock)\n    at authenticate (D:\\New folder\\Pehnawa-Store-Pos\\Backend\\src\\middleware\\auth.middleware.ts:90:13)","timestamp":"2026-10-17T17:02:25.653Z"}
+{"level":"error","message":"Error: This account is view-only (products and stock)\n    at authenticate (D:\\New folder\\Pehnawa-Store-Pos\\Backend\\src\\middleware\\auth.middleware.ts:90:13)","timestamp":"2026-10-17T17:34:09.658Z"}
+{"level":"error","message":"Error: This account is view-only (products and stock)\n    at authenticate (D:\\New folder\\Pehnawa-Store-Pos\\Backend\\src\\middleware\\auth.middleware.ts:90:13)","timestamp":"2026-10-17T17:34:10.297Z"}

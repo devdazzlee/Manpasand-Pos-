@@ -46,8 +46,34 @@ export interface PurchaseReturnPayload {
     product_id: string;
     quantity: number;
     unit_cost: number;
-    purchase_id: string;
+    /** Empty for a direct return (stock added without a bill) */
+    purchase_id?: string | null;
   }[];
+}
+
+/** A product that can be returned without a bill (has stock at the branch). */
+export interface DirectReturnProduct {
+  product_id: string;
+  product_name: string;
+  sku: string | null;
+  on_hand: number;
+  unit_cost: number;
+  cost_source: "last_purchase" | "product_rate";
+  last_purchase_date: string | null;
+  from_supplier: boolean;
+}
+
+export async function fetchDirectReturnProducts(
+  supplierId: string,
+  branchId: string,
+  search: string,
+  signal?: AbortSignal,
+): Promise<DirectReturnProduct[]> {
+  const res = await apiClient.get("/purchase-returns/direct-products", {
+    params: cleanParams({ supplier_id: supplierId, branch_id: branchId, search: search.trim() || undefined }),
+    signal,
+  });
+  return Array.isArray(res.data?.data) ? res.data.data : [];
 }
 
 export interface ReturnableBillLine {

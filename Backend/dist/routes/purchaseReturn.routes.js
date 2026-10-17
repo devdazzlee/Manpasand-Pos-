@@ -12,6 +12,8 @@ const router = express_1.default.Router();
 router.use(auth_middleware_1.authenticate, (0, auth_middleware_1.authorize)(['SUPER_ADMIN', 'ADMIN', 'PURCHASE_MANAGER', 'WAREHOUSE_MANAGER', 'BRANCH_MANAGER']));
 router.get('/', (0, validation_middleware_1.validate)(purchaseReturn_validation_1.listPurchaseReturnsSchema), purchaseReturn_controller_1.listPurchaseReturns);
 router.get('/returnable-bills', (0, validation_middleware_1.validate)(purchaseReturn_validation_1.returnableBillsSchema), purchaseReturn_controller_1.listReturnableBills);
+// Return without a bill: stock that came in directly (no supplier bill)
+router.get('/direct-products', (0, validation_middleware_1.validate)(purchaseReturn_validation_1.directReturnProductsSchema), purchaseReturn_controller_1.listDirectReturnProducts);
 router.post('/', (0, validation_middleware_1.validate)(purchaseReturn_validation_1.createPurchaseReturnSchema), purchaseReturn_controller_1.createPurchaseReturn);
 router.get('/:id', (0, validation_middleware_1.validate)(purchaseReturn_validation_1.idParamSchema), purchaseReturn_controller_1.getPurchaseReturn);
 router.post('/:id/cancel', (0, validation_middleware_1.validate)(purchaseReturn_validation_1.idParamSchema), purchaseReturn_controller_1.cancelPurchaseReturn);

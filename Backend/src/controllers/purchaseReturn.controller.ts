@@ -21,6 +21,13 @@ export const listReturnableBills = asyncHandler(async (req: Request, res: Respon
     new ApiResponse(data, 'Returnable supplier bills retrieved').send(res);
 });
 
+export const listDirectReturnProducts = asyncHandler(async (req: Request, res: Response) => {
+    const supplierId = String(req.query.supplier_id || '');
+    const branchId = String(req.query.branch_id || '') || resolveBranchId(req) || '';
+    const data = await service.directReturnProducts(supplierId, branchId, req.query.search ? String(req.query.search) : undefined);
+    new ApiResponse(data, 'Products available to return').send(res);
+});
+
 export const getPurchaseReturn = asyncHandler(async (req: Request, res: Response) => {
     const data = await service.getById(req.params.id);
     new ApiResponse(data, 'Purchase return retrieved').send(res);

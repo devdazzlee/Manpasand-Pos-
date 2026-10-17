@@ -15,11 +15,19 @@ export const createPurchaseReturnSchema = z.object({
                     product_id: z.string().uuid(),
                     quantity: z.coerce.number().positive(),
                     unit_cost: z.coerce.number().nonnegative(),
-                    /** Required by service — links return to a real purchase bill line. */
-                    purchase_id: z.string().uuid('Select a purchase bill line'),
+                    /** Bill line being returned. Empty = direct return (stock added without a bill). */
+                    purchase_id: z.string().uuid('Select a purchase bill line').nullish(),
                 }),
             )
             .min(1, 'Add at least one line'),
+    }),
+});
+
+export const directReturnProductsSchema = z.object({
+    query: z.object({
+        supplier_id: z.string().uuid(),
+        branch_id: z.string().uuid(),
+        search: z.string().trim().max(120).optional(),
     }),
 });
 

@@ -37,7 +37,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
-import { Ban, Check, FileText, Loader2, Plus, Search, Undo2 } from "lucide-react";
+import { Ban, Check, FileText, Loader2, PackageMinus, Plus, Search, Trash2, Undo2 } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { formatMoney, formatQty } from "@/components/inventory/stock-ops/export-utils";
@@ -51,6 +51,8 @@ import {
   type PurchaseReturn,
   type ReturnableBill,
   type ReturnableBillLine,
+  fetchDirectReturnProducts,
+  type DirectReturnProduct,
 } from "@/lib/api/purchase-returns";
 
 type Supplier = { id: string; name: string };
@@ -147,7 +149,7 @@ export function PurchaseReturnsPanel({
         <div>
           <h2 className="text-sm font-semibold text-slate-900">Purchase returns</h2>
           <p className="text-xs text-slate-500">
-            Return items from a previous supplier bill — not from the full catalog
+            Return items to a supplier — from a bill, or directly for stock added without a bill
           </p>
         </div>
         <Button
@@ -236,7 +238,7 @@ export function PurchaseReturnsPanel({
               <Undo2 className="h-8 w-8 text-slate-300" />
               <p className="text-sm font-medium text-slate-800">No purchase returns yet</p>
               <p className="text-xs text-slate-500">
-                Pick a previous supplier bill, then return only those items
+                Return from a supplier bill, or directly for stock that came in without one
               </p>
               <Button size="sm" className="mt-2 h-8" onClick={() => setFormOpen(true)}>
                 <Plus className="mr-1 h-3.5 w-3.5" />
@@ -457,11 +459,15 @@ function ReturnFormSheet({
       product_id: string;
       quantity: number;
       unit_cost: number;
-      purchase_id: string;
+      purchase_id?: string | null;
     }[];
   }) => void;
   saving: boolean;
 }) {
+  // "bill": return lines of a supplier bill. "direct": stock that came in
+  // without a bill — pick any product with stock, cost fills in automatically.
+  const [mode, setMode] = useState<"bill" | "direct">("bill");
+  const [directLines, setDirectLines] = useState<DirectLine[]>([]);
   const [supplierId, setSupplierId] = useState("");
   const [branchId, setBranchId] = useState("");
   const [reason, setReason] = useState("");
@@ -484,6 +490,8 @@ function ReturnFormSheet({
     setBillPickMode("product");
     setBillSearch("");
     setProductSearch("");
+    setMode("bill");
+    setDirectLines([]);
   }, [open, branches]);
 
   useEffect(() => {
@@ -562,29 +570,64 @@ function ReturnFormSheet({
     return qty <= 0 || qty > max + 1e-9;
   });
 
+  const directErrors = directLines.filter((l) => {
+    const qty = Number(l.quantity) || 0;
+    const cost = Number(l.unit_cost);
+    return qty <= 0 || qty > l.on_hand + 1e-9 || !(cost >= 0) || l.unit_cost === "";
+  });
+  const directTotal = directLines.reduce((a, l) => a + (Number(l.quantity) || 0) * (Number(l.unit_cost) || 0), 0);
+  const creditTotal = mode === "bill" ? total : directTotal;
+
   const valid =
-    Boolean(supplierId && branchId && billId) &&
-    selectedLines.length > 0 &&
-    lineErrors.length === 0;
+    mode === "bill"
+      ? Boolean(supplierId && branchId && billId) && selectedLines.length > 0 && lineErrors.length === 0
+      : Boolean(supplierId && branchId) && directLines.length > 0 && directErrors.length === 0;
 
   const stepDone = {
     supplier: Boolean(supplierId && branchId),
-    bill: Boolean(billId),
-    lines: selectedLines.length > 0,
+    bill: mode === "bill" ? Boolean(billId) : directLines.length > 0,
+    lines: mode === "bill" ? selectedLines.length > 0 : directLines.length > 0 && directErrors.length === 0,
   };
 
   return (
     <DetailSheet open={open} onOpenChange={onOpenChange} size="xl">
       <DetailSheetHeader
         title="New purchase return"
-        subtitle="Return only items from a previous supplier bill"
+        subtitle={
+          mode === "bill"
+            ? "Return items from a previous supplier bill"
+            : "Return stock that came in without a bill — cost fills in automatically"
+        }
       />
       <DetailSheetBody className="space-y-4">
+        <div role="tablist" aria-label="Return type" className="grid grid-cols-2 gap-1 rounded-xl bg-slate-100 p-1">
+          {(
+            [
+              { key: "bill", label: "From a bill", hint: "Stock In with a supplier bill" },
+              { key: "direct", label: "Without bill (direct)", hint: "Stock added directly, no bill" },
+            ] as const
+          ).map((m) => (
+            <button
+              key={m.key}
+              type="button"
+              role="tab"
+              aria-selected={mode === m.key}
+              onClick={() => setMode(m.key)}
+              className={cn(
+                "rounded-lg px-3 py-2 text-left transition",
+                mode === m.key ? "bg-white shadow-sm ring-1 ring-slate-200" : "text-slate-500 hover:text-slate-800",
+              )}
+            >
+              <span className={cn("block text-sm font-semibold", mode === m.key ? "text-slate-900" : "")}>{m.label}</span>
+              <span className="block text-[11px] text-slate-500">{m.hint}</span>
+            </button>
+          ))}
+        </div>
         <ol className="flex flex-wrap items-center gap-1.5 text-[11px]">
           {(
             [
               { n: 1, label: "Supplier & branch", done: stepDone.supplier, active: !stepDone.supplier },
-              { n: 2, label: "Pick bill", done: stepDone.bill, active: stepDone.supplier && !stepDone.bill },
+              { n: 2, label: mode === "bill" ? "Pick bill" : "Add products", done: stepDone.bill, active: stepDone.supplier && !stepDone.bill },
               { n: 3, label: "Qty to return", done: stepDone.lines, active: stepDone.bill && !stepDone.lines },
             ] as const
           ).map((step, idx) => (
@@ -618,6 +661,7 @@ function ReturnFormSheet({
                 setSupplierId(v);
                 setBillId("");
                 setDraftLines([]);
+                setDirectLines([]);
               }}
             >
               <SelectTrigger className="h-9">
@@ -642,6 +686,7 @@ function ReturnFormSheet({
                 setBranchId(v);
                 setBillId("");
                 setDraftLines([]);
+                setDirectLines([]);
               }}
             >
               <SelectTrigger className="h-9">
@@ -667,6 +712,16 @@ function ReturnFormSheet({
           </div>
         </div>
 
+        {mode === "direct" ? (
+          <DirectReturnPicker
+            supplierId={supplierId}
+            branchId={branchId}
+            lines={directLines}
+            setLines={setDirectLines}
+            hasErrors={directErrors.length > 0}
+          />
+        ) : (
+          <>
         <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
           <div className="flex flex-wrap items-start justify-between gap-2">
             <div className="flex items-center gap-2">
@@ -697,6 +752,13 @@ function ReturnFormSheet({
           ) : bills.length === 0 ? (
             <p className="rounded-lg border border-dashed border-slate-200 bg-white px-3 py-6 text-center text-xs text-slate-500">
               No returnable bills for this supplier at this branch.
+              <button
+                type="button"
+                className="mt-2 block w-full text-xs font-semibold text-rose-700 underline underline-offset-2"
+                onClick={() => setMode("direct")}
+              >
+                Stock came in without a bill? Return without bill →
+              </button>
             </p>
           ) : (
             <>
@@ -1028,10 +1090,13 @@ function ReturnFormSheet({
           </div>
         ) : null}
 
+          </>
+        )}
+
         <div className="flex justify-end text-sm">
           <span className="text-slate-500">Credit to supplier&nbsp;</span>
           <span className="font-semibold tabular-nums text-slate-900">
-            Rs {formatMoney(total)}
+            Rs {formatMoney(creditTotal)}
           </span>
         </div>
       </DetailSheetBody>
@@ -1047,12 +1112,20 @@ function ReturnFormSheet({
               supplier_id: supplierId,
               branch_id: branchId,
               reason: reason.trim() || null,
-              items: selectedLines.map((l) => ({
-                product_id: l.product_id,
-                quantity: Number(l.quantity),
-                unit_cost: l.unit_cost,
-                purchase_id: l.purchase_id,
-              })),
+              items:
+                mode === "bill"
+                  ? selectedLines.map((l) => ({
+                      product_id: l.product_id,
+                      quantity: Number(l.quantity),
+                      unit_cost: l.unit_cost,
+                      purchase_id: l.purchase_id,
+                    }))
+                  : directLines.map((l) => ({
+                      product_id: l.product_id,
+                      quantity: Number(l.quantity),
+                      unit_cost: Number(l.unit_cost),
+                      purchase_id: null,
+                    })),
             })
           }
         >
@@ -1061,5 +1134,229 @@ function ReturnFormSheet({
         </Button>
       </DetailSheetFooter>
     </DetailSheet>
+  );
+}
+
+
+type DirectLine = Omit<DirectReturnProduct, "unit_cost" | "from_supplier"> & {
+  quantity: string;
+  unit_cost: string;
+};
+
+/**
+ * Return without a bill: search products with stock at the branch, add them,
+ * set qty. Cost is the last price paid to this supplier (else product cost).
+ */
+function DirectReturnPicker({
+  supplierId,
+  branchId,
+  lines,
+  setLines,
+  hasErrors,
+}: {
+  supplierId: string;
+  branchId: string;
+  lines: DirectLine[];
+  setLines: React.Dispatch<React.SetStateAction<DirectLine[]>>;
+  hasErrors: boolean;
+}) {
+  const [search, setSearch] = useState("");
+  const [results, setResults] = useState<DirectReturnProduct[]>([]);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    if (!supplierId || !branchId) {
+      setResults([]);
+      return;
+    }
+    const ac = new AbortController();
+    const t = setTimeout(() => {
+      setLoading(true);
+      fetchDirectReturnProducts(supplierId, branchId, search, ac.signal)
+        .then(setResults)
+        .catch((e: any) => {
+          if (!ac.signal.aborted) toast.error(e?.response?.data?.message || "Could not load products");
+        })
+        .finally(() => {
+          if (!ac.signal.aborted) setLoading(false);
+        });
+    }, 250);
+    return () => {
+      clearTimeout(t);
+      ac.abort();
+    };
+  }, [supplierId, branchId, search]);
+
+  const added = new Set(lines.map((l) => l.product_id));
+  const add = (p: DirectReturnProduct) => {
+    if (added.has(p.product_id)) return;
+    setLines((rows) => [
+      ...rows,
+      {
+        product_id: p.product_id,
+        product_name: p.product_name,
+        sku: p.sku,
+        on_hand: p.on_hand,
+        cost_source: p.cost_source,
+        last_purchase_date: p.last_purchase_date,
+        quantity: "1",
+        unit_cost: String(p.unit_cost),
+      },
+    ]);
+  };
+  const update = (id: string, patch: Partial<DirectLine>) =>
+    setLines((rows) => rows.map((r) => (r.product_id === id ? { ...r, ...patch } : r)));
+
+  if (!supplierId || !branchId) {
+    return (
+      <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+        Choose supplier and branch first.
+      </p>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <div className="space-y-2 rounded-xl border border-slate-200 bg-slate-50/40 p-3">
+        <div className="flex items-center gap-2">
+          <PackageMinus className="h-4 w-4 text-slate-500" />
+          <div>
+            <p className="text-sm font-semibold text-slate-900">Add products to return</p>
+            <p className="text-[11px] text-slate-500">
+              Any product with stock in this branch. This supplier&apos;s products are listed first.
+            </p>
+          </div>
+        </div>
+        <div className="relative">
+          <Search className="absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search product name, code or barcode…"
+            className="h-9 bg-white pl-8"
+            autoFocus
+          />
+          {loading ? <Loader2 className="absolute right-2.5 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-slate-400" /> : null}
+        </div>
+        <div className="max-h-56 overflow-y-auto rounded-lg border border-slate-200 bg-white">
+          {results.length === 0 && !loading ? (
+            <p className="px-3 py-6 text-center text-xs text-slate-500">
+              {search ? "No product with stock matches this search." : "No products with stock in this branch."}
+            </p>
+          ) : (
+            results.map((p) => {
+              const isAdded = added.has(p.product_id);
+              return (
+                <button
+                  key={p.product_id}
+                  type="button"
+                  disabled={isAdded}
+                  onClick={() => add(p)}
+                  className={cn(
+                    "flex w-full items-center gap-3 border-b border-slate-100 px-3 py-2 text-left last:border-0",
+                    isAdded ? "cursor-default bg-emerald-50/60" : "hover:bg-slate-50",
+                  )}
+                >
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-slate-900">{p.product_name}</p>
+                    <p className="text-[11px] text-slate-500">
+                      {p.sku ? <span className="font-mono">{p.sku}</span> : null}
+                      {p.sku ? " · " : ""}on hand {formatQty(p.on_hand)}
+                      {p.from_supplier ? <span className="ml-1.5 rounded bg-emerald-100 px-1 text-emerald-800">this supplier</span> : null}
+                    </p>
+                  </div>
+                  <div className="shrink-0 text-right">
+                    <p className="text-sm font-semibold tabular-nums text-slate-900">Rs {formatMoney(p.unit_cost)}</p>
+                    <p className="text-[10px] text-slate-500">{p.cost_source === "last_purchase" ? "last paid" : "product cost"}</p>
+                  </div>
+                  {isAdded ? <Check className="h-4 w-4 text-emerald-600" /> : <Plus className="h-4 w-4 text-slate-400" />}
+                </button>
+              );
+            })
+          )}
+        </div>
+      </div>
+
+      {lines.length ? (
+        <div className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+          <div className="border-b border-slate-100 bg-slate-50/80 px-3 py-2.5">
+            <p className="text-sm font-semibold text-slate-900">Items to return</p>
+            <p className="text-[11px] text-slate-500">Qty can&apos;t be more than on hand. Cost is filled in — change it if the supplier agreed a different price.</p>
+          </div>
+          <div className="overflow-x-auto">
+            <Table>
+              <TableHeader>
+                <TableRow className="hover:bg-transparent">
+                  <TableHead className="pl-3 text-[11px] uppercase tracking-wider text-slate-500">Product</TableHead>
+                  <TableHead className="text-right text-[11px] uppercase tracking-wider text-slate-500">On hand</TableHead>
+                  <TableHead className="w-28 text-right text-[11px] uppercase tracking-wider text-slate-500">Return qty</TableHead>
+                  <TableHead className="w-32 text-right text-[11px] uppercase tracking-wider text-slate-500">Unit cost</TableHead>
+                  <TableHead className="text-right text-[11px] uppercase tracking-wider text-slate-500">Credit</TableHead>
+                  <TableHead className="w-10 pr-3" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {lines.map((l) => {
+                  const qty = Number(l.quantity) || 0;
+                  const over = qty > l.on_hand + 1e-9;
+                  return (
+                    <TableRow key={l.product_id}>
+                      <TableCell className="pl-3">
+                        <p className="text-sm font-medium text-slate-900">{l.product_name}</p>
+                        <p className="text-[11px] text-slate-500">
+                          {l.cost_source === "last_purchase"
+                            ? `Cost = last paid to this supplier${l.last_purchase_date ? ` (${fmtDate(l.last_purchase_date)})` : ""}`
+                            : "Cost = product purchase rate"}
+                        </p>
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm">{formatQty(l.on_hand)}</TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="1"
+                          value={l.quantity}
+                          onChange={(e) => update(l.product_id, { quantity: e.target.value })}
+                          className={cn("h-8 text-right tabular-nums", (over || qty <= 0) && "border-rose-400")}
+                        />
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Input
+                          type="number"
+                          min="0"
+                          step="0.01"
+                          value={l.unit_cost}
+                          onChange={(e) => update(l.product_id, { unit_cost: e.target.value })}
+                          className="h-8 text-right tabular-nums"
+                        />
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums text-sm font-medium">
+                        Rs {formatMoney(qty * (Number(l.unit_cost) || 0))}
+                      </TableCell>
+                      <TableCell className="pr-3">
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 text-slate-400 hover:text-rose-600"
+                          onClick={() => setLines((rows) => rows.filter((r) => r.product_id !== l.product_id))}
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
+          {hasErrors ? (
+            <p className="border-t border-rose-100 bg-rose-50 px-3 py-2 text-[11px] text-rose-700">
+              Fix the highlighted rows — qty must be more than 0 and not more than on hand.
+            </p>
+          ) : null}
+        </div>
+      ) : null}
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.listPurchaseReturnsSchema = exports.returnableBillsSchema = exports.createPurchaseReturnSchema = exports.idParamSchema = void 0;
+exports.listPurchaseReturnsSchema = exports.returnableBillsSchema = exports.directReturnProductsSchema = exports.createPurchaseReturnSchema = exports.idParamSchema = void 0;
 const zod_1 = require("zod");
 exports.idParamSchema = zod_1.z.object({ params: zod_1.z.object({ id: zod_1.z.string().uuid() }) });
 exports.createPurchaseReturnSchema = zod_1.z.object({
@@ -15,10 +15,17 @@ exports.createPurchaseReturnSchema = zod_1.z.object({
             product_id: zod_1.z.string().uuid(),
             quantity: zod_1.z.coerce.number().positive(),
             unit_cost: zod_1.z.coerce.number().nonnegative(),
-            /** Required by service — links return to a real purchase bill line. */
-            purchase_id: zod_1.z.string().uuid('Select a purchase bill line'),
+            /** Bill line being returned. Empty = direct return (stock added without a bill). */
+            purchase_id: zod_1.z.string().uuid('Select a purchase bill line').nullish(),
         }))
             .min(1, 'Add at least one line'),
+    }),
+});
+exports.directReturnProductsSchema = zod_1.z.object({
+    query: zod_1.z.object({
+        supplier_id: zod_1.z.string().uuid(),
+        branch_id: zod_1.z.string().uuid(),
+        search: zod_1.z.string().trim().max(120).optional(),
     }),
 });
 exports.returnableBillsSchema = zod_1.z.object({

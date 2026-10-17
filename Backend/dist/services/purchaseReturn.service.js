@@ -181,15 +181,87 @@ class PurchaseReturnService {
         })
             .sort((a, b) => b.purchase_date.getTime() - a.purchase_date.getTime());
     }
+    /**
+     * Products that can be returned to a supplier without a bill: anything with
+     * stock at the branch. Cost = last price paid to this supplier for it, else
+     * the product's purchase rate. This supplier's products are listed first.
+     */
+    async directReturnProducts(supplierId, branchId, search) {
+        if (!supplierId || !branchId)
+            throw new apiError_1.AppError(400, 'Supplier and branch are required');
+        const q = search?.trim();
+        const stocks = await client_2.prisma.stock.findMany({
+            where: {
+                branch_id: branchId,
+                current_quantity: { gt: 0 },
+                ...(q
+                    ? {
+                        product: {
+                            OR: [
+                                { name: { contains: q, mode: 'insensitive' } },
+                                { sku: { contains: q, mode: 'insensitive' } },
+                                { code: { contains: q, mode: 'insensitive' } },
+                                { custom_code: { contains: q, mode: 'insensitive' } },
+                                { label_barcode: { contains: q, mode: 'insensitive' } },
+                            ],
+                        },
+                    }
+                    : {}),
+            },
+            select: {
+                current_quantity: true,
+                product: {
+                    select: { id: true, name: true, sku: true, code: true, custom_code: true, label_barcode: true, purchase_rate: true, supplier_id: true },
+                },
+            },
+            take: 400,
+        });
+        if (!stocks.length)
+            return [];
+        const productIds = stocks.map((s) => s.product.id);
+        const lastFromSupplier = await client_2.prisma.purchase.findMany({
+            where: { supplier_id: supplierId, product_id: { in: productIds } },
+            orderBy: { purchase_date: 'desc' },
+            distinct: ['product_id'],
+            select: { product_id: true, cost_price: true, purchase_date: true },
+        });
+        const lastBy = new Map(lastFromSupplier.map((p) => [p.product_id, p]));
+        return stocks
+            .map((s) => {
+            const last = lastBy.get(s.product.id);
+            const fromSupplier = !!last || s.product.supplier_id === supplierId;
+            return {
+                product_id: s.product.id,
+                product_name: s.product.name,
+                sku: s.product.custom_code || s.product.label_barcode || s.product.sku || s.product.code,
+                on_hand: (0, helpers_1.asNumber)(s.current_quantity),
+                unit_cost: last ? (0, helpers_1.asNumber)(last.cost_price) : (0, helpers_1.asNumber)(s.product.purchase_rate),
+                cost_source: last ? 'last_purchase' : 'product_rate',
+                last_purchase_date: last?.purchase_date ?? null,
+                from_supplier: fromSupplier,
+            };
+        })
+            .sort((a, b) => Number(b.from_supplier) - Number(a.from_supplier) || a.product_name.localeCompare(b.product_name))
+            .slice(0, 60);
+    }
     async create(data, userId) {
         if (!data.items?.length)
             throw new apiError_1.AppError(400, 'A purchase return needs at least one line');
         for (const it of data.items) {
             if (it.quantity <= 0)
                 throw new apiError_1.AppError(400, 'Return quantity must be positive');
-            if (!it.purchase_id) {
-                throw new apiError_1.AppError(400, 'Each return line must link to a purchase bill line');
-            }
+            if (!(Number(it.unit_cost) >= 0))
+                throw new apiError_1.AppError(400, 'Cost cannot be negative');
+        }
+        // Bill lines are checked against what was bought; direct lines (stock that
+        // came in without a bill) only against stock on hand, inside the transaction.
+        const billItems = data.items.filter((i) => !!i.purchase_id);
+        const directItems = data.items.filter((i) => !i.purchase_id);
+        if (directItems.length) {
+            const ids = [...new Set(directItems.map((i) => i.product_id))];
+            const found = await client_2.prisma.product.count({ where: { id: { in: ids } } });
+            if (found !== ids.length)
+                throw new apiError_1.AppError(400, 'One or more products were not found');
         }
         const [supplier, branch] = await Promise.all([
             client_2.prisma.supplier.findUnique({ where: { id: data.supplier_id } }),
@@ -199,7 +271,7 @@ class PurchaseReturnService {
             throw new apiError_1.AppError(400, 'Invalid supplier');
         if (!branch)
             throw new apiError_1.AppError(400, 'Invalid branch');
-        const purchaseIds = [...new Set(data.items.map((i) => i.purchase_id))];
+        const purchaseIds = [...new Set(billItems.map((i) => i.purchase_id))];
         const purchases = await client_2.prisma.purchase.findMany({
             where: { id: { in: purchaseIds } },
         });
@@ -229,7 +301,7 @@ class PurchaseReturnService {
             returnedByPurchase.set(row.purchase_id, (returnedByPurchase.get(row.purchase_id) || 0) + (0, helpers_1.asNumber)(row.quantity));
         }
         const requestedByPurchase = new Map();
-        for (const it of data.items) {
+        for (const it of billItems) {
             requestedByPurchase.set(it.purchase_id, (requestedByPurchase.get(it.purchase_id) || 0) + Number(it.quantity));
         }
         for (const [purchaseId, qty] of requestedByPurchase) {
@@ -241,7 +313,7 @@ class PurchaseReturnService {
                 throw new apiError_1.AppError(400, `Cannot return more than purchased for a bill line (returnable ${Math.max(0, returnable)})`);
             }
         }
-        for (const it of data.items) {
+        for (const it of billItems) {
             const purchase = purchaseById.get(it.purchase_id);
             if (it.product_id !== purchase.product_id) {
                 throw new apiError_1.AppError(400, 'Product does not match the selected purchase line');
@@ -266,7 +338,7 @@ class PurchaseReturnService {
                             quantity: new client_1.Prisma.Decimal(it.quantity),
                             unit_cost: new client_1.Prisma.Decimal(it.unit_cost),
                             total_cost: new client_1.Prisma.Decimal(Number(it.quantity) * Number(it.unit_cost)),
-                            purchase_id: it.purchase_id,
+                            purchase_id: it.purchase_id || null,
                         })),
                     },
                 },
