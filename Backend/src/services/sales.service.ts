@@ -412,7 +412,7 @@ class SaleService {
     await loyaltyService.reverseForSale(sale.id, opts.userId);
     await giftCardService.refundForSale(sale.id, opts.userId);
 
-    return prisma.sale.update({
+    const cancelled = await prisma.sale.update({
       where: { id: saleId },
       data: {
         status: SaleStatus.CANCELLED,
@@ -427,6 +427,11 @@ class SaleService {
         user: { select: { id: true, email: true, role: true } },
       },
     });
+    // Cancelled bill: its cash / bank voucher goes too.
+    await saleAccountingService.repostForSale(saleId, { userId: opts.userId }).catch((err) => {
+      console.error('[sale-accounting] repost after cancel failed', saleId, (err as Error).message);
+    });
+    return cancelled;
   }
 
   async updateSale(
@@ -712,6 +717,11 @@ class SaleService {
       });
     }
 
+    // Payment method / amount may have changed: keep Cash in Hand / Bank in step.
+    await saleAccountingService.repostForSale(saleId).catch((err) => {
+      console.error('[sale-accounting] repost after edit failed', saleId, (err as Error).message);
+    });
+
     return this.getSaleById(saleId);
   }
 
@@ -772,6 +782,9 @@ class SaleService {
     await loyaltyService.reverseForSale(sale.id, opts.userId).catch(() => undefined);
     await giftCardService.refundForSale(sale.id, opts.userId).catch(() => undefined);
 
+    await prisma.journalVoucher.deleteMany({
+      where: { reference: { in: [`SALE:${saleId}`, `SALE-RTN:${saleId}`] } },
+    });
     await prisma.sale.delete({ where: { id: saleId } });
     return { id: saleId, deleted: true };
   }

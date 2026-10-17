@@ -32,7 +32,9 @@ function getTimeZoneOffsetMs(date: Date, timeZone: string): number {
   if (hour === 24) hour = 0;
 
   const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), hour, get('minute'), get('second'));
-  return asUtc - date.getTime();
+  // formatToParts has no milliseconds — compare against the whole second, or a
+  // day's end (23:59:59.999) drifts ~1s into the next day.
+  return asUtc - (date.getTime() - date.getUTCMilliseconds());
 }
 
 /** Wall-clock local time in `timeZone` → UTC Date. */

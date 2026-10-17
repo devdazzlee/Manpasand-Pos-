@@ -197,6 +197,18 @@ async function createBalancedVoucher(params: {
 }
 
 class SaleAccountingService {
+  /**
+   * Rebuild a sale's accounting after it changed (payment method / amount
+   * edited, cancelled or deleted): drop its voucher and post it again from
+   * the sale as it is now. A cancelled or deleted sale ends with no voucher.
+   */
+  async repostForSale(saleId: string, opts?: { userId?: string | null; skipPeriodLock?: boolean }) {
+    await prisma.journalVoucher.deleteMany({
+      where: { reference: { in: [saleVoucherRef(saleId), returnVoucherRef(saleId)] } },
+    });
+    return this.postForSale(saleId, { userId: opts?.userId, skipPeriodLock: opts?.skipPeriodLock });
+  }
+
   /** Post (or no-op if already posted) accounting for a completed sale or return. */
   async postForSale(saleId: string, opts?: { skipPeriodLock?: boolean; userId?: string | null }) {
     await ensureBankSystemAccount();
@@ -226,13 +238,39 @@ class SaleAccountingService {
     const existing = await prisma.journalVoucher.findFirst({ where: { reference }, select: { id: true } });
     if (existing) return existing;
 
-    const { cash, bank, bankByMethod } = splitTenders(
+    const split = splitTenders(
       sale.payments,
       String(sale.payment_method),
       Number(sale.payment_received) || 0,
     );
+    let { cash, bank } = split;
+    const { bankByMethod } = split;
+    // Gift-card tenders are posted from the gift card ledger (Dr Gift Cards / Cr Sales).
+    const giftCard = round2(
+      sale.payments
+        .filter((p) => String(p.method).toUpperCase() === 'GIFT_CARD')
+        .reduce((t, p) => t + Math.abs(Number(p.amount) || 0), 0),
+    );
+    // Paid more than the bill (e.g. 14,500 tendered on 13,000): the excess was
+    // handed back as change — it is neither sales nor money kept. Take it off
+    // cash first, then off bank tenders.
+    let excess = round2(cash + bank + giftCard - (Number(sale.total_amount) || 0));
+    if (excess > 0.005) {
+      const fromCash = Math.min(cash, excess);
+      cash = round2(cash - fromCash);
+      excess = round2(excess - fromCash);
+      for (const [method, amount] of bankByMethod) {
+        if (excess < 0.005) break;
+        const take = Math.min(amount, excess);
+        bankByMethod.set(method, round2(amount - take));
+        excess = round2(excess - take);
+      }
+      bank = round2([...bankByMethod.values()].reduce((t, v) => t + v, 0));
+    }
     const totalMoney = round2(cash + bank);
-    if (totalMoney < 0.005) return null;
+    // Whatever the customer did not pay now is on credit: it is still a sale.
+    const unpaid = round2(Math.max(0, (Number(sale.total_amount) || 0) - totalMoney - giftCard));
+    if (totalMoney < 0.005 && unpaid < 0.005) return null;
 
     const [cashAcct, bankAcct, salesAcct] = await Promise.all([
       accountByKey('CASH'),
@@ -254,6 +292,7 @@ class SaleAccountingService {
       // Each method goes to its configured account (Settings → Payment accounts).
       const perAccount = new Map<string, { amount: number; methods: string[] }>();
       for (const [method, amount] of bankByMethod) {
+        if (amount < 0.005) continue;
         const accountId = await bankAccountForMethod(method, bankAcct.id);
         const row = perAccount.get(accountId) || { amount: 0, methods: [] };
         row.amount = round2(row.amount + amount);
@@ -268,9 +307,17 @@ class SaleAccountingService {
         });
       }
     }
+    if (unpaid > 0.005) {
+      const receivables = await accountByKey('RECEIVABLES');
+      lines.push({
+        accountId: receivables.id,
+        debit: unpaid,
+        description: `On credit (customer owes) · ${sale.sale_number}`,
+      });
+    }
     lines.push({
       accountId: salesAcct.id,
-      credit: totalMoney,
+      credit: round2(totalMoney + unpaid),
       description: `Sale · ${sale.sale_number}`,
     });
 

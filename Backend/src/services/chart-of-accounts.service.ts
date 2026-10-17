@@ -1232,12 +1232,14 @@ export class ChartOfAccountsService {
         for (const line of lines) {
           const account = byId.get(line.account_id);
           if (!account) continue;
-          // Opening-stock vouchers debit Inventory for the record, but Inventory is
-          // already overlaid from live stock — counting the line too would double it.
+          // Opening-stock vouchers debit Inventory, and credit-sale vouchers debit
+          // Customers Receivable, for the record — but both accounts are already
+          // overlaid from live stock / customer balances, so counting the line
+          // too would double it.
           if (
             account.systemKey &&
             COMPUTED_KEYS.has(account.systemKey) &&
-            line.voucher.reference?.startsWith(STOCK_IMPORT_VOUCHER_PREFIX)
+            (line.voucher.reference?.startsWith(STOCK_IMPORT_VOUCHER_PREFIX) || line.voucher.reference?.startsWith('SALE:'))
           ) {
             continue;
           }
