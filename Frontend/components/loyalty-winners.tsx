@@ -5,13 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { SearchableSelect } from "@/components/ui/searchable-select";
 import {
   Dialog,
   DialogContent,
@@ -349,18 +343,14 @@ export function LoyaltyWinners() {
             </div>
             <div className="space-y-1.5 sm:col-span-2">
               <Label>Branch (discount only valid here)</Label>
-              <Select value={form.branchId} onValueChange={(v) => setField({ branchId: v })}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Choose branch" />
-                </SelectTrigger>
-                <SelectContent>
-                  {branches.map((b: any) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <SearchableSelect
+                value={form.branchId}
+                onValueChange={(v) => setField({ branchId: v })}
+                options={branches.map((b: any) => ({ value: b.id, label: b.name }))}
+                placeholder="Choose branch"
+                searchPlaceholder="Search branches..."
+                emptyText="No branches found."
+              />
             </div>
             <div className="space-y-1.5">
               <Label>Discount %</Label>

@@ -116,7 +116,13 @@ export default function Home() {
     Object.entries(preserved).forEach(([key, value]) => localStorage.setItem(key, value));
 
     clearTabFromUrl();
-    setToken(null);
+
+    // Force a full reload (not just setToken(null)) so every in-memory cache —
+    // React Query's included — is torn down with the page. Without this, a
+    // second account logging in on the same tab/device can keep seeing
+    // another account's cached reference data (branches, customers, etc.)
+    // for up to its staleTime, even though localStorage was cleared above.
+    window.location.href = "/";
   };
   if (checking) {
     return (
