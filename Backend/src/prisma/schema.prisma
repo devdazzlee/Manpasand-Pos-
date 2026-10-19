@@ -88,6 +88,7 @@ model Branch {
   transfers_from     Transfer[]    @relation("TransferFrom")
   transfers_to       Transfer[]    @relation("TransferTo")
   stock_adjustments  StockAdjustment[]
+  loyalty_customers  Customer[] @relation("CustomerLoyaltyBranch")
 
   @@index([code])
   @@index([is_active])
@@ -579,6 +580,9 @@ model Sale {
   subtotal         Decimal       @default(0)
   tax_amount       Decimal       @default(0)
   discount_amount  Decimal       @default(0)
+  // True when discount_amount came from a customer's lifetime loyalty-winner
+  // discount — used to count usages against their per-month limit.
+  loyalty_discount_applied Boolean @default(false)
   total_amount     Decimal
   payment_method   PaymentMethod @default(CASH)
   payment_status   PaymentStatus @default(PAID)
@@ -763,6 +767,18 @@ model Customer {
   credit_limit       Decimal?
   previous_credit_balance Decimal?     @default(0)
   default_discount_percent Decimal?    @default(0)
+  // Lifetime loyalty/giveaway winner discount (e.g. Instagram giveaway winners):
+  // a fixed-percent discount, capped per transaction, limited to N uses/month,
+  // and valid only at one branch. Separate from default_discount_percent so it
+  // carries its own cap/limit/branch rules instead of being a plain % field.
+  is_loyalty_winner        Boolean         @default(false)
+  loyalty_cnic              String?
+  loyalty_branch_id         String?
+  loyalty_branch            Branch?         @relation("CustomerLoyaltyBranch", fields: [loyalty_branch_id], references: [id])
+  loyalty_discount_percent  Decimal?        @default(25)
+  loyalty_discount_cap      Decimal?        @default(3000)
+  loyalty_monthly_limit     Int?            @default(4)
+  loyalty_registered_at     DateTime?
   orders             Order[]
   sales              Sale[] // NEW: Link to sales
   hold_sales         HoldSale[]
@@ -773,6 +789,7 @@ model Customer {
 
   @@index([area_id])
   @@index([is_active])
+  @@index([loyalty_branch_id])
 }
 
 model CustomerPayment {

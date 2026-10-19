@@ -15,6 +15,7 @@ import {
   getCustomerActivity,
   createCustomerPayment,
   deleteCustomerPayment,
+  getCustomerLoyaltyStatus,
 } from '../controllers/customer.controller';
 import { validate } from '../middleware/validation.middleware';
 import {
@@ -69,6 +70,7 @@ router.get('/:customerId/purchases', validate(getCustomerParamsSchema), getCusto
 router.get('/:customerId/ledger', validate(getCustomerParamsSchema), getCustomerLedger);
 router.get('/:customerId/statement', validate(getCustomerParamsSchema), getCustomerStatement);
 router.get('/:customerId/activity', validate(getCustomerParamsSchema), getCustomerActivity);
+router.get('/:customerId/loyalty-status', validate(getCustomerParamsSchema), getCustomerLoyaltyStatus);
 router.post('/:customerId/payments', validate(createCustomerPaymentSchema), createCustomerPayment);
 router.delete('/:customerId/payments/:paymentId', validate(deleteCustomerPaymentSchema), deleteCustomerPayment);
 router.get('/:customerId', getCustomerById);

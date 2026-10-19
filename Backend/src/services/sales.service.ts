@@ -818,6 +818,45 @@ class SaleService {
     await prisma.holdSale.delete({ where: { id: holdSaleId } });
   }
 
+  /**
+   * Lifetime loyalty/giveaway-winner discount: fixed %, capped per transaction,
+   * limited to N uses/month, cash-only, valid at one registered branch only.
+   * Computed server-side (not trusted from the client) so the cap/limit/branch/
+   * cash rules can't be bypassed or combined with another discount.
+   */
+  private async computeLoyaltyDiscount(
+    customer: { id: string; is_loyalty_winner: boolean; loyalty_branch_id: string | null; loyalty_discount_percent: Prisma.Decimal | null; loyalty_discount_cap: Prisma.Decimal | null; loyalty_monthly_limit: number | null } | null,
+    branchId: string,
+    paymentMethod: PaymentMethod,
+    subtotalAmt: number,
+  ): Promise<{ amount: number; applied: boolean }> {
+    if (!customer?.is_loyalty_winner) return { amount: 0, applied: false };
+    if (!customer.loyalty_branch_id || customer.loyalty_branch_id !== branchId) {
+      return { amount: 0, applied: false };
+    }
+    if (paymentMethod !== PaymentMethod.CASH) return { amount: 0, applied: false };
+
+    const monthlyLimit = customer.loyalty_monthly_limit ?? 4;
+    const monthStart = new Date();
+    monthStart.setDate(1);
+    monthStart.setHours(0, 0, 0, 0);
+
+    const usedThisMonth = await prisma.sale.count({
+      where: {
+        customer_id: customer.id,
+        loyalty_discount_applied: true,
+        status: { notIn: [SaleStatus.CANCELLED, SaleStatus.REFUNDED] },
+        sale_date: { gte: monthStart },
+      },
+    });
+    if (usedThisMonth >= monthlyLimit) return { amount: 0, applied: false };
+
+    const percent = Number(customer.loyalty_discount_percent ?? 25);
+    const cap = Number(customer.loyalty_discount_cap ?? 3000);
+    const amount = Math.min((subtotalAmt * percent) / 100, cap);
+    return { amount: Math.max(0, amount), applied: amount > 0 };
+  }
+
   async createSale({
     branchId,
     customerId,
@@ -904,11 +943,20 @@ class SaleService {
   
     // 5) Prepare all writes as a single non-interactive transaction (prevents P2028)
     const subtotalAmt = items.reduce((s, it) => s + it.price * it.quantity, 0);
-    const finalDiscount = discountAmount ?? 0;
+    const loyalty = await this.computeLoyaltyDiscount(
+      customer,
+      branchId,
+      paymentMethod as PaymentMethod,
+      subtotalAmt,
+    );
+    // A registered loyalty winner's discount is computed and validated here,
+    // on the server, and replaces whatever discount the client sent — this is
+    // the only place the cap/monthly-limit/branch/cash rules are enforced.
+    const finalDiscount = customer?.is_loyalty_winner ? loyalty.amount : (discountAmount ?? 0);
     const finalTotal = Math.max(0, subtotalAmt - finalDiscount);
-  
+
     const ops: Prisma.PrismaPromise<any>[] = [];
-  
+
     // (a) Sale + items
     ops.push(
       prisma.sale.create({
@@ -919,6 +967,7 @@ class SaleService {
           total_amount: new Prisma.Decimal(finalTotal),
           subtotal: new Prisma.Decimal(subtotalAmt),
           discount_amount: new Prisma.Decimal(finalDiscount),
+          loyalty_discount_applied: loyalty.applied,
           payment_method: paymentMethod,
           payment_status: 'PAID',
           status: 'COMPLETED',

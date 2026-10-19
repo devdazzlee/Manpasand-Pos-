@@ -80,6 +80,12 @@ class CustomerService {
         credit_limit?: number | null;
         previous_credit_balance?: number | null;
         default_discount_percent?: number | null;
+        is_loyalty_winner?: boolean;
+        loyalty_cnic?: string | null;
+        loyalty_branch_id?: string | null;
+        loyalty_discount_percent?: number | null;
+        loyalty_discount_cap?: number | null;
+        loyalty_monthly_limit?: number | null;
     }) {
         const email = this.resolveCustomerEmail(data.email, data.phone_number);
         const customerExists = await this.verifyCustomerExistance(email);
@@ -87,6 +93,7 @@ class CustomerService {
             throw new AppError(400, 'Customer already exists');
         }
 
+        const isLoyaltyWinner = data.is_loyalty_winner ?? false;
         const customer = await prisma.customer.create({
             data: {
                 name: data.name,
@@ -98,6 +105,13 @@ class CustomerService {
                 credit_limit: data.credit_limit ?? null,
                 previous_credit_balance: data.previous_credit_balance ?? 0,
                 default_discount_percent: data.default_discount_percent ?? 0,
+                is_loyalty_winner: isLoyaltyWinner,
+                loyalty_cnic: data.loyalty_cnic ?? null,
+                loyalty_branch_id: data.loyalty_branch_id ?? null,
+                loyalty_discount_percent: data.loyalty_discount_percent ?? 25,
+                loyalty_discount_cap: data.loyalty_discount_cap ?? 3000,
+                loyalty_monthly_limit: data.loyalty_monthly_limit ?? 4,
+                loyalty_registered_at: isLoyaltyWinner ? new Date() : null,
             },
         });
 
@@ -148,12 +162,79 @@ class CustomerService {
         return customer;
     }
 
+    /**
+     * Real-time eligibility preview for a customer's lifetime loyalty-winner
+     * discount at a given branch — mirrors SaleService.computeLoyaltyDiscount's
+     * branch/monthly-limit rules so the Sale screen can show the cashier the
+     * same outcome the backend will actually enforce at checkout (cash-only is
+     * checked there too, once a payment method is chosen).
+     */
+    public async getLoyaltyStatus(customerId: Customer['id'], branchId?: string) {
+        const customer = await prisma.customer.findUnique({ where: { id: customerId } });
+        if (!customer) throw new AppError(404, 'Customer not found');
+
+        if (!customer.is_loyalty_winner) {
+            return { isWinner: false, eligible: false, reason: null as string | null };
+        }
+
+        const percent = Number(customer.loyalty_discount_percent ?? 25);
+        const cap = Number(customer.loyalty_discount_cap ?? 3000);
+        const monthlyLimit = customer.loyalty_monthly_limit ?? 4;
+
+        if (!customer.loyalty_branch_id || customer.loyalty_branch_id !== branchId) {
+            return {
+                isWinner: true,
+                eligible: false,
+                reason: 'Not valid at this branch',
+                discountPercent: percent,
+                discountCap: cap,
+                monthlyLimit,
+                usedThisMonth: null as number | null,
+            };
+        }
+
+        const monthStart = new Date();
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const usedThisMonth = await prisma.sale.count({
+            where: {
+                customer_id: customerId,
+                loyalty_discount_applied: true,
+                status: { notIn: ['CANCELLED', 'REFUNDED'] },
+                sale_date: { gte: monthStart },
+            },
+        });
+
+        if (usedThisMonth >= monthlyLimit) {
+            return {
+                isWinner: true,
+                eligible: false,
+                reason: 'Monthly discount limit reached',
+                discountPercent: percent,
+                discountCap: cap,
+                monthlyLimit,
+                usedThisMonth,
+            };
+        }
+
+        return {
+            isWinner: true,
+            eligible: true,
+            reason: null as string | null,
+            discountPercent: percent,
+            discountCap: cap,
+            monthlyLimit,
+            usedThisMonth,
+        };
+    }
+
     public async getCustomers(params?: {
         search?: string;
         page?: number;
         limit?: number;
         is_active?: boolean;
         created_after?: string;
+        is_loyalty_winner?: boolean;
     }) {
         const search = params?.search;
         const { page, limit, skip } = parsePagination({
@@ -166,6 +247,9 @@ class CustomerService {
 
         const where = {
             ...(params?.is_active !== undefined ? { is_active: params.is_active } : {}),
+            ...(params?.is_loyalty_winner !== undefined
+                ? { is_loyalty_winner: params.is_loyalty_winner }
+                : {}),
             ...(validCreatedAfter ? { created_at: { gte: validCreatedAfter } } : {}),
             ...(search
                 ? {
@@ -297,6 +381,12 @@ class CustomerService {
         }
 
         const data: Partial<Customer> = { ...updateData };
+
+        if (data.is_loyalty_winner && !existingCustomer.is_loyalty_winner) {
+            data.loyalty_registered_at = new Date();
+        } else if (data.is_loyalty_winner === false) {
+            data.loyalty_registered_at = null;
+        }
 
         if (data.email !== undefined) {
             const trimmed = data.email?.trim();

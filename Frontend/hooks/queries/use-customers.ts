@@ -15,6 +15,7 @@ import {
   fetchCustomerPurchases,
   fetchCustomerStatement,
   fetchCustomerActivity,
+  fetchCustomerLoyaltyStatus,
   createCustomer,
   updateCustomer,
   deleteCustomer,
@@ -85,6 +86,25 @@ export function useCustomerActivity(id: string | null, options?: { enabled?: boo
     queryFn: ({ signal }) => fetchCustomerActivity(id as string, signal),
     staleTime: STALE_TIME.volatile,
     enabled: Boolean(id) && (options?.enabled ?? true),
+  });
+}
+
+/**
+ * Real-time eligibility for a customer's lifetime loyalty-winner discount at
+ * the cashier's current branch — mirrors exactly what the backend will apply
+ * at checkout, so the Sale screen never shows a discount preview the backend
+ * would then silently zero out.
+ */
+export function useCustomerLoyaltyStatus(
+  customerId: string | null,
+  branchId: string | undefined,
+  options?: { enabled?: boolean },
+) {
+  return useQuery({
+    queryKey: [...qk.customers.detail(customerId ?? ""), "loyalty-status", branchId] as const,
+    queryFn: ({ signal }) => fetchCustomerLoyaltyStatus(customerId as string, branchId, signal),
+    staleTime: STALE_TIME.volatile,
+    enabled: Boolean(customerId) && Boolean(branchId) && (options?.enabled ?? true),
   });
 }
 

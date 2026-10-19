@@ -6,7 +6,27 @@ export interface Customer {
   phone?: string;
   email?: string;
   is_active?: boolean;
+  default_discount_percent?: number | string | null;
+  // Lifetime loyalty/giveaway-winner discount — see Customer.is_loyalty_winner
+  // in the backend schema.
+  is_loyalty_winner?: boolean;
+  loyalty_cnic?: string | null;
+  loyalty_branch_id?: string | null;
+  loyalty_discount_percent?: number | string | null;
+  loyalty_discount_cap?: number | string | null;
+  loyalty_monthly_limit?: number | null;
+  loyalty_registered_at?: string | null;
   [key: string]: unknown;
+}
+
+export interface LoyaltyStatus {
+  isWinner: boolean;
+  eligible: boolean;
+  reason: string | null;
+  discountPercent?: number;
+  discountCap?: number;
+  monthlyLimit?: number;
+  usedThisMonth?: number | null;
 }
 
 export interface CustomerQuery {
@@ -15,6 +35,7 @@ export interface CustomerQuery {
   limit?: number;
   isActive?: boolean;
   createdAfter?: string;
+  isLoyaltyWinner?: boolean;
 }
 
 export async function fetchCustomers(
@@ -26,6 +47,7 @@ export async function fetchCustomers(
     cleanParams({
       page: q.page ?? 1,
       limit: q.limit ?? 20,
+      is_loyalty_winner: q.isLoyaltyWinner,
       search: q.search?.trim() || undefined,
       is_active: q.isActive,
       created_after: q.createdAfter,
@@ -60,6 +82,17 @@ export async function fetchCustomerStatement(
 
 export async function fetchCustomerActivity(id: string, signal?: AbortSignal) {
   return getOne<any>(`/customer/${id}/activity`, { params: { limit: 50 }, signal });
+}
+
+export async function fetchCustomerLoyaltyStatus(
+  id: string,
+  branchId: string | undefined,
+  signal?: AbortSignal,
+): Promise<LoyaltyStatus> {
+  return getOne<LoyaltyStatus>(`/customer/${id}/loyalty-status`, {
+    params: cleanParams({ branchId }),
+    signal,
+  });
 }
 
 /** Mutation payloads are screen-shaped; keep them loose but explicit. */

@@ -54,6 +54,7 @@ import {
   Eye,
   EyeOff,
   Loader2,
+  Gift,
 } from "lucide-react";
 import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 
@@ -316,6 +317,7 @@ const menuSections: SidebarMenuSection[] = [
     expandable: true,
     items: [
       { id: "customers", label: "Customers", icon: Users, roles: SALES_ROLES },
+      { id: "loyalty", label: "Loyalty Winners", icon: Gift, roles: SALES_ROLES },
     ],
   },
   {

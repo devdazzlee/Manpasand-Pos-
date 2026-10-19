@@ -21,7 +21,7 @@ import { TaxManagement } from "@/components/tax-management";
 import { PurchaseOrders } from "@/components/purchase-orders";
 import { Returns } from "@/components/returns";
 import { GiftCards } from "@/components/gift-cards";
-import { Loyalty } from "@/components/loyalty";
+import { LoyaltyWinners } from "@/components/loyalty-winners";
 import { Shifts } from "@/components/shifts";
 import { Audit } from "@/components/audit";
 import { Backup } from "@/components/backup";
@@ -32,7 +32,6 @@ import { LayawayHolds } from "@/components/layaway-holds";
 import { Pricing } from "@/components/pricing";
 import { Branches } from "./branches";
 import Inventory from "./inventory";
-import { Stocks } from "./Stocks";
 import { StockManagement } from "./StockManagement";
 import {
   InventoryDashboard,
@@ -122,7 +121,7 @@ export function Dashboard({ onLogout }: DashboardProps) {
       case "customers":
         return <Customers />;
       case "loyalty":
-        return <Stocks />;
+        return <LoyaltyWinners />;
       case "stock-management":
         return <StockManagement onNavigate={setActiveTab} />;
       case "inventory-dashboard":

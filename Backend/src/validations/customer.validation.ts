@@ -27,6 +27,31 @@ const optionalPercent = z.preprocess(
         .optional(),
 );
 
+// Lifetime loyalty/giveaway-winner discount fields, shared by the create and
+// update schemas — see Customer.is_loyalty_winner in schema.prisma.
+const loyaltyWinnerFields = {
+    is_loyalty_winner: z.boolean().optional(),
+    loyalty_cnic: z.string().trim().max(30, 'CNIC is too long').nullable().optional(),
+    loyalty_branch_id: z.string().nullable().optional(),
+    loyalty_discount_percent: z
+        .number()
+        .min(0, 'Discount cannot be negative')
+        .max(100, 'Discount cannot exceed 100%')
+        .nullable()
+        .optional(),
+    loyalty_discount_cap: z
+        .number()
+        .nonnegative('Cap cannot be negative')
+        .nullable()
+        .optional(),
+    loyalty_monthly_limit: z
+        .number()
+        .int('Monthly limit must be a whole number')
+        .positive('Monthly limit must be at least 1')
+        .nullable()
+        .optional(),
+};
+
 // Customer self-registration — only email is required (the password is
 // generated / sent separately in the existing flow).
 const cusRegisterationSchema = z.object({
@@ -60,6 +85,7 @@ const customerCreateByAdminSchema = z.object({
         previous_credit_balance: optionalMoney,
         default_discount_percent: optionalPercent,
         is_active: z.boolean().optional(),
+        ...loyaltyWinnerFields,
     }),
 });
 
@@ -96,6 +122,7 @@ const customerUpdateSchema = z.object({
             .nullable()
             .optional(),
         is_active: z.boolean().optional(),
+        ...loyaltyWinnerFields,
     }),
 });
 

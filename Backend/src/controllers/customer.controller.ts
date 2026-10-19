@@ -38,6 +38,12 @@ export const getCustomers = asyncHandler(async (req: Request, res: Response) => 
                     ? false
                     : undefined,
         created_after: req.query.created_after as string | undefined,
+        is_loyalty_winner:
+            req.query.is_loyalty_winner === 'true'
+                ? true
+                : req.query.is_loyalty_winner === 'false'
+                    ? false
+                    : undefined,
     });
     new ApiResponse(result.data, 'Customers fetched', 200, true, result.meta).send(res);
 });
@@ -50,6 +56,14 @@ export const updateCustomerByAdmin = asyncHandler(async (req: Request, res: Resp
 export const updateCustomer = asyncHandler(async (req: Request, res: Response) => {
     const customers = await customerService.updateCustomer(req.customer?.id, req.body);
     new ApiResponse(customers, 'Customers fetched').send(res);
+});
+
+export const getCustomerLoyaltyStatus = asyncHandler(async (req: Request, res: Response) => {
+    const status = await customerService.getLoyaltyStatus(
+        req.params.customerId,
+        req.query.branchId as string | undefined,
+    );
+    new ApiResponse(status, 'Loyalty status fetched').send(res);
 });
 
 export const deleteCustomer = asyncHandler(async (req: Request, res: Response) => {
