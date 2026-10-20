@@ -5,6 +5,7 @@ import { AppError } from '../utils/apiError';
 import { businessTodayYmd, localRange, toBusinessYmd } from '../utils/timezone';
 import { buildRegisterReport } from './register-report.calc';
 import { can } from './permissions.service';
+import { postRegisterSession } from './register-accounting.service';
 
 /* ============================================================
  * Cash register: open with a count, cash in/out, cashier shifts,
@@ -21,6 +22,18 @@ const num = (v: unknown) => {
 };
 const r2 = (v: number) => Math.round((v + Number.EPSILON) * 100) / 100;
 const short = (email?: string | null) => (email ? (email.includes('@') ? email.split('@')[0] : email) : '—');
+
+/** Tendered more than the bill: the excess went back as change, so it never stayed in the drawer (same rule as the sale voucher). */
+function netOfChange(payments: Array<{ method: string; amount: number }>, total: number) {
+  let excess = r2(payments.reduce((t, p) => t + Math.max(0, p.amount), 0) - Math.max(0, total));
+  if (total <= 0 || excess < 0.005) return payments;
+  return payments.map((p) => {
+    if (excess < 0.005 || String(p.method).toUpperCase() !== 'CASH' || p.amount <= 0) return p;
+    const take = Math.min(p.amount, excess);
+    excess = r2(excess - take);
+    return { ...p, amount: r2(p.amount - take) };
+  });
+}
 
 export type HandoverMode = 'HANDOVER' | 'BREAK' | 'RETURN' | 'EMERGENCY';
 type Actor = { userId?: string; role?: string; branchId?: string | null; approvalId?: string | null };
@@ -258,7 +271,7 @@ export class CashRegisterService {
         tax: num(sale.tax_amount),
         total: num(sale.total_amount),
         paymentMethod: sale.payment_method,
-        payments: sale.payments.map((p) => ({ method: p.method, amount: num(p.amount) })),
+        payments: netOfChange(sale.payments.map((p) => ({ method: p.method, amount: num(p.amount) })), num(sale.total_amount)),
         status: sale.status,
         originalSaleId: sale.original_sale_id,
         notes: sale.notes,
@@ -305,7 +318,7 @@ export class CashRegisterService {
     }));
     const salesRows = sales.map((sale) => {
       const cashAmt = sale.payments?.length
-        ? sale.payments
+        ? netOfChange(sale.payments.map((p) => ({ method: p.method, amount: num(p.amount) })), num(sale.total_amount))
             .filter((p) => String(p.method).toUpperCase() === 'CASH')
             .reduce((t, p) => t + Math.max(0, num(p.amount)), 0)
         : String(sale.payment_method).toUpperCase() === 'CASH'
@@ -694,6 +707,9 @@ export class CashRegisterService {
         },
       },
     });
+    await postRegisterSession(s.id, actor.userId).catch((err) =>
+      console.error('[register-accounting] post failed', s.id, (err as Error).message),
+    );
     return this.detail(s.id);
   }
 
@@ -714,6 +730,9 @@ export class CashRegisterService {
         approved_by: actor.approvalId ?? null,
       },
     });
+    await postRegisterSession(s.id, actor.userId).catch((err) =>
+      console.error('[register-accounting] post failed', s.id, (err as Error).message),
+    );
     return this.detail(s.id);
   }
 
@@ -899,6 +918,9 @@ export class CashRegisterService {
       }),
     );
     await prisma.$transaction(ops);
+    await postRegisterSession(s.id, actor.userId).catch((err) =>
+      console.error('[register-accounting] post failed', s.id, (err as Error).message),
+    );
     return this.detail(s.id);
   }
 
@@ -947,6 +969,9 @@ export class CashRegisterService {
         },
       }),
     ]);
+    await postRegisterSession(s.id, actor.userId).catch((err) =>
+      console.error('[register-accounting] post failed', s.id, (err as Error).message),
+    );
     return this.detail(s.id);
   }
 

@@ -563,7 +563,7 @@ export function OpeningStockImport() {
   const pct = progress && progress.totalLines ? Math.round(((progress.totalLines - progress.pending) / progress.totalLines) * 100) : 0;
 
   return (
-    <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-6">
+    <div className="mx-auto w-full min-w-0 max-w-[1600px] space-y-5 p-4 md:p-6 lg:p-8">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">

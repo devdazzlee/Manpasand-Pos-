@@ -238,11 +238,14 @@ class SaleAccountingService {
     const existing = await prisma.journalVoucher.findFirst({ where: { reference }, select: { id: true } });
     if (existing) return existing;
 
-    const split = splitTenders(
-      sale.payments,
-      String(sale.payment_method),
-      Number(sale.payment_received) || 0,
-    );
+    // Exchange docs (customer paid the balance) are saved PAID with no payment
+    // rows and no payment_received — the balance was taken by payment_method.
+    const received = Number(sale.payment_received) || 0;
+    const paidFallback =
+      received > 0.005 || sale.payments.length || sale.payment_status !== 'PAID'
+        ? received
+        : Number(sale.total_amount) || 0;
+    const split = splitTenders(sale.payments, String(sale.payment_method), paidFallback);
     let { cash, bank } = split;
     const { bankByMethod } = split;
     // Gift-card tenders are posted from the gift card ledger (Dr Gift Cards / Cr Sales).

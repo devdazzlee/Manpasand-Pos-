@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, type ComponentType } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { format } from "date-fns";
 import {
   BookOpenText,
@@ -85,6 +85,7 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
   const [customOpen, setCustomOpen] = useState(false);
   const [tree, setTree] = useState<CoaTree | null>(null);
   const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
   const [syncing, setSyncing] = useState(false);
   const [refreshKey, setRefreshKey] = useState(0);
   const [role, setRole] = useState<string | null>(null);
@@ -93,6 +94,7 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
   const [quick, setQuick] = useState<{ open: boolean; template: string | null }>({ open: false, template: null });
   const [drawerAccount, setDrawerAccount] = useState<string | null>(null);
   const [ledgerAccountId, setLedgerAccountId] = useState<string | null>(null);
+  const hasTreeRef = useRef(false);
 
   useEffect(() => {
     const n = normalizeTab(initialTab === "accounts" ? "overview" : initialTab);
@@ -103,13 +105,20 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
   const canManage = role === "SUPER_ADMIN" || role === "ADMIN";
 
   const load = useCallback(async () => {
-    setLoading(true);
+    // Keep current UI mounted on refetch — only the first load shows the skeleton.
+    // Flipping loading/opacity on every period change was causing the page to jerk.
+    const initial = !hasTreeRef.current;
+    if (initial) setLoading(true);
+    else setRefreshing(true);
     try {
-      setTree(await coaApi.tree(filters, true));
+      const next = await coaApi.tree(filters, true);
+      hasTreeRef.current = true;
+      setTree(next);
     } catch (error) {
       toast({ variant: "destructive", title: "Could not load accounts", description: apiError(error) });
     } finally {
       setLoading(false);
+      setRefreshing(false);
     }
   }, [filters, toast]);
   useEffect(() => {
@@ -177,8 +186,8 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
             <p className="text-sm text-gray-500">Your money, what people owe, what you owe, and your profit — in one place.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <Button variant="outline" size="sm" className="h-9" onClick={reload} disabled={loading}>
-              <RefreshCw className={cn("mr-1.5 h-4 w-4", loading && "animate-spin")} />
+            <Button variant="outline" size="sm" className="h-9" onClick={reload} disabled={loading || refreshing}>
+              <RefreshCw className={cn("mr-1.5 h-4 w-4", (loading || refreshing) && "animate-spin")} />
               Refresh
             </Button>
             {canManage && (
@@ -265,7 +274,10 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
               </Popover>
             </div>
             <span className="whitespace-nowrap text-xs font-medium text-gray-600">{periodLabel}</span>
-            {loading && tree && <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" />}
+            {/* Fixed slot so the spinner never shifts the period label */}
+            <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden={!refreshing}>
+              {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" /> : null}
+            </span>
           </div>
           {(tree?.branches.length ?? 0) > 1 && (
             <div className="flex items-center gap-2 md:ml-auto">
@@ -307,7 +319,7 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
         </div>
       </div>
 
-      <div className={cn("px-4 py-5 transition-opacity md:px-6", loading && tree && "opacity-70")}>
+      <div className="px-4 py-5 md:px-6">
         {!tree ? (
           <AccountsSkeleton />
         ) : (

@@ -286,7 +286,7 @@ export function ScanStockCount() {
   const branchName = branches.find((b: any) => b.id === branchId)?.name;
 
   return (
-    <div className="mx-auto max-w-6xl space-y-5 p-4 md:p-6">
+    <div className="mx-auto w-full min-w-0 max-w-[1600px] space-y-5 p-4 md:p-6 lg:p-8">
       <div>
         <h1 className="flex items-center gap-2 text-2xl font-bold tracking-tight text-slate-900">
           <ScanBarcode className="h-6 w-6 text-sky-600" />

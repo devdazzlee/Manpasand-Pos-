@@ -1118,11 +1118,13 @@ class SaleService {
       where: { id: { in: uniqueProductIds } },
       select: {
         id: true,
+        name: true,
         purchase_rate: true,
         tax: { select: { percentage: true, is_active: true } },
       },
     });
     const foundProductIds = new Set(products.map(p => p.id));
+    const nameOf = new Map(products.map((p) => [p.id, p.name]));
     const taxRateOf = new Map(products.map((p) => [p.id, p.tax?.is_active ? Number(p.tax.percentage) || 0 : 0]));
     const costOf = new Map(products.map((p) => [p.id, Number(p.purchase_rate) || 0]));
     const missingProductIds = uniqueProductIds.filter(id => !foundProductIds.has(id));
@@ -1161,7 +1163,19 @@ class SaleService {
       const change = gp.qty.mul(-1); // sale => decrement
       const next = prev.plus(change);
 
-      // allow negative stock per your testing; add a check here if you want to block it
+      if (prev.lt(gp.qty)) {
+        const name = nameOf.get(gp.productId) || 'Product';
+        const available = Number(prev);
+        const requested = Number(gp.qty);
+        if (available <= 0) {
+          throw new AppError(400, `${name} is not available in stock`);
+        }
+        throw new AppError(
+          400,
+          `Insufficient stock for ${name}. Available: ${available}, requested: ${requested}`,
+        );
+      }
+
       movements.push({
         product_id: gp.productId,
         previous_qty: prev,
@@ -1688,8 +1702,8 @@ class SaleService {
       stocks.map((stock) => [stock.product_id, new Prisma.Decimal(stock.current_quantity)]),
     );
 
-    // Exchange replacement items decrement stock like a sale. Do not block when
-    // stock is missing or insufficient — same policy as createSale (negative OK).
+    // Exchange replacement items decrement stock like a sale. Stock shortfalls
+    // are blocked in createSale; exchanges keep the previous permissive policy.
 
     type MovementRow = {
       product_id: string;
