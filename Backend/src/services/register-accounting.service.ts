@@ -3,14 +3,10 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 
 /**
- * Keeps "Cash in Hand" equal to the register drawer, the way production POS
- * systems do it. Each register session posts:
+ * "Cash in Hand" is all of the shop's cash — in the drawer or with the owner.
+ * Opening the drawer with a float, or putting cash in, only moves cash inside
+ * Cash in Hand, so neither posts anything. Each register session posts only:
  *
- *   OPEN    drawer started below last night's count → cash moved to the safe /
- *           owner (Dr Cash in Safe / Cr Cash in Hand); above it (or the very
- *           first float) → cash brought in from the safe (reverse).
- *   CASHIN  "Cash in" to the drawer (not gift cards — those post themselves)
- *           → Dr Cash in Hand / Cr Cash in Safe.
  *   CLOSE   counted ≠ expected → the difference goes to Cash Short & Over
  *           (short: Dr Short & Over / Cr Cash in Hand; extra: reverse).
  *
@@ -86,49 +82,12 @@ export async function postRegisterSession(sessionId: string, userId?: string | n
   if (!s) return null;
   await prisma.journalVoucher.deleteMany({ where: { reference: { startsWith: ref(sessionId, '') } } });
 
-  // Creates Cash in Safe / Cash Short & Over on first use after a deploy.
+  // Creates Cash Short & Over on first use after a deploy.
   const { ChartOfAccountsService } = await import('./chart-of-accounts.service');
   await new ChartOfAccountsService().ensureSetup();
-  const [cash, safe, overShort] = await Promise.all([accountId('CASH'), accountId('CASH_SAFE'), accountId('CASH_OVER_SHORT')]);
+  const [cash, overShort] = await Promise.all([accountId('CASH'), accountId('CASH_OVER_SHORT')]);
   const where = s.branch?.name ? ` · ${s.branch.name}` : '';
   const posted: string[] = [];
-
-  // OPEN — drawer vs last night's count (no previous count = float brought in).
-  const expectedOpening = s.expected_opening == null ? 0 : num(s.expected_opening);
-  const openDiff = round2(num(s.opening) - expectedOpening);
-  if (Math.abs(openDiff) >= 0.005) {
-    const toSafe = openDiff < 0;
-    const v = await post({
-      reference: ref(s.id, 'OPEN'),
-      date: s.opened_at,
-      branchId: s.branch_id,
-      narration: toSafe
-        ? `Cash taken out of the drawer to safe / owner (opened with ${round2(num(s.opening))}, last count ${round2(expectedOpening)})${where}`
-        : `Cash put into the drawer from safe / owner at opening${where}`,
-      debitId: toSafe ? safe : cash,
-      creditId: toSafe ? cash : safe,
-      amount: openDiff,
-      userId,
-    });
-    if (v) posted.push(v.voucher_no);
-  }
-
-  // CASH IN during the session (gift-card cash posts from the gift card ledger).
-  const ins = await prisma.cashMovement.findMany({ where: { cashflow_id: s.id, type: 'IN' } });
-  for (const m of ins) {
-    if (/^gift card/i.test(m.reason || '')) continue;
-    const v = await post({
-      reference: ref(s.id, `CASHIN:${m.id}`),
-      date: m.created_at,
-      branchId: s.branch_id,
-      narration: `Cash put into the drawer from safe / owner · ${m.reason}${where}`,
-      debitId: cash,
-      creditId: safe,
-      amount: num(m.amount),
-      userId,
-    });
-    if (v) posted.push(v.voucher_no);
-  }
 
   // CLOSE — counted vs expected.
   if (s.status === 'CLOSED' && s.variance != null && Math.abs(num(s.variance)) >= 0.005) {

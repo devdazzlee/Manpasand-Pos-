@@ -99,8 +99,6 @@ const DEFAULT_CHART: DefaultSubType[] = [
         accounts: [
           { name: 'Cash in Hand', systemKey: 'CASH' },
           { name: 'Bank Account', systemKey: 'BANK' },
-          // Cash taken out of the register drawer (safe / owner)
-          { name: 'Cash in Safe / with Owner', systemKey: 'CASH_SAFE' },
         ],
       },
       {
