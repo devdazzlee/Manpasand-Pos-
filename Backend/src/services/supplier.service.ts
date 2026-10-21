@@ -800,6 +800,7 @@ export class SupplierService {
                 userId: createdBy,
                 reference: payment.id,
                 notes: data.notes || data.reference || null,
+                paidFromAccountId: paidFrom,
             }).catch(() => undefined);
         }
         return this.serializePayment(payment);

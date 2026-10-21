@@ -383,6 +383,7 @@ export class CommissionService {
         userId: opts.userId,
         reference: row.id,
         notes: `Commission ${row.month}/${row.year}`,
+        paidFromAccountId: paidFrom,
       }).catch(() => undefined);
     }
     return this.serialize(row);

@@ -4,6 +4,8 @@ import { prisma } from '../prisma/client';
 /**
  * When salary / commission / similar is paid in CASH while a register is open,
  * record it as an approved expense on that drawer so Expected cash drops.
+ * Paid from any account other than Cash in Hand (e.g. the bank) never touches
+ * the drawer, whatever method was picked.
  */
 export async function recordCashPayOnOpenRegister(opts: {
   particular: string;
@@ -12,10 +14,24 @@ export async function recordCashPayOnOpenRegister(opts: {
   userId?: string | null;
   reference?: string | null;
   notes?: string | null;
+  /** Account the money left from; looked up from the supplier payment (reference) when omitted. */
+  paidFromAccountId?: string | null;
 }) {
   const amount = Math.round((Number(opts.amount) + Number.EPSILON) * 100) / 100;
   if (!(amount > 0.005)) return null;
   const method = 'CASH';
+
+  let paidFrom = opts.paidFromAccountId;
+  if (paidFrom === undefined && opts.reference) {
+    const pay = await prisma.supplierPayment
+      .findUnique({ where: { id: opts.reference }, select: { paid_from_account_id: true } })
+      .catch(() => null);
+    paidFrom = pay?.paid_from_account_id;
+  }
+  if (paidFrom) {
+    const account = await prisma.transactionalAccount.findUnique({ where: { id: paidFrom }, select: { system_key: true } });
+    if (account && account.system_key !== 'CASH') return null;
+  }
 
   const open = await prisma.cashFlow.findMany({
     where: {
