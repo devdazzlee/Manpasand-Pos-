@@ -11,6 +11,7 @@ const apiError_1 = require("../utils/apiError");
 const timezone_1 = require("../utils/timezone");
 const register_report_calc_1 = require("./register-report.calc");
 const permissions_service_1 = require("./permissions.service");
+const register_accounting_service_1 = require("./register-accounting.service");
 /* ============================================================
  * Cash register: open with a count, cash in/out, cashier shifts,
  * breaks and handovers (both cashiers confirm), close with a count
@@ -25,6 +26,19 @@ const num = (v) => {
 };
 const r2 = (v) => Math.round((v + Number.EPSILON) * 100) / 100;
 const short = (email) => (email ? (email.includes('@') ? email.split('@')[0] : email) : '—');
+/** Tendered more than the bill: the excess went back as change, so it never stayed in the drawer (same rule as the sale voucher). */
+function netOfChange(payments, total) {
+    let excess = r2(payments.reduce((t, p) => t + Math.max(0, p.amount), 0) - Math.max(0, total));
+    if (total <= 0 || excess < 0.005)
+        return payments;
+    return payments.map((p) => {
+        if (excess < 0.005 || String(p.method).toUpperCase() !== 'CASH' || p.amount <= 0)
+            return p;
+        const take = Math.min(p.amount, excess);
+        excess = r2(excess - take);
+        return { ...p, amount: r2(p.amount - take) };
+    });
+}
 /** Bucket names used by the register maths → stored payment methods. */
 const BUCKET_TO_METHOD = { CASH: 'CASH', CARD: 'CARD', BANK_TRANSFER: 'BANK_TRANSFER', ONLINE: 'MOBILE_MONEY' };
 exports.METHOD_LABEL = { CASH: 'Cash', CARD: 'Card', BANK_TRANSFER: 'Bank transfer', MOBILE_MONEY: 'Wallet (JazzCash / Easypaisa)' };
@@ -238,7 +252,7 @@ class CashRegisterService {
                 tax: num(sale.tax_amount),
                 total: num(sale.total_amount),
                 paymentMethod: sale.payment_method,
-                payments: sale.payments.map((p) => ({ method: p.method, amount: num(p.amount) })),
+                payments: netOfChange(sale.payments.map((p) => ({ method: p.method, amount: num(p.amount) })), num(sale.total_amount)),
                 status: sale.status,
                 originalSaleId: sale.original_sale_id,
                 notes: sale.notes,
@@ -286,7 +300,7 @@ class CashRegisterService {
         }));
         const salesRows = sales.map((sale) => {
             const cashAmt = sale.payments?.length
-                ? sale.payments
+                ? netOfChange(sale.payments.map((p) => ({ method: p.method, amount: num(p.amount) })), num(sale.total_amount))
                     .filter((p) => String(p.method).toUpperCase() === 'CASH')
                     .reduce((t, p) => t + Math.max(0, num(p.amount)), 0)
                 : String(sale.payment_method).toUpperCase() === 'CASH'
@@ -667,6 +681,7 @@ class CashRegisterService {
                 },
             },
         });
+        await (0, register_accounting_service_1.postRegisterSession)(s.id, actor.userId).catch((err) => console.error('[register-accounting] post failed', s.id, err.message));
         return this.detail(s.id);
     }
     /* ------------------------------ cash in ------------------------------ */
@@ -688,6 +703,7 @@ class CashRegisterService {
                 approved_by: actor.approvalId ?? null,
             },
         });
+        await (0, register_accounting_service_1.postRegisterSession)(s.id, actor.userId).catch((err) => console.error('[register-accounting] post failed', s.id, err.message));
         return this.detail(s.id);
     }
     /* ------------------------------ breaks & handovers ------------------------------ */
@@ -853,6 +869,7 @@ class CashRegisterService {
             },
         }));
         await client_2.prisma.$transaction(ops);
+        await (0, register_accounting_service_1.postRegisterSession)(s.id, actor.userId).catch((err) => console.error('[register-accounting] post failed', s.id, err.message));
         return this.detail(s.id);
     }
     /* ------------------------------ review / reopen ------------------------------ */
@@ -901,6 +918,7 @@ class CashRegisterService {
                 },
             }),
         ]);
+        await (0, register_accounting_service_1.postRegisterSession)(s.id, actor.userId).catch((err) => console.error('[register-accounting] post failed', s.id, err.message));
         return this.detail(s.id);
     }
     /* ------------------------------ reconciliation report ------------------------------ */
@@ -924,6 +942,7 @@ class CashRegisterService {
         ]);
         const methodTotals = {};
         const byCashier = new Map();
+        const cashAccount = await client_2.prisma.transactionalAccount.findUnique({ where: { system_key: 'CASH' }, select: { id: true } });
         const sessionRows = [];
         for (const s of sessions) {
             for (const x of s.shifts) {
@@ -941,6 +960,20 @@ class CashRegisterService {
                 byCashier.set(key, row);
             }
             const live = await this.compute(s, s.closed_at ?? undefined);
+            // Supplier payments during this session that left from the bank (not the drawer) — so the
+            // day sheet shows where every rupee went, not only the drawer cash.
+            const bankPays = await client_2.prisma.supplierPayment.findMany({
+                where: {
+                    type: { in: ['PAYMENT', 'ADVANCE'] },
+                    payment_date: { gte: s.opened_at, lte: s.closed_at ?? new Date() },
+                    OR: [
+                        { paid_from_account_id: { not: cashAccount?.id ?? '' } },
+                        { paid_from_account_id: null, method: { not: 'CASH' } },
+                    ],
+                },
+                include: { supplier: { select: { name: true } } },
+                orderBy: { payment_date: 'asc' },
+            });
             const closing = s.closing == null ? null : num(s.closing);
             // Always show live maths so Expected / Expenses stay correct even if the
             // snapshot from close-time missed a later-linked expense.
@@ -1011,6 +1044,15 @@ class CashRegisterService {
                     expected: live.expectedCash,
                 },
                 sales: live.salesRows,
+                salesByMethod: live.byMethod,
+                nonCashExpenses: r2(live.allExpenses - (live.expensesByMethod.CASH || 0)),
+                bankPayments: bankPays.map((p) => ({
+                    id: p.id,
+                    particular: `Supplier payment · ${p.supplier?.name || 'Supplier'}`,
+                    amount: num(p.amount),
+                    at: p.payment_date.toISOString(),
+                    method: p.method,
+                })),
             });
         }
         return {

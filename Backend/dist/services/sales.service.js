@@ -903,11 +903,13 @@ class SaleService {
             where: { id: { in: uniqueProductIds } },
             select: {
                 id: true,
+                name: true,
                 purchase_rate: true,
                 tax: { select: { percentage: true, is_active: true } },
             },
         });
         const foundProductIds = new Set(products.map(p => p.id));
+        const nameOf = new Map(products.map((p) => [p.id, p.name]));
         const taxRateOf = new Map(products.map((p) => [p.id, p.tax?.is_active ? Number(p.tax.percentage) || 0 : 0]));
         const costOf = new Map(products.map((p) => [p.id, Number(p.purchase_rate) || 0]));
         const missingProductIds = uniqueProductIds.filter(id => !foundProductIds.has(id));
@@ -933,7 +935,15 @@ class SaleService {
             const prev = new client_1.Prisma.Decimal(existing?.current_quantity ?? 0);
             const change = gp.qty.mul(-1); // sale => decrement
             const next = prev.plus(change);
-            // allow negative stock per your testing; add a check here if you want to block it
+            if (prev.lt(gp.qty)) {
+                const name = nameOf.get(gp.productId) || 'Product';
+                const available = Number(prev);
+                const requested = Number(gp.qty);
+                if (available <= 0) {
+                    throw new apiError_1.AppError(400, `${name} is not available in stock`);
+                }
+                throw new apiError_1.AppError(400, `Insufficient stock for ${name}. Available: ${available}, requested: ${requested}`);
+            }
             movements.push({
                 product_id: gp.productId,
                 previous_qty: prev,

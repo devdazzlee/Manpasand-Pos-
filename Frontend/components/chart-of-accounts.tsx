@@ -62,9 +62,10 @@ function normalizeTab(t: CoaTab): { tab: Tab; report?: ReportView } {
   return { tab: t };
 }
 
-type Preset = Extract<DatePreset, "today" | "thisMonth" | "lastMonth" | "thisYear" | "all" | "custom">;
+type Preset = Extract<DatePreset, "today" | "yesterday" | "thisMonth" | "lastMonth" | "thisYear" | "all" | "custom">;
 const QUICK_PERIODS: { id: Exclude<Preset, "custom">; label: string }[] = [
   { id: "today", label: "Today" },
+  { id: "yesterday", label: "Yesterday" },
   { id: "thisMonth", label: "This month" },
   { id: "lastMonth", label: "Last month" },
   { id: "thisYear", label: "This year" },
@@ -95,6 +96,7 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
   const [drawerAccount, setDrawerAccount] = useState<string | null>(null);
   const [ledgerAccountId, setLedgerAccountId] = useState<string | null>(null);
   const hasTreeRef = useRef(false);
+  const requestSeq = useRef(0);
 
   useEffect(() => {
     const n = normalizeTab(initialTab === "accounts" ? "overview" : initialTab);
@@ -110,15 +112,22 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
     const initial = !hasTreeRef.current;
     if (initial) setLoading(true);
     else setRefreshing(true);
+    // Switching periods quickly: only the newest request may update the screen,
+    // otherwise a slower older response overwrites it with the wrong period.
+    const seq = ++requestSeq.current;
     try {
       const next = await coaApi.tree(filters, true);
+      if (seq !== requestSeq.current) return;
       hasTreeRef.current = true;
       setTree(next);
     } catch (error) {
+      if (seq !== requestSeq.current) return;
       toast({ variant: "destructive", title: "Could not load accounts", description: apiError(error) });
     } finally {
-      setLoading(false);
-      setRefreshing(false);
+      if (seq === requestSeq.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
     }
   }, [filters, toast]);
   useEffect(() => {
@@ -235,8 +244,12 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
         </div>
 
         {/* period & branch */}
-        <div className="flex flex-col gap-2 border-t border-gray-100 px-4 py-2.5 md:flex-row md:items-center md:px-6">
-          <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+        <div className="relative flex flex-col gap-2 border-t border-gray-100 px-4 py-2.5 md:flex-row md:items-center md:px-6">
+          {/* Loading bar sits on the row's bottom edge — takes no space, so nothing moves */}
+          <div className="pointer-events-none absolute inset-x-0 bottom-0 h-0.5 overflow-hidden" aria-hidden>
+            {refreshing && <div className="h-full w-full animate-pulse bg-[#a67c2e]/70" />}
+          </div>
+          <div className="flex items-center gap-2 overflow-x-auto [scrollbar-width:none] md:overflow-visible [&::-webkit-scrollbar]:hidden">
             <CalendarRange className="h-4 w-4 shrink-0 text-gray-400" />
             <div className="flex shrink-0 rounded-lg bg-gray-100 p-0.5">
               {QUICK_PERIODS.map((p) => (
@@ -273,11 +286,7 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
                 </PopoverContent>
               </Popover>
             </div>
-            <span className="whitespace-nowrap text-xs font-medium text-gray-600">{periodLabel}</span>
-            {/* Fixed slot so the spinner never shifts the period label */}
-            <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center" aria-hidden={!refreshing}>
-              {refreshing ? <Loader2 className="h-3.5 w-3.5 animate-spin text-gray-400" /> : null}
-            </span>
+            <span className={cn("whitespace-nowrap text-xs font-medium transition-colors", refreshing ? "text-gray-400" : "text-gray-600")}>{periodLabel}</span>
           </div>
           {(tree?.branches.length ?? 0) > 1 && (
             <div className="flex items-center gap-2 md:ml-auto">
@@ -323,7 +332,9 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
         {!tree ? (
           <AccountsSkeleton />
         ) : (
-          <>
+          <div className="relative" aria-busy={refreshing}>
+            {/* Period change: keep the layout, fade the old numbers so they never read as the new period */}
+            <div className={cn("transition-[opacity,filter] duration-200", refreshing && "pointer-events-none select-none opacity-50 blur-[1.5px]")}>
             {tab === "overview" && <CoaOverview tree={tree} periodLabel={periodLabel} onOpenAccount={openAccount} onGo={go} onQuickEntry={(t) => setQuick({ open: true, template: t ?? null })} />}
             {tab === "pnl" && <CoaProfitLoss tree={tree} periodLabel={periodLabel} branchLabel={branchLabel} onOpenAccount={openAccount} />}
             {tab === "accounts" && (
@@ -393,7 +404,18 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
                 onOpenAccount={openAccount}
               />
             )}
-          </>
+            </div>
+            {refreshing && (
+              <div className="absolute inset-0 z-10 flex justify-center">
+                <div className="sticky top-[38vh] mt-16 h-fit">
+                  <div className="inline-flex items-center gap-2 rounded-full border border-gray-200 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-lg">
+                    <Loader2 className="h-4 w-4 animate-spin text-[#a67c2e]" />
+                    Loading {periodLabel}…
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
         )}
       </div>
 

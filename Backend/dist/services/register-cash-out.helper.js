@@ -7,12 +7,26 @@ const client_2 = require("../prisma/client");
 /**
  * When salary / commission / similar is paid in CASH while a register is open,
  * record it as an approved expense on that drawer so Expected cash drops.
+ * Paid from any account other than Cash in Hand (e.g. the bank) never touches
+ * the drawer, whatever method was picked.
  */
 async function recordCashPayOnOpenRegister(opts) {
     const amount = Math.round((Number(opts.amount) + Number.EPSILON) * 100) / 100;
     if (!(amount > 0.005))
         return null;
     const method = 'CASH';
+    let paidFrom = opts.paidFromAccountId;
+    if (paidFrom === undefined && opts.reference) {
+        const pay = await client_2.prisma.supplierPayment
+            .findUnique({ where: { id: opts.reference }, select: { paid_from_account_id: true } })
+            .catch(() => null);
+        paidFrom = pay?.paid_from_account_id;
+    }
+    if (paidFrom) {
+        const account = await client_2.prisma.transactionalAccount.findUnique({ where: { id: paidFrom }, select: { system_key: true } });
+        if (account && account.system_key !== 'CASH')
+            return null;
+    }
     const open = await client_2.prisma.cashFlow.findMany({
         where: {
             status: 'OPEN',

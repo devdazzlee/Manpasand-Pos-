@@ -26,7 +26,8 @@ import { naturalAmount, type CoaAccount, type CoaTree } from "./coa-shared";
  * answered in plain words. Every number opens the account behind it.
  * ============================================================ */
 
-const rs = (v: number) => `Rs ${Math.round(v).toLocaleString("en-PK")}`;
+// `|| 0` turns -0 (e.g. a -0.50 balance) into 0 so it never shows as "Rs -0".
+const rs = (v: number) => `Rs ${(Math.round(v) || 0).toLocaleString("en-PK")}`;
 
 type Totals = { receivable: number; overdue: number; count: number };
 

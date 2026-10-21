@@ -288,6 +288,7 @@ class SalaryService {
                 userId: opts?.userId,
                 reference: updated.id,
                 notes: `Salary ${updated.month}/${updated.year}`,
+                paidFromAccountId: paidFrom,
             }).catch(() => undefined);
         }
         return updated;

@@ -60,7 +60,7 @@ const SHORT = ["type", "group", "head", "account"] as const;
 
 const amt = (v: number) => {
   const a = Math.abs(v);
-  if (a < 0.5) return "—";
+  if (Math.round(a) === 0 || a < 0.5) return "—";
   return `${v < 0 ? "−" : ""}${Math.round(a).toLocaleString("en-PK")}`;
 };
 

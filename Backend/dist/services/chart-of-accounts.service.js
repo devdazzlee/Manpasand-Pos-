@@ -171,7 +171,11 @@ const DEFAULT_CHART = [
                 code: '521',
                 name: 'Expenses Control',
                 systemKey: 'GENERAL_EXPENSES',
-                accounts: [{ name: 'Miscellaneous Expense', systemKey: 'MISC_EXPENSE' }],
+                accounts: [
+                    { name: 'Miscellaneous Expense', systemKey: 'MISC_EXPENSE' },
+                    // Register count vs expected at close (short = debit, over = credit)
+                    { name: 'Cash Short & Over', systemKey: 'CASH_OVER_SHORT' },
+                ],
             },
             { code: '522', name: 'Payroll Expense', systemKey: 'PAYROLL', accounts: [] },
         ],
@@ -1348,7 +1352,11 @@ class ChartOfAccountsService {
      */
     async collectMoneyEntries(ctx) {
         const { start, end, branchId, accounts, onlyAccountId, byId, entries } = ctx;
-        const key = (k) => accounts.find((a) => a.systemKey === k)?.id;
+        // Resolve accounts from the whole chart, not just the ones being reported:
+        // a payment must land on its real account even when only Cash in Hand is
+        // asked for (push() then keeps just the requested accounts).
+        const allAccounts = await this.loadAccountMeta();
+        const key = (k) => allAccounts.find((a) => a.systemKey === k)?.id;
         const cashId = key('CASH');
         const bankId = key('BANK');
         const staffId = key('STAFF_ADVANCES');
@@ -1356,11 +1364,13 @@ class ChartOfAccountsService {
         const salesId = key('SALES');
         if (!cashId)
             return;
-        const moneyAccounts = new Set(accounts
+        const moneyAccounts = new Set(allAccounts
             .filter((a) => a.controlSystemKey === 'CASH_BANK' || a.systemKey === 'CASH' || a.systemKey === 'BANK')
             .map((a) => a.id));
         const relevant = new Set([...moneyAccounts, staffId, giftId, salesId].filter(Boolean));
         if (onlyAccountId && !relevant.has(onlyAccountId))
+            return;
+        if (!accounts.some((a) => relevant.has(a.id)))
             return;
         // Older rows have no saved account: use today's routing for their method.
         const routing = await (0, payment_accounts_service_1.getPaymentRouting)();
