@@ -1018,7 +1018,7 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
                         <th className="pb-2 text-left font-medium">Closed by</th>
                         <th className="pb-2 text-right font-medium">Expected</th>
                         <th className="pb-2 text-right font-medium">Counted</th>
-                        <th className="pb-2 text-right font-medium">Expenses</th>
+                        <th className="pb-2 text-right font-medium">Cash out</th>
                         <th className="pb-2 text-right font-medium">Difference</th>
                         <th className="px-4 pb-2 text-right font-medium">Status</th>
                       </tr>
@@ -1070,11 +1070,20 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
                             >
                               {rs(s.cashExpenses || 0)}
                             </button>
-                            {(s.expenses?.length || 0) > 0 && (
-                              <div className="text-xs text-stone-500">
-                                {s.expenses.length} {s.expenses.length === 1 ? "item" : "items"}
-                              </div>
-                            )}
+                            {(s.expenses?.length || 0) > 0 && (() => {
+                              // Supplier payments made from the drawer are cash out, not expenses.
+                              const toSuppliers = s.expenses
+                                .filter((e) => e.deducted !== false && /^purchase payment/i.test(e.particular))
+                                .reduce((t, e) => t + (e.amount || 0), 0);
+                              const spent = (s.cashExpenses || 0) - toSuppliers;
+                              return (
+                                <div className="text-xs text-stone-500">
+                                  {toSuppliers > 0
+                                    ? `${rs(spent)} expenses · ${rs(toSuppliers)} suppliers`
+                                    : `${s.expenses.length} ${s.expenses.length === 1 ? "item" : "items"}`}
+                                </div>
+                              );
+                            })()}
                           </td>
                           <td
                             className={cn("cursor-pointer py-2.5 text-right font-semibold tabular-nums", varianceCls(s.variance))}
