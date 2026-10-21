@@ -998,6 +998,7 @@ export class CashRegisterService {
 
     const methodTotals: Record<string, { expected: number; actual: number; variance: number }> = {};
     const byCashier = new Map<string, { cashier: string; shifts: number; over: number; short: number; net: number }>();
+    const cashAccount = await prisma.transactionalAccount.findUnique({ where: { system_key: 'CASH' }, select: { id: true } });
     const sessionRows = [];
     for (const s of sessions) {
       for (const x of s.shifts) {
@@ -1012,6 +1013,20 @@ export class CashRegisterService {
         byCashier.set(key, row);
       }
       const live = await this.compute(s, s.closed_at ?? undefined);
+      // Supplier payments during this session that left from the bank (not the drawer) — so the
+      // day sheet shows where every rupee went, not only the drawer cash.
+      const bankPays = await prisma.supplierPayment.findMany({
+        where: {
+          type: { in: ['PAYMENT', 'ADVANCE'] },
+          payment_date: { gte: s.opened_at, lte: s.closed_at ?? new Date() },
+          OR: [
+            { paid_from_account_id: { not: cashAccount?.id ?? '' } },
+            { paid_from_account_id: null, method: { not: 'CASH' } },
+          ],
+        },
+        include: { supplier: { select: { name: true } } },
+        orderBy: { payment_date: 'asc' },
+      });
       const closing = s.closing == null ? null : num(s.closing);
       // Always show live maths so Expected / Expenses stay correct even if the
       // snapshot from close-time missed a later-linked expense.
@@ -1085,6 +1100,15 @@ export class CashRegisterService {
           expected: live.expectedCash,
         },
         sales: live.salesRows,
+        salesByMethod: live.byMethod,
+        nonCashExpenses: r2(live.allExpenses - (live.expensesByMethod.CASH || 0)),
+        bankPayments: bankPays.map((p) => ({
+          id: p.id,
+          particular: `Supplier payment · ${p.supplier?.name || 'Supplier'}`,
+          amount: num(p.amount),
+          at: p.payment_date.toISOString(),
+          method: p.method,
+        })),
       });
     }
 

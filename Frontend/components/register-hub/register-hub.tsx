@@ -935,7 +935,7 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
   }, [load]);
 
   return (
-    <div className="space-y-4">
+    <div className="space-y-4 pb-10">
       <div className="flex flex-wrap items-end gap-2 rounded-xl border border-stone-200 bg-white p-3">
         <div className="flex gap-1">
           {PRESETS.map((p) => (
@@ -1004,65 +1004,90 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
             </div>
           </div>
 
-          <div className="grid gap-4 lg:grid-cols-3">
-            <Panel title="Sessions" className="lg:col-span-2">
-              {data.sessions.length === 0 ? (
-                <p className="py-8 text-center text-sm text-stone-500">No register sessions in this period.</p>
+          <div className="grid gap-4 md:grid-cols-2">
+            <Panel title="By payment method">
+              {data.totals.methods.length === 0 ? (
+                <p className="text-sm text-stone-500">Nothing reconciled yet.</p>
               ) : (
-                <div className="-mx-4 overflow-x-auto">
-                  <table className="w-full min-w-[860px] text-sm">
-                    <thead className="text-xs text-stone-500">
-                      <tr className="border-b border-stone-100">
-                        <th className="px-4 pb-2 text-left font-medium">Date</th>
-                        <th className="pb-2 text-left font-medium">Branch</th>
-                        <th className="pb-2 text-left font-medium">Closed by</th>
-                        <th className="pb-2 text-right font-medium">Expected</th>
-                        <th className="pb-2 text-right font-medium">Counted</th>
-                        <th className="pb-2 text-right font-medium">Cash out</th>
-                        <th className="pb-2 text-right font-medium">Difference</th>
-                        <th className="px-4 pb-2 text-right font-medium">Status</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {data.sessions.map((s) => (
-                        <tr key={s.id} className="border-b border-stone-50 hover:bg-[#fcf8f2]">
-                          <td className="cursor-pointer px-4 py-2.5" onClick={() => onOpenSession(s.id)}>
-                            <div className="font-medium">{format(new Date(s.openedAt), "dd MMM yyyy")}</div>
-                            <div className="text-xs text-stone-500">{s.handovers ? `${s.handovers} handover${s.handovers > 1 ? "s" : ""}` : "single shift"}</div>
+                <ul className="space-y-2.5 text-sm">
+                  {data.totals.methods.map((m) => (
+                    <li key={m.method} className="flex items-center justify-between gap-2">
+                      <span className="text-stone-700">{METHOD_LABEL[m.method] ?? m.label}</span>
+                      <span className="text-right">
+                        <span className="tabular-nums text-stone-500">{rs(m.actual)}</span>
+                        <span className={cn("ml-2 font-semibold tabular-nums", varianceCls(m.variance))}>{signedRs(m.variance)}</span>
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+            <Panel title="By cashier (shift differences)">
+              {data.byCashier.length === 0 ? (
+                <p className="text-sm text-stone-500">No completed shifts.</p>
+              ) : (
+                <ul className="space-y-2.5 text-sm">
+                  {data.byCashier.map((c) => (
+                    <li key={c.cashier} className="flex items-center justify-between gap-2">
+                      <span className="min-w-0">
+                        <span className="block truncate font-medium text-stone-800">{userName(c.cashier)}</span>
+                        <span className="text-xs text-stone-500">
+                          {c.shifts} shifts · short {rs(Math.abs(c.short))} · over {rs(c.over)}
+                        </span>
+                      </span>
+                      <span className={cn("font-semibold tabular-nums", varianceCls(c.net))}>{signedRs(c.net)}</span>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </Panel>
+          </div>
+
+          <section className="overflow-hidden rounded-xl border border-stone-200 bg-white">
+            <header className="flex items-center justify-between gap-2 border-b border-stone-100 px-4 py-3">
+              <h3 className="text-sm font-semibold text-stone-800">Sessions</h3>
+              <span className="text-xs text-stone-500">Click a day for the full money summary</span>
+            </header>
+            {data.sessions.length === 0 ? (
+              <p className="py-8 text-center text-sm text-stone-500">No register sessions in this period.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <table className="w-full min-w-[760px] text-sm">
+                  <thead className="bg-stone-50 text-[11px] uppercase tracking-wide text-stone-500">
+                    <tr>
+                      <th className="px-4 py-2.5 text-left font-medium">Day</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Sales</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Cash out</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Drawer cash</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Difference</th>
+                      <th className="px-4 py-2.5 text-right font-medium">Status</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-stone-100">
+                    {data.sessions.map((s) => {
+                      const m = s.salesByMethod ?? {};
+                      const nonCash = (m.CARD || 0) + (m.BANK_TRANSFER || 0) + (m.MOBILE_MONEY || 0);
+                      const toSuppliers = supplierCashOut(s);
+                      const openDay = () => setModal({ kind: "counted", session: s });
+                      return (
+                        <tr key={s.id} className="cursor-pointer align-top hover:bg-[#fcf8f2]" onClick={openDay}>
+                          <td className="px-4 py-3">
+                            <div className="whitespace-nowrap font-semibold text-stone-900">{format(new Date(s.openedAt), "EEE, dd MMM yyyy")}</div>
+                            <div className="mt-0.5 whitespace-nowrap text-xs text-stone-500">
+                              {s.branch?.name ?? "—"} · {s.closedBy ? userName(s.closedBy) : "not closed"}
+                              {s.handovers ? ` · ${s.handovers} handover${s.handovers > 1 ? "s" : ""}` : ""}
+                            </div>
                           </td>
-                          <td className="cursor-pointer py-2.5" onClick={() => onOpenSession(s.id)}>{s.branch?.name ?? "—"}</td>
-                          <td className="cursor-pointer py-2.5" onClick={() => onOpenSession(s.id)}>{userName(s.closedBy)}</td>
-                          <td className="py-2.5 text-right">
+                          <td className="whitespace-nowrap px-3 py-3 text-right">
+                            <div className="font-semibold tabular-nums text-stone-900">{rs((m.CASH || 0) + nonCash)}</div>
+                            <div className="mt-0.5 text-xs tabular-nums text-stone-500">
+                              Cash {rs(m.CASH || 0)} · Card/bank {rs(nonCash)}
+                            </div>
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right">
                             <button
                               type="button"
-                              className="font-medium tabular-nums text-stone-800 underline-offset-2 hover:underline"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setModal({ kind: "expected", session: s });
-                              }}
-                            >
-                              {rs(s.expectedCash)}
-                            </button>
-                          </td>
-                          <td className="py-2.5 text-right">
-                            <button
-                              type="button"
-                              className="font-medium tabular-nums text-stone-800 underline-offset-2 hover:underline"
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                setModal({ kind: "counted", session: s });
-                              }}
-                            >
-                              {rs(s.closing)}
-                            </button>
-                          </td>
-                          <td className="py-2.5 text-right">
-                            <button
-                              type="button"
-                              className={cn(
-                                "tabular-nums font-medium underline-offset-2 hover:underline",
-                                (s.cashExpenses || 0) > 0 ? "text-rose-700" : "text-stone-500",
-                              )}
+                              className={cn("font-semibold tabular-nums underline-offset-2 hover:underline", (s.cashExpenses || 0) > 0 ? "text-rose-700" : "text-stone-400")}
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setModal({ kind: "expenses", session: s });
@@ -1070,29 +1095,34 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
                             >
                               {rs(s.cashExpenses || 0)}
                             </button>
-                            {(s.expenses?.length || 0) > 0 && (() => {
-                              // Supplier payments made from the drawer are cash out, not expenses.
-                              const toSuppliers = s.expenses
-                                .filter((e) => e.deducted !== false && /^purchase payment/i.test(e.particular))
-                                .reduce((t, e) => t + (e.amount || 0), 0);
-                              const spent = (s.cashExpenses || 0) - toSuppliers;
-                              return (
-                                <div className="text-xs text-stone-500">
-                                  {toSuppliers > 0
-                                    ? `${rs(spent)} expenses · ${rs(toSuppliers)} suppliers`
-                                    : `${s.expenses.length} ${s.expenses.length === 1 ? "item" : "items"}`}
-                                </div>
-                              );
-                            })()}
+                            <div className="mt-0.5 text-xs tabular-nums text-stone-500">
+                              {toSuppliers > 0
+                                ? `Expenses ${rs((s.cashExpenses || 0) - toSuppliers)} · Suppliers ${rs(toSuppliers)}`
+                                : `${s.expenses?.length || 0} ${(s.expenses?.length || 0) === 1 ? "item" : "items"}`}
+                            </div>
                           </td>
-                          <td
-                            className={cn("cursor-pointer py-2.5 text-right font-semibold tabular-nums", varianceCls(s.variance))}
-                            onClick={() => setModal({ kind: "counted", session: s })}
-                          >
-                            {signedRs(s.variance)}
-                            {s.varianceNote && <div className="max-w-[180px] truncate text-right text-xs font-normal text-stone-500">{s.varianceNote}</div>}
+                          <td className="whitespace-nowrap px-3 py-3 text-right">
+                            <button
+                              type="button"
+                              className="font-semibold tabular-nums text-stone-900 underline-offset-2 hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setModal({ kind: "expected", session: s });
+                              }}
+                            >
+                              {s.closing == null ? "—" : rs(s.closing)}
+                            </button>
+                            <div className="mt-0.5 text-xs tabular-nums text-stone-500">expected {rs(s.expectedCash)}</div>
                           </td>
-                          <td className="cursor-pointer px-4 py-2.5 text-right" onClick={() => onOpenSession(s.id)}>
+                          <td className="whitespace-nowrap px-3 py-3 text-right">
+                            <div className={cn("font-semibold tabular-nums", varianceCls(s.variance))}>{s.variance == null ? "—" : signedRs(s.variance)}</div>
+                            {s.varianceNote && (
+                              <div className="mt-0.5 ml-auto max-w-[160px] truncate text-xs text-stone-500" title={s.varianceNote}>
+                                {s.varianceNote}
+                              </div>
+                            )}
+                          </td>
+                          <td className="px-4 py-3 text-right">
                             {s.status === "OPEN" ? (
                               <Pill className={STATE_META.OPEN.cls}>Open</Pill>
                             ) : s.reviewStatus === "PENDING" ? (
@@ -1104,52 +1134,13 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
                             )}
                           </td>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </Panel>
-
-            <div className="space-y-4">
-              <Panel title="By payment method">
-                {data.totals.methods.length === 0 ? (
-                  <p className="text-sm text-stone-500">Nothing reconciled yet.</p>
-                ) : (
-                  <ul className="space-y-2.5 text-sm">
-                    {data.totals.methods.map((m) => (
-                      <li key={m.method} className="flex items-center justify-between gap-2">
-                        <span className="text-stone-700">{METHOD_LABEL[m.method] ?? m.label}</span>
-                        <span className="text-right">
-                          <span className="tabular-nums text-stone-500">{rs(m.actual)}</span>
-                          <span className={cn("ml-2 font-semibold tabular-nums", varianceCls(m.variance))}>{signedRs(m.variance)}</span>
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Panel>
-              <Panel title="By cashier (shift differences)">
-                {data.byCashier.length === 0 ? (
-                  <p className="text-sm text-stone-500">No completed shifts.</p>
-                ) : (
-                  <ul className="space-y-2.5 text-sm">
-                    {data.byCashier.map((c) => (
-                      <li key={c.cashier} className="flex items-center justify-between gap-2">
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium text-stone-800">{userName(c.cashier)}</span>
-                          <span className="text-xs text-stone-500">
-                            {c.shifts} shifts · short {rs(Math.abs(c.short))} · over {rs(c.over)}
-                          </span>
-                        </span>
-                        <span className={cn("font-semibold tabular-nums", varianceCls(c.net))}>{signedRs(c.net)}</span>
-                      </li>
-                    ))}
-                  </ul>
-                )}
-              </Panel>
-            </div>
-          </div>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </section>
         </>
       )}
 
@@ -1158,7 +1149,7 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
           <DialogHeader>
             <DialogTitle>
               {modal?.kind === "expected" && "Expected cash"}
-              {modal?.kind === "counted" && "Counted cash"}
+              {modal?.kind === "counted" && "Day summary"}
               {modal?.kind === "expenses" && "Cash out / expenses"}
               {modal ? ` · ${format(new Date(modal.session.openedAt), "dd MMM yyyy")}` : ""}
             </DialogTitle>
@@ -1223,57 +1214,112 @@ function ExpectedCashModal({ session, onOpenFull }: { session: ReconSession; onO
   );
 }
 
-function CountedCashModal({ session }: { session: ReconSession }) {
-  const expected = session.expectedCash ?? 0;
-  const counted = session.closing;
-  const diff = session.variance;
+/** Drawer cash that went to suppliers (stock payments), as opposed to running expenses. */
+function supplierCashOut(s: ReconSession) {
+  return (s.expenses || [])
+    .filter((e) => e.deducted !== false && /^purchase payment/i.test(e.particular))
+    .reduce((t, e) => t + (e.amount || 0), 0);
+}
+
+function SummaryRow({ label, value, tone, strong, sub }: { label: ReactNode; value: number | null | undefined; tone?: "in" | "out"; strong?: boolean; sub?: string }) {
   return (
-    <div className="space-y-3">
+    <div className={cn("flex items-baseline justify-between gap-3 py-1", strong && "border-t border-stone-200 pt-2 font-semibold")}>
+      <span className={cn("min-w-0", strong ? "text-stone-900" : "text-stone-600")}>
+        {label}
+        {sub && <span className="block text-xs font-normal text-stone-400">{sub}</span>}
+      </span>
+      <span className={cn("shrink-0 tabular-nums", tone === "in" && "text-emerald-700", tone === "out" && "text-rose-700", !tone && "text-stone-900")}>
+        {tone === "out" && (value || 0) > 0 ? "− " : tone === "in" && (value || 0) > 0 ? "+ " : ""}
+        {rs(value)}
+      </span>
+    </div>
+  );
+}
+
+function SummaryBlock({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="rounded-lg border border-stone-200 px-3 py-2 text-sm">
+      <div className="mb-1 text-[11px] font-semibold uppercase tracking-wide text-stone-500">{title}</div>
+      {children}
+    </div>
+  );
+}
+
+/** Whole day on one screen: money in by method, money out (drawer and bank), drawer count, where it ended. */
+function CountedCashModal({ session }: { session: ReconSession }) {
+  const m = session.salesByMethod ?? {};
+  const b = session.breakdown;
+  const card = m.CARD || 0;
+  const bankTransfer = m.BANK_TRANSFER || 0;
+  const wallet = m.MOBILE_MONEY || 0;
+  const totalIn = (m.CASH || 0) + card + bankTransfer + wallet;
+  const drawerItems = (session.expenses || []).filter((e) => e.deducted !== false);
+  const supplierItems = drawerItems.filter((e) => /^purchase payment/i.test(e.particular));
+  const expenseItems = drawerItems.filter((e) => !/^purchase payment/i.test(e.particular));
+  const sum = (xs: { amount: number }[]) => xs.reduce((t, x) => t + (x.amount || 0), 0);
+  const bankPays = session.bankPayments || [];
+  const nonCashExp = session.nonCashExpenses || 0;
+  const bankNet = card + bankTransfer + wallet - sum(bankPays) - nonCashExp;
+  const diff = session.variance;
+
+  return (
+    <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
       <div className="grid grid-cols-3 gap-2 text-center text-sm">
-        <div className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-3">
-          <div className="text-xs text-stone-500">Expected</div>
-          <div className="mt-1 font-semibold tabular-nums">{rs(expected)}</div>
+        <div className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-2.5">
+          <div className="text-xs text-stone-500">Total sales</div>
+          <div className="mt-0.5 font-semibold tabular-nums">{rs(totalIn)}</div>
         </div>
-        <div className="rounded-lg border border-stone-200 bg-white px-2 py-3">
-          <div className="text-xs text-stone-500">Counted</div>
-          <div className="mt-1 font-semibold tabular-nums">{rs(counted)}</div>
+        <div className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-2.5">
+          <div className="text-xs text-stone-500">Paid out</div>
+          <div className="mt-0.5 font-semibold tabular-nums text-rose-700">{rs(sum(drawerItems) + sum(bankPays) + nonCashExp)}</div>
         </div>
-        <div className="rounded-lg border border-stone-200 bg-white px-2 py-3">
-          <div className="text-xs text-stone-500">Difference</div>
-          <div className={cn("mt-1 font-semibold tabular-nums", varianceCls(diff))}>{signedRs(diff)}</div>
+        <div className="rounded-lg border border-stone-200 bg-stone-50 px-2 py-2.5">
+          <div className="text-xs text-stone-500">Drawer difference</div>
+          <div className={cn("mt-0.5 font-semibold tabular-nums", varianceCls(diff))}>{diff == null ? "—" : signedRs(diff)}</div>
         </div>
       </div>
-      <p className="text-sm text-stone-600">
-        {counted == null
-          ? "This register is still open — no closing count yet."
-          : Math.abs(diff ?? 0) < 0.5
-            ? "Drawer matched expected cash."
-            : (diff ?? 0) > 0
-              ? `Drawer had ${rs(Math.abs(diff ?? 0))} more than expected (over).`
-              : `Drawer had ${rs(Math.abs(diff ?? 0))} less than expected (short).`}
-      </p>
-      {session.closedAt && (
-        <div className="rounded-lg border border-stone-100 px-3 py-2 text-sm text-stone-600">
-          Closed {format(new Date(session.closedAt), "dd MMM yyyy, h:mm a")}
-          {session.closedBy ? ` · ${userName(session.closedBy)}` : ""}
-        </div>
-      )}
-      {session.varianceNote && (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">{session.varianceNote}</div>
-      )}
-      {session.methods?.length > 0 && (
-        <ul className="space-y-1.5 text-sm">
-          {session.methods.map((m) => (
-            <li key={m.method} className="flex items-center justify-between gap-2 rounded-lg border border-stone-100 px-3 py-2">
-              <span>{METHOD_LABEL[m.method] ?? m.method}</span>
-              <span className="text-right">
-                <span className="tabular-nums text-stone-500">{rs(m.actual)}</span>
-                <span className={cn("ml-2 font-semibold tabular-nums", varianceCls(m.variance))}>{signedRs(m.variance)}</span>
-              </span>
-            </li>
-          ))}
-        </ul>
-      )}
+
+      <SummaryBlock title="Money received">
+        <SummaryRow label="Cash" value={m.CASH || 0} />
+        {card > 0 && <SummaryRow label="Card" value={card} />}
+        {bankTransfer > 0 && <SummaryRow label="Bank transfer" value={bankTransfer} />}
+        {wallet > 0 && <SummaryRow label="Wallet (JazzCash / Easypaisa)" value={wallet} />}
+        <SummaryRow label="Total sales" value={totalIn} strong />
+      </SummaryBlock>
+
+      <SummaryBlock title="Paid out">
+        <SummaryRow label="Expenses (from drawer)" value={sum(expenseItems)} tone="out" sub={expenseItems.map((e) => e.particular).join(", ") || undefined} />
+        {supplierItems.map((e) => (
+          <SummaryRow key={e.id} label={e.particular.replace(/^purchase payment ·/i, "Supplier ·")} value={e.amount} tone="out" sub="Cash from drawer" />
+        ))}
+        {bankPays.map((p) => (
+          <SummaryRow key={p.id} label={p.particular.replace(/^supplier payment ·/i, "Supplier ·")} value={p.amount} tone="out" sub={`From bank · ${METHOD_LABEL[p.method] || p.method}`} />
+        ))}
+        {nonCashExp > 0 && <SummaryRow label="Expenses paid by card / bank" value={nonCashExp} tone="out" />}
+        <SummaryRow label="Total paid out" value={sum(drawerItems) + sum(bankPays) + nonCashExp} strong />
+      </SummaryBlock>
+
+      <SummaryBlock title="Drawer cash">
+        <SummaryRow label="Opening" value={b?.opening ?? session.opening} />
+        <SummaryRow label="Cash sales" value={b?.cashSales ?? 0} tone="in" />
+        {(b?.cashIn || 0) > 0 && <SummaryRow label="Cash in" value={b?.cashIn} tone="in" />}
+        {(b?.cashRefunds || 0) > 0 && <SummaryRow label="Cash refunds" value={b?.cashRefunds} tone="out" />}
+        <SummaryRow label="Cash out (expenses + suppliers)" value={b?.cashOut ?? session.cashExpenses} tone="out" />
+        <SummaryRow label="Should be in drawer" value={session.expectedCash} strong />
+        <SummaryRow label="Counted at closing" value={session.closing} />
+        {session.closedAt && (
+          <div className="pt-1 text-xs text-stone-500">
+            Closed {format(new Date(session.closedAt), "dd MMM yyyy, h:mm a")}
+            {session.closedBy ? ` · ${userName(session.closedBy)}` : ""}
+          </div>
+        )}
+        {session.varianceNote && <div className="mt-2 rounded-md bg-amber-50 px-2.5 py-1.5 text-xs text-amber-900">{session.varianceNote}</div>}
+      </SummaryBlock>
+
+      <SummaryBlock title="Where the money is at day end">
+        <SummaryRow label="Cash in drawer" value={session.closing ?? session.expectedCash} />
+        <SummaryRow label="Card / bank sales left in bank" value={bankNet} sub="Card + bank + wallet sales minus payments made from the bank" />
+      </SummaryBlock>
     </div>
   );
 }

@@ -162,6 +162,12 @@ export interface ReconReport {
     expenses: ReconExpenseItem[];
     breakdown?: ReconBreakdown;
     sales?: ReconSaleItem[];
+    /** Money received by method during the session (sales net of returns). */
+    salesByMethod?: Record<string, number>;
+    /** Expenses paid by card / bank during the session (not from the drawer). */
+    nonCashExpenses?: number;
+    /** Supplier payments during the session that left from the bank, not the drawer. */
+    bankPayments?: { id: string; particular: string; amount: number; at: string; method: string }[];
   }[];
   totals: {
     sessions: number;
