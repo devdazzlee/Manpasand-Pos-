@@ -1052,13 +1052,15 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
               <p className="py-8 text-center text-sm text-stone-500">No register sessions in this period.</p>
             ) : (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[760px] text-sm">
+                <table className="w-full min-w-[980px] text-sm">
                   <thead className="bg-stone-50 text-[11px] uppercase tracking-wide text-stone-500">
                     <tr>
                       <th className="px-4 py-2.5 text-left font-medium">Day</th>
                       <th className="px-3 py-2.5 text-right font-medium">Sales</th>
                       <th className="px-3 py-2.5 text-right font-medium">Cash out</th>
                       <th className="px-3 py-2.5 text-right font-medium">Drawer cash</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Cash close</th>
+                      <th className="px-3 py-2.5 text-right font-medium">Card / bank close</th>
                       <th className="px-3 py-2.5 text-right font-medium">Difference</th>
                       <th className="px-4 py-2.5 text-right font-medium">Status</th>
                     </tr>
@@ -1068,23 +1070,24 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
                       const m = s.salesByMethod ?? {};
                       const nonCash = (m.CARD || 0) + (m.BANK_TRANSFER || 0) + (m.MOBILE_MONEY || 0);
                       const toSuppliers = supplierCashOut(s);
+                      const close = sessionCloseCounts(s);
                       const openDay = () => setModal({ kind: "counted", session: s });
                       return (
-                        <tr key={s.id} className="cursor-pointer align-top hover:bg-[#fcf8f2]" onClick={openDay}>
-                          <td className="px-4 py-3">
-                            <div className="whitespace-nowrap font-semibold text-stone-900">{format(new Date(s.openedAt), "EEE, dd MMM yyyy")}</div>
-                            <div className="mt-0.5 whitespace-nowrap text-xs text-stone-500">
+                        <tr key={s.id} className="cursor-pointer hover:bg-[#fcf8f2]" onClick={openDay}>
+                          <td className="whitespace-nowrap px-4 py-3 align-top">
+                            <div className="font-semibold text-stone-900">{format(new Date(s.openedAt), "EEE, dd MMM yyyy")}</div>
+                            <div className="mt-0.5 text-xs text-stone-500">
                               {s.branch?.name ?? "—"} · {s.closedBy ? userName(s.closedBy) : "not closed"}
                               {s.handovers ? ` · ${s.handovers} handover${s.handovers > 1 ? "s" : ""}` : ""}
                             </div>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3 text-right">
+                          <td className="whitespace-nowrap px-3 py-3 text-right align-top">
                             <div className="font-semibold tabular-nums text-stone-900">{rs((m.CASH || 0) + nonCash)}</div>
                             <div className="mt-0.5 text-xs tabular-nums text-stone-500">
-                              Cash {rs(m.CASH || 0)} · Card/bank {rs(nonCash)}
+                              Cash {rs(m.CASH || 0)} · Card {rs(nonCash)}
                             </div>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3 text-right">
+                          <td className="whitespace-nowrap px-3 py-3 text-right align-top">
                             <button
                               type="button"
                               className={cn("font-semibold tabular-nums underline-offset-2 hover:underline", (s.cashExpenses || 0) > 0 ? "text-rose-700" : "text-stone-400")}
@@ -1095,34 +1098,47 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
                             >
                               {rs(s.cashExpenses || 0)}
                             </button>
-                            <div className="mt-0.5 text-xs tabular-nums text-stone-500">
+                            <div className="mt-0.5 text-xs text-stone-500">
                               {toSuppliers > 0
                                 ? `Expenses ${rs((s.cashExpenses || 0) - toSuppliers)} · Suppliers ${rs(toSuppliers)}`
                                 : `${s.expenses?.length || 0} ${(s.expenses?.length || 0) === 1 ? "item" : "items"}`}
                             </div>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3 text-right">
+                          <td className="whitespace-nowrap px-3 py-3 text-right align-top">
                             <button
                               type="button"
-                              className="font-semibold tabular-nums text-stone-900 underline-offset-2 hover:underline"
+                              className="text-right underline-offset-2 hover:underline"
                               onClick={(e) => {
                                 e.stopPropagation();
                                 setModal({ kind: "expected", session: s });
                               }}
                             >
-                              {s.closing == null ? "—" : rs(s.closing)}
+                              <div className="font-semibold tabular-nums text-stone-900">{s.closing == null ? "—" : rs(s.closing)}</div>
+                              <div className="mt-0.5 text-xs tabular-nums text-stone-500">expected {rs(s.expectedCash)}</div>
                             </button>
-                            <div className="mt-0.5 text-xs tabular-nums text-stone-500">expected {rs(s.expectedCash)}</div>
                           </td>
-                          <td className="whitespace-nowrap px-3 py-3 text-right">
-                            <div className={cn("font-semibold tabular-nums", varianceCls(s.variance))}>{s.variance == null ? "—" : signedRs(s.variance)}</div>
+                          <td className="whitespace-nowrap px-3 py-3 text-right align-top">
+                            <AmountPair received={close.cash.received} expected={close.cash.expected} />
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right align-top">
+                            <AmountPair received={close.bank.received} expected={close.bank.expected} />
+                          </td>
+                          <td className="whitespace-nowrap px-3 py-3 text-right align-top">
+                            <div className={cn("font-semibold tabular-nums", varianceCls(close.cash.variance))}>
+                              {close.cash.variance == null ? "—" : signedRs(close.cash.variance)}
+                            </div>
+                            {close.bank.variance != null && Math.abs(close.bank.variance) >= 0.005 && (
+                              <div className={cn("mt-0.5 text-xs tabular-nums", varianceCls(close.bank.variance))}>
+                                card {signedRs(close.bank.variance)}
+                              </div>
+                            )}
                             {s.varianceNote && (
-                              <div className="mt-0.5 ml-auto max-w-[160px] truncate text-xs text-stone-500" title={s.varianceNote}>
+                              <div className="mt-0.5 max-w-[140px] truncate text-xs text-stone-500" title={s.varianceNote}>
                                 {s.varianceNote}
                               </div>
                             )}
                           </td>
-                          <td className="px-4 py-3 text-right">
+                          <td className="whitespace-nowrap px-4 py-3 text-right align-top">
                             {s.status === "OPEN" ? (
                               <Pill className={STATE_META.OPEN.cls}>Open</Pill>
                             ) : s.reviewStatus === "PENDING" ? (
@@ -1219,6 +1235,40 @@ function supplierCashOut(s: ReconSession) {
   return (s.expenses || [])
     .filter((e) => e.deducted !== false && /^purchase payment/i.test(e.particular))
     .reduce((t, e) => t + (e.amount || 0), 0);
+}
+
+/** Expected vs received at close — cash and card/bank from reconciliation. */
+function sessionCloseCounts(s: ReconSession) {
+  const sales = s.salesByMethod ?? {};
+  const methods = s.methods ?? [];
+  const cashM = methods.find((x) => x.method === "CASH");
+  const bankMs = methods.filter((x) => x.method !== "CASH");
+  const salesBank = (sales.CARD || 0) + (sales.BANK_TRANSFER || 0) + (sales.MOBILE_MONEY || 0);
+
+  const cashExpected = cashM?.expected ?? s.expectedCash ?? sales.CASH ?? 0;
+  const cashReceived = cashM != null ? cashM.actual : s.closing;
+  const cashVariance =
+    cashReceived == null ? null : cashM != null ? cashM.variance : s.variance;
+
+  const bankExpected = bankMs.length ? bankMs.reduce((t, x) => t + x.expected, 0) : salesBank;
+  const bankReceived = bankMs.length ? bankMs.reduce((t, x) => t + x.actual, 0) : null;
+  const bankVariance = bankMs.length ? bankMs.reduce((t, x) => t + x.variance, 0) : null;
+
+  return {
+    cash: { expected: cashExpected, received: cashReceived, variance: cashVariance },
+    bank: { expected: bankExpected, received: bankReceived, variance: bankVariance },
+  };
+}
+
+function AmountPair({ received, expected }: { received: number | null | undefined; expected: number }) {
+  return (
+    <>
+      <div className="text-xs text-stone-500">
+        received <span className="font-semibold tabular-nums text-stone-900">{received == null ? "—" : rs(received)}</span>
+      </div>
+      <div className="mt-0.5 text-xs tabular-nums text-stone-500">expected {rs(expected)}</div>
+    </>
+  );
 }
 
 function SummaryRow({ label, value, tone, strong, sub }: { label: ReactNode; value: number | null | undefined; tone?: "in" | "out"; strong?: boolean; sub?: string }) {
