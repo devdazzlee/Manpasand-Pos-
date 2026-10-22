@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
+import { bankAccountForMethod } from './payment-accounts.service';
 
 /**
  * "Cash in Hand" is all of the shop's cash — in the drawer or with the owner.
@@ -9,6 +10,9 @@ import { AppError } from '../utils/apiError';
  *
  *   CLOSE   counted ≠ expected → the difference goes to Cash Short & Over
  *           (short: Dr Short & Over / Cr Cash in Hand; extra: reverse).
+ *   CLOSE:<method>  card / bank / wallet amount entered at closing ≠ sales by
+ *           that method → the difference moves that method's bank account the
+ *           same way, so the books show what was entered at closing.
  *
  * Idempotent: a session's vouchers are rebuilt from scratch every time.
  */
@@ -85,7 +89,7 @@ export async function postRegisterSession(sessionId: string, userId?: string | n
   // Creates Cash Short & Over on first use after a deploy.
   const { ChartOfAccountsService } = await import('./chart-of-accounts.service');
   await new ChartOfAccountsService().ensureSetup();
-  const [cash, overShort] = await Promise.all([accountId('CASH'), accountId('CASH_OVER_SHORT')]);
+  const [cash, bank, overShort] = await Promise.all([accountId('CASH'), accountId('BANK'), accountId('CASH_OVER_SHORT')]);
   const where = s.branch?.name ? ` · ${s.branch.name}` : '';
   const posted: string[] = [];
 
@@ -103,6 +107,29 @@ export async function postRegisterSession(sessionId: string, userId?: string | n
       userId,
     });
     if (v) posted.push(v.voucher_no);
+  }
+
+  // CLOSE:<method> — card / bank / wallet entered at closing vs sales by that method.
+  if (s.status === 'CLOSED') {
+    const recs = await prisma.registerReconciliation.findMany({ where: { cashflow_id: s.id, method: { not: 'CASH' } } });
+    for (const r of recs) {
+      const diff = round2(num(r.variance));
+      if (Math.abs(diff) < 0.005) continue;
+      const methodBank = await bankAccountForMethod(r.method, bank);
+      const less = diff < 0;
+      const label = r.method.toLowerCase().replace(/_/g, ' ');
+      const v = await post({
+        reference: ref(s.id, `CLOSE:${r.method}`),
+        date: s.closed_at ?? new Date(),
+        branchId: s.branch_id,
+        narration: `${label} ${less ? 'short' : 'over'} at register close (sales ${round2(num(r.expected))}, entered ${round2(num(r.actual))})${where}`,
+        debitId: less ? overShort : methodBank,
+        creditId: less ? methodBank : overShort,
+        amount: diff,
+        userId,
+      });
+      if (v) posted.push(v.voucher_no);
+    }
   }
   return posted;
 }

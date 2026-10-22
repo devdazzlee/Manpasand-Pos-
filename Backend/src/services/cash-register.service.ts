@@ -1171,6 +1171,10 @@ export class CashRegisterService {
         },
       }),
     ]);
+    // Keep Cash in Hand / Bank on what was entered at closing after the maths moved.
+    await postRegisterSession(s.id).catch((err) =>
+      console.error('[register-accounting] post failed', s.id, (err as Error).message),
+    );
     return {
       id: s.id,
       expectedCash: live.expectedCash,
