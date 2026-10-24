@@ -390,7 +390,6 @@ function ExpensesTab({ toast }: { toast: Toast }) {
                 </TableHeader>
                 <TableBody>
                   {expenses.map((e) => {
-                    const locked = Boolean(e.cashflow_id);
                     return (
                       <TableRow key={e.id} className="h-11 hover:bg-muted/50">
                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground nums">
@@ -466,7 +465,7 @@ function ExpensesTab({ toast }: { toast: Toast }) {
                                 </Button>
                               </>
                             )}
-                            {!locked && e.status !== "REJECTED" && (
+                            {e.status !== "REJECTED" && (
                               <Button
                                 size="icon"
                                 variant="ghost"
@@ -477,17 +476,15 @@ function ExpensesTab({ toast }: { toast: Toast }) {
                                 <Pencil className="h-4 w-4" />
                               </Button>
                             )}
-                            {!locked && (
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                title="Delete"
-                                onClick={() => setDeleteTarget(e)}
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </Button>
-                            )}
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              title="Delete"
+                              onClick={() => setDeleteTarget(e)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -805,7 +802,9 @@ function ExpenseFormSheet({
           </p>
         )}
         {editing?.cashflow_id && (
-          <p className="rounded-lg bg-[#fcf8f2] px-3 py-2 text-xs text-gray-600">This expense is recorded in a cash register session.</p>
+          <p className="rounded-lg bg-[#fcf8f2] px-3 py-2 text-xs text-gray-600">
+            This expense is in a cash register session — saving updates that day&apos;s register and accounts.
+          </p>
         )}
         {showBank && (
           <Field label="Reference / cheque no.">

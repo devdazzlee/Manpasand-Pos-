@@ -511,17 +511,27 @@ export function CloseRegisterDialog({
   const [recs, setRecs] = useState<Record<string, { actual: string; reference: string }>>({});
   const [busy, setBusy] = useState(false);
 
+  // A reopened register keeps its last closing rows — show those methods and amounts again so they can be corrected.
+  const previous = useMemo(() => new Map((session?.reconciliations ?? []).map((r) => [r.method, r])), [session]);
   const methods = useMemo(
-    () => (session ? (["CARD", "BANK_TRANSFER", "MOBILE_MONEY"] as const).filter((m) => (session.live.byMethod[m] || 0) !== 0) : []),
-    [session],
+    () => (session ? (["CARD", "BANK_TRANSFER", "MOBILE_MONEY"] as const).filter((m) => (session.live.byMethod[m] || 0) !== 0 || previous.has(m)) : []),
+    [session, previous],
   );
 
   useEffect(() => {
     if (!open || !session) return;
-    setAmount("");
+    const lastCash = previous.get("CASH");
+    setAmount(lastCash ? String(Math.round(lastCash.actual)) : "");
     setCounts({});
-    setRecs(Object.fromEntries(methods.map((m) => [m, { actual: String(Math.round(session.live.byMethod[m] || 0)), reference: "" }])));
-  }, [open, session, methods]);
+    setRecs(
+      Object.fromEntries(
+        methods.map((m) => {
+          const last = previous.get(m);
+          return [m, { actual: String(Math.round(last ? last.actual : session.live.byMethod[m] || 0)), reference: last?.reference ?? "" }];
+        }),
+      ),
+    );
+  }, [open, session, methods, previous]);
 
   if (!session) return null;
   const expected = session.live.expectedCash;

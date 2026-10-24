@@ -1,4 +1,4 @@
-import { Prisma } from '@prisma/client';
+import { Prisma, type ExpensePaymentMethod } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { asNumber } from '../utils/helpers';
@@ -203,6 +203,38 @@ export class ExpenseCategoryService {
 
 /* ============================= expenses ============================= */
 
+/**
+ * Keep the method in step with the account the money left from: paid from
+ * Cash in Hand is CASH, paid from a bank is never CASH — the register counts
+ * drawer cash by this, so "Cash" with a bank account would come off the drawer.
+ */
+async function methodMatchingPaidFrom(paidFrom: string | null | undefined, method: string): Promise<ExpensePaymentMethod> {
+    const current = method as ExpensePaymentMethod;
+    if (!paidFrom) return current;
+    const account = await prisma.transactionalAccount.findUnique({ where: { id: paidFrom }, select: { system_key: true } });
+    if (!account) return current;
+    if (account.system_key === 'CASH') return 'CASH';
+    return current === 'CASH' ? 'BANK' : current;
+}
+
+/** Drawer copies of supplier / salary / commission payments are edited from the payment itself. */
+function assertNotPaymentCopy(row: { cashflow_id: string | null; reference: string | null; particular: string }) {
+    if (row.cashflow_id && row.reference && /^(Purchase payment|Salary|Commission) ·/.test(row.particular)) {
+        throw new AppError(400, 'This is a supplier / salary / commission payment — change it from Suppliers, Salaries or Commission');
+    }
+}
+
+/** A closed register's expected cash and its Cash in Hand / Bank entries follow an edited expense. */
+async function refreshClosedRegister(cashflowId: string | null) {
+    if (!cashflowId) return;
+    const session = await prisma.cashFlow.findUnique({ where: { id: cashflowId }, select: { status: true } });
+    if (session?.status !== 'CLOSED') return;
+    const { CashRegisterService } = await import('./cash-register.service');
+    await new CashRegisterService().recalculateClosed(cashflowId).catch((err) =>
+        console.error('[expense] register recalculation failed', cashflowId, (err as Error).message),
+    );
+}
+
 export class ExpenseService {
     private buildWhere(q: ExpenseListQuery): Prisma.ExpenseWhereInput {
         // Supplier / salary / commission payments made from the drawer are not expenses.
@@ -315,6 +347,7 @@ export class ExpenseService {
             }
         }
         const fromDrawer = !!cashflowId;
+        const method = await methodMatchingPaidFrom(links.paidFrom, data.payment_method ?? 'CASH');
         const created = await prisma.expense.create({
             data: {
                 particular: data.particular.trim(),
@@ -322,7 +355,7 @@ export class ExpenseService {
                 category_id: links.categoryId ?? null,
                 account_id: links.accountId ?? null,
                 paid_from_account_id: links.paidFrom ?? null,
-                payment_method: data.payment_method ?? 'CASH',
+                payment_method: method,
                 bank_account: data.bank_account?.trim() || null,
                 reference: data.reference?.trim() || null,
                 vendor: data.vendor?.trim() || null,
@@ -346,12 +379,7 @@ export class ExpenseService {
         if (existing.status === 'REJECTED') {
             throw new AppError(400, 'Rejected expenses cannot be edited');
         }
-        if (existing.cashflow_id) {
-            throw new AppError(
-                400,
-                'This expense belongs to a cash register session and cannot be edited here',
-            );
-        }
+        assertNotPaymentCopy(existing);
         await assertPeriodOpen(existing.expense_date, 'an expense');
         if (data.expense_date) await assertPeriodOpen(parseDateInput(data.expense_date), 'an expense');
         const links = await resolveExpenseLinks(data, existing);
@@ -368,7 +396,9 @@ export class ExpenseService {
         if (links.paidFrom !== undefined) {
             patch.paid_from = links.paidFrom ? { connect: { id: links.paidFrom } } : { disconnect: true };
         }
-        if (data.payment_method !== undefined) patch.payment_method = data.payment_method;
+        const finalPaidFrom = links.paidFrom !== undefined ? links.paidFrom : existing.paid_from_account_id;
+        const finalMethod = await methodMatchingPaidFrom(finalPaidFrom, data.payment_method ?? existing.payment_method);
+        if (finalMethod !== existing.payment_method) patch.payment_method = finalMethod;
         if (data.bank_account !== undefined) patch.bank_account = data.bank_account?.trim() || null;
         if (data.reference !== undefined) patch.reference = data.reference?.trim() || null;
         if (data.vendor !== undefined) patch.vendor = data.vendor?.trim() || null;
@@ -387,17 +417,17 @@ export class ExpenseService {
             data: patch,
             include: EXPENSE_INCLUDE,
         });
+        await refreshClosedRegister(existing.cashflow_id);
         return { ...updated, amount: asNumber(updated.amount) };
     }
 
     async remove(id: string) {
         const existing = await prisma.expense.findUnique({ where: { id } });
         if (!existing) throw new AppError(404, 'Expense not found');
-        if (existing.cashflow_id) {
-            throw new AppError(400, 'This expense belongs to a cash register session and cannot be deleted here');
-        }
+        assertNotPaymentCopy(existing);
         await assertPeriodOpen(existing.expense_date, 'an expense');
         await prisma.expense.delete({ where: { id } });
+        await refreshClosedRegister(existing.cashflow_id);
         return { id };
     }
 

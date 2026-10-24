@@ -103,15 +103,18 @@ export class CashRegisterService {
       byId.set(row.id, row);
     };
 
+    // Paid from a bank account = not drawer cash, whatever method was picked.
+    const cashAccount = await prisma.transactionalAccount.findUnique({ where: { system_key: 'CASH' }, select: { id: true } });
     for (const e of s.expenses) {
       if (e.status !== 'APPROVED' || e.created_at > end) continue;
+      const fromBank = !!e.paid_from_account_id && !!cashAccount && e.paid_from_account_id !== cashAccount.id;
       add({
         id: e.id,
         kind: 'EXPENSE',
         particular: e.particular,
         amount: num(e.amount),
         date: e.created_at.toISOString(),
-        paymentMethod: e.payment_method,
+        paymentMethod: fromBank && e.payment_method === 'CASH' ? 'BANK' : e.payment_method,
         status: e.status,
         cashierId: e.created_by,
         cashierName: short(e.creator?.email),
