@@ -15,6 +15,7 @@ import type {
 } from '../validations/expense.validation';
 import { assertPeriodOpen } from './period-lock.service';
 import { businessTodayYmd } from '../utils/timezone';
+import { REGISTER_PAYMENT_COPY } from './register-cash-out.helper';
 
 type Frequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
 
@@ -204,7 +205,8 @@ export class ExpenseCategoryService {
 
 export class ExpenseService {
     private buildWhere(q: ExpenseListQuery): Prisma.ExpenseWhereInput {
-        const where: Prisma.ExpenseWhereInput = {};
+        // Supplier / salary / commission payments made from the drawer are not expenses.
+        const where: Prisma.ExpenseWhereInput = { NOT: REGISTER_PAYMENT_COPY };
         if (q.search?.trim()) {
             const s = q.search.trim();
             where.OR = [

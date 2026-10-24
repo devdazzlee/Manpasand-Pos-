@@ -2,6 +2,7 @@ import { PaymentMethod, Prisma, SaleStatus } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { localRange } from './purchase-report.service';
+import { REGISTER_PAYMENT_COPY } from './register-cash-out.helper';
 
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
 const VIEWS = new Set(['revenue', 'cash', 'credit', 'expenses']);
@@ -281,6 +282,7 @@ export class DayReportService {
     const where: Prisma.ExpenseWhereInput = {
       expense_date: { gte: input.start, lte: input.end },
       status: 'APPROVED',
+      NOT: REGISTER_PAYMENT_COPY,
       ...(input.branchId ? { branch_id: input.branchId } : {}),
     };
     if (input.search) {

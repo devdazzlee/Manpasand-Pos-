@@ -2,6 +2,7 @@ import { SaleItemType, SaleStatus, PaymentMethod } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { localRange } from './purchase-report.service';
+import { REGISTER_PAYMENT_COPY } from './register-cash-out.helper';
 
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
 const INCLUDED_STATUSES: SaleStatus[] = ['COMPLETED', 'REFUNDED', 'EXCHANGED'];
@@ -285,6 +286,7 @@ export class FinancialStatementService {
         where: {
           expense_date: { gte: start, lte: end },
           status: 'APPROVED',
+          NOT: REGISTER_PAYMENT_COPY,
           ...(params.branchId ? { branch_id: params.branchId } : {}),
           ...(params.categoryId ? { category_id: params.categoryId } : {}),
         },

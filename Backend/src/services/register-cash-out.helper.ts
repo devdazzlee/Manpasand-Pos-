@@ -2,6 +2,18 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 
 /**
+ * The drawer copies recordCashPayOnOpenRegister writes for a supplier payment,
+ * salary or commission paid in cash. They only make the drawer balance — the
+ * payment itself is the real record, so reports and the Expenses list must
+ * leave these out (use as `NOT: REGISTER_PAYMENT_COPY`) or the money counts twice.
+ */
+export const REGISTER_PAYMENT_COPY: Prisma.ExpenseWhereInput = {
+  cashflow_id: { not: null },
+  reference: { not: null },
+  OR: ['Purchase payment ·', 'Salary ·', 'Commission ·'].map((prefix) => ({ particular: { startsWith: prefix } })),
+};
+
+/**
  * When salary / commission / similar is paid in CASH while a register is open,
  * record it as an approved expense on that drawer so Expected cash drops.
  * Paid from any account other than Cash in Hand (e.g. the bank) never touches

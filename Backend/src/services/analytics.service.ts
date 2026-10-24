@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { businessTodayYmd, localRange, shiftBusinessYmd, toBusinessYmd } from '../utils/timezone';
 import { SUPPLIER_CASH_TYPES, supplierAging, supplierEffect } from './supplier-accounts.service';
+import { REGISTER_PAYMENT_COPY } from './register-cash-out.helper';
 
 /* ============================================================
  * Business insight reports: sales by attribute, slow movers,
@@ -589,7 +590,7 @@ export class AnalyticsService {
         select: { id: true, payment_date: true, amount: true, method: true, type: true, reference: true, customer: { select: { name: true } } },
       }),
       prisma.expense.findMany({
-        where: { ...dateWhere('expense_date'), status: 'APPROVED', ...(branchId ? { branch_id: branchId } : {}) },
+        where: { ...dateWhere('expense_date'), status: 'APPROVED', NOT: REGISTER_PAYMENT_COPY, ...(branchId ? { branch_id: branchId } : {}) },
         select: { id: true, expense_date: true, amount: true, payment_method: true, particular: true, category: { select: { name: true } } },
       }),
       prisma.supplierPayment.findMany({
