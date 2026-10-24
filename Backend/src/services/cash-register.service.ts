@@ -229,9 +229,24 @@ export class CashRegisterService {
     return { deducted, purchases };
   }
 
+  /**
+   * Where a session's window ends: `at`, else its closing time, else now — but
+   * never past the next register opened on the branch, so a reopened old day
+   * never takes in later days' sales, expenses or payments.
+   */
+  private async windowEnd(s: { id: string; branch_id: string | null; opened_at: Date; closed_at?: Date | null }, at?: Date) {
+    const end = at ?? s.closed_at ?? new Date();
+    const next = await prisma.cashFlow.findFirst({
+      where: { id: { not: s.id }, opened_at: { gt: s.opened_at }, ...(s.branch_id ? { branch_id: s.branch_id } : {}) },
+      orderBy: { opened_at: 'asc' },
+      select: { opened_at: true },
+    });
+    return next && next.opened_at <= end ? new Date(next.opened_at.getTime() - 1) : end;
+  }
+
   /** Register maths for a session up to `at` (defaults to now / closing time). */
   private async compute(s: SessionRow, at?: Date) {
-    const end = at ?? s.closed_at ?? new Date();
+    const end = await this.windowEnd(s, at);
     const [sales, outflowPack] = await Promise.all([
       prisma.sale.findMany({
         where: {
@@ -559,8 +574,8 @@ export class CashRegisterService {
   /* ------------------------------ expenses entered on the Expenses screen ------------------------------ */
 
   /** Expenses for this open drawer that are not linked yet (entered during the shift). */
-  private async unlinkedExpenses(s: { branch_id: string | null; opened_at: Date; closed_at?: Date | null }) {
-    const end = s.closed_at ?? new Date();
+  private async unlinkedExpenses(s: { id: string; branch_id: string | null; opened_at: Date; closed_at?: Date | null }) {
+    const end = await this.windowEnd(s);
     // Require expense_date on/after the drawer opened so old imported rows are not pulled in.
     const rows = await prisma.expense.findMany({
       where: {
@@ -841,7 +856,9 @@ export class CashRegisterService {
     if (!(num(body.closing) >= 0)) throw new AppError(400, 'Count the cash in the drawer');
     // Pull every expense entered during this shift into the drawer before we freeze expected cash.
     if (await this.attachTodaysExpenses(s)) s = await this.session(sessionId);
-    const live = await this.compute(s);
+    // A reopened earlier day closes at the end of its own window, not "now".
+    const closedAt = await this.windowEnd(s);
+    const live = await this.compute(s, closedAt);
     const variance = r2(num(body.closing) - live.expectedCash);
 
     const activeRef = this.activeShift(s);
@@ -854,7 +871,7 @@ export class CashRegisterService {
           where: { id: active.id },
           data: {
             status: 'ENDED',
-            ended_at: new Date(),
+            ended_at: closedAt,
             end_count: new Prisma.Decimal(num(body.closing)),
             expected_end: new Prisma.Decimal(expected),
             variance: new Prisma.Decimal(r2(num(body.closing) - expected)),
@@ -910,7 +927,7 @@ export class CashRegisterService {
           variance_note: body.note?.trim() || null,
           variance_approved_by: actor.approvalId ?? null,
           status: 'CLOSED',
-          closed_at: new Date(),
+          closed_at: closedAt,
           closed_by: actor.userId ?? null,
           locked: false,
           locked_reason: null,
@@ -959,7 +976,7 @@ export class CashRegisterService {
           review_note: `Reopened: ${body.reason.trim()}`,
         },
       }),
-      prisma.registerReconciliation.deleteMany({ where: { cashflow_id: s.id } }),
+      // Last closing rows stay: closing again starts from them and overwrites them.
       prisma.registerShift.create({
         data: {
           cashflow_id: s.id,
@@ -1021,7 +1038,7 @@ export class CashRegisterService {
       const bankPays = await prisma.supplierPayment.findMany({
         where: {
           type: { in: ['PAYMENT', 'ADVANCE'] },
-          payment_date: { gte: s.opened_at, lte: s.closed_at ?? new Date() },
+          payment_date: { gte: s.opened_at, lte: await this.windowEnd(s) },
           OR: [
             { paid_from_account_id: { not: cashAccount?.id ?? '' } },
             { paid_from_account_id: null, method: { not: 'CASH' } },
@@ -1173,6 +1190,16 @@ export class CashRegisterService {
           variance: new Prisma.Decimal(variance),
         },
       }),
+      // Card / bank / wallet: expected follows the sales in the window; what was entered stays.
+      ...s.reconciliations
+        .filter((rec) => rec.method !== 'CASH')
+        .map((rec) => {
+          const expected = r2(live.byMethod[rec.method] ?? 0);
+          return prisma.registerReconciliation.update({
+            where: { id: rec.id },
+            data: { expected: new Prisma.Decimal(expected), variance: new Prisma.Decimal(r2(num(rec.actual) - expected)) },
+          });
+        }),
     ]);
     // Keep Cash in Hand / Bank on what was entered at closing after the maths moved.
     await postRegisterSession(s.id).catch((err) =>
