@@ -12,7 +12,7 @@ import {
 import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
 import { PurchaseInvoiceService } from './purchaseInvoice.service';
 import { assertPeriodOpen } from './period-lock.service';
-import { recordCashPayOnOpenRegister } from './register-cash-out.helper';
+import { recordCashPayOnOpenRegister, syncSupplierPaymentDrawerCopy } from './register-cash-out.helper';
 import {
     SUPPLIER_CASH_TYPES,
     SUPPLIER_INVOICE_TYPES,
@@ -41,6 +41,18 @@ function supplierData(data: Partial<CreateSupplierInput>) {
     if ('opening_balance_date' in data)
         out.opening_balance_date = data.opening_balance_date ? localRange(data.opening_balance_date.slice(0, 10), data.opening_balance_date.slice(0, 10)).start : null;
     return out;
+}
+
+/**
+ * Keep the method in step with the account the money left from: Cash in Hand is
+ * CASH, a bank account is never CASH — the register takes CASH from the drawer.
+ */
+async function methodMatchingPaidFrom(paidFrom: string | null, method: string) {
+    if (!paidFrom) return method;
+    const account = await prisma.transactionalAccount.findUnique({ where: { id: paidFrom }, select: { system_key: true } });
+    if (!account) return method;
+    if (account.system_key === 'CASH') return 'CASH';
+    return method === 'CASH' ? 'BANK_TRANSFER' : method;
 }
 
 export class SupplierService {
@@ -769,10 +781,11 @@ export class SupplierService {
         await assertPeriodOpen(paymentDate, 'a supplier payment');
         const invoiceId = await this.checkInvoice(supplierId, type, data.purchaseInvoiceId);
 
-        const method = SUPPLIER_CASH_TYPES.has(type) ? String(data.method || 'CASH').toUpperCase() : 'ADJUSTMENT';
+        const picked = SUPPLIER_CASH_TYPES.has(type) ? String(data.method || 'CASH').toUpperCase() : 'ADJUSTMENT';
         const paidFrom = SUPPLIER_CASH_TYPES.has(type)
-            ? await new ChartOfAccountsService().resolveMoneyAccount(data.paidFromAccountId, method)
+            ? await new ChartOfAccountsService().resolveMoneyAccount(data.paidFromAccountId, picked)
             : null;
+        const method = await methodMatchingPaidFrom(paidFrom, picked);
         const payment = await prisma.supplierPayment.create({
             data: {
                 supplier_id: supplierId,
@@ -789,7 +802,9 @@ export class SupplierService {
             include: { user: { select: { email: true } }, purchase_invoice: { select: { invoice_number: true } } },
         });
         if (invoiceId) await PurchaseInvoiceService.recompute(invoiceId);
-        if (SUPPLIER_CASH_TYPES.has(type) && method === 'CASH') {
+        // Only cash taken from today's open drawer lowers that register — not cash
+        // already taken out on an earlier day (e.g. yesterday's takings paid today).
+        if (SUPPLIER_CASH_TYPES.has(type) && method === 'CASH' && data.fromDrawer !== false) {
             const supplier = await prisma.supplier.findUnique({
                 where: { id: supplierId },
                 select: { name: true },
@@ -832,7 +847,7 @@ export class SupplierService {
                 type,
                 ...(data.amount !== undefined ? { amount: data.amount } : {}),
                 ...(paymentDate ? { payment_date: paymentDate } : {}),
-                method,
+                method: SUPPLIER_CASH_TYPES.has(type) ? await methodMatchingPaidFrom(paidFrom, method) : method,
                 paid_from_account_id: paidFrom,
                 ...(data.reference !== undefined ? { reference: data.reference || null } : {}),
                 ...(data.notes !== undefined ? { notes: data.notes || null } : {}),
@@ -841,6 +856,8 @@ export class SupplierService {
             include: { user: { select: { email: true } }, purchase_invoice: { select: { invoice_number: true } } },
         });
         for (const id of new Set([existing.purchase_invoice_id, invoiceId].filter((v): v is string => !!v))) await PurchaseInvoiceService.recompute(id);
+        // The register copy follows the payment: new amount, or gone once it is no longer drawer cash.
+        await syncSupplierPaymentDrawerCopy(payment.id, payment.method === 'CASH' && SUPPLIER_CASH_TYPES.has(type) ? { amount: asNumber(payment.amount) } : null);
         return this.serializePayment(payment);
     }
 
@@ -851,6 +868,7 @@ export class SupplierService {
         const invoiceId = payment.purchase_invoice_id;
         await prisma.supplierPayment.delete({ where: { id: paymentId } });
         if (invoiceId) await PurchaseInvoiceService.recompute(invoiceId);
+        await syncSupplierPaymentDrawerCopy(paymentId, null);
         return { message: 'Transaction deleted' };
     }
 }

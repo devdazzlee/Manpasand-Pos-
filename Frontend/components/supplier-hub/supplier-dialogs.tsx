@@ -335,6 +335,9 @@ export function TransactionDialog({
   const [notes, setNotes] = useState("");
   const [invoiceId, setInvoiceId] = useState<string>("none");
   const [busy, setBusy] = useState(false);
+  // Cash in Hand is the drawer AND cash already taken out (owner / safe) — ask which, so only
+  // money that really left today's drawer lowers the open register.
+  const [cashSource, setCashSource] = useState<"" | "drawer" | "kept">("");
   const paidFrom = usePaidFrom(method, open);
   const { setPaidFrom } = paidFrom;
   // Editing keeps the account it was saved with.
@@ -351,6 +354,7 @@ export function TransactionDialog({
     setReference(editing?.reference ?? "");
     setNotes(editing?.notes ?? "");
     setInvoiceId(editing?.purchase_invoice_id ?? "none");
+    setCashSource("");
   }, [open, editing, initialType]);
 
   const meta = TXN_META[type];
@@ -358,11 +362,14 @@ export function TransactionDialog({
   const canAllocate = type === "PAYMENT" || type === "DEBIT_NOTE" || type === "DISCOUNT";
   const value = Number(amount) || 0;
   const after = balanceDue != null ? balanceDue + (meta.effect === "increase" ? value : -value) : null;
+  const fromCashInHand = paidFrom.accounts.find((a) => a.id === paidFrom.paidFrom)?.system_key === "CASH";
+  const askCashSource = !editing && meta.cash && type !== "REFUND" && fromCashInHand;
 
   const save = async () => {
     if (!supplier) return;
     if (!(value > 0)) return toast({ variant: "destructive", title: "Enter an amount" });
     if (!meta.cash && !notes.trim()) return toast({ variant: "destructive", title: "Write the reason for this note" });
+    if (askCashSource && !cashSource) return toast({ variant: "destructive", title: "Choose where this cash came from" });
     setBusy(true);
     const body = {
       type,
@@ -370,6 +377,7 @@ export function TransactionDialog({
       paymentDate: date,
       method: meta.cash ? method : undefined,
       paidFromAccountId: meta.cash ? paidFrom.paidFrom || null : null,
+      ...(askCashSource ? { fromDrawer: cashSource === "drawer" } : {}),
       reference: reference.trim() || null,
       notes: notes.trim() || null,
       purchaseInvoiceId: canAllocate && invoiceId !== "none" ? invoiceId : null,
@@ -445,6 +453,31 @@ export function TransactionDialog({
           {meta.cash && (
             <Field label={type === "REFUND" ? "Received into" : "Paid from"}>
               <PaidFromSelect value={paidFrom.paidFrom} onChange={paidFrom.setPaidFrom} accounts={paidFrom.accounts} />
+            </Field>
+          )}
+          {askCashSource && (
+            <Field label="Where did this cash come from?" className="sm:col-span-2">
+              <div className="grid gap-2 sm:grid-cols-2">
+                {(
+                  [
+                    ["drawer", "Today's register drawer", "Taken from the till now — lowers today's expected cash."],
+                    ["kept", "Cash already taken out", "Earlier days' takings kept by the owner / in the safe — today's drawer is not touched."],
+                  ] as const
+                ).map(([id, title, hint]) => (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setCashSource(id)}
+                    className={cn(
+                      "rounded-lg border px-3 py-2 text-left transition-colors",
+                      cashSource === id ? "border-[#a67c2e] bg-[#fcf8f2] ring-1 ring-[#a67c2e]" : "border-stone-200 hover:bg-stone-50",
+                    )}
+                  >
+                    <span className="block text-sm font-medium text-stone-900">{title}</span>
+                    <span className="mt-0.5 block text-xs text-stone-500">{hint}</span>
+                  </button>
+                ))}
+              </div>
             </Field>
           )}
           <Field label={method === "CHEQUE" && meta.cash ? "Cheque no." : meta.cash ? "Reference / transaction ID" : "Note / bill reference"}>

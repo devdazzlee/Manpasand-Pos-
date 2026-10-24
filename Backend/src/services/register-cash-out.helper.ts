@@ -1,5 +1,16 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
+import { localRange, toBusinessYmd } from '../utils/timezone';
+
+/**
+ * When money left a register drawer, for the books: now — or, when the register
+ * was opened on an earlier business day (entered after midnight before closing),
+ * the last moment of that day, so it lands on the register's day.
+ */
+export function drawerDate(openedAt: Date, at: Date = new Date()) {
+  const day = toBusinessYmd(openedAt);
+  return toBusinessYmd(at) === day ? at : localRange(day, day).end;
+}
 
 /**
  * The drawer copies recordCashPayOnOpenRegister writes for a supplier payment,
@@ -50,7 +61,7 @@ export async function recordCashPayOnOpenRegister(opts: {
       status: 'OPEN',
       ...(opts.branchId ? { branch_id: opts.branchId } : {}),
     },
-    select: { id: true, branch_id: true },
+    select: { id: true, branch_id: true, opened_at: true },
     take: 2,
   });
   if (open.length !== 1) return null;
@@ -62,7 +73,7 @@ export async function recordCashPayOnOpenRegister(opts: {
       payment_method: method,
       reference: opts.reference?.trim() || null,
       notes: opts.notes?.trim() || null,
-      expense_date: new Date(),
+      expense_date: drawerDate(open[0].opened_at),
       branch_id: opts.branchId ?? open[0].branch_id,
       cashflow_id: open[0].id,
       status: 'APPROVED',
@@ -72,6 +83,34 @@ export async function recordCashPayOnOpenRegister(opts: {
     },
     select: { id: true, cashflow_id: true },
   });
+}
+
+/** A closed register's expected cash and its Cash in Hand / Bank entries follow a changed drawer entry. */
+export async function refreshClosedRegister(cashflowId: string | null) {
+  if (!cashflowId) return;
+  const session = await prisma.cashFlow.findUnique({ where: { id: cashflowId }, select: { status: true } });
+  if (session?.status !== 'CLOSED') return;
+  const { CashRegisterService } = await import('./cash-register.service');
+  await new CashRegisterService().recalculateClosed(cashflowId).catch((err) =>
+    console.error('[register] recalculation failed', cashflowId, (err as Error).message),
+  );
+}
+
+/**
+ * Keep a supplier payment's drawer copy in step with the payment: same amount
+ * while it is still cash from Cash in Hand, gone once it is edited to the bank
+ * or deleted. Closed registers are recalculated.
+ */
+export async function syncSupplierPaymentDrawerCopy(paymentId: string, keep: { amount: number } | null) {
+  const copies = await prisma.expense.findMany({
+    where: { reference: paymentId, particular: { startsWith: 'Purchase payment' }, cashflow_id: { not: null } },
+    select: { id: true, cashflow_id: true },
+  });
+  if (!copies.length) return;
+  const ids = copies.map((c) => c.id);
+  if (keep) await prisma.expense.updateMany({ where: { id: { in: ids } }, data: { amount: new Prisma.Decimal(keep.amount) } });
+  else await prisma.expense.deleteMany({ where: { id: { in: ids } } });
+  for (const id of new Set(copies.map((c) => c.cashflow_id))) await refreshClosedRegister(id);
 }
 
 /**

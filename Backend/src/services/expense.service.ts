@@ -15,7 +15,7 @@ import type {
 } from '../validations/expense.validation';
 import { assertPeriodOpen } from './period-lock.service';
 import { businessTodayYmd } from '../utils/timezone';
-import { REGISTER_PAYMENT_COPY } from './register-cash-out.helper';
+import { REGISTER_PAYMENT_COPY, drawerDate, refreshClosedRegister } from './register-cash-out.helper';
 
 type Frequency = 'DAILY' | 'WEEKLY' | 'MONTHLY' | 'QUARTERLY' | 'YEARLY';
 
@@ -224,17 +224,6 @@ function assertNotPaymentCopy(row: { cashflow_id: string | null; reference: stri
     }
 }
 
-/** A closed register's expected cash and its Cash in Hand / Bank entries follow an edited expense. */
-async function refreshClosedRegister(cashflowId: string | null) {
-    if (!cashflowId) return;
-    const session = await prisma.cashFlow.findUnique({ where: { id: cashflowId }, select: { status: true } });
-    if (session?.status !== 'CLOSED') return;
-    const { CashRegisterService } = await import('./cash-register.service');
-    await new CashRegisterService().recalculateClosed(cashflowId).catch((err) =>
-        console.error('[expense] register recalculation failed', cashflowId, (err as Error).message),
-    );
-}
-
 export class ExpenseService {
     private buildWhere(q: ExpenseListQuery): Prisma.ExpenseWhereInput {
         // Supplier / salary / commission payments made from the drawer are not expenses.
@@ -335,14 +324,16 @@ export class ExpenseService {
         // If a register is open for this branch, the expense comes out of that drawer
         // (cash lowers expected; card/bank are tracked per method). No open register → save only.
         let cashflowId: string | null = null;
+        let drawerOpenedAt: Date | null = null;
         let branchId = data.branch_id ?? opts.userBranchId ?? null;
         {
             const open = await prisma.cashFlow.findMany({
                 where: { status: 'OPEN', ...(branchId ? { branch_id: branchId } : {}) },
-                select: { id: true, branch_id: true },
+                select: { id: true, branch_id: true, opened_at: true },
             });
             if (open.length === 1) {
                 cashflowId = open[0].id;
+                drawerOpenedAt = open[0].opened_at;
                 branchId = branchId ?? open[0].branch_id;
             }
         }
@@ -360,7 +351,7 @@ export class ExpenseService {
                 reference: data.reference?.trim() || null,
                 vendor: data.vendor?.trim() || null,
                 notes: data.notes?.trim() || null,
-                expense_date: fromDrawer ? new Date() : parseDateInput(data.expense_date) ?? new Date(),
+                expense_date: drawerOpenedAt ? drawerDate(drawerOpenedAt) : parseDateInput(data.expense_date) ?? new Date(),
                 branch_id: branchId,
                 created_by: userId ?? null,
                 // Recorded in the register = already paid, so it is approved straight away (like a paid-out).

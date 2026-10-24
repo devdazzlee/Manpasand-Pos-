@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { bankAccountForMethod } from './payment-accounts.service';
+import { drawerDate } from './register-cash-out.helper';
 
 /**
  * "Cash in Hand" is all of the shop's cash — in the drawer or with the owner.
@@ -98,7 +99,7 @@ export async function postRegisterSession(sessionId: string, userId?: string | n
     const short = num(s.variance) < 0;
     const v = await post({
       reference: ref(s.id, 'CLOSE'),
-      date: s.closed_at ?? new Date(),
+      date: drawerDate(s.opened_at, s.closed_at ?? new Date()),
       branchId: s.branch_id,
       narration: `${short ? 'Cash short' : 'Cash over'} at register close (expected ${round2(num(s.expected_cash))}, counted ${round2(num(s.closing))})${where}`,
       debitId: short ? overShort : cash,
@@ -120,7 +121,7 @@ export async function postRegisterSession(sessionId: string, userId?: string | n
       const label = r.method.toLowerCase().replace(/_/g, ' ');
       const v = await post({
         reference: ref(s.id, `CLOSE:${r.method}`),
-        date: s.closed_at ?? new Date(),
+        date: drawerDate(s.opened_at, s.closed_at ?? new Date()),
         branchId: s.branch_id,
         narration: `${label} ${less ? 'short' : 'over'} at register close (sales ${round2(num(r.expected))}, entered ${round2(num(r.actual))})${where}`,
         debitId: less ? overShort : methodBank,

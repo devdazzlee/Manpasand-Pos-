@@ -95,6 +95,8 @@ export const createSupplierPaymentSchema = z.object({
         purchaseInvoiceId: z.string().uuid().nullable().optional(),
         /** Cash / bank account the money left from (into, for refunds) */
         paidFromAccountId: z.string().uuid().nullish(),
+        /** Cash taken from the open register's drawer (true) or from cash already taken out (false). */
+        fromDrawer: z.boolean().optional(),
     }),
 });
 
@@ -113,6 +115,8 @@ export const updateSupplierPaymentSchema = z.object({
         purchaseInvoiceId: z.string().uuid().nullable().optional(),
         /** Cash / bank account the money left from (into, for refunds) */
         paidFromAccountId: z.string().uuid().nullish(),
+        /** Cash taken from the open register's drawer (true) or from cash already taken out (false). */
+        fromDrawer: z.boolean().optional(),
     }),
 });
 
