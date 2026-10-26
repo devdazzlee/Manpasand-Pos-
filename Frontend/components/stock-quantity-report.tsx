@@ -32,7 +32,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Table, TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { TableBody, TableCell, TableFooter, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -47,6 +47,7 @@ import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { downloadStockQuantityReportPdf } from "@/lib/stock-quantity-report-pdf";
 import { rangeForPreset } from "@/lib/business-timezone";
+import { HistoryButton, StockQuantityHistoryDialog } from "@/components/stock-quantity-history-dialog";
 
 type Preset = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
 type ItemType = "all" | "finished" | "loose";
@@ -145,6 +146,7 @@ export function StockQuantityReport() {
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState<null | "xlsx" | "csv" | "pdf" | "print">(null);
+  const [historyLine, setHistoryLine] = useState<Line | null>(null);
 
   useEffect(() => {
     const t = setTimeout(() => setDebouncedSearch(search.trim()), 300);
@@ -334,7 +336,11 @@ export function StockQuantityReport() {
 
   const filterLabelCls = "text-xs font-semibold text-indigo-900/80";
   const filterControl = "h-9 border-indigo-200/80 bg-white shadow-sm";
-  const th = "h-10 whitespace-nowrap bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500";
+  // Sticky must be on <th> (not <thead>), with opaque bg — nested overflow on Table breaks sticky.
+  const th =
+    "sticky top-0 z-[2] h-14 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-4 text-[11px] font-semibold uppercase tracking-wider text-slate-600 shadow-[0_1px_0_0_rgba(15,23,42,0.06)]";
+  // Override TableCell default p-4 so rows stay comfortably tall.
+  const td = "!py-5 px-4 align-middle";
   const fromRow = (pagination.page - 1) * pagination.limit + 1;
   const toRowN = Math.min(pagination.page * pagination.limit, pagination.total);
 
@@ -657,24 +663,26 @@ export function StockQuantityReport() {
               ))}
             </div>
           ) : (
-            <div className="max-h-[65vh] min-h-[240px] overflow-auto">
-              <Table>
-                <TableHeader className="sticky top-0 z-[1]">
+            // One scroll parent only — Table's own overflow-auto wrapper would break sticky headers.
+            <div className="h-[min(85dvh,calc(100dvh-8.5rem))] min-h-[640px] overflow-auto">
+              <table className="w-full caption-bottom text-[15px] leading-relaxed">
+                <TableHeader>
                   <TableRow className="hover:bg-transparent">
-                    <TableHead className={cn(th, "pl-5")}>Dress</TableHead>
+                    <TableHead className={cn(th, "pl-5 text-left")}>Dress</TableHead>
                     <TableHead className={cn(th, "text-right")}>Opening</TableHead>
                     <TableHead className={cn(th, "text-right")}>Bought</TableHead>
                     <TableHead className={cn(th, "text-right")}>Sold</TableHead>
                     <TableHead className={cn(th, "w-28")}>Sell-through</TableHead>
                     <TableHead className={cn(th, "text-right")}>Closing</TableHead>
                     <TableHead className={cn(th, "text-right")}>Available now</TableHead>
-                    <TableHead className={cn(th, "pr-5 text-right")}>Value</TableHead>
+                    <TableHead className={cn(th, "text-right")}>Value</TableHead>
+                    <TableHead className={cn(th, "pr-5 text-right")}> </TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {lines.length === 0 ? (
                     <TableRow className="hover:bg-transparent">
-                      <TableCell colSpan={8} className="py-14">
+                      <TableCell colSpan={9} className="py-14">
                         <div className="flex flex-col items-center text-center">
                           <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
                             <Inbox className="h-5 w-5" />
@@ -697,25 +705,25 @@ export function StockQuantityReport() {
                       const sell = line.sellThrough;
                       return (
                         <TableRow key={line.id} className="border-slate-100 hover:bg-slate-50/70">
-                          <TableCell className="py-3 pl-5">
-                            <div className="flex items-center gap-2">
-                              <p className="max-w-[300px] truncate font-semibold text-slate-900">{line.item}</p>
+                          <TableCell className={cn(td, "pl-5")}>
+                            <div className="flex items-center gap-2.5">
+                              <p className="max-w-[320px] truncate text-[15px] font-semibold leading-snug text-slate-900">{line.item}</p>
                               {st ? (
-                                <span className={cn("inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold ring-1 ring-inset", st.tone)}>{st.label}</span>
+                                <span className={cn("inline-flex shrink-0 items-center rounded-full px-2 py-0.5 text-[11px] font-semibold ring-1 ring-inset", st.tone)}>{st.label}</span>
                               ) : null}
                             </div>
-                            <p className="text-[11px] text-slate-500">
+                            <p className="mt-1 text-xs leading-snug text-slate-500">
                               <span className="font-mono">{line.sku}</span> · {line.category} · {line.unit}
                             </p>
                           </TableCell>
-                          <TableCell className="py-3 text-right tabular-nums text-slate-500">{qty(line.opening)}</TableCell>
-                          <TableCell className={cn("py-3 text-right tabular-nums", line.boughtQty ? "font-medium text-emerald-700" : "text-slate-300")}>
+                          <TableCell className={cn(td, "text-right tabular-nums text-slate-500")}>{qty(line.opening)}</TableCell>
+                          <TableCell className={cn(td, "text-right tabular-nums", line.boughtQty ? "font-medium text-emerald-700" : "text-slate-300")}>
                             {line.boughtQty ? `+${qty(line.boughtQty)}` : "—"}
                           </TableCell>
-                          <TableCell className={cn("py-3 text-right tabular-nums", line.soldQty ? "font-medium text-rose-700" : "text-slate-300")}>
+                          <TableCell className={cn(td, "text-right tabular-nums", line.soldQty ? "font-medium text-rose-700" : "text-slate-300")}>
                             {line.soldQty ? `−${qty(line.soldQty)}` : "—"}
                           </TableCell>
-                          <TableCell className="py-3">
+                          <TableCell className={td}>
                             {sell == null ? (
                               <span className="text-xs text-slate-300">—</span>
                             ) : (
@@ -723,38 +731,56 @@ export function StockQuantityReport() {
                                 <div className="h-1.5 overflow-hidden rounded-full bg-slate-100">
                                   <div className={cn("h-full rounded-full", sell >= 60 ? "bg-emerald-500" : sell >= 25 ? "bg-amber-400" : "bg-slate-400")} style={{ width: `${Math.min(100, sell)}%` }} />
                                 </div>
-                                <p className="mt-0.5 flex items-center gap-1 text-[10px] tabular-nums text-slate-500">
+                                <p className="mt-1 flex items-center gap-1 text-[10px] tabular-nums text-slate-500">
                                   {sell >= 60 ? <Flame className="h-3 w-3 text-orange-500" /> : null}
                                   {sell}%
                                 </p>
                               </div>
                             )}
                           </TableCell>
-                          <TableCell className="py-3 text-right font-semibold tabular-nums text-slate-900">{qty(line.closing)}</TableCell>
-                          <TableCell className={cn("py-3 text-right text-base font-semibold tabular-nums", line.availableQty <= 0 ? "text-rose-600" : "text-slate-900")}>
+                          <TableCell className={cn(td, "text-right font-semibold tabular-nums text-slate-900")}>{qty(line.closing)}</TableCell>
+                          <TableCell className={cn(td, "text-right text-base font-semibold tabular-nums", line.availableQty <= 0 ? "text-rose-600" : "text-slate-900")}>
                             {qty(line.availableQty)}
                           </TableCell>
-                          <TableCell className="whitespace-nowrap py-3 pr-5 text-right text-sm tabular-nums text-slate-600">{line.stockValue ? money(line.stockValue) : "—"}</TableCell>
+                          <TableCell className={cn(td, "whitespace-nowrap text-right text-sm tabular-nums text-slate-600")}>{line.stockValue ? money(line.stockValue) : "—"}</TableCell>
+                          <TableCell className={cn(td, "pr-3 text-right")}>
+                            <HistoryButton onClick={() => setHistoryLine(line)} />
+                          </TableCell>
                         </TableRow>
                       );
                     })
                   )}
                 </TableBody>
                 {lines.length > 0 && viewTotals ? (
-                  <TableFooter className="sticky bottom-0 z-[1] bg-slate-50">
+                  <TableFooter>
                     <TableRow className="hover:bg-slate-50">
-                      <TableCell className="py-3 pl-5 text-sm font-semibold text-slate-700">Total · all {viewTotals.count.toLocaleString()} items</TableCell>
-                      <TableCell className="py-3 text-right tabular-nums text-slate-600">{qty(viewTotals.opening)}</TableCell>
-                      <TableCell className="py-3 text-right font-semibold tabular-nums text-emerald-700">+{qty(viewTotals.boughtQty)}</TableCell>
-                      <TableCell className="py-3 text-right font-semibold tabular-nums text-rose-700">−{qty(viewTotals.soldQty)}</TableCell>
-                      <TableCell />
-                      <TableCell className="py-3 text-right font-semibold tabular-nums text-slate-900">{qty(viewTotals.closing)}</TableCell>
-                      <TableCell className="py-3 text-right text-base font-semibold tabular-nums text-slate-900">{qty(viewTotals.availableQty)}</TableCell>
-                      <TableCell className="py-3 pr-5 text-right font-semibold tabular-nums text-slate-900">{money(viewTotals.stockValue)}</TableCell>
+                      <TableCell className="sticky bottom-0 z-[2] border-t border-slate-200 bg-slate-50 !py-4 pl-5 text-sm font-semibold text-slate-700">
+                        Total · all {viewTotals.count.toLocaleString()} items
+                      </TableCell>
+                      <TableCell className="sticky bottom-0 z-[2] border-t border-slate-200 bg-slate-50 !py-4 text-right tabular-nums text-slate-600">
+                        {qty(viewTotals.opening)}
+                      </TableCell>
+                      <TableCell className="sticky bottom-0 z-[2] border-t border-slate-200 bg-slate-50 !py-4 text-right font-semibold tabular-nums text-emerald-700">
+                        +{qty(viewTotals.boughtQty)}
+                      </TableCell>
+                      <TableCell className="sticky bottom-0 z-[2] border-t border-slate-200 bg-slate-50 !py-4 text-right font-semibold tabular-nums text-rose-700">
+                        −{qty(viewTotals.soldQty)}
+                      </TableCell>
+                      <TableCell className="sticky bottom-0 z-[2] border-t border-slate-200 bg-slate-50 !py-4" />
+                      <TableCell className="sticky bottom-0 z-[2] border-t border-slate-200 bg-slate-50 !py-4 text-right font-semibold tabular-nums text-slate-900">
+                        {qty(viewTotals.closing)}
+                      </TableCell>
+                      <TableCell className="sticky bottom-0 z-[2] border-t border-slate-200 bg-slate-50 !py-4 text-right text-base font-semibold tabular-nums text-slate-900">
+                        {qty(viewTotals.availableQty)}
+                      </TableCell>
+                      <TableCell className="sticky bottom-0 z-[2] border-t border-slate-200 bg-slate-50 !py-4 text-right font-semibold tabular-nums text-slate-900">
+                        {money(viewTotals.stockValue)}
+                      </TableCell>
+                      <TableCell className="sticky bottom-0 z-[2] border-t border-slate-200 bg-slate-50 !py-4 pr-3" />
                     </TableRow>
                   </TableFooter>
                 ) : null}
-              </Table>
+              </table>
             </div>
           )}
         </div>
@@ -822,8 +848,19 @@ export function StockQuantityReport() {
       </Card>
 
       <p className="text-xs text-slate-500">
-        Closing = opening + everything received − everything sent out in the period. Available now = live stock today. Sell-through = sold ÷ (opening + bought).
+        Closing = opening + everything received − everything sent out in the period. Bought = net stock-in (purchases − deleted stock-in lines − returns to supplier). Available now = live stock today. Sell-through = sold ÷ (opening + bought).
       </p>
+
+      <StockQuantityHistoryDialog
+        open={!!historyLine}
+        onOpenChange={(open) => {
+          if (!open) setHistoryLine(null);
+        }}
+        productId={historyLine?.id ?? null}
+        productName={historyLine?.item ?? ""}
+        sku={historyLine?.sku ?? ""}
+        availableQty={historyLine?.availableQty ?? 0}
+      />
     </div>
   );
 }

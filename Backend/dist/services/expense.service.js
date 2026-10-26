@@ -9,6 +9,7 @@ const pagination_1 = require("../utils/pagination");
 const timezone_1 = require("../utils/timezone");
 const chart_of_accounts_service_1 = require("./chart-of-accounts.service");
 const period_lock_service_1 = require("./period-lock.service");
+const register_cash_out_helper_1 = require("./register-cash-out.helper");
 /** Advance a date by one recurrence step. */
 function advanceDate(from, frequency, interval) {
     const d = new Date(from);
@@ -177,9 +178,32 @@ class ExpenseCategoryService {
 }
 exports.ExpenseCategoryService = ExpenseCategoryService;
 /* ============================= expenses ============================= */
+/**
+ * Keep the method in step with the account the money left from: paid from
+ * Cash in Hand is CASH, paid from a bank is never CASH — the register counts
+ * drawer cash by this, so "Cash" with a bank account would come off the drawer.
+ */
+async function methodMatchingPaidFrom(paidFrom, method) {
+    const current = method;
+    if (!paidFrom)
+        return current;
+    const account = await client_2.prisma.transactionalAccount.findUnique({ where: { id: paidFrom }, select: { system_key: true } });
+    if (!account)
+        return current;
+    if (account.system_key === 'CASH')
+        return 'CASH';
+    return current === 'CASH' ? 'BANK' : current;
+}
+/** Drawer copies of supplier / salary / commission payments are edited from the payment itself. */
+function assertNotPaymentCopy(row) {
+    if (row.cashflow_id && row.reference && /^(Purchase payment|Salary|Commission) ·/.test(row.particular)) {
+        throw new apiError_1.AppError(400, 'This is a supplier / salary / commission payment — change it from Suppliers, Salaries or Commission');
+    }
+}
 class ExpenseService {
     buildWhere(q) {
-        const where = {};
+        // Supplier / salary / commission payments made from the drawer are not expenses.
+        const where = { NOT: register_cash_out_helper_1.REGISTER_PAYMENT_COPY };
         if (q.search?.trim()) {
             const s = q.search.trim();
             where.OR = [
@@ -273,18 +297,21 @@ class ExpenseService {
         // If a register is open for this branch, the expense comes out of that drawer
         // (cash lowers expected; card/bank are tracked per method). No open register → save only.
         let cashflowId = null;
+        let drawerOpenedAt = null;
         let branchId = data.branch_id ?? opts.userBranchId ?? null;
         {
             const open = await client_2.prisma.cashFlow.findMany({
                 where: { status: 'OPEN', ...(branchId ? { branch_id: branchId } : {}) },
-                select: { id: true, branch_id: true },
+                select: { id: true, branch_id: true, opened_at: true },
             });
             if (open.length === 1) {
                 cashflowId = open[0].id;
+                drawerOpenedAt = open[0].opened_at;
                 branchId = branchId ?? open[0].branch_id;
             }
         }
         const fromDrawer = !!cashflowId;
+        const method = await methodMatchingPaidFrom(links.paidFrom, data.payment_method ?? 'CASH');
         const created = await client_2.prisma.expense.create({
             data: {
                 particular: data.particular.trim(),
@@ -292,12 +319,12 @@ class ExpenseService {
                 category_id: links.categoryId ?? null,
                 account_id: links.accountId ?? null,
                 paid_from_account_id: links.paidFrom ?? null,
-                payment_method: data.payment_method ?? 'CASH',
+                payment_method: method,
                 bank_account: data.bank_account?.trim() || null,
                 reference: data.reference?.trim() || null,
                 vendor: data.vendor?.trim() || null,
                 notes: data.notes?.trim() || null,
-                expense_date: fromDrawer ? new Date() : parseDateInput(data.expense_date) ?? new Date(),
+                expense_date: drawerOpenedAt ? (0, register_cash_out_helper_1.drawerDate)(drawerOpenedAt) : parseDateInput(data.expense_date) ?? new Date(),
                 branch_id: branchId,
                 created_by: userId ?? null,
                 // Recorded in the register = already paid, so it is approved straight away (like a paid-out).
@@ -316,9 +343,7 @@ class ExpenseService {
         if (existing.status === 'REJECTED') {
             throw new apiError_1.AppError(400, 'Rejected expenses cannot be edited');
         }
-        if (existing.cashflow_id) {
-            throw new apiError_1.AppError(400, 'This expense belongs to a cash register session and cannot be edited here');
-        }
+        assertNotPaymentCopy(existing);
         await (0, period_lock_service_1.assertPeriodOpen)(existing.expense_date, 'an expense');
         if (data.expense_date)
             await (0, period_lock_service_1.assertPeriodOpen)(parseDateInput(data.expense_date), 'an expense');
@@ -337,8 +362,10 @@ class ExpenseService {
         if (links.paidFrom !== undefined) {
             patch.paid_from = links.paidFrom ? { connect: { id: links.paidFrom } } : { disconnect: true };
         }
-        if (data.payment_method !== undefined)
-            patch.payment_method = data.payment_method;
+        const finalPaidFrom = links.paidFrom !== undefined ? links.paidFrom : existing.paid_from_account_id;
+        const finalMethod = await methodMatchingPaidFrom(finalPaidFrom, data.payment_method ?? existing.payment_method);
+        if (finalMethod !== existing.payment_method)
+            patch.payment_method = finalMethod;
         if (data.bank_account !== undefined)
             patch.bank_account = data.bank_account?.trim() || null;
         if (data.reference !== undefined)
@@ -360,17 +387,17 @@ class ExpenseService {
             data: patch,
             include: EXPENSE_INCLUDE,
         });
+        await (0, register_cash_out_helper_1.refreshClosedRegister)(existing.cashflow_id);
         return { ...updated, amount: (0, helpers_1.asNumber)(updated.amount) };
     }
     async remove(id) {
         const existing = await client_2.prisma.expense.findUnique({ where: { id } });
         if (!existing)
             throw new apiError_1.AppError(404, 'Expense not found');
-        if (existing.cashflow_id) {
-            throw new apiError_1.AppError(400, 'This expense belongs to a cash register session and cannot be deleted here');
-        }
+        assertNotPaymentCopy(existing);
         await (0, period_lock_service_1.assertPeriodOpen)(existing.expense_date, 'an expense');
         await client_2.prisma.expense.delete({ where: { id } });
+        await (0, register_cash_out_helper_1.refreshClosedRegister)(existing.cashflow_id);
         return { id };
     }
     async approve(id, userId) {

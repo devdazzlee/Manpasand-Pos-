@@ -5,6 +5,7 @@ const client_1 = require("@prisma/client");
 const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const purchase_report_service_1 = require("./purchase-report.service");
+const register_cash_out_helper_1 = require("./register-cash-out.helper");
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
 const VIEWS = new Set(['revenue', 'cash', 'credit', 'expenses']);
 /** Max rows returned when fetch_all=true or when limit is at the cap. */
@@ -215,6 +216,7 @@ class DayReportService {
         const where = {
             expense_date: { gte: input.start, lte: input.end },
             status: 'APPROVED',
+            NOT: register_cash_out_helper_1.REGISTER_PAYMENT_COPY,
             ...(input.branchId ? { branch_id: input.branchId } : {}),
         };
         if (input.search) {

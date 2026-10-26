@@ -6,6 +6,7 @@ const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const timezone_1 = require("../utils/timezone");
 const supplier_accounts_service_1 = require("./supplier-accounts.service");
+const register_cash_out_helper_1 = require("./register-cash-out.helper");
 /* ============================================================
  * Business insight reports: sales by attribute, slow movers,
  * customer segments, supplier performance & purchase prices,
@@ -565,7 +566,7 @@ class AnalyticsService {
                 select: { id: true, payment_date: true, amount: true, method: true, type: true, reference: true, customer: { select: { name: true } } },
             }),
             client_2.prisma.expense.findMany({
-                where: { ...dateWhere('expense_date'), status: 'APPROVED', ...(branchId ? { branch_id: branchId } : {}) },
+                where: { ...dateWhere('expense_date'), status: 'APPROVED', NOT: register_cash_out_helper_1.REGISTER_PAYMENT_COPY, ...(branchId ? { branch_id: branchId } : {}) },
                 select: { id: true, expense_date: true, amount: true, payment_method: true, particular: true, category: { select: { name: true } } },
             }),
             client_2.prisma.supplierPayment.findMany({

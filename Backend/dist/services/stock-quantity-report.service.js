@@ -31,10 +31,15 @@ class StockQuantityReportService {
         p.purchase_rate AS purchase_rate,
         CASE WHEN p.sales_rate_inc_dis_and_tax > 0 THEN p.sales_rate_inc_dis_and_tax ELSE p.sales_rate_exc_dis_and_tax END AS sales_rate,
         COALESCE(SUM(CASE WHEN m.created_at < ${start} THEN m.quantity_change ELSE 0 END), 0) AS opening,
+        -- Net bought: stock-in purchases − deleted stock-in lines − returns to supplier
+        -- (gross PURCHASE alone made "Bought 2 / Sold 1 / Available 0" look wrong).
         COALESCE(SUM(CASE
           WHEN m.created_at >= ${start} AND m.created_at <= ${end}
-            AND m.movement_type = 'PURCHASE'
-            AND m.quantity_change > 0
+            AND (
+              (m.movement_type = 'PURCHASE' AND m.quantity_change > 0)
+              OR m.reference_type IN ('purchase_delete', 'purchase_edit')
+              OR m.movement_type = 'PURCHASE_RETURN'
+            )
           THEN m.quantity_change ELSE 0 END), 0) AS bought_qty,
         COALESCE(SUM(CASE
           WHEN m.created_at >= ${start} AND m.created_at <= ${end}

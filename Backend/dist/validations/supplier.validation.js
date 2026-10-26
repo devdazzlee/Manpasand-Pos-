@@ -91,6 +91,8 @@ exports.createSupplierPaymentSchema = zod_1.z.object({
         purchaseInvoiceId: zod_1.z.string().uuid().nullable().optional(),
         /** Cash / bank account the money left from (into, for refunds) */
         paidFromAccountId: zod_1.z.string().uuid().nullish(),
+        /** Cash taken from the open register's drawer (true) or from cash already taken out (false). */
+        fromDrawer: zod_1.z.boolean().optional(),
     }),
 });
 exports.updateSupplierPaymentSchema = zod_1.z.object({
@@ -108,6 +110,8 @@ exports.updateSupplierPaymentSchema = zod_1.z.object({
         purchaseInvoiceId: zod_1.z.string().uuid().nullable().optional(),
         /** Cash / bank account the money left from (into, for refunds) */
         paidFromAccountId: zod_1.z.string().uuid().nullish(),
+        /** Cash taken from the open register's drawer (true) or from cash already taken out (false). */
+        fromDrawer: zod_1.z.boolean().optional(),
     }),
 });
 exports.deleteSupplierPaymentSchema = zod_1.z.object({

@@ -5,6 +5,7 @@ const client_1 = require("@prisma/client");
 const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const purchase_report_service_1 = require("./purchase-report.service");
+const register_cash_out_helper_1 = require("./register-cash-out.helper");
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
 const INCLUDED_STATUSES = ['COMPLETED', 'REFUNDED', 'EXCHANGED'];
 const num = (value) => {
@@ -214,6 +215,7 @@ class FinancialStatementService {
                 where: {
                     expense_date: { gte: start, lte: end },
                     status: 'APPROVED',
+                    NOT: register_cash_out_helper_1.REGISTER_PAYMENT_COPY,
                     ...(params.branchId ? { branch_id: params.branchId } : {}),
                     ...(params.categoryId ? { category_id: params.categoryId } : {}),
                 },
