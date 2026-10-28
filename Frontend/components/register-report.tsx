@@ -79,6 +79,13 @@ import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { ymd, rangeForPreset } from "@/lib/business-timezone";
 import { downloadRegisterReportPdf } from "@/lib/register-report-pdf";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 type Preset = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
 
@@ -222,6 +229,7 @@ export function RegisterReport() {
   const [paymentMethod, setPaymentMethod] = useState("ALL");
   const [transactionType, setTransactionType] = useState("ALL");
   const [status, setStatus] = useState("ALL");
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [closeTarget, setCloseTarget] = useState<SessionRow | null>(null);
@@ -239,6 +247,7 @@ export function RegisterReport() {
       if (paymentMethod !== "ALL") params.paymentMethod = paymentMethod;
       if (transactionType !== "ALL") params.transactionType = transactionType;
       if (status !== "ALL") params.status = status;
+      Object.assign(params, catalogFilterParams(catalog));
       const response = await apiClient.get("/register-report", { params });
       setReport(response.data.data);
     } catch (error: any) {
@@ -250,7 +259,7 @@ export function RegisterReport() {
     } finally {
       setLoading(false);
     }
-  }, [from, to, branchId, cashierId, paymentMethod, transactionType, status, toast]);
+  }, [from, to, branchId, cashierId, paymentMethod, transactionType, status, catalog, toast]);
 
   useEffect(() => {
     load();
@@ -607,6 +616,7 @@ export function RegisterReport() {
     (cashierId !== "all" ? 1 : 0) +
     (paymentMethod !== "ALL" ? 1 : 0) +
     (transactionType !== "ALL" ? 1 : 0) +
+    (hasCatalogFilters(catalog) ? 1 : 0) +
     (status !== "ALL" ? 1 : 0);
 
   const clearAllFilters = () => {
@@ -616,6 +626,7 @@ export function RegisterReport() {
     setPaymentMethod("ALL");
     setTransactionType("ALL");
     setStatus("ALL");
+    setCatalog(EMPTY_CATALOG_FILTERS);
   };
 
   const runExport = async (type: "csv" | "xlsx" | "pdf") => {
@@ -1031,6 +1042,19 @@ export function RegisterReport() {
               </Button>
             </div>
           )}
+          <div className="space-y-2 border-t border-dashed border-indigo-200 pt-4">
+            <CatalogFilterBar
+              value={catalog}
+              onChange={setCatalog}
+              className="[&_label]:text-xs [&_label]:font-semibold [&_label]:text-indigo-900/80"
+            />
+            {hasCatalogFilters(catalog) ? (
+              <p className="text-xs text-slate-500">
+                Sales totals, payments and transactions show only bills with matching items. The cash drawer count
+                (expected cash, over / short) still covers every sale so it stays accurate.
+              </p>
+            ) : null}
+          </div>
         </div>
       </Card>
 

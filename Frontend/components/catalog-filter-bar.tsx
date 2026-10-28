@@ -4,7 +4,6 @@ import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronsUpDown, X } from "lucide-react";
 import apiClient from "@/lib/apiClient";
-import { cleanParams } from "@/lib/api/http";
 import { STALE_TIME } from "@/lib/query/query-client";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -62,29 +61,21 @@ export function catalogFilterParams(f: CatalogFilters): Record<string, string> {
 
 type Option = { id: string; name: string };
 
-async function fetchAllPages(path: string): Promise<Option[]> {
-  const all: Option[] = [];
-  for (let page = 1; page <= 50; page++) {
-    const res = await apiClient.get(path, { params: cleanParams({ page, limit: 100 }) });
-    const rows = (res.data?.data ?? []) as Option[];
-    all.push(...rows.map((row) => ({ id: row.id, name: row.name })));
-    const totalPages = Number(res.data?.meta?.totalPages ?? 1);
-    if (page >= totalPages || rows.length === 0) break;
-  }
-  return all.sort((a, b) => a.name.localeCompare(b.name));
-}
+type CatalogOptions = {
+  suppliers: Option[];
+  categories: Option[];
+  subcategories: Option[];
+  /** Category ↔ subcategory pairs that products actually use. */
+  links: { categoryId: string; subcategoryId: string }[];
+};
 
-/** Vendors, categories and subcategories for the pickers (cached, all pages). */
+/** Vendors, categories, subcategories and their links for the pickers (cached). */
 export function useCatalogFilterOptions() {
   const query = useQuery({
     queryKey: ["catalog-filter-options"],
     queryFn: async () => {
-      const [suppliers, categories, subcategories] = await Promise.all([
-        fetchAllPages("/suppliers"),
-        fetchAllPages("/categories"),
-        fetchAllPages("/subcategories"),
-      ]);
-      return { suppliers, categories, subcategories };
+      const res = await apiClient.get("/products/catalog-filter-options");
+      return res.data?.data as CatalogOptions;
     },
     staleTime: STALE_TIME.reference,
   });
@@ -92,6 +83,7 @@ export function useCatalogFilterOptions() {
     suppliers: query.data?.suppliers ?? [],
     categories: query.data?.categories ?? [],
     subcategories: query.data?.subcategories ?? [],
+    links: query.data?.links ?? [],
     loading: query.isLoading,
   };
 }
@@ -254,8 +246,26 @@ export function CatalogFilterBar({
   clearable?: boolean;
   className?: string;
 }) {
-  const { suppliers, categories, subcategories, loading } = useCatalogFilterOptions();
+  const { suppliers, categories, subcategories, links, loading } = useCatalogFilterOptions();
   const set = <K extends keyof CatalogFilters>(key: K, next: CatalogFilters[K]) => onChange({ ...value, [key]: next });
+
+  // With categories picked, offer only subcategories used under them.
+  const subcategoryIdsFor = (categoryIds: string[]) =>
+    categoryIds.length
+      ? new Set(links.filter((l) => categoryIds.includes(l.categoryId)).map((l) => l.subcategoryId))
+      : null;
+  const allowedSubcategories = subcategoryIdsFor(value.categoryIds);
+  const subcategoryOptions = allowedSubcategories
+    ? subcategories.filter((s) => allowedSubcategories.has(s.id))
+    : subcategories;
+  const changeCategories = (categoryIds: string[]) => {
+    const allowed = subcategoryIdsFor(categoryIds);
+    onChange({
+      ...value,
+      categoryIds,
+      subcategoryIds: allowed ? value.subcategoryIds.filter((id) => allowed.has(id)) : value.subcategoryIds,
+    });
+  };
 
   return (
     <div className={cn("space-y-3", className)}>
@@ -282,13 +292,13 @@ export function CatalogFilterBar({
           allLabel="All categories"
           options={categories}
           value={value.categoryIds}
-          onChange={(next) => set("categoryIds", next)}
+          onChange={changeCategories}
           loading={loading}
         />
         <MultiSelectFilter
           label="Subcategory"
           allLabel="All subcategories"
-          options={subcategories}
+          options={subcategoryOptions}
           value={value.subcategoryIds}
           onChange={(next) => set("subcategoryIds", next)}
           loading={loading}
