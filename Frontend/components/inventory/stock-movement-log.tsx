@@ -67,6 +67,13 @@ import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
 import { useScrollToTopOnPageChange } from "@/hooks/use-scroll-to-top-on-page-change";
 import { cn } from "@/lib/utils";
 import { Label } from "@/components/ui/label";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 const PAGE_SIZE = 20;
 
@@ -157,6 +164,8 @@ export function StockMovementLog() {
     "all",
   );
   const [filterProductId, setFilterProductId] = useState("all");
+  // Vendor / category / subcategory (multi-select) + Stitched / Unstitched.
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const [filterStart, setFilterStart] = useState<Date | undefined>();
   const [filterEnd, setFilterEnd] = useState<Date | undefined>();
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
@@ -179,6 +188,7 @@ export function StockMovementLog() {
         };
         if (filterBranch !== "all") params.branchId = filterBranch;
         if (filterProductId !== "all") params.productId = filterProductId;
+        Object.assign(params, catalogFilterParams(catalog));
         if (filterType !== "all") params.movementType = filterType;
         if (filterDirection !== "all") params.direction = filterDirection;
         if (filterStart) params.startDate = filterStart.toISOString();
@@ -208,6 +218,7 @@ export function StockMovementLog() {
       page,
       filterBranch,
       filterProductId,
+      catalog,
       filterType,
       filterDirection,
       filterStart,
@@ -292,6 +303,7 @@ export function StockMovementLog() {
     filterType !== "all" ||
     filterDirection !== "all" ||
     filterProductId !== "all" ||
+    hasCatalogFilters(catalog) ||
     !!filterStart ||
     !!filterEnd;
 
@@ -301,6 +313,7 @@ export function StockMovementLog() {
     setFilterType("all");
     setFilterDirection("all");
     setFilterProductId("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setFilterStart(undefined);
     setFilterEnd(undefined);
     setProdSearch("");
@@ -700,6 +713,15 @@ export function StockMovementLog() {
             </Popover>
           </div>
         </div>
+
+        <CatalogFilterBar
+          value={catalog}
+          onChange={(next) => {
+            setCatalog(next);
+            setPage(1);
+          }}
+          className="border-t border-gray-100 pt-3"
+        />
 
         <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 pt-1 border-t border-gray-100">
           <p className="text-xs text-gray-500">

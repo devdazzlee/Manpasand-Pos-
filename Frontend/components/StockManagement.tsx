@@ -97,6 +97,13 @@ import {
 import { InventoryCardGrid } from "@/components/inventory/stock-ops/inventory-card-grid";
 import { StockRecordCard } from "@/components/inventory/stock-ops/stock-record-card";
 import { MovementRecordCard } from "@/components/inventory/stock-ops/movement-record-card";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 const DLG = {
   content: "max-w-2xl border border-gray-200 p-0 gap-0 max-h-[90vh] overflow-y-auto",
@@ -358,9 +365,9 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
 
   // UI state
   const [branchFilter, setBranchFilter] = useState<string>(ALL_BRANCHES);
-  const [categoryFilter, setCategoryFilter] = useState<string>(ALL_CATEGORIES);
+  // Vendor / category / subcategory (multi-select) + Stitched / Unstitched.
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const [brandFilter, setBrandFilter] = useState<string>(ALL_BRANDS);
-  const [supplierFilter, setSupplierFilter] = useState<string>(ALL_SUPPLIERS);
   const [stockStatusFilter, setStockStatusFilter] = useState<string>(ALL_STOCK_STATUS);
   const [searchTerm, setSearchTerm] = useState("");
   const [skuSearch, setSkuSearch] = useState("");
@@ -375,8 +382,8 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     return (m: Movement) => {
       if (branchFilter !== ALL_BRANCHES && m.branch?.id !== branchFilter) return false;
       if (
-        categoryFilter !== ALL_CATEGORIES &&
-        m.product?.category_id !== categoryFilter
+        catalog.categoryIds.length &&
+        !catalog.categoryIds.includes(m.product?.category_id || "")
       )
         return false;
       if (term) {
@@ -386,7 +393,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
       }
       return true;
     };
-  }, [branchFilter, categoryFilter, searchTerm]);
+  }, [branchFilter, catalog, searchTerm]);
   // Filtering now happens on the server; the client filter stays as a guard
   // for the branch/category fields on the rows returned.
   const filteredHistory = useMemo(
@@ -602,7 +609,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
   // Reset to page 1 when search changes
   useEffect(() => {
     setStockPage(1);
-  }, [searchTerm, skuSearch, barcodeSearch, brandFilter, supplierFilter, stockStatusFilter]);
+  }, [searchTerm, skuSearch, barcodeSearch, brandFilter, catalog, stockStatusFilter]);
 
   const combinedSearch = useMemo(() => {
     return [searchTerm, skuSearch, barcodeSearch].filter(Boolean).join(" ").trim();
@@ -617,9 +624,8 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         });
         
         if (branchFilter && branchFilter !== ALL_BRANCHES) params.append('branchId', branchFilter);
-        if (categoryFilter && categoryFilter !== ALL_CATEGORIES) params.append('categoryId', categoryFilter);
+        for (const [key, value] of Object.entries(catalogFilterParams(catalog))) params.append(key, value);
         if (brandFilter && brandFilter !== ALL_BRANDS) params.append('brandId', brandFilter);
-        if (supplierFilter && supplierFilter !== ALL_SUPPLIERS) params.append('supplierId', supplierFilter);
         if (stockStatusFilter && stockStatusFilter !== ALL_STOCK_STATUS) params.append('stockStatus', stockStatusFilter);
         if (combinedSearch) params.append('search', combinedSearch);
         
@@ -638,9 +644,8 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
       }
     }, [
       branchFilter,
-      categoryFilter,
+      catalog,
       brandFilter,
-      supplierFilter,
       stockStatusFilter,
       combinedSearch,
       stockPage,
@@ -655,11 +660,11 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     (page: number, limit: number) => {
       const params: Record<string, string | number> = { page, limit };
       if (branchFilter && branchFilter !== ALL_BRANCHES) params.branchId = branchFilter;
-      if (categoryFilter && categoryFilter !== ALL_CATEGORIES) params.categoryId = categoryFilter;
+      Object.assign(params, catalogFilterParams(catalog));
       if (combinedSearch) params.search = combinedSearch;
       return params;
     },
-    [branchFilter, categoryFilter, combinedSearch],
+    [branchFilter, catalog, combinedSearch],
   );
 
   const loadMovements = useCallback(async () => {
@@ -694,7 +699,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
   useEffect(() => {
     setHistoryPage(1);
     setTodayPage(1);
-  }, [branchFilter, categoryFilter, combinedSearch]);
+  }, [branchFilter, catalog, combinedSearch]);
 
   const buildExportRows = useCallback(() => {
     return allStocks.map((s) => {
@@ -1086,9 +1091,8 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     (skuSearch.trim() ? 1 : 0) +
     (barcodeSearch.trim() ? 1 : 0) +
     (branchFilter !== ALL_BRANCHES ? 1 : 0) +
-    (categoryFilter !== ALL_CATEGORIES ? 1 : 0) +
+    (hasCatalogFilters(catalog) ? 1 : 0) +
     (brandFilter !== ALL_BRANDS ? 1 : 0) +
-    (supplierFilter !== ALL_SUPPLIERS ? 1 : 0) +
     (stockStatusFilter !== ALL_STOCK_STATUS ? 1 : 0);
 
   const clearAllStockFilters = () => {
@@ -1096,9 +1100,8 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     setSkuSearch("");
     setBarcodeSearch("");
     setBranchFilter(ALL_BRANCHES);
-    setCategoryFilter(ALL_CATEGORIES);
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setBrandFilter(ALL_BRANDS);
-    setSupplierFilter(ALL_SUPPLIERS);
     setStockStatusFilter(ALL_STOCK_STATUS);
     setStockPage(1);
   };
@@ -1953,22 +1956,6 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className={filterLabelCls}>Category</Label>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className={filterControlCls}>
-                  <SelectValue placeholder="All categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_CATEGORIES}>All categories</SelectItem>
-                  {categories.map((c: { id: string; name: string }) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
               <Label className={filterLabelCls}>Brand</Label>
               <Select value={brandFilter} onValueChange={setBrandFilter}>
                 <SelectTrigger className={filterControlCls}>
@@ -1984,23 +1971,15 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label className={filterLabelCls}>Supplier</Label>
-              <Select value={supplierFilter} onValueChange={setSupplierFilter}>
-                <SelectTrigger className={filterControlCls}>
-                  <SelectValue placeholder="All suppliers" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_SUPPLIERS}>All suppliers</SelectItem>
-                  {supplierOptions.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
+          <CatalogFilterBar
+            value={catalog}
+            onChange={(next) => {
+              setCatalog(next);
+              setStockPage(1);
+            }}
+            className="border-t border-dashed border-indigo-200 pt-4 [&_label]:text-xs [&_label]:font-semibold [&_label]:text-indigo-900/80"
+          />
         </div>
       </div>
 

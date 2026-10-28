@@ -3,6 +3,7 @@ import asyncHandler from "../middleware/asyncHandler";
 import { ApiResponse } from "../utils/apiResponse";
 import { StockService } from "../services/stock.service";
 import { AppError } from "../utils/apiError";
+import { parseProductFilters } from '../utils/product-filters';
 
 const stockService = new StockService();
 
@@ -44,6 +45,7 @@ const getStocksController = asyncHandler(async (req: Request, res: Response) => 
         brandId,
         supplierId,
         stockStatus,
+        parseProductFilters(req.query),
     );
     new ApiResponse(result.data, "Stocks retrieved successfully", 200, true, result.meta).send(res);
 });
@@ -68,6 +70,7 @@ const movementQuery = (req: Request) => ({
     search: (req.query.search as string) || undefined,
     categoryId: (req.query.categoryId as string) || undefined,
     movementType: (req.query.movementType as string) || undefined,
+    filters: parseProductFilters(req.query),
 });
 
 const getStockMovementsController = asyncHandler(async (req: Request, res: Response) => {

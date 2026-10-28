@@ -186,6 +186,7 @@ export const exportProductsToExcel = asyncHandler(async (req: Request, res: Resp
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
         display_on_website: display_on_website ? display_on_website === 'true' : undefined,
+        catalog: parseProductFilters({ stitchTypes: req.query.stitchTypes }),
     });
 
     const requestedColumnsRaw = typeof req.query.columns === 'string' ? req.query.columns : '';

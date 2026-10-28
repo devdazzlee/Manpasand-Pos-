@@ -89,6 +89,12 @@ import {
   printBarcodeLabelsViaServer,
   type BarcodeLabelItem,
 } from "@/lib/print-server";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  hasCatalogFilters,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 interface Product {
   id: string;
@@ -102,6 +108,10 @@ interface Product {
   unitName?: string;
   unitId?: string;
   category?: string;
+  categoryId?: string;
+  subcategoryId?: string;
+  supplierId?: string;
+  stitch_type?: "STITCHED" | "UNSTITCHED" | null;
   brandName?: string;
   weight?: string;
   mfgDate?: string;
@@ -197,7 +207,8 @@ export default function BarcodeGenerator() {
   const { toast } = useToast();
 
   // Product picker table state
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  // Vendor / category / subcategory (multi-select) + Stitched / Unstitched.
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const [tablePage, setTablePage] = useState(1);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
   const [inStockOnly, setInStockOnly] = useState(false);
@@ -649,22 +660,20 @@ export default function BarcodeGenerator() {
     }
   };
 
-  // Every non-empty category currently in the catalog, for the table filter.
-  const categoryOptions = useMemo(() => {
-    const set = new Set<string>();
-    products.forEach((p) => {
-      if (p.is_active !== false && p.category) set.add(p.category);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [products]);
-
   const filteredProducts = useMemo(() => {
     // Inactive products are kept out of the barcode generator — there's no
     // point printing barcodes for items that can't be sold.
     let list = products.filter((p) => p.is_active !== false);
 
-    if (categoryFilter !== "all") {
-      list = list.filter((p) => p.category === categoryFilter);
+    if (hasCatalogFilters(catalog)) {
+      const { categoryIds, subcategoryIds, supplierIds, stitchType } = catalog;
+      list = list.filter(
+        (p) =>
+          (!categoryIds.length || categoryIds.includes(p.categoryId || "")) &&
+          (!subcategoryIds.length || subcategoryIds.includes(p.subcategoryId || "")) &&
+          (!supplierIds.length || supplierIds.includes(p.supplierId || "")) &&
+          (stitchType === "all" || p.stitch_type === stitchType),
+      );
     }
 
     if (inStockOnly) {
@@ -681,13 +690,13 @@ export default function BarcodeGenerator() {
     }
 
     return list;
-  }, [products, categoryFilter, inStockOnly, debouncedSearch]);
+  }, [products, catalog, inStockOnly, debouncedSearch]);
 
   // Reset to page 1 whenever the visible set changes, so the user never
   // lands on a page that no longer exists after filtering.
   useEffect(() => {
     setTablePage(1);
-  }, [searchTerm, categoryFilter, inStockOnly]);
+  }, [searchTerm, catalog, inStockOnly]);
 
   const totalTablePages = Math.max(1, Math.ceil(filteredProducts.length / TABLE_PAGE_SIZE));
   const pagedProducts = useMemo(
@@ -1139,11 +1148,11 @@ export default function BarcodeGenerator() {
   const activeCatalog = products.filter((p) => p.is_active !== false);
   const inStockCount = activeCatalog.filter((p) => stockOf(p) > 0).length;
   const labelSize = LABEL_SIZES[selectedPaperSize] || LABEL_SIZES[DEFAULT_LABEL_SIZE];
-  const activeFilterCount = (searchTerm.trim() ? 1 : 0) + (categoryFilter !== "all" ? 1 : 0) + (inStockOnly ? 1 : 0);
+  const activeFilterCount = (searchTerm.trim() ? 1 : 0) + (hasCatalogFilters(catalog) ? 1 : 0) + (inStockOnly ? 1 : 0);
 
   const clearFilters = () => {
     setSearchTerm("");
-    setCategoryFilter("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setInStockOnly(false);
     productSearchInputRef.current?.focus();
   };
@@ -1368,27 +1377,16 @@ export default function BarcodeGenerator() {
                 ) : null}
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label className={filterLabel}>Category</Label>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                <SelectTrigger className={filterControl}>
-                  <SelectValue placeholder="All categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
-                  {categoryOptions.map((c) => (
-                    <SelectItem key={c} value={c}>
-                      {c}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             <label className="flex h-10 cursor-pointer items-center gap-2.5 rounded-lg border border-indigo-200/80 bg-white px-3 shadow-sm">
               <Switch checked={inStockOnly} onCheckedChange={setInStockOnly} />
               <span className="whitespace-nowrap text-sm font-medium text-slate-700">In stock only</span>
             </label>
           </div>
+          <CatalogFilterBar
+            value={catalog}
+            onChange={setCatalog}
+            className="border-t border-dashed border-indigo-200 pt-4 [&_label]:text-xs [&_label]:font-semibold [&_label]:text-indigo-900/80"
+          />
         </div>
       </Card>
 

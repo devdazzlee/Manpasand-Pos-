@@ -35,6 +35,7 @@ const EXPORT_COLUMNS = [
   { key: "subcategory_id", label: "Subcategory ID" },
   { key: "subcategory_name", label: "Subcategory" },
   { key: "subcategory_code", label: "Subcategory Code" },
+  { key: "stitch_type", label: "Stitched / Unstitched" },
   { key: "unit_id", label: "Unit ID" },
   { key: "unit_name", label: "Unit" },
   { key: "unit_code", label: "Unit Code" },
@@ -87,6 +88,7 @@ export function ProductExport() {
   const [categoryId, setCategoryId] = useState("all")
   const [subcategoryId, setSubcategoryId] = useState("all")
   const [supplierId, setSupplierId] = useState("all")
+  const [stitchType, setStitchType] = useState("all")
   const [brandId, setBrandId] = useState("all")
   const [isActive, setIsActive] = useState("all")
   const [displayOnPos, setDisplayOnPos] = useState("all")
@@ -165,6 +167,7 @@ export function ProductExport() {
       if (categoryId !== "all") params.category_id = categoryId
       if (subcategoryId !== "all") params.subcategory_id = subcategoryId
       if (supplierId !== "all") params.supplier_id = supplierId
+      if (stitchType !== "all") params.stitchTypes = stitchType
       if (brandId !== "all") params.brand_id = brandId
       if (isActive !== "all") params.is_active = isActive
       if (displayOnPos !== "all") params.display_on_pos = displayOnPos
@@ -246,6 +249,18 @@ export function ProductExport() {
                   {subcategories.map((item) => (
                     <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Stitched / Unstitched</Label>
+              <Select value={stitchType} onValueChange={setStitchType}>
+                <SelectTrigger><SelectValue placeholder="All" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="STITCHED">Stitched</SelectItem>
+                  <SelectItem value="UNSTITCHED">Unstitched</SelectItem>
                 </SelectContent>
               </Select>
             </div>
