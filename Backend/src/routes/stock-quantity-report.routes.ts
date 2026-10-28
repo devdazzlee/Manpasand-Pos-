@@ -8,7 +8,7 @@ const router = Router();
 
 router.use(
   authenticate,
-  authorize(['SUPER_ADMIN', 'ADMIN', 'PURCHASE_MANAGER', 'WAREHOUSE_MANAGER', 'BRANCH_MANAGER']),
+  authorize(['SUPER_ADMIN', 'ADMIN', 'PURCHASE_MANAGER', 'WAREHOUSE_MANAGER', 'BRANCH_MANAGER', 'CASHIER']),
 );
 
 router.get('/', validate(stockQuantityReportSchema), getStockQuantityReport);

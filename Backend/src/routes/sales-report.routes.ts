@@ -6,7 +6,7 @@ import { itemwiseSalesReportSchema } from '../validations/sales-report.validatio
 
 const router = Router();
 
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'CASHIER']));
 
 router.get('/itemwise', validate(itemwiseSalesReportSchema), getItemwiseSalesReport);
 

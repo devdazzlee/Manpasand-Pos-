@@ -526,7 +526,19 @@ const filterMenuSectionsByRole = (role: UserRole | null): SidebarMenuSection[] =
   }
 
   // Cashiers see only the counter screens; supervisors see what a branch manager sees.
-  const CASHIER_TABS = new Set(["new-sale", "sales-history", "returns", "exchanges", "customers", "till", "printer-settings", "today-revenue", "today-cash-sales"]);
+  const CASHIER_TABS = new Set([
+    "new-sale",
+    "sales-history",
+    "sales-report",
+    "stock-quantity-report",
+    "returns",
+    "exchanges",
+    "customers",
+    "till",
+    "printer-settings",
+    "today-revenue",
+    "today-cash-sales",
+  ]);
   // View-only account: products and stock screens only.
   const VIEWER_TABS = new Set(["inventory", "stock-view", "stock-quantity-report"]);
   const roleAllows = (roles?: UserRole[]) => {
