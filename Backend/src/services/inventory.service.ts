@@ -8,6 +8,7 @@ import {
   startOfBusinessMonth,
   toBusinessYmd,
 } from '../utils/timezone';
+import { ProductFilters, hasProductFilters, productFilterWhere, productMatchesFilters } from '../utils/product-filters';
 
 export class InventoryService {
   async getDashboardStats(_userRole?: string, branchId?: string) {
@@ -528,6 +529,8 @@ export class InventoryService {
     page?: number;
     limit?: number;
     userRole?: string;
+    /** Multi-select vendor / category / subcategory / stitch. */
+    filters?: ProductFilters;
   }) {
     const page = params.page || 1;
     const limit = params.limit || 50;
@@ -550,6 +553,7 @@ export class InventoryService {
     }
 
     if (params.productId) where.product_id = params.productId;
+    if (hasProductFilters(params.filters)) where.product = productFilterWhere(params.filters);
     if (params.movementType) where.movement_type = params.movementType as any;
     if (params.direction === 'in') where.quantity_change = { gt: 0 };
     if (params.direction === 'out') where.quantity_change = { lt: 0 };
@@ -625,6 +629,8 @@ export class InventoryService {
     supplierId?: string;
     productId?: string;
     categoryId?: string;
+    /** Vendor / category / subcategory / stitch (financial audit). */
+    filters?: ProductFilters;
   }) {
     switch (params.type) {
       case 'valuation': {
@@ -806,6 +812,23 @@ export class InventoryService {
         const where: Prisma.SaleWhereInput = {
           status: 'COMPLETED'
         };
+        // Catalog filters: the legacy single category folds into the same set.
+        const catalog: ProductFilters | undefined =
+          hasProductFilters(params.filters) || params.categoryId
+            ? {
+                categoryIds: params.filters?.categoryIds.length
+                  ? params.filters.categoryIds
+                  : params.categoryId
+                    ? [params.categoryId]
+                    : [],
+                subcategoryIds: params.filters?.subcategoryIds ?? [],
+                supplierIds: params.filters?.supplierIds ?? [],
+                stitchTypes: params.filters?.stitchTypes ?? [],
+              }
+            : undefined;
+        const catalogFiltered = hasProductFilters(catalog);
+        const catalogProduct = catalogFiltered ? { product: productFilterWhere(catalog) } : {};
+        if (catalogFiltered) where.sale_items = { some: catalogProduct };
         if (params.branchId) where.branch_id = params.branchId;
         if (params.startDate || params.endDate) {
           where.sale_date = {};
@@ -836,6 +859,9 @@ export class InventoryService {
                       code: true,
                       purchase_rate: true,
                       category_id: true,
+                      subcategory_id: true,
+                      supplier_id: true,
+                      stitch_type: true,
                       category: { select: { id: true, name: true } },
                     },
                   },
@@ -848,7 +874,7 @@ export class InventoryService {
             where: {
               ...(params.branchId ? { branch_id: params.branchId } : {}),
               ...(params.productId ? { product_id: params.productId } : {}),
-              ...(params.categoryId ? { product: { category_id: params.categoryId } } : {}),
+              ...catalogProduct,
             },
             select: {
               branch_id: true,
@@ -869,7 +895,7 @@ export class InventoryService {
               created_at: { gt: params.endDate },
               ...(params.branchId ? { branch_id: params.branchId } : {}),
               ...(params.productId ? { product_id: params.productId } : {}),
-              ...(params.categoryId ? { product: { category_id: params.categoryId } } : {}),
+              ...catalogProduct,
             },
             _sum: { quantity_change: true },
           });
@@ -895,7 +921,7 @@ export class InventoryService {
         for (const sale of sales) {
           const items = sale.sale_items.filter((item) => {
             if (params.productId && item.product_id !== params.productId) return false;
-            if (params.categoryId && item.product.category_id !== params.categoryId) return false;
+            if (!productMatchesFilters(catalog, item.product)) return false;
             return true;
           });
           if (items.length === 0) continue;
@@ -911,7 +937,7 @@ export class InventoryService {
           totals.count += 1;
           branch.count += 1;
           // Bill-level discount/tax only when the whole bill is in scope.
-          if (!params.productId && !params.categoryId) {
+          if (!params.productId && !catalogFiltered) {
             const d = asNumber(sale.discount_amount);
             const t = asNumber(sale.tax_amount);
             totals.discount += d;

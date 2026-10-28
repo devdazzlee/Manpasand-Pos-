@@ -44,6 +44,14 @@ import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
 import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
 import { downloadExcel, downloadBrandedPdf, formatMoney, formatQty, yieldForUi } from "@/components/inventory/stock-ops/export-utils";
 import { cn } from "@/lib/utils";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  useCatalogFilterLabel,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 type Metrics = {
   revenue: number;
@@ -131,7 +139,9 @@ export function InventoryAudit() {
 
   const [sortKey, setSortKey] = useState<SortKey>("revenue");
   const [filterBranch, setFilterBranch] = useState("all");
-  const [filterCategory, setFilterCategory] = useState("all");
+  // Vendor / category / subcategory (multi-select) + Stitched / Unstitched.
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
+  const catalogLabel = useCatalogFilterLabel(catalog);
   const [filterProduct, setFilterProduct] = useState("all");
   const [filterStart, setFilterStart] = useState<Date | undefined>();
   const [filterEnd, setFilterEnd] = useState<Date | undefined>();
@@ -143,7 +153,7 @@ export function InventoryAudit() {
     try {
       const params: Record<string, string> = { type: "financial_audit" };
       if (filterBranch !== "all") params.branchId = filterBranch;
-      if (filterCategory !== "all") params.categoryId = filterCategory;
+      Object.assign(params, catalogFilterParams(catalog));
       if (filterProduct !== "all") params.productId = filterProduct;
       if (filterStart) params.startDate = filterStart.toISOString();
       if (filterEnd) {
@@ -164,7 +174,7 @@ export function InventoryAudit() {
     } finally {
       setLoading(false);
     }
-  }, [filterBranch, filterCategory, filterProduct, filterStart, filterEnd]);
+  }, [filterBranch, catalog, filterProduct, filterStart, filterEnd]);
 
   useEffect(() => {
     fetchCategories();
@@ -205,11 +215,11 @@ export function InventoryAudit() {
   };
 
   const activeFilterCount =
-    (preset !== "all" ? 1 : 0) + (filterBranch !== "all" ? 1 : 0) + (filterCategory !== "all" ? 1 : 0) + (filterProduct !== "all" ? 1 : 0);
+    (preset !== "all" ? 1 : 0) + (filterBranch !== "all" ? 1 : 0) + (hasCatalogFilters(catalog) ? 1 : 0) + (filterProduct !== "all" ? 1 : 0);
   const clearFilters = () => {
     applyPreset("all");
     setFilterBranch("all");
-    setFilterCategory("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setFilterProduct("all");
   };
 
@@ -238,7 +248,7 @@ export function InventoryAudit() {
     : "All time";
   const scopeLabel = [
     filterBranch !== "all" ? branches.find((b) => b.id === filterBranch)?.name : "All branches",
-    filterCategory !== "all" ? categories.find((c) => c.id === filterCategory)?.name : null,
+    catalogLabel || null,
     filterProduct !== "all" ? productOptions.find((p) => p.id === filterProduct)?.name : null,
   ]
     .filter(Boolean)
@@ -527,7 +537,7 @@ export function InventoryAudit() {
               </button>
             ))}
           </div>
-          <div className="grid grid-cols-1 gap-x-3 gap-y-4 border-t border-dashed border-indigo-200 pt-4 md:grid-cols-2 xl:grid-cols-5">
+          <div className="grid grid-cols-1 gap-x-3 gap-y-4 border-t border-dashed border-indigo-200 pt-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-1.5">
               <Label className={filterLabel}>Branch</Label>
               <Select value={filterBranch} onValueChange={setFilterBranch}>
@@ -543,19 +553,6 @@ export function InventoryAudit() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-            <div className="space-y-1.5">
-              <Label className={filterLabel}>Category</Label>
-              <ReportItemCombobox
-                value={filterCategory}
-                onChange={setFilterCategory}
-                items={categories.filter((c) => (c.name || "").toLowerCase() !== "unknown").map((c) => ({ id: c.id, name: c.name, sku: null }))}
-                placeholder="All categories"
-                allLabel="All categories"
-                searchPlaceholder="Search categories…"
-                emptyText="No categories found"
-                className={filterControl}
-              />
             </div>
             <div className="space-y-1.5">
               <Label className={filterLabel}>Product</Label>
@@ -598,6 +595,11 @@ export function InventoryAudit() {
               </div>
             ))}
           </div>
+          <CatalogFilterBar
+            value={catalog}
+            onChange={setCatalog}
+            className="border-t border-dashed border-indigo-200 pt-4 [&_label]:text-xs [&_label]:font-semibold [&_label]:text-indigo-900/80"
+          />
         </div>
       </Card>
 

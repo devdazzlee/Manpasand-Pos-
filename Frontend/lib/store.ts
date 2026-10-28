@@ -28,6 +28,7 @@ interface Product {
   taxId?: string
   taxName?: string
   supplierId?: string
+  stitch_type?: "STITCHED" | "UNSTITCHED" | null
   supplierName?: string
   brandId?: string
   brandName?: string
@@ -207,7 +208,8 @@ export const mapApiProductToStoreProduct = (item: any): Product => {
     unitName: item.unit?.name,
     taxId: item.tax?.id,
     taxName: item.tax?.name,
-    supplierId: item.supplier?.id,
+    supplierId: item.supplier?.id ?? item.supplier_id ?? undefined,
+    stitch_type: item.stitch_type ?? null,
     supplierName: item.supplier?.name,
     brandId: item.brand?.id,
     brandName: item.brand?.name,

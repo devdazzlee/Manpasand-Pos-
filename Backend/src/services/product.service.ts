@@ -28,8 +28,9 @@ export class ProductService {
         is_active?: boolean;
         display_on_pos?: boolean;
         display_on_website?: boolean;
+        catalog?: ProductFilters;
     }) {
-        const where: Prisma.ProductWhereInput = {};
+        const where: Prisma.ProductWhereInput = { ...productFilterWhere(filters?.catalog) };
 
         if (filters?.search) {
             where.OR = [
@@ -1360,6 +1361,8 @@ export class ProductService {
                 is_featured: true,
                 is_loose_item: true,
                 updated_at: true,
+                supplier_id: true,
+                stitch_type: true,
                 category: { select: { id: true, name: true } },
                 subcategory: { select: { id: true, name: true } },
                 unit: { select: { id: true, name: true } },

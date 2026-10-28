@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 import { AppError } from "../utils/apiError";
 import { addDecimal, asNumber } from "../utils/helpers";
 import { businessTodayRange } from "../utils/timezone";
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
 
 class StockService {
     async createStock({ productId, branchId, quantity, supplierId, unitCost, invoiceRef, notes, createdBy }: {
@@ -325,6 +326,7 @@ class StockService {
         brandId?: string,
         supplierId?: string,
         stockStatus?: string,
+        filters?: ProductFilters,
     ) {
         const skip = (page - 1) * limit;
 
@@ -352,6 +354,10 @@ class StockService {
         }
         if (supplierId && supplierId !== 'all') {
             productWhere.supplier_id = supplierId;
+        }
+        // Multi-select vendor / category / subcategory / stitch.
+        if (hasProductFilters(filters)) {
+            productWhere.AND = [productFilterWhere(filters)];
         }
         if (Object.keys(productWhere).length > 0) {
             where.product = productWhere;
@@ -476,6 +482,8 @@ class StockService {
         categoryId?: string;
         movementType?: string;
         todayOnly?: boolean;
+        /** Multi-select vendor / category / subcategory / stitch. */
+        filters?: ProductFilters;
     }) {
         const where: Prisma.StockMovementWhereInput = {};
 
@@ -503,6 +511,9 @@ class StockService {
                       }
                     : {}),
             };
+        }
+        if (hasProductFilters(params.filters)) {
+            where.product = { ...((where.product as Prisma.ProductWhereInput) || {}), AND: [productFilterWhere(params.filters)] };
         }
 
         const paged = Boolean(params.page);

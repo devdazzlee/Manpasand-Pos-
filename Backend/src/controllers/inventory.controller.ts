@@ -39,6 +39,7 @@ export const getStockMovements = asyncHandler(async (req: Request, res: Response
     page: Number(query.page) || 1,
     limit: Number(query.limit) || 50,
     userRole: req.user?.role as string,
+    filters: parseProductFilters(query),
   });
   new ApiResponse(result.data, 'Stock movements retrieved', 200, true, { ...result.meta, summary: result.summary }).send(res);
 });
@@ -87,6 +88,7 @@ export const getReports = asyncHandler(async (req: Request, res: Response) => {
     productId: query.productId,
     // Was never passed through, so the category filter had no effect.
     categoryId: query.categoryId,
+    filters: parseProductFilters(query),
   });
   new ApiResponse(report, 'Report generated').send(res);
 });

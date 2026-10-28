@@ -65,3 +65,16 @@ export const productFilterSql = (f: ProductFilters | null | undefined, alias = '
   }
   return Prisma.join(clauses, ' ');
 };
+
+/** In-memory version of the same filters, for rows already loaded. */
+export const productMatchesFilters = (
+  f: ProductFilters | null | undefined,
+  p: { category_id: string; subcategory_id: string | null; supplier_id: string | null; stitch_type: StitchType | null },
+): boolean => {
+  if (!hasProductFilters(f)) return true;
+  if (f.categoryIds.length && !f.categoryIds.includes(p.category_id)) return false;
+  if (f.subcategoryIds.length && !(p.subcategory_id && f.subcategoryIds.includes(p.subcategory_id))) return false;
+  if (f.supplierIds.length && !(p.supplier_id && f.supplierIds.includes(p.supplier_id))) return false;
+  if (f.stitchTypes.length && !(p.stitch_type && f.stitchTypes.includes(p.stitch_type))) return false;
+  return true;
+};

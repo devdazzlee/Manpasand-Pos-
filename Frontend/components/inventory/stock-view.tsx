@@ -83,6 +83,13 @@ import {
   yieldForUi,
 } from "@/components/inventory/stock-ops/export-utils";
 import { isReadOnlyRole } from "@/lib/role-utils";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 /** Sentinel values - must not match a real branch/category id from the API. */
 const ALL_WAREHOUSES = "__all_warehouses__";
@@ -168,7 +175,8 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
   const [hasStockMeta, setHasStockMeta] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [supplierFilter, setSupplierFilter] = useState(ALL_SUPPLIERS);
+  // Vendor / category / subcategory (multi-select) + Stitched / Unstitched.
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const [detailRow, setDetailRow] = useState<any | null>(null);
   const [detailProduct, setDetailProduct] = useState<Record<string, unknown> | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -176,7 +184,6 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
 
   const [branchFilter, setBranchFilter] = useState(ALL_BRANCHES);
   const [warehouseFilter, setWarehouseFilter] = useState(ALL_WAREHOUSES);
-  const [categoryFilter, setCategoryFilter] = useState(ALL_CATEGORIES);
   const [brandFilter, setBrandFilter] = useState(ALL_BRANDS);
   const [stockStatusFilter, setStockStatusFilter] = useState(ALL_STOCK_STATUS);
   const [search, setSearch] = useState("");
@@ -208,9 +215,8 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
         page: currentPage,
         limit: itemsPerPage,
         branchId: activeLocationId,
-        categoryId: categoryFilter === ALL_CATEGORIES ? "" : categoryFilter,
         brandId: brandFilter === ALL_BRANDS ? "" : brandFilter,
-        supplierId: supplierFilter === ALL_SUPPLIERS ? "" : supplierFilter,
+        ...catalogFilterParams(catalog),
         search: combinedSearch,
       };
       if (stockStatusFilter && stockStatusFilter !== ALL_STOCK_STATUS) {
@@ -245,9 +251,8 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
     }
   }, [
     activeLocationId,
-    categoryFilter,
+    catalog,
     brandFilter,
-    supplierFilter,
     combinedSearch,
     stockStatusFilter,
     currentPage,
@@ -279,26 +284,16 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
     Boolean(search || skuSearch || barcodeSearch) ||
     branchFilter !== ALL_BRANCHES ||
     warehouseFilter !== ALL_WAREHOUSES ||
-    categoryFilter !== ALL_CATEGORIES ||
+    hasCatalogFilters(catalog) ||
     brandFilter !== ALL_BRANDS ||
-    supplierFilter !== ALL_SUPPLIERS ||
     stockStatusFilter !== ALL_STOCK_STATUS;
 
   const activeFilterCount =
     [search, skuSearch, barcodeSearch].filter((v) => v.trim()).length +
     (activeLocationId ? 1 : 0) +
-    (categoryFilter !== ALL_CATEGORIES ? 1 : 0) +
+    (hasCatalogFilters(catalog) ? 1 : 0) +
     (brandFilter !== ALL_BRANDS ? 1 : 0) +
-    (supplierFilter !== ALL_SUPPLIERS ? 1 : 0) +
     (stockStatusFilter !== ALL_STOCK_STATUS ? 1 : 0);
-
-  const supplierOptions = useMemo(
-    () =>
-      (suppliers || [])
-        .filter((sup: any) => sup?.id && sup?.name)
-        .map((sup: any) => ({ id: sup.id as string, name: sup.name as string })),
-    [suppliers],
-  );
 
   const retry = () => {
     fetchStocks();
@@ -322,9 +317,8 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
     setBarcodeSearch("");
     setBranchFilter(ALL_BRANCHES);
     setWarehouseFilter(ALL_WAREHOUSES);
-    setCategoryFilter(ALL_CATEGORIES);
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setBrandFilter(ALL_BRANDS);
-    setSupplierFilter(ALL_SUPPLIERS);
     setStockStatusFilter(ALL_STOCK_STATUS);
     setCurrentPage(1);
   };
@@ -513,11 +507,6 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
       Number(detailRow.reserved_quantity || 0);
 
   const totalPages = Math.max(1, stockMeta.totalPages);
-
-  const visibleCategories = useMemo(
-    () => categories.filter((c) => (c.name || "").trim().toLowerCase() !== "unknown"),
-    [categories],
-  );
 
   const statsReady = hasStockMeta && !loadError;
   const allCount = stockMeta.totalProducts || stockMeta.total;
@@ -955,28 +944,6 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
               </Select>
             </div>
             <div className="space-y-1.5">
-              <Label className={filterLabelCls}>Category</Label>
-              <Select
-                value={categoryFilter}
-                onValueChange={(v) => {
-                  setCategoryFilter(v);
-                  setCurrentPage(1);
-                }}
-              >
-                <SelectTrigger className={filterControlCls}>
-                  <SelectValue placeholder="All categories" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_CATEGORIES}>All categories</SelectItem>
-                  {visibleCategories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
               <Label className={filterLabelCls}>Brand</Label>
               <Select
                 value={brandFilter}
@@ -998,29 +965,15 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label className={filterLabelCls}>Supplier</Label>
-              <Select
-                value={supplierFilter}
-                onValueChange={(v) => {
-                  setSupplierFilter(v);
-                  setCurrentPage(1);
-                }}
-              >
-                <SelectTrigger className={filterControlCls}>
-                  <SelectValue placeholder="All suppliers" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_SUPPLIERS}>All suppliers</SelectItem>
-                  {supplierOptions.map((sup) => (
-                    <SelectItem key={sup.id} value={sup.id}>
-                      {sup.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
           </div>
+          <CatalogFilterBar
+            value={catalog}
+            onChange={(next) => {
+              setCatalog(next);
+              setCurrentPage(1);
+            }}
+            className="border-t border-dashed border-indigo-200 pt-4 [&_label]:text-xs [&_label]:font-semibold [&_label]:text-indigo-900/80"
+          />
         </div>
       </div>
 
