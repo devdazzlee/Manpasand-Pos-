@@ -24,9 +24,10 @@ import {
 const EMPTY: Subcategory[] = [];
 
 export function useSubcategories(params: SubcategoryQuery = {}) {
+  const queryParams = { limit: 200, ...params };
   const query = useQuery({
-    queryKey: qk.subcategories.list(params as Record<string, unknown>),
-    queryFn: ({ signal }) => fetchSubcategories(params, signal),
+    queryKey: qk.subcategories.list(queryParams as Record<string, unknown>),
+    queryFn: ({ signal }) => fetchSubcategories(queryParams, signal),
     staleTime: STALE_TIME.reference,
     placeholderData: keepPreviousData,
   });

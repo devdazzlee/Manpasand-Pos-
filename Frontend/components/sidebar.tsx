@@ -354,14 +354,12 @@ const menuSections: SidebarMenuSection[] = [
         icon: Grid3X3,
         roles: BRANCH_DATA_ROLES,
       },
-      /*
       {
         id: "sub-categories",
         label: "Sub-Categories",
         icon: Tags,
-        roles: ADMIN_ROLES,
+        roles: BRANCH_DATA_ROLES,
       },
-      */
       { id: "units", label: "Units", icon: Package, roles: ADMIN_ROLES },
       { id: "brand", label: "Brands", icon: StoreIcon, roles: ADMIN_ROLES },
       { id: "colors", label: "Colors", icon: Package, roles: ADMIN_ROLES },

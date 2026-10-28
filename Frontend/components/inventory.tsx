@@ -23,6 +23,16 @@ import { ChevronDown } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { extractApiError } from "@/lib/api/errors"
+import { useSubcategoryMutations } from "@/hooks/queries/use-subcategories"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import {
   Command,
@@ -440,6 +450,8 @@ function FormDropdown({
   options,
   allowNone = false,
   noneLabel = "None",
+  onCreateNew,
+  createLabel,
 }: {
   label: string
   htmlFor: string
@@ -450,6 +462,8 @@ function FormDropdown({
   options: DropdownOption[]
   allowNone?: boolean
   noneLabel?: string
+  onCreateNew?: (nameFromSearch: string) => void
+  createLabel?: string
 }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
@@ -492,7 +506,7 @@ function FormDropdown({
             variant="outline"
             role="combobox"
             aria-expanded={open}
-            disabled={!allowNone && options.length === 0}
+            disabled={!allowNone && options.length === 0 && !onCreateNew}
             className="h-10 w-full justify-between font-normal"
           >
             <span className={cn("truncate text-left", !hasSelection && "text-muted-foreground")}>
@@ -509,7 +523,7 @@ function FormDropdown({
               onValueChange={setQuery}
             />
             <CommandList>
-              {options.length === 0 ? (
+              {options.length === 0 && !onCreateNew ? (
                 <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                   No options available
                 </div>
@@ -554,6 +568,24 @@ function FormDropdown({
                         {option.name}
                       </CommandItem>
                     ))}
+                    {onCreateNew ? (
+                      <CommandItem
+                        value="__create_new__"
+                        onSelect={() => {
+                          const typed = query.trim()
+                          setOpen(false)
+                          setQuery("")
+                          onCreateNew(typed)
+                        }}
+                      >
+                        <Plus className="mr-2 h-4 w-4 text-indigo-600" />
+                        <span className="font-medium text-indigo-700">
+                          {query.trim()
+                            ? `Create “${query.trim()}”`
+                            : createLabel || `Create new ${label.toLowerCase()}`}
+                        </span>
+                      </CommandItem>
+                    ) : null}
                   </CommandGroup>
                 </>
               )}
@@ -598,6 +630,7 @@ const ProductForm = ({
   barcodeHint,
   autoFocusBarcode,
   onBarcodeTakenChange,
+  onSubcategoryCreated,
 }: {
   productId?: string
   productInternalCode?: string
@@ -609,6 +642,7 @@ const ProductForm = ({
   autoFocusBarcode?: boolean
   /** Lets the page block saving while the code belongs to another product */
   onBarcodeTakenChange?: (taken: boolean) => void
+  onSubcategoryCreated?: (item: DropdownOption) => void
   onSubmit: () => void
   loading: boolean
   submitText: string
@@ -635,7 +669,40 @@ const ProductForm = ({
   stockLabel: string
   currentBranchStocks?: Record<string, number>
 }) => {
+  const { toast } = useToast()
+  const { create: createSubcat } = useSubcategoryMutations()
+  const [newSubcatOpen, setNewSubcatOpen] = useState(false)
+  const [newSubcatName, setNewSubcatName] = useState("")
+  const [creatingSubcat, setCreatingSubcat] = useState(false)
   const hasErrors = Object.values(formErrors).some((error) => !!error)
+
+  const openCreateSubcategory = (typedName: string) => {
+    setNewSubcatName(typedName)
+    setNewSubcatOpen(true)
+  }
+
+  const submitNewSubcategory = async () => {
+    const name = newSubcatName.trim()
+    if (!name) return
+    setCreatingSubcat(true)
+    try {
+      const created = await createSubcat.mutateAsync({ name, display_on_pos: true, is_active: true })
+      const option: DropdownOption = { id: created.id, name: created.name }
+      onSubcategoryCreated?.(option)
+      updateFormData("subcategory_id", created.id)
+      setNewSubcatOpen(false)
+      setNewSubcatName("")
+      toast({ title: "Subcategory created", description: created.name })
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Could not create subcategory",
+        description: extractApiError(e, "Try another name"),
+      })
+    } finally {
+      setCreatingSubcat(false)
+    }
+  }
 
   // Raw text state for numeric inputs. We keep it independent of formData
   // so users can naturally type "0.", "1.5", clear to empty, etc., without the
@@ -856,6 +923,9 @@ const ProductForm = ({
             placeholder="Select subcategory"
             options={subcategories}
             allowNone
+            noneLabel="None"
+            createLabel="Create new subcategory"
+            onCreateNew={openCreateSubcategory}
           />
         </div>
         <div>
@@ -1303,6 +1373,40 @@ const ProductForm = ({
           )}
         </Button>
       </div>
+
+      <Dialog open={newSubcatOpen} onOpenChange={setNewSubcatOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New subcategory</DialogTitle>
+            <DialogDescription>This will be saved to the catalog and selected on this product.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-subcat-name">Name</Label>
+            <Input
+              id="new-subcat-name"
+              value={newSubcatName}
+              onChange={(e) => setNewSubcatName(e.target.value)}
+              placeholder="e.g. Unstitched, Stitched, Kids"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  void submitNewSubcategory()
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setNewSubcatOpen(false)} disabled={creatingSubcat}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void submitNewSubcategory()} disabled={creatingSubcat || !newSubcatName.trim()}>
+              {creatingSubcat ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+              Create subcategory
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -2542,6 +2646,9 @@ export default function Inventory() {
             units={units}
             categories={categoryOptions}
             subcategories={subcategories}
+            onSubcategoryCreated={(item) =>
+              setSubcategories((prev) => (prev.some((s) => s.id === item.id) ? prev : [...prev, item].sort((a, b) => a.name.localeCompare(b.name))))
+            }
             taxes={taxes}
             suppliers={suppliers}
             brands={brands}

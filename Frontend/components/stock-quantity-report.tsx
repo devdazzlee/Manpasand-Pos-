@@ -848,7 +848,7 @@ export function StockQuantityReport() {
       </Card>
 
       <p className="text-xs text-slate-500">
-        Closing = opening + everything received − everything sent out in the period. Bought = net stock-in (purchases − deleted stock-in lines − returns to supplier). Available now = live stock today. Sell-through = sold ÷ (opening + bought).
+        Closing = opening + everything received − everything sent out in the period. Bought = purchases + opening-stock import − deleted stock-in − returns to supplier. Sold = sales − customer returns. Available now = live stock today. Sell-through = sold ÷ (opening + bought).
       </p>
 
       <StockQuantityHistoryDialog

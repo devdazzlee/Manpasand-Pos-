@@ -70,20 +70,24 @@ export class StockQuantityReportService {
         p.purchase_rate AS purchase_rate,
         CASE WHEN p.sales_rate_inc_dis_and_tax > 0 THEN p.sales_rate_inc_dis_and_tax ELSE p.sales_rate_exc_dis_and_tax END AS sales_rate,
         COALESCE(SUM(CASE WHEN m.created_at < ${start} THEN m.quantity_change ELSE 0 END), 0) AS opening,
-        -- Net bought: stock-in purchases − deleted stock-in lines − returns to supplier
-        -- (gross PURCHASE alone made "Bought 2 / Sold 1 / Available 0" look wrong).
+        -- Net received: purchases + opening-stock import − deleted stock-in − supplier returns.
+        -- Import was only in Closing math, so this dress showed Bought 4 / Sold 6 (150%).
         COALESCE(SUM(CASE
           WHEN m.created_at >= ${start} AND m.created_at <= ${end}
             AND (
               (m.movement_type = 'PURCHASE' AND m.quantity_change > 0)
-              OR m.reference_type IN ('purchase_delete', 'purchase_edit')
+              OR m.reference_type IN ('purchase_delete', 'purchase_edit', 'stock_import')
               OR m.movement_type = 'PURCHASE_RETURN'
             )
           THEN m.quantity_change ELSE 0 END), 0) AS bought_qty,
+        -- Net sold: customer sales − customer returns (RETURN puts stock back).
+        -- Gross SALE alone showed 8 sold when 1 was returned and only 7 stayed sold.
         COALESCE(SUM(CASE
           WHEN m.created_at >= ${start} AND m.created_at <= ${end}
-            AND m.movement_type = 'SALE'
-            AND m.quantity_change < 0
+            AND (
+              (m.movement_type = 'SALE' AND m.quantity_change < 0)
+              OR (m.movement_type = 'RETURN' AND m.quantity_change > 0)
+            )
           THEN -m.quantity_change ELSE 0 END), 0) AS sold_qty,
         COALESCE(SUM(CASE
           WHEN m.created_at >= ${start} AND m.created_at <= ${end}
@@ -167,7 +171,7 @@ export class StockQuantityReportService {
           stockValue: round2(Math.max(availableQty, 0) * cost),
           retailValue: round2(Math.max(availableQty, 0) * price),
           // Share of what was on hand + bought in the period that got sold.
-          sellThrough: availableBase > 0 ? Math.round((soldQty / availableBase) * 1000) / 10 : null,
+          sellThrough: availableBase > 0 ? Math.min(100, Math.round((soldQty / availableBase) * 1000) / 10) : null,
         };
       })
       .filter(
@@ -213,7 +217,7 @@ export class StockQuantityReportService {
     const stockValue = round2(lines.reduce((sum, l) => sum + l.stockValue, 0));
     const retailValue = round2(lines.reduce((sum, l) => sum + l.retailValue, 0));
     const sellBase = totals.opening + totals.boughtQty;
-    const sellThrough = sellBase > 0 ? Math.round((totals.soldQty / sellBase) * 1000) / 10 : null;
+    const sellThrough = sellBase > 0 ? Math.min(100, Math.round((totals.soldQty / sellBase) * 1000) / 10) : null;
 
     // Status filter, sort and paging on the server; exports pass `all`.
     const status = params.status && params.status !== 'all' ? params.status : null;
