@@ -93,8 +93,8 @@ export class SubcategoryService {
         page = 1,
         limit = 10,
         search,
-        is_active = true,
-        display_on_pos = true,
+        is_active,
+        display_on_pos,
     }: {
         page?: number;
         limit?: number;

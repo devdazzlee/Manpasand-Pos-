@@ -53,8 +53,11 @@ export function useSubcategory(id: string | null, options?: { enabled?: boolean 
 
 export function useSubcategoryMutations() {
   const qc = useQueryClient();
-  const invalidate = () =>
+  const invalidate = () => {
     qc.invalidateQueries({ queryKey: qk.subcategories.all });
+    // Report filter pickers list subcategories too.
+    qc.invalidateQueries({ queryKey: ["catalog-filter-options"] });
+  };
 
   return {
     create: useMutation({
