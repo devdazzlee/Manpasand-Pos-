@@ -48,6 +48,14 @@ import { cn } from "@/lib/utils";
 import { downloadStockQuantityReportPdf } from "@/lib/stock-quantity-report-pdf";
 import { rangeForPreset } from "@/lib/business-timezone";
 import { HistoryButton, StockQuantityHistoryDialog } from "@/components/stock-quantity-history-dialog";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  useCatalogFilterLabel,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 type Preset = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
 type ItemType = "all" | "finished" | "loose";
@@ -133,7 +141,8 @@ export function StockQuantityReport() {
   const [to, setTo] = useState(initial.to);
   const [draftFrom, setDraftFrom] = useState(initial.from);
   const [draftTo, setDraftTo] = useState(initial.to);
-  const [categoryId, setCategoryId] = useState("all");
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
+  const catalogLabel = useCatalogFilterLabel(catalog);
   const [branchId, setBranchId] = useState("all");
   const [itemType, setItemType] = useState<ItemType>("all");
   const [activity, setActivity] = useState<Activity>("moved");
@@ -154,7 +163,7 @@ export function StockQuantityReport() {
   }, [search]);
   useEffect(() => {
     setPage(1);
-  }, [from, to, categoryId, branchId, itemType, activity, debouncedSearch, status, sortKey, pageSize]);
+  }, [from, to, catalog, branchId, itemType, activity, debouncedSearch, status, sortKey, pageSize]);
 
   const searching = search.trim() !== debouncedSearch;
   const isFirstLoad = loading && !report;
@@ -163,12 +172,12 @@ export function StockQuantityReport() {
   const buildParams = useCallback(
     (extra: Record<string, string | number> = {}) => {
       const params: Record<string, string | number> = { from, to, type: itemType, activity, sort: sortKey, status, ...extra };
-      if (categoryId !== "all") params.categoryId = categoryId;
+      Object.assign(params, catalogFilterParams(catalog));
       if (branchId !== "all") params.branchId = branchId;
       if (debouncedSearch) params.search = debouncedSearch;
       return params;
     },
-    [from, to, itemType, activity, sortKey, status, categoryId, branchId, debouncedSearch],
+    [from, to, itemType, activity, sortKey, status, catalog, branchId, debouncedSearch],
   );
 
   const load = useCallback(async () => {
@@ -211,14 +220,14 @@ export function StockQuantityReport() {
 
   const activeFilterCount =
     (preset !== DEFAULT_PRESET ? 1 : 0) +
-    (categoryId !== "all" ? 1 : 0) +
+    (hasCatalogFilters(catalog) ? 1 : 0) +
     (branchId !== "all" ? 1 : 0) +
     (itemType !== "all" ? 1 : 0) +
     (activity !== "moved" ? 1 : 0) +
     (search.trim() ? 1 : 0);
   const clearFilters = () => {
     applyPreset(DEFAULT_PRESET);
-    setCategoryId("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setBranchId("all");
     setItemType("all");
     setActivity("moved");
@@ -232,7 +241,7 @@ export function StockQuantityReport() {
   const pagination = report?.pagination || { page: 1, limit: pageSize, total: lines.length, totalPages: 1 };
   const viewTotals = report?.viewTotals;
   const isAdmin = (report?.branches || []).length > 0;
-  const categoryName = categoryId === "all" ? "All categories" : report?.categories.find((c) => c.id === categoryId)?.name || "Category";
+  const categoryName = catalogLabel || "All categories";
   const branchName = branchId === "all" ? "All locations" : report?.branches.find((b) => b.id === branchId)?.name || "Location";
   const filterLabel = `${categoryName} · ${branchName}`;
 
@@ -525,7 +534,7 @@ export function StockQuantityReport() {
               </Button>
             </div>
           ) : null}
-          <div className={cn("grid gap-x-3 gap-y-4 border-t border-dashed border-indigo-200 pt-4 md:grid-cols-2", isAdmin ? "xl:grid-cols-5" : "xl:grid-cols-4")}>
+          <div className={cn("grid gap-x-3 gap-y-4 border-t border-dashed border-indigo-200 pt-4 md:grid-cols-2", isAdmin ? "xl:grid-cols-4" : "xl:grid-cols-3")}>
             <div className="space-y-1.5 md:col-span-2 xl:col-span-1">
               <Label className={filterLabelCls}>Dress name</Label>
               <div className="relative">
@@ -541,22 +550,6 @@ export function StockQuantityReport() {
                   </button>
                 ) : null}
               </div>
-            </div>
-            <div className="space-y-1.5">
-              <Label className={filterLabelCls}>Category</Label>
-              <Select value={categoryId} onValueChange={setCategoryId}>
-                <SelectTrigger className={filterControl}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All categories</SelectItem>
-                  {(report?.categories || []).map((c) => (
-                    <SelectItem key={c.id} value={c.id}>
-                      {c.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <div className="space-y-1.5">
               <Label className={filterLabelCls}>Type</Label>
@@ -613,6 +606,12 @@ export function StockQuantityReport() {
               </div>
             ) : null}
           </div>
+
+          <CatalogFilterBar
+            value={catalog}
+            onChange={setCatalog}
+            className="border-t border-dashed border-indigo-200 pt-4 [&_label]:text-xs [&_label]:font-semibold [&_label]:text-indigo-900/80"
+          />
         </div>
       </Card>
 

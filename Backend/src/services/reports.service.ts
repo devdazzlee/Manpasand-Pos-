@@ -1,6 +1,7 @@
 import { prisma } from '../prisma/client';
 import { Prisma, SaleStatus } from '@prisma/client';
 import { localRange, shiftBusinessYmd } from '../utils/timezone';
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
 
 const SOLD: Prisma.EnumSaleStatusFilter = {
   notIn: [SaleStatus.CANCELLED, SaleStatus.PENDING],
@@ -11,6 +12,8 @@ export type ReportsQuery = {
   userRole?: string;
   from?: string;
   to?: string;
+  /** Vendor / category / subcategory / stitch: orders that contain such items. */
+  filters?: ProductFilters;
 };
 
 export class ReportsService {
@@ -23,7 +26,37 @@ export class ReportsService {
       const { start, end } = localRange(q.from, q.to);
       where.sale_date = { gte: start, lte: end };
     }
+    const itemWhere = this.itemScope(q);
+    if (itemWhere) where.sale_items = { some: itemWhere };
     return where;
+  }
+
+  /** Sale-line filter for the catalog filters, or undefined when none are set. */
+  private itemScope(q: ReportsQuery): Prisma.SaleItemWhereInput | undefined {
+    return hasProductFilters(q.filters) ? { product: productFilterWhere(q.filters) } : undefined;
+  }
+
+  /** Per-sale amount: the whole bill, or only the matching lines when filtered. */
+  private async amountsBySale(q: ReportsQuery, where: Prisma.SaleWhereInput) {
+    const itemWhere = this.itemScope(q);
+    if (!itemWhere) return null;
+    const rows = await prisma.saleItem.groupBy({
+      by: ['sale_id'],
+      where: { ...itemWhere, sale: where },
+      _sum: { line_total: true },
+    });
+    return new Map(rows.map((r) => [r.sale_id, Number(r._sum.line_total || 0)]));
+  }
+
+  /** Bill totals normally; with catalog filters, only the matching lines count. */
+  private async revenueFor(q: ReportsQuery, where: Prisma.SaleWhereInput, billTotal: number) {
+    const itemWhere = this.itemScope(q);
+    if (!itemWhere) return billTotal;
+    const agg = await prisma.saleItem.aggregate({
+      where: { ...itemWhere, sale: where },
+      _sum: { line_total: true },
+    });
+    return Number(agg._sum.line_total || 0);
   }
 
   private previousRange(from: string, to: string): { from: string; to: string } {
@@ -43,6 +76,7 @@ export class ReportsService {
       where: this.saleScope(q),
       include: {
         sale_items: {
+          where: this.itemScope(q),
           include: {
             product: {
               include: {
@@ -65,7 +99,7 @@ export class ReportsService {
   async getBestSellingProducts(q: ReportsQuery & { limit?: number }) {
     const isAdmin = q.userRole === 'ADMIN' || q.userRole === 'SUPER_ADMIN';
     const saleFilter = this.saleScope(q);
-    const where: Prisma.SaleItemWhereInput = { sale: saleFilter };
+    const where: Prisma.SaleItemWhereInput = { sale: saleFilter, ...(this.itemScope(q) || {}) };
     const limit = q.limit ?? 10;
 
     const products = await prisma.saleItem.groupBy({
@@ -95,7 +129,7 @@ export class ReportsService {
     let topBranchByProduct = new Map<string, { id: string; name: string; quantity: number }>();
     if (isAdmin && !q.branchId && productIds.length > 0) {
       const itemsWithBranch = await prisma.saleItem.findMany({
-        where: { product_id: { in: productIds }, sale: saleFilter },
+        where: { product_id: { in: productIds }, sale: saleFilter, ...(this.itemScope(q) || {}) },
         select: {
           product_id: true,
           quantity: true,
@@ -147,21 +181,26 @@ export class ReportsService {
    * Prefers salesperson (commission credit), else linked employee on cashier, else user name.
    */
   async getEmployeePerformance(q: ReportsQuery) {
-    const sales = await prisma.sale.findMany({
-      where: this.saleScope(q),
-      select: {
-        total_amount: true,
-        salesperson: { select: { id: true, name: true } },
-        user: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            employee: { select: { id: true, name: true } },
+    const scope = this.saleScope(q);
+    const [sales, lineAmounts] = await Promise.all([
+      prisma.sale.findMany({
+        where: scope,
+        select: {
+          id: true,
+          total_amount: true,
+          salesperson: { select: { id: true, name: true } },
+          user: {
+            select: {
+              id: true,
+              name: true,
+              email: true,
+              employee: { select: { id: true, name: true } },
+            },
           },
         },
-      },
-    });
+      }),
+      this.amountsBySale(q, scope),
+    ]);
 
     type Agg = { id: string; name: string; sales: number; orders: number };
     const map = new Map<string, Agg>();
@@ -177,7 +216,7 @@ export class ReportsService {
         user?.email ||
         'Unknown cashier';
       const row = map.get(id) || { id, name, sales: 0, orders: 0 };
-      row.sales += Number(sale.total_amount || 0);
+      row.sales += lineAmounts ? lineAmounts.get(sale.id) || 0 : Number(sale.total_amount || 0);
       row.orders += 1;
       map.set(id, row);
     }
@@ -212,7 +251,7 @@ export class ReportsService {
       }),
     ]);
 
-    const revenue = Number(totalRevenue._sum.total_amount || 0);
+    const revenue = await this.revenueFor(q, where, Number(totalRevenue._sum.total_amount || 0));
     const customers = uniqueCustomers.filter((c) => c.customer_id).length;
     const avgOrder = totalSales > 0 ? revenue / totalSales : 0;
 
@@ -235,7 +274,11 @@ export class ReportsService {
           distinct: ['customer_id'],
         }),
       ]);
-      const prevRevenue = Number(prevRevAgg._sum.total_amount || 0);
+      const prevRevenue = await this.revenueFor(
+        { ...q, from: prev.from, to: prev.to },
+        prevWhere,
+        Number(prevRevAgg._sum.total_amount || 0),
+      );
       const prevCustomers = prevCust.filter((c) => c.customer_id).length;
       const prevAvg = prevSales > 0 ? prevRevenue / prevSales : 0;
       const pct = (cur: number, old: number) =>

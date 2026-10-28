@@ -3,6 +3,7 @@ import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { InventoryService } from '../services/inventory.service';
 import { InventoryReportService, InventoryReportType } from '../services/inventory-report.service';
+import { parseProductFilters } from '../utils/product-filters';
 
 const inventoryService = new InventoryService();
 const inventoryReportService = new InventoryReportService();
@@ -60,6 +61,7 @@ export const getReports = asyncHandler(async (req: Request, res: Response) => {
       branchId: query.branchId,
       categoryId: query.categoryId,
       supplierId: query.supplierId,
+      filters: parseProductFilters(query),
       productId: query.productId,
       startDate,
       endDate,

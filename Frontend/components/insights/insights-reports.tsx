@@ -13,6 +13,7 @@ import {
   writeInsightsParamsToUrl,
 } from "@/lib/dashboard-tabs";
 import { Card, Chips, Column, DataTable, day, Empty, errorText, insightsGet, Kpi, KpiRow, Loading, pct, Period, qty, rs, ShareBars } from "./insights-shared";
+import { CatalogFilterBar, EMPTY_CATALOG_FILTERS, catalogFilterParams, type CatalogFilters } from "@/components/catalog-filter-bar";
 
 type Scope = { period: Period; branchId?: string };
 
@@ -73,6 +74,7 @@ type SalesRow = {
 const DIMS = [
   { id: "category", label: "Category" },
   { id: "subcategory", label: "Sub-category" },
+  { id: "stitch", label: "Stitched / Unstitched" },
   { id: "brand", label: "Brand" },
   { id: "collection", label: "Collection" },
   { id: "size", label: "Size" },
@@ -106,11 +108,13 @@ export function SalesByReport({ period, branchId }: Scope) {
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const state = useReport<{ rows: SalesRow[]; totals: { qty: number; revenue: number; cost: number; profit: number } }>("sales-by", {
     dimension: dim,
     from: period.from,
     to: period.to,
     branchId,
+    ...catalogFilterParams(catalog),
   });
   const dimLabel = DIMS.find((d) => d.id === dim)!.label;
   const cols: Column<SalesRow>[] = [
@@ -126,6 +130,7 @@ export function SalesByReport({ period, branchId }: Scope) {
   return (
     <div className="space-y-4">
       <Chips value={dim} onChange={setDim} options={DIMS.map((d) => ({ id: d.id, label: d.label }))} />
+      <CatalogFilterBar value={catalog} onChange={setCatalog} clearable />
       <Frame state={state}>
         {(d) => (
           <>

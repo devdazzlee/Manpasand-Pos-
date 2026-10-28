@@ -397,6 +397,8 @@ model Product {
   is_loose_item              Boolean      @default(false)
   /// Season / collection label, e.g. "Eid 2026", "Winter Luxe"
   collection                 String?
+  /// Stitched vs unstitched, kept apart from category so every report can split on it.
+  stitch_type                StitchType?
   price_history              ProductPriceHistory[]
 
   // Relations
@@ -423,10 +425,16 @@ model Product {
   @@index([brand_id])
   @@index([color_id])
   @@index([size_id])
+  @@index([stitch_type])
   @@index([is_featured])
   @@index([is_active])
   @@index([display_on_pos])
   @@index([display_on_website])
+}
+
+enum StitchType {
+  STITCHED
+  UNSTITCHED
 }
 
 enum ImageStatus {

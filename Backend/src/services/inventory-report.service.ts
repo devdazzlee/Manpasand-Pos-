@@ -2,6 +2,7 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { asNumber } from '../utils/helpers';
 import { toBusinessYmd } from '../utils/timezone';
+import { ProductFilters, productFilterWhere } from '../utils/product-filters';
 
 /**
  * Inventory Reports (Valuation, Purchases, Transfers, Outflow, Low stock,
@@ -28,6 +29,8 @@ export interface InventoryReportParams {
   branchId?: string;
   categoryId?: string;
   supplierId?: string;
+  /** Multi-select vendor / category / subcategory / stitch. */
+  filters?: ProductFilters;
   productId?: string;
   startDate?: Date;
   endDate?: Date;
@@ -94,9 +97,9 @@ function dateRange(params: InventoryReportParams) {
 }
 
 function productWhere(params: InventoryReportParams): Prisma.ProductWhereInput | undefined {
-  const where: Prisma.ProductWhereInput = {};
-  if (params.categoryId) where.category_id = params.categoryId;
-  if (params.supplierId) where.supplier_id = params.supplierId;
+  const where: Prisma.ProductWhereInput = productFilterWhere(params.filters);
+  if (params.categoryId && !where.category_id) where.category_id = params.categoryId;
+  if (params.supplierId && !where.supplier_id) where.supplier_id = params.supplierId;
   return Object.keys(where).length ? where : undefined;
 }
 
@@ -279,9 +282,20 @@ export class InventoryReportService {
   private async purchases(params: InventoryReportParams) {
     const where: Prisma.PurchaseWhereInput = {};
     if (params.branchId) where.warehouse_branch_id = params.branchId;
-    if (params.supplierId) where.supplier_id = params.supplierId;
+    // Vendor = the bill's supplier here; the other filters narrow the product.
+    const vendorIds = params.filters?.supplierIds.length
+      ? params.filters.supplierIds
+      : params.supplierId
+        ? [params.supplierId]
+        : [];
+    if (vendorIds.length) where.supplier_id = { in: vendorIds };
     if (params.productId) where.product_id = params.productId;
-    if (params.categoryId) where.product = { category_id: params.categoryId };
+    const purchaseProductWhere = productWhere({
+      ...params,
+      supplierId: undefined,
+      filters: params.filters && { ...params.filters, supplierIds: [] },
+    });
+    if (purchaseProductWhere) where.product = purchaseProductWhere;
     const range = dateRange(params);
     if (range) where.purchase_date = range;
 
@@ -391,7 +405,8 @@ export class InventoryReportService {
     const where: Prisma.TransferWhereInput = {};
     if (params.branchId) where.OR = [{ from_branch_id: params.branchId }, { to_branch_id: params.branchId }];
     if (params.productId) where.product_id = params.productId;
-    if (params.categoryId) where.product = { category_id: params.categoryId };
+    const transferProductWhere = productWhere(params);
+    if (transferProductWhere) where.product = transferProductWhere;
     const range = dateRange(params);
     if (range) where.transfer_date = range;
 

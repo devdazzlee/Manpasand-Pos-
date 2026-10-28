@@ -55,6 +55,8 @@ export interface SalesQuery {
   sortOrder?: "asc" | "desc";
   /** When true (default), return rows appear like old POS. */
   includeReturns?: boolean;
+  /** Vendor / category / subcategory / stitch params (see catalogFilterParams). */
+  catalog?: Record<string, string>;
 }
 
 export interface SalesListResult {
@@ -80,6 +82,7 @@ function toParams(q: SalesQuery): Record<string, unknown> {
     sortBy: q.sortBy,
     sortOrder: q.sortOrder,
     includeReturns: q.includeReturns === false ? false : true,
+    ...(q.catalog ?? {}),
   });
 }
 

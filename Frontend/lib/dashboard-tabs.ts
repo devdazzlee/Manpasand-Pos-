@@ -103,6 +103,7 @@ export const INSIGHTS_REPORT_IDS = new Set([
 export const SALES_BY_DIMENSION_IDS = new Set([
   "category",
   "subcategory",
+  "stitch",
   "brand",
   "collection",
   "size",

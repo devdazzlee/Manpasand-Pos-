@@ -1,5 +1,6 @@
 import { Prisma, SaleItemType, SaleStatus } from '@prisma/client';
 import { prisma } from '../prisma/client';
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
 import { localRange } from '../utils/timezone';
 
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
@@ -58,7 +59,8 @@ export class ProductSalesProfitService {
     from: string;
     to: string;
     branchId?: string;
-    categoryId?: string;
+    /** Vendor / category / subcategory / stitch (multi-select). */
+    filters?: ProductFilters;
     productId?: string;
     search?: string;
     userRole?: string;
@@ -71,7 +73,7 @@ export class ProductSalesProfitService {
 
     const productFilter: Prisma.ProductWhereInput = {
       ...(params.productId ? { id: params.productId } : {}),
-      ...(params.categoryId ? { category_id: params.categoryId } : {}),
+      ...productFilterWhere(params.filters),
       ...(search
         ? {
             OR: [
@@ -83,7 +85,7 @@ export class ProductSalesProfitService {
         : {}),
     };
 
-    const hasProductFilter = Boolean(params.productId || params.categoryId || search);
+    const hasProductFilter = Boolean(params.productId || hasProductFilters(params.filters) || search);
 
     const saleWhere: Prisma.SaleWhereInput = {
       sale_date: { gte: start, lte: end },

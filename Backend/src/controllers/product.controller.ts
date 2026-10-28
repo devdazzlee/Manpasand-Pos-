@@ -9,6 +9,7 @@ import { parse as csvParse } from 'csv-parse/sync';
 import XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
+import { parseProductFilters } from '../utils/product-filters';
 
 const productService = new ProductService();
 const reportsService = new ReportsService();
@@ -147,6 +148,12 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
         stock_status: stockStatus,
         branch_id: branch_id as string | undefined,
         fetchAll: fetch_all ? fetch_all === 'true' : false,
+        filters: parseProductFilters({
+            categoryIds: req.query.categoryIds,
+            subcategoryIds: req.query.subcategoryIds,
+            supplierIds: req.query.supplierIds,
+            stitchTypes: req.query.stitchTypes,
+        }),
     });
 
     new ApiResponse(result.data, 'Products retrieved successfully', 200, true, result.meta).send(res);

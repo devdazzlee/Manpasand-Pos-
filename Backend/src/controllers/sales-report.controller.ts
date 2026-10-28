@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { SalesReportService } from '../services/sales-report.service';
+import { parseProductFilters } from '../utils/product-filters';
 
 const service = new SalesReportService();
 
@@ -14,6 +15,7 @@ export const getItemwiseSalesReport = asyncHandler(async (req: Request, res: Res
     productId: req.query.productId ? String(req.query.productId) : undefined,
     search: req.query.search ? String(req.query.search) : undefined,
     branchId: req.query.branchId ? String(req.query.branchId) : undefined,
+    filters: parseProductFilters(req.query),
     userRole: req.user?.role,
     userBranchId: req.user?.branch_id,
   });

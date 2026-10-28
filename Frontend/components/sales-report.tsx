@@ -66,6 +66,15 @@ import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { rangeForPreset } from "@/lib/business-timezone";
 import { downloadSalesReportPdf } from "@/lib/sales-report-pdf";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  STITCH_LABEL,
+  useCatalogFilterLabel,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 type Preset = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
 type Mode = "customer" | "item";
@@ -87,6 +96,10 @@ interface Line {
   sku: string;
   item: string;
   unit: string;
+  category?: string;
+  subcategory?: string;
+  vendor?: string;
+  stitchType?: "STITCHED" | "UNSTITCHED" | null;
   quantity: number;
   rate: number;
   discount?: number;
@@ -165,6 +178,8 @@ export function SalesReport() {
   const [productId, setProductId] = useState("all");
   const [branchId, setBranchId] = useState("all");
   const [search, setSearch] = useState("");
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
+  const catalogLabel = useCatalogFilterLabel(catalog);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -193,6 +208,7 @@ export function SalesReport() {
       if (mode === "item" && productId !== "all") params.productId = productId;
       if (mode === "item" && debouncedSearch) params.search = debouncedSearch;
       if (branchId !== "all") params.branchId = branchId;
+      Object.assign(params, catalogFilterParams(catalog));
       const response = await apiClient.get("/sales-report/itemwise", { params });
       setReport(response.data.data);
     } catch (error: any) {
@@ -204,7 +220,7 @@ export function SalesReport() {
     } finally {
       setLoading(false);
     }
-  }, [from, to, mode, customerId, productId, branchId, debouncedSearch, toast]);
+  }, [from, to, mode, customerId, productId, branchId, debouncedSearch, catalog, toast]);
 
   useEffect(() => {
     load();
@@ -246,6 +262,7 @@ export function SalesReport() {
     (customerId !== "all" ? 1 : 0) +
     (productId !== "all" ? 1 : 0) +
     (branchId !== "all" ? 1 : 0) +
+    (hasCatalogFilters(catalog) ? 1 : 0) +
     (search.trim() ? 1 : 0);
 
   const clearFilters = () => {
@@ -253,6 +270,7 @@ export function SalesReport() {
     setCustomerId("all");
     setProductId("all");
     setBranchId("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setSearch("");
   };
 
@@ -272,7 +290,7 @@ export function SalesReport() {
       : report?.products.find((product) => product.id === productId)?.name || "Item";
   const branchName =
     branchId === "all" ? null : report?.branches?.find((branch) => branch.id === branchId)?.name || null;
-  const filterLabel = [mode === "customer" ? customerName : itemName, branchName].filter(Boolean).join(" · ");
+  const filterLabel = [mode === "customer" ? customerName : itemName, catalogLabel, branchName].filter(Boolean).join(" · ");
 
   // ----- derived: counts, results, insights -----
   const typeCounts = useMemo(() => {
@@ -363,13 +381,17 @@ export function SalesReport() {
       line.branch || "",
       line.sku,
       line.item,
+      line.category || "",
+      line.subcategory || "",
+      line.stitchType ? STITCH_LABEL[line.stitchType] : "",
+      line.vendor || "",
       line.unit,
       line.quantity,
       line.rate,
       line.discount ?? 0,
       line.amount,
     ]);
-  const EXPORT_HEADER = ["Date", "Voucher", "Type", "Customer", "Branch", "SKU", "Item", "Unit", "Qty", "Rate", "Discount", "Amount"];
+  const EXPORT_HEADER = ["Date", "Voucher", "Type", "Customer", "Branch", "SKU", "Item", "Category", "Subcategory", "Stitched / Unstitched", "Vendor", "Unit", "Qty", "Rate", "Discount", "Amount"];
 
   const summaryRows = (): (string | number)[][] => [
     ["Period", periodLabel(from, to)],
@@ -396,7 +418,7 @@ export function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, name);
     };
     add("Summary", [["Item", "Value"], ...summaryRows()], [18, 40]);
-    add("Lines", [EXPORT_HEADER, ...exportRows()], [18, 20, 10, 22, 16, 14, 30, 8, 8, 10, 10, 12]);
+    add("Lines", [EXPORT_HEADER, ...exportRows()], [18, 20, 10, 22, 16, 14, 30, 16, 16, 12, 18, 8, 8, 10, 10, 12]);
     add(
       "Top items",
       [["Item", "SKU", "Qty sold", "Amount"], ...topItems.map((row) => [row.name, row.sku, row.quantity, Math.round(row.amount * 100) / 100])],
@@ -865,6 +887,12 @@ export function SalesReport() {
               </div>
             ) : null}
           </div>
+
+          <CatalogFilterBar
+            value={catalog}
+            onChange={setCatalog}
+            className="border-t border-dashed border-indigo-200 pt-4 [&_label]:text-xs [&_label]:font-semibold [&_label]:text-indigo-900/80"
+          />
         </div>
       </Card>
 

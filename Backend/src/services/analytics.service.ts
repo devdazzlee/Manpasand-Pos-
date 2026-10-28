@@ -4,6 +4,7 @@ import { AppError } from '../utils/apiError';
 import { businessTodayYmd, localRange, shiftBusinessYmd, toBusinessYmd } from '../utils/timezone';
 import { SUPPLIER_CASH_TYPES, supplierAging, supplierEffect } from './supplier-accounts.service';
 import { REGISTER_PAYMENT_COPY } from './register-cash-out.helper';
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
 
 /* ============================================================
  * Business insight reports: sales by attribute, slow movers,
@@ -24,7 +25,8 @@ const SOLD = { notIn: [SaleStatus.CANCELLED, SaleStatus.PENDING] };
 const DAY = 86_400_000;
 
 export type Range = { from: string; to: string; branchId?: string };
-export type SalesDimension = 'category' | 'subcategory' | 'brand' | 'color' | 'size' | 'collection' | 'supplier' | 'product';
+export type SalesDimension = 'category' | 'subcategory' | 'stitch' | 'brand' | 'color' | 'size' | 'collection' | 'supplier' | 'product';
+const STITCH_LABEL: Record<string, string> = { STITCHED: 'Stitched', UNSTITCHED: 'Unstitched' };
 
 const BOOK_OF: Record<string, 'cash' | 'bank' | null> = {
   CASH: 'cash',
@@ -52,11 +54,12 @@ const METHOD_LABEL: Record<string, string> = {
 export class AnalyticsService {
   /* ------------------------------ sales by attribute ------------------------------ */
 
-  async salesBy(dimension: SalesDimension, range: Range) {
+  async salesBy(dimension: SalesDimension, range: Range & { filters?: ProductFilters }) {
     const { start, end } = localRange(range.from, range.to);
     const items = await prisma.saleItem.findMany({
       where: {
         sale: { sale_date: { gte: start, lte: end }, status: SOLD, ...(range.branchId ? { branch_id: range.branchId } : {}) },
+        ...(hasProductFilters(range.filters) ? { product: productFilterWhere(range.filters) } : {}),
       },
       select: {
         quantity: true,
@@ -70,6 +73,7 @@ export class AnalyticsService {
             sku: true,
             purchase_rate: true,
             collection: true,
+            stitch_type: true,
             category: { select: { id: true, name: true } },
             subcategory: { select: { id: true, name: true } },
             brand: { select: { id: true, name: true } },
@@ -89,6 +93,8 @@ export class AnalyticsService {
           return [p.category?.id ?? 'none', p.category?.name ?? 'Uncategorised'];
         case 'subcategory':
           return [p.subcategory?.id ?? 'none', p.subcategory?.name ?? 'No sub-category'];
+        case 'stitch':
+          return [p.stitch_type ?? 'none', p.stitch_type ? STITCH_LABEL[p.stitch_type] : 'Not set'];
         case 'brand':
           return [p.brand?.id ?? 'none', p.brand?.name ?? 'No brand'];
         case 'color':

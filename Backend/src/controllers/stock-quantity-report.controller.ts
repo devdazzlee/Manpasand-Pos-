@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { StockQuantityReportService } from '../services/stock-quantity-report.service';
+import { parseProductFilters } from '../utils/product-filters';
 
 const service = new StockQuantityReportService();
 
@@ -10,7 +11,7 @@ export const getStockQuantityReport = asyncHandler(async (req: Request, res: Res
   const report = await service.report({
     from: String(req.query.from),
     to: String(req.query.to),
-    categoryId: req.query.categoryId ? String(req.query.categoryId) : undefined,
+    filters: parseProductFilters(req.query),
     branchId: req.query.branchId ? String(req.query.branchId) : undefined,
     type,
     activity: req.query.activity === 'moved' ? 'moved' : 'all',

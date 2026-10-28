@@ -99,6 +99,15 @@ import {
   type LabelBarcodeMode,
 } from "@/lib/labelBarcode"
 import { isReadOnlyRole } from "@/lib/role-utils"
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  StitchTabs,
+  catalogFilterParams,
+  hasCatalogFilters,
+  type CatalogFilters,
+  type StitchType,
+} from "@/components/catalog-filter-bar"
 
 // Image compression utility
 const compressImage = (file: File, quality = 0.7, maxWidth = 800, maxHeight = 600): Promise<File> => {
@@ -365,6 +374,7 @@ interface ProductFormData {
   color_id?: string
   size_id?: string
   collection?: string
+  stitch_type?: StitchType | null
   is_active?: boolean
   display_on_pos?: boolean
   display_on_website?: boolean
@@ -804,6 +814,15 @@ const ProductForm = ({
       {/* Basic Information */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Basic Information</h3>
+        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
+          <Label className="text-sm font-medium">Stitched / Unstitched</Label>
+          <StitchTabs
+            value={formData.stitch_type ?? "all"}
+            onChange={(value) => updateFormData("stitch_type", value === "all" ? null : value)}
+            allLabel="Not set"
+          />
+          <span className="text-xs text-muted-foreground">Used by every report&apos;s Stitched / Unstitched tab.</span>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="name">Product Name *</Label>
@@ -1445,8 +1464,8 @@ export default function Inventory() {
   // dropdowns. Must not collide with any real ID — using "all" alone broke
   // when a record happened to have id="all" and Radix Select treated two items
   // as selected at once ("All CategoriesAll" in the trigger).
-  const [selectedCategory, setSelectedCategory] = useState("__all__")
-  const [selectedSubcategory, setSelectedSubcategory] = useState("__all__")
+  // Vendor / category / subcategory (multi-select) + Stitched / Unstitched tab.
+  const [catalogFilters, setCatalogFilters] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS)
   // Catalog quick filters: status / stock health / featured
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "ACTIVE" | "INACTIVE" | "OUT" | "LOW" | "FEATURED" | "HIDDEN_WEB"
@@ -1723,8 +1742,7 @@ export default function Inventory() {
         page: currentPage,
         limit,
         search: searchTerm.trim() || undefined,
-        categoryId: selectedCategory !== "__all__" ? selectedCategory : undefined,
-        subcategoryId: selectedSubcategory !== "__all__" ? selectedSubcategory : undefined,
+        catalogParams: catalogFilterParams(catalogFilters),
         isActive:
           statusFilter === "ACTIVE" ? true : statusFilter === "INACTIVE" ? false : undefined,
         isFeatured: statusFilter === "FEATURED" ? true : undefined,
@@ -1739,8 +1757,7 @@ export default function Inventory() {
     currentPage,
     pageSize,
     searchTerm,
-    selectedCategory,
-    selectedSubcategory,
+    catalogFilters,
     statusFilter,
   ])
 
@@ -1791,8 +1808,7 @@ export default function Inventory() {
 
   const hasActiveFilters =
     searchTerm.trim() !== "" ||
-    selectedCategory !== "__all__" ||
-    selectedSubcategory !== "__all__" ||
+    hasCatalogFilters(catalogFilters) ||
     statusFilter !== "ALL"
 
   // "Loading" = a fetch is in flight, or none has completed yet (no meta), and
@@ -1832,24 +1848,6 @@ export default function Inventory() {
       lowStock,
     }
   }, [globalProducts, productsMeta])
-
-  const subcategoryFilterOptions = useMemo(() => {
-    return subcategories
-      .filter((sub) => {
-        if (!sub.id || !sub.name) return false
-        if (String(sub.name).trim().toLowerCase() === "unknown") return false
-        if (
-          selectedCategory !== "__all__" &&
-          sub.category_id &&
-          sub.category_id !== selectedCategory
-        ) {
-          return false
-        }
-        return true
-      })
-      .map((sub) => ({ id: sub.id, name: sub.name }))
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }, [subcategories, selectedCategory])
 
   const filteredProductCount = productsMeta?.total ?? filteredProductsAll.length
 
@@ -2191,6 +2189,7 @@ export default function Inventory() {
         color_id: fresh.color?.id ?? "",
         size_id: fresh.size?.id ?? "",
         collection: fresh.collection ?? "",
+        stitch_type: fresh.stitch_type ?? null,
         is_active: fresh.is_active ?? true,
         display_on_pos: fresh.display_on_pos ?? true,
         display_on_website: fresh.display_on_website ?? true,
@@ -2321,6 +2320,7 @@ export default function Inventory() {
         color_id: fresh.color?.id ?? "",
         size_id: fresh.size?.id ?? "",
         collection: fresh.collection ?? "",
+        stitch_type: fresh.stitch_type ?? null,
         is_active: fresh.is_active ?? true,
         display_on_pos: fresh.display_on_pos ?? true,
         display_on_website: fresh.display_on_website ?? true,
@@ -2460,8 +2460,7 @@ export default function Inventory() {
 
   const clearCatalogFilters = () => {
     setSearchTerm("")
-    setSelectedCategory("__all__")
-    setSelectedSubcategory("__all__")
+    setCatalogFilters(EMPTY_CATALOG_FILTERS)
     setStatusFilter("ALL")
     setCurrentPage(1)
   }
@@ -2846,7 +2845,7 @@ export default function Inventory() {
           })}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
           <form
             className="relative min-w-0 sm:col-span-2"
             autoComplete="off"
@@ -2893,45 +2892,6 @@ export default function Inventory() {
             ) : null}
           </form>
           <Select
-            value={selectedCategory}
-            onValueChange={(v) => {
-              setSelectedCategory(v)
-              setSelectedSubcategory("__all__")
-              setCurrentPage(1)
-            }}
-          >
-            <SelectTrigger className="h-10 w-full">
-              <SelectValue placeholder="All Categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Categories</SelectItem>
-              {categoryOptions.map((category) => (
-                <SelectItem key={category.id} value={category.id}>
-                  {category.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={selectedSubcategory}
-            onValueChange={(v) => {
-              setSelectedSubcategory(v)
-              setCurrentPage(1)
-            }}
-          >
-            <SelectTrigger className="h-10 w-full">
-              <SelectValue placeholder="All Subcategories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Subcategories</SelectItem>
-              {subcategoryFilterOptions.map((sub) => (
-                <SelectItem key={sub.id} value={sub.id}>
-                  {sub.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
             value={sortBy}
             onValueChange={(v) => {
               setSortBy(v)
@@ -2970,6 +2930,14 @@ export default function Inventory() {
             </SelectContent>
           </Select>
         </div>
+
+        <CatalogFilterBar
+          value={catalogFilters}
+          onChange={(next) => {
+            setCatalogFilters(next)
+            setCurrentPage(1)
+          }}
+        />
 
         {hasActiveFilters && (
           <div className="flex justify-end">
