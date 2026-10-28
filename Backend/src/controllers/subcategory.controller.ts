@@ -31,13 +31,15 @@ export const deleteSubcategory = asyncHandler(async (req: Request, res: Response
 });
 
 export const listSubcategories = asyncHandler(async (req: Request, res: Response) => {
-    const { page = 1, limit = 10, search, is_active } = req.query;
+    const { page = 1, limit = 10, search, is_active, display_on_pos } = req.query;
 
     const result = await subcategoryService.listSubcategories({
         page: Number(page),
         limit: Number(limit),
         search: search as string | undefined,
         is_active: is_active ? is_active === 'true' : undefined,
+        // Unset = every subcategory, so ones hidden from POS still show in admin.
+        display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
     });
 
     new ApiResponse(result.data, 'Subcategories retrieved successfully', 200).send(res);
