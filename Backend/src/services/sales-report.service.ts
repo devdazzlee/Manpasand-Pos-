@@ -1,6 +1,7 @@
 import { Prisma, SaleItemType, SaleStatus } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { localRange } from './purchase-report.service';
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
 
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
 const INCLUDED_STATUSES: SaleStatus[] = ['COMPLETED', 'REFUNDED', 'EXCHANGED'];
@@ -38,6 +39,7 @@ export class SalesReportService {
     productId?: string;
     search?: string;
     branchId?: string;
+    filters?: ProductFilters;
     userRole?: string;
     userBranchId?: string | null;
   }) {
@@ -58,17 +60,23 @@ export class SalesReportService {
           ],
         }
       : undefined;
+    // Vendor / category / subcategory / stitch narrow the lines in both modes.
+    const catalogFilter = hasProductFilters(params.filters) ? productFilterWhere(params.filters) : undefined;
+    const itemFilter: Prisma.SaleItemWhereInput | undefined = (() => {
+      const parts: Prisma.SaleItemWhereInput[] = [];
+      if (productId) parts.push({ product_id: productId });
+      else if (mode === 'item' && productSearchFilter) parts.push({ product: productSearchFilter });
+      if (catalogFilter) parts.push({ product: catalogFilter });
+      if (!parts.length) return undefined;
+      return parts.length === 1 ? parts[0] : { AND: parts };
+    })();
 
     const saleWhere: Prisma.SaleWhereInput = {
       sale_date: { gte: start, lte: end },
       status: { in: INCLUDED_STATUSES },
       ...(branchId ? { branch_id: branchId } : {}),
       ...(customerId ? { customer_id: customerId } : {}),
-      ...(productId
-        ? { sale_items: { some: { product_id: productId } } }
-        : mode === 'item' && productSearchFilter
-          ? { sale_items: { some: { product: productSearchFilter } } }
-          : {}),
+      ...(itemFilter ? { sale_items: { some: itemFilter } } : {}),
     };
 
     const [sales, customers, products, branches] = await Promise.all([
@@ -78,12 +86,19 @@ export class SalesReportService {
           customer: { select: { id: true, name: true, phone_number: true, mobile_number: true } },
           branch: { select: { id: true, name: true } },
           sale_items: {
-            where: productId
-              ? { product_id: productId }
-              : mode === 'item' && productSearchFilter
-                ? { product: productSearchFilter }
-                : undefined,
-            include: { product: { include: { unit: true, size: true, color: true } } },
+            where: itemFilter,
+            include: {
+              product: {
+                include: {
+                  unit: true,
+                  size: true,
+                  color: true,
+                  category: { select: { name: true } },
+                  subcategory: { select: { name: true } },
+                  supplier: { select: { name: true } },
+                },
+              },
+            },
           },
         },
         orderBy: { sale_date: 'asc' },
@@ -95,7 +110,7 @@ export class SalesReportService {
       }),
       // Lean select (no 500 cap) so every active item is pickable in the filter.
       prisma.product.findMany({
-        where: { is_active: true },
+        where: { is_active: true, ...(catalogFilter || {}) },
         select: {
           id: true,
           name: true,
@@ -138,6 +153,10 @@ export class SalesReportService {
             sku: item.product.sku || item.product.code,
             item: itemLabel(item.product),
             unit: item.product.unit?.name || 'Pcs',
+            category: item.product.category?.name || '',
+            subcategory: item.product.subcategory?.name || '',
+            vendor: item.product.supplier?.name || '',
+            stitchType: item.product.stitch_type || null,
             quantity: round2(quantity),
             rate: round2(rate),
             discount: round2(num(item.discount_amount)),

@@ -124,6 +124,8 @@ interface StoreState {
     isFeatured?: boolean
     displayOnWebsite?: boolean
     stockStatus?: "out" | "low"
+    /** Multi-select vendor / category / subcategory / stitch params. */
+    catalogParams?: Record<string, string>
   }) => Promise<void>
   fetchCategories: (force?: boolean) => Promise<void>
   fetchCustomers: (options?: {
@@ -273,6 +275,7 @@ export const useStore = create<StoreState>()(
         isFeatured?: boolean
         displayOnWebsite?: boolean
         stockStatus?: "out" | "low"
+        catalogParams?: Record<string, string>
       }) => {
         const {
           force = false,
@@ -286,6 +289,7 @@ export const useStore = create<StoreState>()(
           isFeatured,
           displayOnWebsite,
           stockStatus,
+          catalogParams,
         } = options ?? {}
         const state = get()
         const now = Date.now()
@@ -298,7 +302,8 @@ export const useStore = create<StoreState>()(
           displayOnPos !== undefined ||
           isFeatured !== undefined ||
           displayOnWebsite !== undefined ||
-          Boolean(stockStatus)
+          Boolean(stockStatus) ||
+          Boolean(catalogParams && Object.keys(catalogParams).length)
 
         if (!hasFilters && !force) {
           if (
@@ -368,6 +373,7 @@ export const useStore = create<StoreState>()(
           if (isFeatured !== undefined) params.is_featured = isFeatured
           if (displayOnWebsite !== undefined) params.display_on_website = displayOnWebsite
           if (stockStatus) params.stock_status = stockStatus
+          if (catalogParams) Object.assign(params, catalogParams)
 
           const res = await apiClient.get("/products", { params })
           const rawProducts = Array.isArray(res.data?.data) ? res.data.data : []

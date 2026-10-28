@@ -17,7 +17,7 @@ export function BulkProductUpload() {
       const response = await apiClient.get(`${API_BASE}/products/export/excel`, {
         responseType: "blob",
         params: {
-          columns: "product_name,purchase_rate,sales_rate_inc,stock,min_qty,max_qty,category_name,brand_name"
+          columns: "product_name,purchase_rate,sales_rate_inc,stock,min_qty,max_qty,category_name,subcategory_name,stitch_type,supplier_name,brand_name"
         }
       });
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -101,6 +101,22 @@ export function BulkProductUpload() {
           {
             name: "Stock",
             description: "Initial stock quantity (optional).",
+          },
+          {
+            name: "Category",
+            description: "Category name; created if it doesn't exist (optional).",
+          },
+          {
+            name: "Subcategory",
+            description: "Subcategory name (optional).",
+          },
+          {
+            name: "Stitched / Unstitched",
+            description: "Write Stitched or Unstitched; leave blank if not set (optional).",
+          },
+          {
+            name: "Supplier",
+            description: "Vendor name (optional).",
           },
         ]}
         onRow={async (row, index) => {

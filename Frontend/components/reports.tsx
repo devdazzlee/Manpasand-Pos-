@@ -48,6 +48,13 @@ import {
   type DatePreset,
 } from "@/lib/business-timezone"
 import { cn } from "@/lib/utils"
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  useCatalogFilterLabel,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar"
 
 /** Format YYYY-MM-DD without UTC shift. */
 const formatYmd = (ymd: string) => {
@@ -128,6 +135,8 @@ export function Reports() {
   const [draftTo, setDraftTo] = useState(initial.to)
 
   const [loading, setLoading] = useState(true)
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS)
+  const catalogLabel = useCatalogFilterLabel(catalog)
   const [hasLoaded, setHasLoaded] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [totalRevenue, setTotalRevenue] = useState(0)
@@ -204,6 +213,7 @@ export function Reports() {
         }
       }
 
+      Object.assign(params, catalogFilterParams(catalog))
       const reportsRes = await apiClient.get("/reports", { params })
       const reportsData = reportsRes.data?.data || {}
       const sales = reportsData.sales || []
@@ -302,7 +312,7 @@ export function Reports() {
     } finally {
       setLoading(false)
     }
-  }, [from, to, buildDaily, toast])
+  }, [from, to, catalog, buildDaily, toast])
 
   useEffect(() => {
     fetchReportsData()
@@ -335,6 +345,7 @@ export function Reports() {
     setTo(range.to)
     setDraftFrom(range.from)
     setDraftTo(range.to)
+    setCatalog(EMPTY_CATALOG_FILTERS)
   }
 
   const periodLabel =
@@ -517,8 +528,9 @@ export function Reports() {
       </div>
 
       <CompactReportFilters
-        summary={periodLabel}
+        summary={[periodLabel, catalogLabel].filter(Boolean).join(" · ")}
         loading={loading && hasLoaded}
+        catalog={<CatalogFilterBar value={catalog} onChange={setCatalog} />}
         defaultOpen
         actions={
           <>

@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { addDecimal, asNumber } from '../utils/helpers';
 import { generateUniqueNumericSku, isNineDigitNumericSku } from '../utils/numericBarcodeSku';
 import { parsePagination, paginationMeta, MAX_LIMIT } from '../utils/pagination';
+import { ProductFilters, productFilterWhere } from '../utils/product-filters';
 
 
 type RelationField =
@@ -334,6 +335,7 @@ export class ProductService {
         if ((data as any).collection !== undefined) {
             productData.collection = (data as any).collection?.trim() || null;
         }
+        if (data.stitch_type !== undefined) productData.stitch_type = data.stitch_type || null;
         const lb = data.label_barcode?.trim();
         if (lb) productData.label_barcode = lb;
         const cc = data.custom_code?.trim();
@@ -365,6 +367,7 @@ export class ProductService {
         if (data.is_deal !== undefined) updateData.is_deal = data.is_deal;
         if (data.is_featured !== undefined) updateData.is_featured = data.is_featured;
         if ((data as any).collection !== undefined) updateData.collection = (data as any).collection?.trim() || null;
+        if (data.stitch_type !== undefined) updateData.stitch_type = data.stitch_type || null;
         if (data.label_barcode !== undefined) {
             const lb = data.label_barcode?.trim();
             updateData.label_barcode = lb ? lb : null;
@@ -1084,6 +1087,7 @@ export class ProductService {
         stock_status,
         branch_id,
         fetchAll = false,
+        filters,
     }: {
         page?: number;
         limit?: number;
@@ -1102,8 +1106,10 @@ export class ProductService {
         stock_status?: 'out' | 'low';
         branch_id?: string;
         fetchAll?: boolean;
+        /** Multi-select vendor / category / subcategory / stitch filters. */
+        filters?: ProductFilters;
     }) {
-        const where: Prisma.ProductWhereInput = {};
+        const where: Prisma.ProductWhereInput = { ...productFilterWhere(filters) };
 
         if (search) {
             where.OR = [
@@ -1170,6 +1176,7 @@ export class ProductService {
             display_on_pos: true,
             display_on_website: true,
             is_featured: true,
+            stitch_type: true,
             created_at: true,
             updated_at: true,
             category: {

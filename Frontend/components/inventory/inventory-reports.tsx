@@ -56,6 +56,13 @@ import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
 import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
 import { downloadExcel, downloadBrandedPdf, formatMoney, formatQty, yieldForUi } from "@/components/inventory/stock-ops/export-utils";
 import { cn } from "@/lib/utils";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 // ---------------------------------------------------------------- types & config
 
@@ -500,8 +507,8 @@ export function InventoryReports() {
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
   const [filterBranch, setFilterBranch] = useState("all");
-  const [filterCategory, setFilterCategory] = useState("all");
-  const [filterSupplier, setFilterSupplier] = useState("all");
+  // Vendor / category / subcategory (multi-select) + Stitched / Unstitched.
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const [chip, setChip] = useState("all");
   const [sort, setSort] = useState(REPORTS[0].sorts[0].value);
   const [preset, setPreset] = useState<DatePreset>("all");
@@ -528,14 +535,13 @@ export function InventoryReports() {
 
   useEffect(() => {
     setPage(1);
-  }, [search, filterBranch, filterCategory, filterSupplier, chip, sort, filterStart, filterEnd, pageSize]);
+  }, [search, filterBranch, catalog, chip, sort, filterStart, filterEnd, pageSize]);
 
   const buildParams = useCallback(
     (extra: Record<string, string> = {}) => {
       const params: Record<string, string> = { type: reportType, sort, ...extra };
       if (filterBranch !== "all") params.branchId = filterBranch;
-      if (filterCategory !== "all") params.categoryId = filterCategory;
-      if (active.supplier && filterSupplier !== "all") params.supplierId = filterSupplier;
+      Object.assign(params, catalogFilterParams(catalog));
       if (search) params.q = search;
       if (active.chipKey && chip !== "all") params[active.chipKey] = chip;
       if (active.dates) {
@@ -548,7 +554,7 @@ export function InventoryReports() {
       }
       return params;
     },
-    [reportType, sort, filterBranch, filterCategory, filterSupplier, search, chip, filterStart, filterEnd, active],
+    [reportType, sort, filterBranch, catalog, search, chip, filterStart, filterEnd, active],
   );
 
   const fetchReport = useCallback(async () => {
@@ -631,8 +637,7 @@ export function InventoryReports() {
   const activeFilterCount =
     (search ? 1 : 0) +
     (filterBranch !== "all" ? 1 : 0) +
-    (filterCategory !== "all" ? 1 : 0) +
-    (active.supplier && filterSupplier !== "all" ? 1 : 0) +
+    (hasCatalogFilters(catalog) ? 1 : 0) +
     (chip !== "all" ? 1 : 0) +
     (active.dates && preset !== defaultPreset ? 1 : 0);
 
@@ -640,8 +645,7 @@ export function InventoryReports() {
     setSearchInput("");
     setSearch("");
     setFilterBranch("all");
-    setFilterCategory("all");
-    setFilterSupplier("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setChip("all");
     applyPreset(defaultPreset);
   };
@@ -1021,34 +1025,6 @@ export function InventoryReports() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1.5">
-              <Label className={filterLabel}>Category</Label>
-              <ReportItemCombobox
-                value={filterCategory}
-                onChange={setFilterCategory}
-                items={categories.filter((c) => (c.name || "").toLowerCase() !== "unknown").map((c) => ({ id: c.id, name: c.name, sku: null }))}
-                placeholder="All categories"
-                allLabel="All categories"
-                searchPlaceholder="Search categories…"
-                emptyText="No categories found"
-                className={filterControl}
-              />
-            </div>
-            {active.supplier ? (
-              <div className="space-y-1.5">
-                <Label className={filterLabel}>Supplier</Label>
-                <ReportItemCombobox
-                  value={filterSupplier}
-                  onChange={setFilterSupplier}
-                  items={suppliers.map((x) => ({ id: x.id, name: x.name, sku: null }))}
-                  placeholder="All suppliers"
-                  allLabel="All suppliers"
-                  searchPlaceholder="Search suppliers…"
-                  emptyText="No suppliers found"
-                  className={filterControl}
-                />
-              </div>
-            ) : null}
             {active.dates
               ? (
                   [
@@ -1117,6 +1093,13 @@ export function InventoryReports() {
               </div>
             ) : null}
           </div>
+
+          <CatalogFilterBar
+            value={catalog}
+            onChange={setCatalog}
+            vendorLabel={active.supplier ? "Vendor" : "Product vendor"}
+            className="mt-4 border-t border-dashed pt-4 [&_label]:text-xs [&_label]:font-semibold"
+          />
         </div>
       </Card>
 

@@ -9,6 +9,7 @@ import { parse as csvParse } from 'csv-parse/sync';
 import XLSX from 'xlsx';
 import fs from 'fs';
 import path from 'path';
+import { parseProductFilters } from '../utils/product-filters';
 
 const productService = new ProductService();
 const reportsService = new ReportsService();
@@ -147,6 +148,12 @@ export const listProducts = asyncHandler(async (req: Request, res: Response) => 
         stock_status: stockStatus,
         branch_id: branch_id as string | undefined,
         fetchAll: fetch_all ? fetch_all === 'true' : false,
+        filters: parseProductFilters({
+            categoryIds: req.query.categoryIds,
+            subcategoryIds: req.query.subcategoryIds,
+            supplierIds: req.query.supplierIds,
+            stitchTypes: req.query.stitchTypes,
+        }),
     });
 
     new ApiResponse(result.data, 'Products retrieved successfully', 200, true, result.meta).send(res);
@@ -205,6 +212,7 @@ export const exportProductsToExcel = asyncHandler(async (req: Request, res: Resp
         subcategory_id: 'Subcategory ID',
         subcategory_name: 'Subcategory',
         subcategory_code: 'Subcategory Code',
+        stitch_type: 'Stitched / Unstitched',
         unit_id: 'Unit ID',
         unit_name: 'Unit',
         unit_code: 'Unit Code',
@@ -286,6 +294,8 @@ export const exportProductsToExcel = asyncHandler(async (req: Request, res: Resp
             subcategory_id: product.subcategory_id || '',
             subcategory_name: product.subcategory?.name || '',
             subcategory_code: product.subcategory?.code || '',
+            stitch_type:
+                product.stitch_type === 'STITCHED' ? 'Stitched' : product.stitch_type === 'UNSTITCHED' ? 'Unstitched' : '',
             unit_id: product.unit_id,
             unit_name: product.unit?.name || '',
             unit_code: product.unit?.code || '',
@@ -385,6 +395,16 @@ function parseExcelBoolean(value: unknown, fallback: boolean): boolean {
     if (['true', 'yes', '1', 'y'].includes(normalized)) return true;
     if (['false', 'no', '0', 'n'].includes(normalized)) return false;
     return fallback;
+}
+
+/** "Stitched" / "Unstitched" (also "Un-Stitched", "S", "U"); blank or unknown → not set. */
+function parseStitchType(value: unknown): 'STITCHED' | 'UNSTITCHED' | undefined {
+    if (value === undefined || value === null) return undefined;
+    const text = String(value).trim().toLowerCase();
+    if (!text) return undefined;
+    if (/un[\s_-]*stitch/.test(text) || text === 'u') return 'UNSTITCHED';
+    if (/stitch/.test(text) || text === 's') return 'STITCHED';
+    return undefined;
 }
 
 function mapBulkUploadRow(prod: Record<string, unknown>) {
@@ -508,6 +528,9 @@ function mapBulkUploadRow(prod: Record<string, unknown>) {
         brand_name: pickCell(prod, 'brand_name', 'brand', 'Brand') as string | undefined,
         color_name: pickCell(prod, 'color_name', 'color', 'Color') as string | undefined,
         size_name: pickCell(prod, 'size_name', 'size', 'Size') as string | undefined,
+        stitch_type: parseStitchType(
+            pickCell(prod, 'Stitched / Unstitched', 'stitch_type', 'Stitch Type', 'Stitched/Unstitched', 'Stitching'),
+        ),
     };
 }
 

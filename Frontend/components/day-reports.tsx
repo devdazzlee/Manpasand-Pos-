@@ -72,6 +72,14 @@ import {
   updateExpense,
   type ExpensePaymentMethod,
 } from "@/lib/api/expenses";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  useCatalogFilterLabel,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 type DayView = "revenue" | "cash" | "credit" | "expenses";
 type Preset = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
@@ -199,6 +207,8 @@ export function DayReports({
   const [draftTo, setDraftTo] = useState(initial.to);
   const [search, setSearch] = useState("");
   const [branchId, setBranchId] = useState("all");
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
+  const catalogLabel = useCatalogFilterLabel(catalog);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<string>("20");
   const [exporting, setExporting] = useState(false);
@@ -261,6 +271,8 @@ export function DayReports({
       const base: Record<string, string | number> = { from, to, view };
       if (search.trim()) base.search = search.trim();
       if (branchId !== "all") base.branchId = branchId;
+      // Expenses aren't tied to products, so the catalog filters apply to sales views only.
+      if (view !== "expenses") Object.assign(base, catalogFilterParams(catalog));
 
       const stale = () => gen !== loadGenRef.current;
 
@@ -287,7 +299,7 @@ export function DayReports({
     } finally {
       if (gen === loadGenRef.current) setLoading(false);
     }
-  }, [from, to, view, page, pageSize, pageLimit, search, branchId, toast]);
+  }, [from, to, view, page, pageSize, pageLimit, search, branchId, catalog, toast]);
 
   const exportExpensesExcel = async () => {
     if (view !== "expenses") return;
@@ -376,6 +388,7 @@ export function DayReports({
     setDraftTo(range.to);
     setSearch("");
     setBranchId("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setPage(1);
   };
 
@@ -736,7 +749,28 @@ export function DayReports({
       <CompactReportFilters
         defaultOpen
         loading={isRefreshing}
-        summary={`${periodDisplay(preset, from, to)} · ${report?.scopeLabel || "All locations"}`}
+        summary={[periodDisplay(preset, from, to), report?.scopeLabel || "All locations", view !== "expenses" ? catalogLabel : ""]
+          .filter(Boolean)
+          .join(" · ")}
+        catalog={
+          view !== "expenses" ? (
+            <div className="space-y-2">
+              <CatalogFilterBar
+                value={catalog}
+                onChange={(next) => {
+                  setCatalog(next);
+                  setPage(1);
+                }}
+              />
+              {hasCatalogFilters(catalog) ? (
+                <p className="text-xs text-slate-500">
+                  Showing bills that contain matching items; amounts count only those items
+                  {view === "cash" ? ", and customer account payments are left out" : ""}.
+                </p>
+              ) : null}
+            </div>
+          ) : undefined
+        }
         actions={
           <>
             {preset === "custom" ? (

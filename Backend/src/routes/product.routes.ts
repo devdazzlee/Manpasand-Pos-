@@ -65,6 +65,34 @@ router.post('/import-row', authenticate, productWriters, importProductRow);
 router.delete('/all', authenticate, authorize(['SUPER_ADMIN']), deleteAllProducts);
 router.get('/', validate(listProductsSchema), listProducts);
 router.get('/pos-catalog', authenticate, getPosCatalog);
+// Options for the report filter bar, readable by every signed-in role.
+router.get(
+  '/catalog-filter-options',
+  authenticate,
+  asyncHandler(async (_req, res) => {
+    const named = { select: { id: true, name: true }, orderBy: { name: 'asc' as const } };
+    const [suppliers, categories, subcategories, links] = await Promise.all([
+      prisma.supplier.findMany(named),
+      prisma.category.findMany(named),
+      prisma.subcategory.findMany(named),
+      // Subcategories carry no category of their own; a link is any product using the pair.
+      prisma.product.findMany({
+        where: { subcategory_id: { not: null } },
+        select: { category_id: true, subcategory_id: true },
+        distinct: ['category_id', 'subcategory_id'],
+      }),
+    ]);
+    new ApiResponse(
+      {
+        suppliers,
+        categories,
+        subcategories,
+        links: links.map((l) => ({ categoryId: l.category_id, subcategoryId: l.subcategory_id as string })),
+      },
+      'Catalog filter options',
+    ).send(res);
+  }),
+);
 // Live check for the product form: is this custom barcode free? (+ next free suggestion)
 router.get(
   '/barcode-availability',

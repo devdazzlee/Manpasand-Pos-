@@ -22,6 +22,13 @@ import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { CompactReportFilters } from "@/components/report-filters-shell";
 import { rangeForPreset } from "@/lib/business-timezone";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  useCatalogFilterLabel,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 type Preset = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
 
@@ -101,7 +108,8 @@ export function ProductSalesProfit() {
   const [to, setTo] = useState(initial.to);
   const [draftFrom, setDraftFrom] = useState(initial.from);
   const [draftTo, setDraftTo] = useState(initial.to);
-  const [categoryId, setCategoryId] = useState("all");
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
+  const catalogLabel = useCatalogFilterLabel(catalog);
   const [branchId, setBranchId] = useState("all");
   const [search, setSearch] = useState("");
   const [report, setReport] = useState<ReportData | null>(null);
@@ -111,7 +119,7 @@ export function ProductSalesProfit() {
     setLoading(true);
     try {
       const params: Record<string, string> = { from, to };
-      if (categoryId !== "all") params.categoryId = categoryId;
+      Object.assign(params, catalogFilterParams(catalog));
       if (branchId !== "all") params.branchId = branchId;
       if (search.trim()) params.search = search.trim();
       const response = await apiClient.get("/product-sales-profit", { params });
@@ -125,7 +133,7 @@ export function ProductSalesProfit() {
     } finally {
       setLoading(false);
     }
-  }, [from, to, categoryId, branchId, search, toast]);
+  }, [from, to, catalog, branchId, search, toast]);
 
   useEffect(() => {
     const timer = setTimeout(load, search ? 300 : 0);
@@ -159,17 +167,14 @@ export function ProductSalesProfit() {
     setTo(range.to);
     setDraftFrom(range.from);
     setDraftTo(range.to);
-    setCategoryId("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setBranchId("all");
     setSearch("");
   };
 
   const rows = report?.rows || [];
   const totals = report?.totals;
-  const categoryName =
-    categoryId === "all"
-      ? "All categories"
-      : report?.categories.find((category) => category.id === categoryId)?.name || "Category";
+  const categoryName = catalogLabel || "All categories";
   const branchName =
     branchId === "all"
       ? "All locations"
@@ -311,28 +316,9 @@ export function ProductSalesProfit() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-1">
-              <Label>Category</Label>
-              {loading && !report ? (
-                <Skeleton className="h-9 w-full rounded-md" />
-              ) : (
-                <Select value={categoryId} onValueChange={setCategoryId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All categories" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All categories</SelectItem>
-                    {(report?.categories || []).map((category) => (
-                      <SelectItem key={category.id} value={category.id}>
-                        {category.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
           </>
         }
+        catalog={<CatalogFilterBar value={catalog} onChange={setCatalog} />}
         advanced={
           <>
             <DateField

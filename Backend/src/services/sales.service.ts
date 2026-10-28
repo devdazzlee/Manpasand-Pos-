@@ -11,6 +11,7 @@ import { LoyaltyService, pointsToEarn, redemptionValue, loyaltySettings } from '
 import { GiftCardService, validateGiftCardTenders } from './gift-card.service';
 import { saleAccountingService } from './sale-accounting.service';
 import { lineUnitCost } from './product-cost.service';
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
 
 const promotionService = new PromotionService();
 const loyaltyService = new LoyaltyService();
@@ -122,6 +123,7 @@ class SaleService {
     sortBy = 'sale_date',
     sortOrder = 'desc',
     includeReturns = false,
+    filters,
   }: {
     branchId?: string;
     page?: number;
@@ -144,12 +146,15 @@ class SaleService {
      * to include them.
      */
     includeReturns?: boolean;
+    /** Vendor / category / subcategory / stitch: bills holding such items. */
+    filters?: ProductFilters;
   }) {
     const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
 
     const where: Prisma.SaleWhereInput = {
       ...(branchId ? { branch_id: branchId } : {}),
       ...(cashierId ? { created_by: cashierId } : {}),
+      ...(hasProductFilters(filters) ? { sale_items: { some: { product: productFilterWhere(filters) } } } : {}),
       ...(customerId ? { customer_id: customerId } : {}),
       ...(salespersonId ? { salesperson_id: salespersonId === 'none' ? null : salespersonId } : {}),
       ...(paymentMethod && Object.values(PaymentMethod).includes(paymentMethod as PaymentMethod)

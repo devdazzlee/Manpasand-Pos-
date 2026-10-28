@@ -49,6 +49,14 @@ import apiClient from "@/lib/apiClient";
 import { cn } from "@/lib/utils";
 import { rangeForPreset } from "@/lib/business-timezone";
 import { downloadPurchaseReportPdf } from "@/lib/purchase-report-pdf";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  useCatalogFilterLabel,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 type Preset = "all" | "today" | "yesterday" | "last7" | "last30" | "custom";
 type Mode = "vendor" | "item";
@@ -152,6 +160,8 @@ export function PurchaseReport() {
   const [productId, setProductId] = useState("all");
   const [branchId, setBranchId] = useState("all");
   const [search, setSearch] = useState("");
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
+  const catalogLabel = useCatalogFilterLabel(catalog);
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -176,7 +186,7 @@ export function PurchaseReport() {
   // Any change that alters the result set returns to page 1.
   useEffect(() => {
     setPage(1);
-  }, [from, to, mode, supplierId, productId, branchId, debouncedSearch, typeFilter, debouncedQuery, sortKey, pageSize]);
+  }, [from, to, mode, supplierId, productId, branchId, catalog, debouncedSearch, typeFilter, debouncedQuery, sortKey, pageSize]);
 
   const searching = (mode === "item" && search.trim() !== debouncedSearch) || resultQuery.trim() !== debouncedQuery;
   const isFirstLoad = loading && !report;
@@ -191,9 +201,10 @@ export function PurchaseReport() {
       if (branchId !== "all") params.branchId = branchId;
       if (typeFilter !== "ALL") params.type = typeFilter;
       if (debouncedQuery) params.q = debouncedQuery;
+      Object.assign(params, catalogFilterParams(catalog));
       return params;
     },
-    [from, to, mode, sortKey, supplierId, productId, debouncedSearch, branchId, typeFilter, debouncedQuery],
+    [from, to, mode, sortKey, supplierId, productId, debouncedSearch, branchId, catalog, typeFilter, debouncedQuery],
   );
 
   const load = useCallback(async () => {
@@ -246,12 +257,14 @@ export function PurchaseReport() {
     (supplierId !== "all" ? 1 : 0) +
     (productId !== "all" ? 1 : 0) +
     (branchId !== "all" ? 1 : 0) +
+    (hasCatalogFilters(catalog) ? 1 : 0) +
     (search.trim() ? 1 : 0);
   const clearFilters = () => {
     applyPreset(DEFAULT_PRESET);
     setSupplierId("all");
     setProductId("all");
     setBranchId("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
     setSearch("");
   };
 
@@ -270,7 +283,7 @@ export function PurchaseReport() {
         : "All items"
       : report?.products.find((p) => p.id === productId)?.name || "Item";
   const branchName = branchId === "all" ? null : report?.branches?.find((b) => b.id === branchId)?.name || null;
-  const filterLabel = [mode === "vendor" ? vendorName : itemName, branchName].filter(Boolean).join(" · ");
+  const filterLabel = [mode === "vendor" ? vendorName : itemName, catalogLabel, branchName].filter(Boolean).join(" · ");
 
   const purchasesAmount = totals?.purchasesAmount ?? totals?.amount ?? 0;
   const returnsAmount = totals?.returnsAmount ?? 0;
@@ -754,6 +767,12 @@ export function PurchaseReport() {
               </div>
             ) : null}
           </div>
+
+          <CatalogFilterBar
+            value={catalog}
+            onChange={setCatalog}
+            className="border-t border-dashed pt-4 [&_label]:text-xs [&_label]:font-semibold"
+          />
         </div>
       </Card>
 

@@ -12,6 +12,7 @@ export function CompactReportFilters({
   summary,
   primary,
   advanced,
+  catalog,
   actions,
   defaultOpen = false,
   loading = false,
@@ -19,6 +20,8 @@ export function CompactReportFilters({
   summary?: string;
   primary: ReactNode;
   advanced?: ReactNode;
+  /** Full-width row, e.g. the Vendor / Category / Stitched filter bar. */
+  catalog?: ReactNode;
   actions?: ReactNode;
   defaultOpen?: boolean;
   /** Shows a small "Updating…" indicator while results reload. */
@@ -61,6 +64,7 @@ export function CompactReportFilters({
           {advanced ? (
             <div className={cn(FIELD_GRID, "border-t border-dashed border-indigo-200 pt-4")}>{advanced}</div>
           ) : null}
+          {catalog ? <div className="border-t border-dashed border-indigo-200 pt-4">{catalog}</div> : null}
         </div>
       ) : null}
     </Card>

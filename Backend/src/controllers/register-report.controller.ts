@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { RegisterReportService } from '../services/register-report.service';
+import { parseProductFilters } from '../utils/product-filters';
 
 const service = new RegisterReportService();
 
@@ -14,6 +15,7 @@ export const getRegisterReport = asyncHandler(async (req: Request, res: Response
     paymentMethod: req.query.paymentMethod ? String(req.query.paymentMethod) : undefined,
     transactionType: req.query.transactionType ? String(req.query.transactionType) : undefined,
     status: req.query.status ? String(req.query.status) : undefined,
+    filters: parseProductFilters(req.query),
     userRole: req.user?.role,
     userBranchId: req.user?.branch_id,
   });

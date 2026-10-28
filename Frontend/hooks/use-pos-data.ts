@@ -66,6 +66,7 @@ export function usePosData() {
     isFeatured?: boolean
     displayOnWebsite?: boolean
     stockStatus?: "out" | "low"
+    catalogParams?: Record<string, string>
   }) => 
     fetchProductsAction(options), [fetchProductsAction])
 

@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { localRange } from './purchase-report.service';
 import { REGISTER_PAYMENT_COPY } from './register-cash-out.helper';
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
 
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
 const VIEWS = new Set(['revenue', 'cash', 'credit', 'expenses']);
@@ -33,6 +34,8 @@ export class DayReportService {
     limit?: number;
     fetchAll?: boolean;
     branchId?: string;
+    /** Vendor / category / subcategory / stitch (sales views only). */
+    filters?: ProductFilters;
     userRole?: string;
     userBranchId?: string | null;
   }) {
@@ -88,6 +91,7 @@ export class DayReportService {
 
     return this.salesReport({
       view,
+      filters: params.filters,
       start,
       end,
       from: params.from,
@@ -106,6 +110,7 @@ export class DayReportService {
 
   private async salesReport(input: {
     view: Exclude<DayReportView, 'expenses'>;
+    filters?: ProductFilters;
     start: Date;
     end: Date;
     from: string;
@@ -125,6 +130,12 @@ export class DayReportService {
       status: { notIn: [SaleStatus.CANCELLED, SaleStatus.PENDING] },
       ...(input.branchId ? { branch_id: input.branchId } : {}),
     };
+    // With catalog filters: bills holding matching items, valued at those lines only.
+    const catalogFiltered = hasProductFilters(input.filters);
+    const itemWhere: Prisma.SaleItemWhereInput | undefined = catalogFiltered
+      ? { product: productFilterWhere(input.filters) }
+      : undefined;
+    if (itemWhere) saleWhere.sale_items = { some: itemWhere };
 
     if (input.view === 'cash') {
       saleWhere.AND = [{ OR: [{ payment_method: PaymentMethod.CASH }, { payments: { some: { method: PaymentMethod.CASH } } }] }];
@@ -153,7 +164,8 @@ export class DayReportService {
         take: input.limit,
       }),
       prisma.sale.count({ where: saleWhere }),
-      input.view === 'cash'
+      // Account payments can't be tied to products, so a filtered view leaves them out.
+      input.view === 'cash' && !catalogFiltered
         ? prisma.customerPayment.aggregate({
             where: {
               payment_date: { gte: input.start, lte: input.end },
@@ -167,6 +179,20 @@ export class DayReportService {
         : Promise.resolve({ _sum: { amount: null }, _count: { id: 0 } }),
     ]);
 
+    const lineAmounts = itemWhere
+      ? new Map(
+          (
+            await prisma.saleItem.groupBy({
+              by: ['sale_id'],
+              where: { ...itemWhere, sale: saleWhere },
+              _sum: { line_total: true },
+            })
+          ).map((row) => [row.sale_id, num(row._sum.line_total)]),
+        )
+      : null;
+    const amountOf = (sale: { id: string; total_amount: unknown }) =>
+      lineAmounts ? lineAmounts.get(sale.id) ?? 0 : num(sale.total_amount);
+
     const saleRows = sales
       .filter((sale) => !isRegenerated(sale.notes))
       .map((sale) => ({
@@ -177,17 +203,17 @@ export class DayReportService {
         paymentMethod: sale.payment_method,
         status: sale.payment_status || sale.status,
         date: sale.sale_date.toISOString(),
-        amount: round2(num(sale.total_amount)),
+        amount: round2(amountOf(sale)),
         branch: sale.branch,
         details: String(sale.payment_method),
       }));
 
     const allSales = await prisma.sale.findMany({
       where: saleWhere,
-      select: { total_amount: true, notes: true, payment_method: true, payments: { select: { method: true, amount: true } } },
+      select: { id: true, total_amount: true, notes: true, payment_method: true, payments: { select: { method: true, amount: true } } },
     });
     const validSales = allSales.filter((sale) => !isRegenerated(sale.notes));
-    const salesTotal = round2(validSales.reduce((sum, sale) => sum + num(sale.total_amount), 0));
+    const salesTotal = round2(validSales.reduce((sum, sale) => sum + amountOf(sale), 0));
     const paymentsTotal = round2(num(cashPaymentsAgg._sum.amount));
     const paymentEntries = cashPaymentsAgg._count.id;
     const periodTotal =
@@ -195,7 +221,7 @@ export class DayReportService {
     const entries =
       input.view === 'cash' ? validSales.length + paymentEntries : validSales.length;
     const average = entries > 0 ? round2(periodTotal / entries) : 0;
-    const amounts = validSales.map((s) => num(s.total_amount));
+    const amounts = validSales.map((s) => amountOf(s));
     const highest = amounts.length ? round2(Math.max(...amounts)) : 0;
 
     // Portion of each bill paid by a tender (split bills count only their share).
@@ -204,9 +230,9 @@ export class DayReportService {
       if (parts.length > 1) {
         const paid = parts.reduce((t, p) => t + num(p.amount), 0);
         const own = parts.filter((p) => String(p.method) === method).reduce((t, p) => t + num(p.amount), 0);
-        return paid > 0 ? (num(sale.total_amount) * own) / paid : 0;
+        return paid > 0 ? (amountOf(sale) * own) / paid : 0;
       }
-      return String(sale.payment_method) === method ? num(sale.total_amount) : 0;
+      return String(sale.payment_method) === method ? amountOf(sale) : 0;
     };
     const cashShare = round2(validSales.reduce((sum, s) => sum + tenderShare(s, 'CASH'), 0));
     const creditShare = round2(validSales.reduce((sum, s) => sum + tenderShare(s, 'CREDIT'), 0));
@@ -218,6 +244,7 @@ export class DayReportService {
       branches: input.branches,
       scopeLabel: input.scopeLabel,
       isAdmin: input.isAdmin,
+      catalogFiltered,
       summary: {
         periodTotal,
         entries,

@@ -3,6 +3,7 @@ import { prisma } from '../prisma/client';
 
 export { localRange, BUSINESS_TIMEZONE } from '../utils/timezone';
 import { localRange } from '../utils/timezone';
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
 
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
 
@@ -28,6 +29,8 @@ export class PurchaseReportService {
     productId?: string;
     search?: string;
     branchId?: string;
+    /** Vendor / category / subcategory / stitch (multi-select). */
+    filters?: ProductFilters;
     /** Paging/filters applied to the merged line list (server side). */
     page?: number;
     limit?: number;
@@ -58,25 +61,43 @@ export class PurchaseReportService {
         }
       : undefined;
 
+    // Vendors here are the bill's supplier; the rest narrow by the product.
+    const vendorIds = params.filters?.supplierIds.length ? params.filters.supplierIds : undefined;
+    const catalogFilter = hasProductFilters(params.filters)
+      ? productFilterWhere({ ...params.filters, supplierIds: [] })
+      : undefined;
+    const hasCatalogFilter = Boolean(catalogFilter && Object.keys(catalogFilter).length);
+    const itemProductFilter: Prisma.ProductWhereInput | undefined = (() => {
+      const parts: Prisma.ProductWhereInput[] = [];
+      if (mode === 'item' && !productId && productSearchFilter) parts.push(productSearchFilter);
+      if (hasCatalogFilter) parts.push(catalogFilter!);
+      if (!parts.length) return undefined;
+      return parts.length === 1 ? parts[0] : { AND: parts };
+    })();
+    const supplierScope = supplierId
+      ? { supplier_id: supplierId }
+      : vendorIds
+        ? { supplier_id: { in: vendorIds } }
+        : {};
+
     const purchaseWhere: Prisma.PurchaseWhereInput = {
       purchase_date: { gte: start, lte: end },
       ...(branchId ? { warehouse_branch_id: branchId } : {}),
-      ...(supplierId ? { supplier_id: supplierId } : {}),
+      ...supplierScope,
       ...(productId ? { product_id: productId } : {}),
-      ...(mode === 'item' && !productId && productSearchFilter
-        ? { product: productSearchFilter }
-        : {}),
+      ...(itemProductFilter ? { product: itemProductFilter } : {}),
     };
+    const returnItemWhere: Prisma.PurchaseReturnItemWhereInput | undefined = productId
+      ? { product_id: productId, ...(hasCatalogFilter ? { product: catalogFilter } : {}) }
+      : itemProductFilter
+        ? { product: itemProductFilter }
+        : undefined;
     const returnWhere: Prisma.PurchaseReturnWhereInput = {
       return_date: { gte: start, lte: end },
       status: { not: 'CANCELLED' },
       ...(branchId ? { branch_id: branchId } : {}),
-      ...(supplierId ? { supplier_id: supplierId } : {}),
-      ...(productId
-        ? { items: { some: { product_id: productId } } }
-        : mode === 'item' && productSearchFilter
-          ? { items: { some: { product: productSearchFilter } } }
-          : {}),
+      ...supplierScope,
+      ...(returnItemWhere ? { items: { some: returnItemWhere } } : {}),
     };
 
     const [purchases, returns, suppliers, products, branches] = await Promise.all([
@@ -94,11 +115,7 @@ export class PurchaseReportService {
         include: {
           supplier: { select: { id: true, name: true, code: true } },
           items: {
-            where: productId
-              ? { product_id: productId }
-              : mode === 'item' && productSearchFilter
-                ? { product: productSearchFilter }
-                : undefined,
+            where: returnItemWhere,
             include: { product: { include: { unit: true, size: true, color: true } } },
           },
         },
@@ -110,7 +127,7 @@ export class PurchaseReportService {
       }),
       // Lean select, no 500 cap, so every active item can be picked.
       prisma.product.findMany({
-        where: { is_active: true },
+        where: { is_active: true, ...(hasCatalogFilter ? catalogFilter : {}) },
         select: {
           id: true,
           name: true,

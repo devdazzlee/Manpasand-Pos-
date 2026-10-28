@@ -1,6 +1,7 @@
 import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { localRange } from '../utils/timezone';
+import { ProductFilters, productFilterSql } from '../utils/product-filters';
 
 const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
 
@@ -37,7 +38,8 @@ export class StockQuantityReportService {
   async report(params: {
     from: string;
     to: string;
-    categoryId?: string;
+    /** Vendor / category / subcategory / stitch (multi-select). */
+    filters?: ProductFilters;
     branchId?: string;
     type?: 'all' | 'finished' | 'loose';
     search?: string;
@@ -112,7 +114,7 @@ export class StockQuantityReportService {
       LEFT JOIN "Color" col ON col.id = p.color_id
       LEFT JOIN "Category" cat ON cat.id = p.category_id
       WHERE p.is_active = true
-        ${params.categoryId ? Prisma.sql`AND p.category_id = ${params.categoryId}` : Prisma.empty}
+        ${productFilterSql(params.filters, 'p')}
         ${type === 'finished' ? Prisma.sql`AND p.is_finished_good = true AND p.is_loose_item = false` : Prisma.empty}
         ${type === 'loose' ? Prisma.sql`AND p.is_loose_item = true` : Prisma.empty}
         ${search ? Prisma.sql`AND (p.name ILIKE ${`%${search}%`} OR p.sku ILIKE ${`%${search}%`} OR p.code ILIKE ${`%${search}%`})` : Prisma.empty}

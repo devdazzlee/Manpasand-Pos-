@@ -2,6 +2,7 @@ import { Request, Response } from 'express';
 import asyncHandler from '../middleware/asyncHandler';
 import { ReportsService } from '../services/reports.service';
 import { ApiResponse } from '../utils/apiResponse';
+import { parseProductFilters } from '../utils/product-filters';
 import { businessTodayYmd, isYmd, shiftBusinessYmd } from '../utils/timezone';
 
 const reportsService = new ReportsService();
@@ -24,7 +25,7 @@ export const getReportsData = asyncHandler(async (req: Request, res: Response) =
     to = swap;
   }
 
-  const q = { branchId, userRole, from, to };
+  const q = { branchId, userRole, from, to, filters: parseProductFilters(req.query) };
 
   const [sales, bestSellingProducts, stats, employeePerformance] = await Promise.all([
     reportsService.getSalesForReports(q),

@@ -4,6 +4,7 @@ import { requirePermission } from '../middleware/permission.middleware';
 import { ApiResponse } from '../utils/apiResponse';
 import { AppError } from '../utils/apiError';
 import { AnalyticsService, assertRange, SalesDimension } from '../services/analytics.service';
+import { parseProductFilters } from '../utils/product-filters';
 
 const service = new AnalyticsService();
 const router = Router();
@@ -23,7 +24,7 @@ const range = (req: Request) => {
   return { from, to, branchId };
 };
 
-const DIMENSIONS: SalesDimension[] = ['category', 'subcategory', 'brand', 'color', 'size', 'collection', 'supplier', 'product'];
+const DIMENSIONS: SalesDimension[] = ['category', 'subcategory', 'stitch', 'brand', 'color', 'size', 'collection', 'supplier', 'product'];
 const financial = requirePermission('reports.financial', { approvable: false });
 
 router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER']));
@@ -33,7 +34,7 @@ router.get(
   wrap(async (req) => {
     const dim = (str(req.query.dimension) || 'category') as SalesDimension;
     if (!DIMENSIONS.includes(dim)) throw new AppError(400, `dimension must be one of ${DIMENSIONS.join(', ')}`);
-    return service.salesBy(dim, range(req));
+    return service.salesBy(dim, { ...range(req), filters: parseProductFilters(req.query) });
   }, 'Sales by attribute'),
 );
 

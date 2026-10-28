@@ -3,6 +3,7 @@ import asyncHandler from "../middleware/asyncHandler";
 import { SaleService } from "../services/sales.service";
 import { ApiResponse } from "../utils/apiResponse";
 import { parseYmdBound } from "../utils/timezone";
+import { parseProductFilters } from '../utils/product-filters';
 
 const saleService = new SaleService();
 
@@ -102,6 +103,7 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
         sortBy,
         sortOrder,
         includeReturns,
+        filters: parseProductFilters(req.query),
     });
 
     console.log(

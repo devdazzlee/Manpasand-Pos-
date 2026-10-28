@@ -2,6 +2,7 @@ import { ExpenseStatus, Prisma, SaleStatus } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { localRange } from '../utils/timezone';
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
 import {
   buildRegisterReport,
   paymentBucket,
@@ -33,6 +34,8 @@ export class RegisterReportService {
     paymentMethod?: string;
     transactionType?: string;
     status?: string;
+    /** Vendor / category / subcategory / stitch: narrows sales, not the drawer count. */
+    filters?: ProductFilters;
     userRole?: string;
     userBranchId?: string | null;
   }) {
@@ -179,7 +182,12 @@ export class RegisterReportService {
       reference: payment.reference,
     }));
 
-    const report = buildRegisterReport({
+    const reportFilters = {
+      paymentMethod: params.paymentMethod,
+      transactionType: params.transactionType,
+      status: params.status,
+    };
+    const fullReport = buildRegisterReport({
       sessions,
       sales,
       expenses,
@@ -187,12 +195,42 @@ export class RegisterReportService {
       cashIns: sessionsRaw.flatMap((session) =>
         session.cash_movements.map((m) => ({ id: m.id, amount: num(m.amount), date: m.created_at.toISOString(), reason: m.reason, cashierName: null })),
       ),
-      filters: {
-        paymentMethod: params.paymentMethod,
-        transactionType: params.transactionType,
-        status: params.status,
-      },
+      filters: reportFilters,
     });
+
+    // Catalog filters narrow the sales figures and transaction list to bills
+    // holding matching items. The drawer (expected cash / variance) stays on
+    // every sale, otherwise a filtered view would show a false shortage.
+    let report = fullReport;
+    const catalogFiltered = hasProductFilters(params.filters);
+    if (catalogFiltered) {
+      const matching = await prisma.sale.findMany({
+        where: { ...saleWhere, sale_items: { some: { product: productFilterWhere(params.filters) } } },
+        select: { id: true },
+      });
+      const ids = new Set(matching.map((row) => row.id));
+      const narrowed = buildRegisterReport({
+        sessions,
+        sales: sales.filter((sale) => ids.has(sale.id)),
+        expenses: [],
+        customerPayments: [],
+        cashIns: [],
+        filters: reportFilters,
+      });
+      report = {
+        ...fullReport,
+        salesSummary: narrowed.salesSummary,
+        payments: narrowed.payments,
+        transactions: narrowed.transactions,
+        cards: {
+          ...fullReport.cards,
+          grossSales: narrowed.cards.grossSales,
+          netSales: narrowed.cards.netSales,
+          otherPayments: narrowed.cards.otherPayments,
+          refunds: narrowed.cards.refunds,
+        },
+      };
+    }
 
     const registerStatus =
       sessions.length === 0 ? 'NONE' : sessions.some((session) => session.status === 'OPEN') ? 'OPEN' : 'CLOSED';
@@ -229,6 +267,7 @@ export class RegisterReportService {
         paymentMethods: ['CASH', 'CARD', 'BANK_TRANSFER', 'ONLINE', 'OTHER'],
       },
       ...report,
+      catalogFiltered,
       sessions: sessionRows,
     };
   }

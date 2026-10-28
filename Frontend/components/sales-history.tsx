@@ -127,6 +127,13 @@ import {
   startOfBusinessMonthYmd,
   startOfBusinessWeekYmd,
 } from "@/lib/business-timezone";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  catalogFilterParams,
+  hasCatalogFilters,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 interface SaleItem {
   id: string;
@@ -433,6 +440,7 @@ export function SalesHistory() {
   const [orderStatus, setOrderStatus] = useState<string>("all");
   const [cashierId, setCashierId] = useState<string>("all");
   const [salespersonFilter, setSalespersonFilter] = useState<string>("all");
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const { people: salespeople } = useSalespeople();
   const [salespersonTarget, setSalespersonTarget] = useState<Sale | null>(null);
   const [branchFilter, setBranchFilter] = useState<string>("all");
@@ -557,8 +565,10 @@ export function SalesHistory() {
       sortOrder,
       // Same as old POS: show return rows (negative) next to the original sale.
       includeReturns: true,
+      catalog: hasCatalogFilters(catalog) ? catalogFilterParams(catalog) : undefined,
     };
   }, [
+    catalog,
     resolveDateParams,
     isAdmin,
     branchFilter,
@@ -669,8 +679,10 @@ export function SalesHistory() {
     if (cashierId !== "all") count += 1;
     if (salespersonFilter !== "all") count += 1;
     if (branchFilter !== "all") count += 1;
+    if (hasCatalogFilters(catalog)) count += 1;
     return count;
   }, [
+    catalog,
     debouncedSearch,
     datePreset,
     paymentMethod,
@@ -693,6 +705,7 @@ export function SalesHistory() {
     setCashierId("all");
     setSalespersonFilter("all");
     setBranchFilter("all");
+    setCatalog(EMPTY_CATALOG_FILTERS);
   };
 
   const openEditSale = (sale: Sale) => {
@@ -1428,6 +1441,15 @@ export function SalesHistory() {
                   />
                 </div>
               )}
+
+              <CatalogFilterBar
+                value={catalog}
+                onChange={(next) => {
+                  setCatalog(next);
+                  setCurrentPage(1);
+                }}
+                className="border-t border-dashed border-indigo-200 pt-4 [&_label]:text-xs [&_label]:font-semibold [&_label]:text-indigo-900/80"
+              />
             </div>
           </Card>
         )}
