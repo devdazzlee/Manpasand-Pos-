@@ -197,6 +197,8 @@ const DEFAULT_CHART: DefaultSubType[] = [
           { name: 'Miscellaneous Expense', systemKey: 'MISC_EXPENSE' },
           // Register count vs expected at close (short = debit, over = credit)
           { name: 'Cash Short & Over', systemKey: 'CASH_OVER_SHORT' },
+          // Money Check: charges the bank takes that were never entered as an expense
+          { name: 'Bank Charges', systemKey: 'BANK_CHARGES' },
         ],
       },
       { code: '522', name: 'Payroll Expense', systemKey: 'PAYROLL', accounts: [] },
@@ -2647,6 +2649,73 @@ export class ChartOfAccountsService {
         })),
       lines: lines.slice(0, 3000).map((l) => ({ ...l, moneyIn: round2(l.moneyIn), moneyOut: round2(l.moneyOut) })),
       truncated: lines.length > 3000,
+    };
+  }
+
+  /**
+   * Money Check day book: every Cash / Bank posting on one business day with
+   * where it came from (sourceId / sourceRef), so each line can be opened and
+   * corrected, plus opening / in / out / closing per money account.
+   */
+  async moneyDay(params: { date: string; branchId?: string }) {
+    await this.ensureSetup();
+    const all = await this.loadAccountMeta();
+    const accounts = all.filter((a) => a.controlSystemKey === 'CASH_BANK' || a.systemKey === 'CASH' || a.systemKey === 'BANK');
+    const { start, end } = localRange(params.date, params.date);
+    const entries = await this.collectEntries({ start, end, branchId: params.branchId, accounts });
+    const per = new Map(accounts.map((a) => [a.id, { opening: 0, moneyIn: 0, moneyOut: 0 }]));
+    const lines: {
+      accountId: string;
+      date: Date | null;
+      kind: string;
+      reference: string | null;
+      description: string;
+      moneyIn: number;
+      moneyOut: number;
+      sourceId: string | null;
+      sourceRef: string | null;
+    }[] = [];
+    for (const e of entries) {
+      const acc = per.get(e.accountId);
+      if (!acc) continue;
+      // Opening balances and everything dated before the day roll into the opening.
+      if (e.before || !e.date || e.date < start) {
+        acc.opening += e.debit - e.credit;
+        continue;
+      }
+      if (e.date > end) continue;
+      acc.moneyIn += e.debit;
+      acc.moneyOut += e.credit;
+      lines.push({
+        accountId: e.accountId,
+        date: e.date,
+        kind: e.kind,
+        reference: e.reference,
+        description: e.description,
+        moneyIn: round2(e.debit),
+        moneyOut: round2(e.credit),
+        sourceId: e.sourceId ?? null,
+        sourceRef: e.sourceRef ?? null,
+      });
+    }
+    lines.sort((a, b) => (a.date?.getTime() ?? 0) - (b.date?.getTime() ?? 0));
+    return {
+      date: params.date,
+      accounts: accounts.map((a) => {
+        const b = per.get(a.id)!;
+        const isBank = a.systemKey === 'BANK' || (a.systemKey !== 'CASH' && /bank/i.test(a.name));
+        return {
+          id: a.id,
+          code: a.code,
+          name: a.name,
+          kind: isBank ? ('BANK' as const) : ('CASH' as const),
+          opening: round2(b.opening),
+          moneyIn: round2(b.moneyIn),
+          moneyOut: round2(b.moneyOut),
+          closing: round2(b.opening + b.moneyIn - b.moneyOut),
+        };
+      }),
+      lines,
     };
   }
 

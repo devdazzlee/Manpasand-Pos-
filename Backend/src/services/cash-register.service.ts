@@ -862,14 +862,16 @@ export class CashRegisterService {
       note?: string | null;
       reconciliations?: { method: string; actual: number; reference?: string | null; notes?: string | null }[];
     },
+    opts?: { closedAt?: Date },
   ) {
     let s = await this.session(sessionId);
     if (s.status !== 'OPEN') throw new AppError(400, 'This register is already closed');
     if (!(num(body.closing) >= 0)) throw new AppError(400, 'Count the cash in the drawer');
     // Pull every expense entered during this shift into the drawer before we freeze expected cash.
     if (await this.attachTodaysExpenses(s)) s = await this.session(sessionId);
-    // A reopened earlier day closes at the end of its own window, not "now".
-    const closedAt = await this.windowEnd(s);
+    // A reopened earlier day closes at the end of its own window, not "now";
+    // a register forgotten open is closed at the time given (end of its day).
+    const closedAt = opts?.closedAt ?? (await this.windowEnd(s));
     const live = await this.compute(s, closedAt);
     const variance = r2(num(body.closing) - live.expectedCash);
 
@@ -1156,6 +1158,54 @@ export class CashRegisterService {
       },
       byCashier: [...byCashier.values()].sort((a, b) => a.net - b.net),
     };
+  }
+
+  /** Live register maths for Money Check (expected cash / card / bank at a moment). */
+  async liveFigures(sessionId: string, at?: Date) {
+    const s = await this.session(sessionId);
+    const live = await this.compute(s, at);
+    return { session: s, live };
+  }
+
+  /**
+   * Correct a closed register's count without reopening it: the cash counted
+   * and / or the card / bank / wallet amounts. Expected figures, differences
+   * and the Cash in Hand / Bank entries are rebuilt from them.
+   */
+  async editClosing(
+    sessionId: string,
+    body: { closing?: number | null; reconciliations?: { method: string; actual: number }[]; note?: string | null },
+    actorId?: string | null,
+  ) {
+    const s = await this.session(sessionId);
+    if (s.status !== 'CLOSED') throw new AppError(400, 'Only a closed register can be corrected here');
+    if (body.closing != null && !(num(body.closing) >= 0)) throw new AppError(400, 'Cash counted cannot be negative');
+    const ops: Prisma.PrismaPromise<unknown>[] = [];
+    if (body.closing != null || body.note) {
+      ops.push(
+        prisma.cashFlow.update({
+          where: { id: s.id },
+          data: {
+            ...(body.closing != null ? { closing: new Prisma.Decimal(num(body.closing)) } : {}),
+            ...(body.note ? { variance_note: body.note.trim().slice(0, 500) } : {}),
+          },
+        }),
+      );
+    }
+    for (const rec of body.reconciliations ?? []) {
+      if (rec.method === 'CASH' || !BUCKET_TO_METHOD[rec.method === 'MOBILE_MONEY' ? 'ONLINE' : rec.method]) continue;
+      ops.push(
+        prisma.registerReconciliation.upsert({
+          where: { cashflow_id_method: { cashflow_id: s.id, method: rec.method } },
+          create: { cashflow_id: s.id, method: rec.method, expected: new Prisma.Decimal(0), actual: new Prisma.Decimal(num(rec.actual)), variance: new Prisma.Decimal(num(rec.actual)), reconciled_by: actorId ?? null },
+          update: { actual: new Prisma.Decimal(num(rec.actual)), reconciled_by: actorId ?? null },
+        }),
+      );
+    }
+    if (ops.length) await prisma.$transaction(ops);
+    // Expected, differences and the accounts entries follow the corrected count.
+    await this.recalculateClosed(s.id);
+    return this.detail(s.id);
   }
 
   /**

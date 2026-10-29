@@ -22,6 +22,7 @@ import { BalanceSheet } from "@/components/balance-sheet";
 import { TrialBalance } from "@/components/trial-balance";
 import { ChartOfAccounts } from "@/components/chart-of-accounts";
 import { MoneyFlow } from "@/components/accounts/money-flow";
+import { MoneyCheck } from "@/components/accounts/money-check";
 import { DayReports } from "@/components/day-reports";
 import { SalesReport } from "@/components/sales-report";
 import { PurchaseReport } from "@/components/purchase-report";
@@ -278,6 +279,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <TrialBalance />;
       case "money-flow":
         return <MoneyFlow />;
+      case "money-check":
+        return <MoneyCheck onNavigate={setActiveTab} />;
       case "chart-of-accounts":
         return <ChartOfAccounts initialTab="accounts" onNavigate={setActiveTab} />;
       case "journal-vouchers":
