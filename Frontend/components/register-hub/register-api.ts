@@ -77,6 +77,8 @@ export interface SessionDetail {
     cashOut: number;
     byMethod: Record<string, number>;
     expensesByMethod: Record<string, number>;
+    /** Card / bank / wallet that should be there at closing: sales by method minus expenses paid by it. */
+    expectedByMethod?: Record<string, number>;
     allExpenses: number;
     bills: number;
     netSales: number;

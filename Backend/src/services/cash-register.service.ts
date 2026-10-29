@@ -322,6 +322,17 @@ export class CashRegisterService {
       expensesByMethod[m] = r2(expensesByMethod[m] + e.amount);
     }
     const allExpenses = r2(Object.values(expensesByMethod).reduce((t, v) => t + v, 0));
+    // What card / bank / wallet should hold at closing, like cash: sales by that method minus the
+    // expenses paid by it. Expenses booked to a method with no sales of its own (e.g. a bank
+    // transfer on a card-only day) come out of card, which settles into the same bank account.
+    const expectedByMethod: Record<string, number> = {};
+    for (const m of ['CARD', 'BANK_TRANSFER', 'MOBILE_MONEY']) expectedByMethod[m] = r2((byMethod[m] || 0) - (expensesByMethod[m] || 0));
+    for (const m of ['BANK_TRANSFER', 'MOBILE_MONEY']) {
+      if (Math.abs(byMethod[m] || 0) < 0.005 && (expensesByMethod[m] || 0) > 0.005) {
+        expectedByMethod.CARD = r2(expectedByMethod.CARD - expensesByMethod[m]);
+        expectedByMethod[m] = 0;
+      }
+    }
     const cashOutItems = [
       ...outflows.filter((e) => String(e.paymentMethod).toUpperCase() === 'CASH'),
       ...outflowPack.purchases,
@@ -364,6 +375,7 @@ export class CashRegisterService {
       salesRows,
       byMethod,
       expensesByMethod,
+      expectedByMethod,
       allExpenses,
       bills: report.salesSummary.saleCount,
       netSales: report.salesSummary.netSales,
@@ -887,7 +899,7 @@ export class CashRegisterService {
       ...(body.reconciliations ?? []).filter((r) => r.method !== 'CASH' && BUCKET_TO_METHOD[r.method === 'MOBILE_MONEY' ? 'ONLINE' : r.method]),
     ];
     for (const rec of recs) {
-      const expected = rec.method === 'CASH' ? live.expectedCash : live.byMethod[rec.method] ?? 0;
+      const expected = rec.method === 'CASH' ? live.expectedCash : live.expectedByMethod[rec.method] ?? 0;
       const actual = num(rec.actual);
       ops.push(
         prisma.registerReconciliation.upsert({
@@ -1190,11 +1202,11 @@ export class CashRegisterService {
           variance: new Prisma.Decimal(variance),
         },
       }),
-      // Card / bank / wallet: expected follows the sales in the window; what was entered stays.
+      // Card / bank / wallet: expected follows the window (sales minus expenses paid by that method); what was entered stays.
       ...s.reconciliations
         .filter((rec) => rec.method !== 'CASH')
         .map((rec) => {
-          const expected = r2(live.byMethod[rec.method] ?? 0);
+          const expected = r2(live.expectedByMethod[rec.method] ?? 0);
           return prisma.registerReconciliation.update({
             where: { id: rec.id },
             data: { expected: new Prisma.Decimal(expected), variance: new Prisma.Decimal(r2(num(rec.actual) - expected)) },

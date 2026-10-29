@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AlertTriangle, ArrowDownCircle, ArrowUpCircle, Calculator, CheckCircle2, Coffee, Loader2, Lock, Repeat, ShieldAlert, UserCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -513,8 +513,18 @@ export function CloseRegisterDialog({
 
   // A reopened register keeps its last closing rows — show those methods and amounts again so they can be corrected.
   const previous = useMemo(() => new Map((session?.reconciliations ?? []).map((r) => [r.method, r])), [session]);
+  // Card / bank like cash: what should be there after expenses paid by that method.
+  const methodExpected = useCallback(
+    (m: string) => session?.live.expectedByMethod?.[m] ?? session?.live.byMethod[m] ?? 0,
+    [session],
+  );
   const methods = useMemo(
-    () => (session ? (["CARD", "BANK_TRANSFER", "MOBILE_MONEY"] as const).filter((m) => (session.live.byMethod[m] || 0) !== 0 || previous.has(m)) : []),
+    () =>
+      session
+        ? (["CARD", "BANK_TRANSFER", "MOBILE_MONEY"] as const).filter(
+            (m) => (session.live.byMethod[m] || 0) !== 0 || (session.live.expensesByMethod?.[m] || 0) !== 0 || previous.has(m),
+          )
+        : [],
     [session, previous],
   );
 
@@ -527,11 +537,11 @@ export function CloseRegisterDialog({
       Object.fromEntries(
         methods.map((m) => {
           const last = previous.get(m);
-          return [m, { actual: String(Math.round(last ? last.actual : session.live.byMethod[m] || 0)), reference: last?.reference ?? "" }];
+          return [m, { actual: String(Math.round(last ? last.actual : methodExpected(m))), reference: last?.reference ?? "" }];
         }),
       ),
     );
-  }, [open, session, methods, previous]);
+  }, [open, session, methods, previous, methodExpected]);
 
   if (!session) return null;
   const expected = session.live.expectedCash;
@@ -594,26 +604,38 @@ export function CloseRegisterDialog({
         {methods.length > 0 && (
           <div className="space-y-2">
             <Label>Card / bank / wallet reconciliation</Label>
+            <p className="text-xs text-stone-500">
+              Expenses paid by card / bank today are already taken off. Enter what is actually in the bank for today.
+            </p>
             <div className="overflow-hidden rounded-lg border border-stone-200">
               <table className="w-full text-sm">
                 <thead className="bg-stone-50 text-xs text-stone-500">
                   <tr>
                     <th className="px-3 py-2 text-left font-medium">Method</th>
-                    <th className="px-3 py-2 text-right font-medium">POS total</th>
-                    <th className="px-3 py-2 text-right font-medium">Actual received</th>
+                    <th className="px-3 py-2 text-right font-medium">Should be in bank</th>
+                    <th className="px-3 py-2 text-right font-medium">Actual in bank</th>
                     <th className="px-3 py-2 text-left font-medium">Batch / ref no.</th>
                     <th className="px-3 py-2 text-right font-medium">Diff</th>
                   </tr>
                 </thead>
                 <tbody>
                   {methods.map((m) => {
-                    const exp = session.live.byMethod[m] || 0;
+                    const exp = methodExpected(m);
+                    const sales = session.live.byMethod[m] || 0;
+                    const spent = sales - exp;
                     const act = Number(recs[m]?.actual || 0);
                     const diff = act - exp;
                     return (
                       <tr key={m} className="border-t border-stone-100">
                         <td className="px-3 py-2 font-medium">{METHOD_LABEL[m]}</td>
-                        <td className="px-3 py-2 text-right tabular-nums">{rs(exp)}</td>
+                        <td className="px-3 py-2 text-right tabular-nums">
+                          <div className="font-semibold">{rs(exp)}</div>
+                          {Math.abs(spent) > 0.5 && (
+                            <div className="text-[11px] font-normal text-stone-500">
+                              sales {rs(sales)} − expenses {rs(spent)}
+                            </div>
+                          )}
+                        </td>
                         <td className="px-3 py-1.5">
                           <Input
                             type="number"

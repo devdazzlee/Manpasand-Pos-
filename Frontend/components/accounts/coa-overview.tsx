@@ -137,7 +137,15 @@ export function CoaOverview({
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <BigCard dark label="Total cash & bank" value={rs(view.moneyTotal)} icon={Banknote} hint="Ready to spend" />
           {view.money.map((a) => (
-            <BigCard key={a.id} label={a.name} value={rs(a.natural)} icon={/bank/i.test(a.name) ? Landmark : Banknote} hint={a.code} onClick={() => onOpenAccount(a.id)} />
+            <BigCard
+              key={a.id}
+              label={a.name}
+              value={rs(a.natural)}
+              icon={/bank/i.test(a.name) ? Landmark : Banknote}
+              // Balance carries earlier days; the period line shows what came in / went out in the dates picked.
+              hint={`${periodLabel}: in ${rs(a.balance?.debit ?? 0)} · out ${rs(a.balance?.credit ?? 0)} · net ${rs((a.balance?.debit ?? 0) - (a.balance?.credit ?? 0))}`}
+              onClick={() => onOpenAccount(a.id)}
+            />
           ))}
         </div>
       </Section>
