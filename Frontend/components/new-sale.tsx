@@ -77,7 +77,7 @@ import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAllPosProducts } from "@/hooks/queries/use-products";
 import { useBranchRegisterSaleGate } from "@/hooks/queries/use-register-status";
 import { useCategories } from "@/hooks/queries/use-categories";
-import { useCustomers, useCustomerMutations, useCustomerLoyaltyStatus } from "@/hooks/queries/use-customers";
+import { useCustomers, useCustomerMutations } from "@/hooks/queries/use-customers";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import {
   formatMoneyDisplay,
@@ -840,18 +840,6 @@ export function NewSale() {
     return [pinnedCustomer, ...customers];
   }, [customers, pinnedCustomer]);
 
-  const selectedCustomerObj = selectedCustomer
-    ? customersForPicker.find((c) => c.id === selectedCustomer) || null
-    : null;
-  const isLoyaltyWinnerCustomer = Boolean(selectedCustomerObj?.is_loyalty_winner);
-
-  // Real-time eligibility (branch + monthly usage) for the lifetime
-  // loyalty-winner discount — mirrors what the backend will actually charge.
-  const { data: loyaltyStatus, isLoading: loyaltyStatusLoading } = useCustomerLoyaltyStatus(
-    isLoyaltyWinnerCustomer ? selectedCustomer : null,
-    selectedBranchId,
-  );
-
   // Clear any pending scan timeout on unmount.
   useEffect(() => {
     return () => {
@@ -863,10 +851,8 @@ export function NewSale() {
   }, []);
 
   // Apply the selected customer's default discount automatically (overridable).
-  // Loyalty-winner customers are handled by a separate effect below instead,
-  // since their discount needs the Rs cap applied, not a plain percentage.
   useEffect(() => {
-    if (discountTouchedRef.current || isLoyaltyWinnerCustomer) return;
+    if (discountTouchedRef.current) return;
     const cust = selectedCustomer
       ? customers.find((c) => c.id === selectedCustomer)
       : null;
@@ -882,7 +868,7 @@ export function NewSale() {
       setShowDiscountRow(false);
       autoDiscountCustomerRef.current = null;
     }
-  }, [selectedCustomer, customers, isLoyaltyWinnerCustomer]);
+  }, [selectedCustomer, customers]);
 
   // Restore the in-progress sale after a refresh, then keep it saved.
   useEffect(() => {
@@ -2090,32 +2076,7 @@ export function NewSale() {
     0,
     subtractMoney(subtotal, roundMoney(globalDiscountAmount + saleExtras.extraDiscount + saleExtras.giftCardTotal)),
   );
-
-  // Lifetime loyalty-winner discount: 25% of the subtotal, capped at a fixed
-  // Rs amount — recomputed as the cart changes so the preview always matches
-  // what the backend will actually charge (same cap/branch/monthly rules).
-  // Cash-only is enforced at the payment step below, since the method isn't
-  // chosen yet at this point in the flow.
-  useEffect(() => {
-    if (discountTouchedRef.current || !isLoyaltyWinnerCustomer) return;
-    if (loyaltyStatus?.eligible) {
-      const percent = Number(loyaltyStatus.discountPercent ?? 25);
-      const cap = Number(loyaltyStatus.discountCap ?? 3000);
-      const capped = roundMoney(Math.min((subtotal * percent) / 100, cap));
-      if (capped > 0) {
-        setGlobalDiscountType("fixed");
-        setGlobalDiscountValue(String(capped));
-        setShowDiscountRow(true);
-        autoDiscountCustomerRef.current = selectedCustomer;
-        return;
-      }
-    }
-    if (autoDiscountCustomerRef.current === selectedCustomer) {
-      setGlobalDiscountValue("");
-      setShowDiscountRow(false);
-      autoDiscountCustomerRef.current = null;
-    }
-  }, [selectedCustomer, isLoyaltyWinnerCustomer, loyaltyStatus, subtotal]);
+  
   const totalQuantity = cart.reduce(
     (sum, item) => sum + item.quantity,
     0
@@ -2184,7 +2145,7 @@ export function NewSale() {
 
     return {
       storeName: branchInfo.name,
-      tagline: "Quality • Service • Value",
+      tagline: "Elegance, crafted for every moment.",
       address: branchInfo.address,
       transactionId,
       timestamp,
@@ -2331,25 +2292,8 @@ export function NewSale() {
     }
     if (!requireRegisterOpen()) return;
 
-    // Lifetime loyalty-winner discount is cash-only (T&C #6) — the backend
-    // would zero it out on a card sale anyway, but strip it here first so
-    // the cashier sees the real total before confirming payment.
-    const loyaltyDiscountActive =
-      isLoyaltyWinnerCustomer &&
-      !discountTouchedRef.current &&
-      autoDiscountCustomerRef.current === selectedCustomer &&
-      globalDiscountAmount > 0;
-    let effectiveTotal = total;
-    if (method === "Card" && loyaltyDiscountActive) {
-      setGlobalDiscountValue("");
-      setShowDiscountRow(false);
-      autoDiscountCustomerRef.current = null;
-      toast.warning("Lifetime discount is cash-only — removed for this card payment.");
-      effectiveTotal = subtotal; // state update above hasn't re-rendered yet
-    }
-
     setPaymentMethodPending(method);
-    setTenderedAmount(formatMoneyFixed(effectiveTotal));
+    setTenderedAmount(formatMoneyFixed(total));
     setPaymentError("");
     setCalculatedChange(0);
     setPaymentDialogOpen(true);
@@ -4331,34 +4275,6 @@ export function NewSale() {
                     {formatMoney(subtotal)}
                   </span>
                 </div>
-
-                {isLoyaltyWinnerCustomer && (
-                  <div
-                    className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[11px] font-medium ${
-                      loyaltyStatus?.eligible
-                        ? "bg-emerald-50 text-emerald-700"
-                        : "bg-amber-50 text-amber-700"
-                    }`}
-                  >
-                    {loyaltyStatusLoading ? (
-                      <span>Checking lifetime discount…</span>
-                    ) : loyaltyStatus?.eligible ? (
-                      <>
-                        <span>
-                          🎁 Lifetime winner — {loyaltyStatus.discountPercent}% off, capped at{" "}
-                          {formatMoney(Number(loyaltyStatus.discountCap ?? 0))}
-                        </span>
-                        <span className="shrink-0 tabular-nums">
-                          {(loyaltyStatus.usedThisMonth ?? 0) + 1}/{loyaltyStatus.monthlyLimit} this month
-                        </span>
-                      </>
-                    ) : (
-                      <span>
-                        Lifetime discount not applied: {loyaltyStatus?.reason || "not eligible"}
-                      </span>
-                    )}
-                  </div>
-                )}
 
                 {!showDiscountRow && globalDiscountAmount === 0 ? (
                   <button
