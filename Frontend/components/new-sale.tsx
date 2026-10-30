@@ -666,6 +666,9 @@ export function NewSale() {
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
   const {
+    adminMode,
+    branches: posBranches,
+    selectBranch,
     branchLoading,
     selectedBranchId,
     branchInfo,
@@ -2979,6 +2982,20 @@ export function NewSale() {
               )}
             </div>
             <div className="hidden flex-wrap items-center gap-2 sm:flex">
+              {adminMode && posBranches.length > 0 && (
+                <Select value={selectedBranchId || undefined} onValueChange={selectBranch} disabled={paymentLoading}>
+                  <SelectTrigger className="h-10 w-[200px]" aria-label="Branch for this sale">
+                    <SelectValue placeholder="Choose branch" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {posBranches.map((b) => (
+                      <SelectItem key={b.id} value={b.id}>
+                        {b.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
               <RepeatSaleCombobox
                 branchId={selectedBranchId}
                 disabled={paymentLoading || branchLoading || !hasBranch}

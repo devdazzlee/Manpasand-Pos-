@@ -949,7 +949,7 @@ app.post('/print-receipt', async (req, res) => {
 
     const footerAddress = normalizeReceiptAddress(receiptData.address);
     const footerLines = [
-      'Call / WhatsApp: 03013181111',
+      'Call / WhatsApp: +92 336 2500357',
       'Website: manpasandstore.com'
     ];
     for (const line of footerLines) {

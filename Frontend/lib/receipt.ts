@@ -7,6 +7,7 @@ import { parseReturnNotes, formatSettlementLabel } from "@/components/returns/ut
 import {
   ACE_STUDIOS_CONTACT,
   PEHNAWA_DEFAULT_STORE_ADDRESS,
+  RECEIPT_WHATSAPP,
   RECEIPT_EXCHANGE_POLICY_LINES,
   RECEIPT_EXCHANGE_POLICY_TITLE,
 } from "@/config/constants";
@@ -66,6 +67,7 @@ export const buildReceiptBranchLine = (
   if (!name || ["ADMIN", "MANPASAND GENERAL STORE", "PEHNAWA BOUTIQUE"].includes(name.toUpperCase())) {
     return address;
   }
+  if (!address) return name;
   if (address.toLowerCase().includes(name.toLowerCase())) return address;
   return `${name}, ${address}`;
 };
@@ -508,10 +510,10 @@ export const generateReceiptHtml = (data: ReceiptData, logoDataUri = ""): string
   const storeAddress =
     (data.address && data.address.trim()) || PEHNAWA_DEFAULT_STORE_ADDRESS;
   const footerLines = [
-    "Call / WhatsApp: 03013181111",
+    `Call / WhatsApp: ${RECEIPT_WHATSAPP}`,
     "Website: manpasandstore.com",
     storeAddress,
-  ];
+  ].filter(Boolean);
   const footerHtml = footerLines.map((line) => `<div class="footer-line">${line}</div>`).join("");
   const aceHtml = `
 <div class="divider-thin"></div>
@@ -901,9 +903,9 @@ export const buildReceiptPdfBlob = async (
       }
     }
   }
-  writeCentered("Call / WhatsApp: 03013181111", { size: 8 });
+  writeCentered(`Call / WhatsApp: ${RECEIPT_WHATSAPP}`, { size: 8 });
   writeCentered("Website: manpasandstore.com", { size: 8 });
-  const footerAddrLines: string[] = doc.splitTextToSize(pdfAddress, usable);
+  const footerAddrLines: string[] = pdfAddress ? doc.splitTextToSize(pdfAddress, usable) : [];
   for (const line of footerAddrLines) {
     writeCentered(line, { size: 8 });
   }

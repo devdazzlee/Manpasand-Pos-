@@ -9,6 +9,9 @@ import {
   normalizeBranchId,
 } from "@/lib/branch-utils";
 
+/** The branch an admin last chose on the Sales screen (admins have no own branch). */
+const POS_BRANCH_KEY = "posBranchId";
+
 interface BranchInfo {
   name: string;
   address: string;
@@ -33,6 +36,7 @@ export function usePosBranch() {
         const role = localStorage.getItem("role");
         const isAdmin = isAdminRole(role);
         const storedBranchId = normalizeBranchId(localStorage.getItem("branch"));
+        const adminBranchId = normalizeBranchId(localStorage.getItem(POS_BRANCH_KEY)) || storedBranchId;
 
         if (!cancelled) {
           setAdminMode(isAdmin);
@@ -52,7 +56,7 @@ export function usePosBranch() {
           setBranches(activeBranches);
 
           const initialBranch =
-            activeBranches.find((branch: BranchOption) => branch.id === storedBranchId) ||
+            activeBranches.find((branch: BranchOption) => branch.id === adminBranchId) ||
             activeBranches[0] ||
             null;
 
@@ -129,8 +133,19 @@ export function usePosBranch() {
     [branches, selectedBranchId]
   );
 
+  // Admin picks the branch the bill belongs to; remembered for next time.
+  const selectBranch = (branchId: string) => {
+    setSelectedBranchId(branchId);
+    try {
+      localStorage.setItem(POS_BRANCH_KEY, branchId);
+    } catch {
+      // storage blocked: the choice just is not remembered
+    }
+  };
+
   return {
     adminMode,
+    selectBranch,
     branchLoading: loading,
     branches,
     selectedBranch,

@@ -8,7 +8,11 @@ export const API_BASE = "https://api.manpasandstore.com/api/v1";
 /** Ace Studios footer on thermal receipts (not the store WhatsApp line). */
 export const ACE_STUDIOS_CONTACT = "+92 336 2500357";
 
-export const PEHNAWA_DEFAULT_STORE_ADDRESS = "Karachi, Pakistan";
+/** Used only when a branch has no address; empty = print just the branch name. */
+export const PEHNAWA_DEFAULT_STORE_ADDRESS = "";
+
+/** Number printed on receipts as "Call / WhatsApp". */
+export const RECEIPT_WHATSAPP = "+92 336 2500357";
 
 /** Shown on product barcode labels before the product name (e.g. MANPASAND DATES). */
 export const BARCODE_LABEL_BRAND_PREFIX = "MANPASAND";

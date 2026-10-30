@@ -370,7 +370,7 @@ export async function printReceiptPDF(input: PrintJobInput) {
   }
 
   const footerLines = [
-    'Call / WhatsApp: 03013181111',
+    'Call / WhatsApp: +92 336 2500357',
     'Website: manpasandstore.com',
   ];
   if (receiptData.footerMessage) footerLines.unshift(receiptData.footerMessage);
