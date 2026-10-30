@@ -76,6 +76,7 @@ import {
   ScanStockCount,
 } from "./inventory/index";
 import Orders from "./orders";
+import WebsiteOrders from "./website-orders";
 import Subcategories from "./sub-categories";
 import Units from "./Units";
 import { SupplierHub } from "./supplier-hub/supplier-hub";
@@ -170,6 +171,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <BarcodeGenerator />;
       case "new-sale":
         return <NewSale />;
+      case "website-orders":
+        return <WebsiteOrders />;
       case "orders":
         return <Orders />;
       case "units":

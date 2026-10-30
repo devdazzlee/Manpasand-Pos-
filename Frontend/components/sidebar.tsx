@@ -79,6 +79,7 @@ import {
   FileUp,
   Waves,
   ShieldCheck,
+  Globe,
 } from "lucide-react";
 import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 
@@ -223,6 +224,19 @@ const menuSections: SidebarMenuSection[] = [
         label: "Barcode Generator",
         icon: BarcodeScanIcon,
         roles: SALES_ROLES,
+      },
+    ],
+  },
+  {
+    id: "website-orders",
+    label: "Website Orders",
+    expandable: true,
+    items: [
+      {
+        id: "website-orders",
+        label: "Website Orders",
+        icon: Globe,
+        roles: STAFF_ROLES,
       },
     ],
   },
@@ -573,6 +587,7 @@ export function Sidebar({
   onClose,
 }: SidebarProps) {
   const [expandedSections, setExpandedSections] = useState<string[]>([
+    "website-orders",
     "sales",
     "inv-overview",
     "inv-stock",

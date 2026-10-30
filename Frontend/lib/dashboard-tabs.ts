@@ -11,6 +11,7 @@ export const DASHBOARD_TAB_IDS = new Set([
   "barcode-generator",
   "new-sale",
   "orders",
+  "website-orders",
   "units",
   "sales-history",
   "register-report",
