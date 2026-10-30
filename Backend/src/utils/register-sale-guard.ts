@@ -1,8 +1,10 @@
 import { prisma } from '../prisma/client';
 import { AppError } from './apiError';
+import { REQUIRE_OPEN_REGISTER_FOR_SALE } from '../config/pos-rules';
 
 /** POS sales require an open, unlocked cash register for the branch. */
 export async function assertCashRegisterOpenForSale(branchId: string): Promise<void> {
+  if (!REQUIRE_OPEN_REGISTER_FOR_SALE) return;
   const session = await prisma.cashFlow.findFirst({
     where: { branch_id: branchId, status: 'OPEN' },
     select: { locked: true, locked_reason: true },

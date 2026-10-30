@@ -13,6 +13,9 @@ export const PEHNAWA_DEFAULT_STORE_ADDRESS = "Karachi, Pakistan";
 /** Shown on product barcode labels before the product name (e.g. MANPASAND DATES). */
 export const BARCODE_LABEL_BRAND_PREFIX = "MANPASAND";
 
+/** Bill only while the branch cash register is open. Off for Manpasand (keep in sync with Backend/src/config/pos-rules.ts). */
+export const REQUIRE_OPEN_REGISTER_FOR_SALE = false;
+
 /** Stitched / Unstitched product type (a clothing filter). Off for Manpasand. */
 export const SHOW_STITCH_TYPE = false;
 

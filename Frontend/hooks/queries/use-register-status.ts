@@ -1,4 +1,5 @@
 import { useQuery, type QueryClient } from "@tanstack/react-query";
+import { REQUIRE_OPEN_REGISTER_FOR_SALE } from "@/config/constants";
 import {
   registerApi,
   type BoardRow,
@@ -86,6 +87,10 @@ export function useBranchRegisterSaleGate(branchId: string | null | undefined) {
         : !statusSettled
           ? null
           : registerSaleBlockMessage(state);
+
+  if (!REQUIRE_OPEN_REGISTER_FOR_SALE) {
+    return { canSell: Boolean(branchId), blockMessage: null, registerStatusLoading: false, registerRow: row, ...query };
+  }
 
   return {
     canSell: Boolean(branchId) && canSell,

@@ -2,6 +2,7 @@ import { PaymentMethod, PaymentStatus, Prisma, SaleItemType, SaleStatus, StockMo
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { assertCashRegisterOpenForSale } from '../utils/register-sale-guard';
+import { ALLOW_NEGATIVE_STOCK_SALE } from '../config/pos-rules';
 import { businessDayRange, businessTodayYmd, businessTodayRange, toBusinessYmd } from '../utils/timezone';
 import { allocateSaleNumber } from '../utils/saleNumber';
 import { computeOriginalSalePaidFactor } from '../utils/saleReturnPricing';
@@ -1207,7 +1208,7 @@ class SaleService {
       const change = gp.qty.mul(-1); // sale => decrement
       const next = prev.plus(change);
 
-      if (prev.lt(gp.qty)) {
+      if (!ALLOW_NEGATIVE_STOCK_SALE && prev.lt(gp.qty)) {
         const name = nameOf.get(gp.productId) || 'Product';
         const available = Number(prev);
         const requested = Number(gp.qty);
