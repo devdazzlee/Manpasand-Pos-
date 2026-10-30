@@ -4,26 +4,54 @@ import { useState, useEffect } from "react";
 import { Sidebar } from "@/components/sidebar";
 import { DashboardHome } from "@/components/dashboard-home";
 import { Button } from "@/components/ui/button";
-import { Menu } from "lucide-react";
+import { Menu, PanelLeftOpen } from "lucide-react";
 import { useDashboardTab } from "@/lib/dashboard-tabs";
 import { scrollMainToTop } from "@/lib/scroll-main";
 import { useDismissKeyboardOnScroll } from "@/hooks/use-dismiss-keyboard-on-scroll";
 
-import { Customers } from "@/components/customers";
+import { CustomerHub } from "@/components/customer-hub/customer-hub";
 import { Reports } from "@/components/reports";
+import { RegisterReport } from "@/components/register-report";
+import { RegisterHub } from "@/components/register-hub/register-hub";
+import { InsightsHub } from "@/components/insights/insights-hub";
+import { Budgets } from "@/components/finance-controls/budgets";
+import { CloseBooks } from "@/components/finance-controls/close-books";
+import { FinancialStatement } from "@/components/financial-statement";
+import { ProfitLoss } from "@/components/profit-loss";
+import { BalanceSheet } from "@/components/balance-sheet";
+import { TrialBalance } from "@/components/trial-balance";
+import { ChartOfAccounts } from "@/components/chart-of-accounts";
+import { MoneyFlow } from "@/components/accounts/money-flow";
+import { MoneyCheck } from "@/components/accounts/money-check";
+import { DayReports } from "@/components/day-reports";
+import { SalesReport } from "@/components/sales-report";
+import { PurchaseReport } from "@/components/purchase-report";
+import { StockQuantityReport } from "@/components/stock-quantity-report";
+import { ProductSalesProfit } from "@/components/product-sales-profit";
 import { Settings } from "@/components/settings";
 import { SalesHistory } from "@/components/sales-history";
-import { EmployeeManagement } from "@/components/employee-management";
+import { EmployeeHub } from "@/components/employee-hub/employee-hub";
 import { Categories } from "@/components/categories";
-import { Promotions } from "@/components/promotions";
+import { PromotionsHub } from "@/components/marketing/promotions-hub";
 import { Expenses } from "@/components/expenses";
-import { TaxManagement } from "@/components/tax-management";
+import { TaxHub } from "@/components/marketing/tax-hub";
+
+const dayViewToTab = (view: "revenue" | "cash" | "credit" | "expenses") => {
+  if (view === "cash") return "today-cash-sales";
+  if (view === "credit") return "today-credit-sales";
+  if (view === "expenses") return "today-expenses";
+  return "today-revenue";
+};
 import { PurchaseOrders } from "@/components/purchase-orders";
 import { Returns } from "@/components/returns";
-import { GiftCards } from "@/components/gift-cards";
 import { LoyaltyWinners } from "@/components/loyalty-winners";
+import { GiftCardsHub } from "@/components/marketing/gift-cards-hub";
+import { LoyaltyHub } from "@/components/marketing/loyalty-hub";
 import { Shifts } from "@/components/shifts";
-import { Audit } from "@/components/audit";
+import { AuditTrail } from "@/components/security/audit-trail";
+import { UsersPermissions } from "@/components/security/users-permissions";
+import { ApprovalDialogHost } from "@/components/security/approval-dialog-host";
+import { installExportAuditing } from "@/lib/audit-client";
 import { Backup } from "@/components/backup";
 import { Integrations } from "@/components/integrations";
 import { MultiLocation } from "@/components/multi-location";
@@ -44,16 +72,18 @@ import {
   InventoryReports,
   InventoryAudit,
   BulkProductUpload,
+  OpeningStockImport,
+  ScanStockCount,
 } from "./inventory/index";
 import Orders from "./orders";
-import WebsiteOrders from "./website-orders";
 import Subcategories from "./sub-categories";
 import Units from "./Units";
-import Suppliers from "./suppliers";
+import { SupplierHub } from "./supplier-hub/supplier-hub";
 import Brands from "./Brands";
 import Colors from "./color";
 import Sizes from "./sizes";
 import { Salaries } from "./Salaries";
+import { CommissionHub } from "./commission-hub/commission-hub";
 import { Designation } from "./Designation";
 import BarcodeGenerator from "./barcode-generator";
 import { NewSale } from "./new-sale";
@@ -65,10 +95,36 @@ interface DashboardProps {
   onLogout: () => void;
 }
 
+const SIDEBAR_OPEN_KEY = "pehnava-sidebar-open";
+
+function readInitialSidebarOpen(): boolean {
+  if (typeof window === "undefined") return true;
+  const stored = localStorage.getItem(SIDEBAR_OPEN_KEY);
+  if (stored === "0") return false;
+  if (stored === "1") return true;
+  return window.innerWidth >= 1024;
+}
+
 export function Dashboard({ onLogout }: DashboardProps) {
   const { activeTab, setActiveTab } = useDashboardTab();
-  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  useEffect(() => {
+    setSidebarOpen(readInitialSidebarOpen());
+  }, []);
+
+  const setSidebarOpenPersist = (open: boolean) => {
+    setSidebarOpen(open);
+    try {
+      localStorage.setItem(SIDEBAR_OPEN_KEY, open ? "1" : "0");
+    } catch {
+      /* ignore */
+    }
+  };
   useDismissKeyboardOnScroll();
+  useEffect(() => {
+    installExportAuditing();
+  }, []);
 
   useEffect(() => {
     scrollMainToTop("auto");
@@ -78,18 +134,54 @@ export function Dashboard({ onLogout }: DashboardProps) {
     switch (activeTab) {
       case "dashboard":
         return <DashboardHome onNavigate={setActiveTab} />;
+      case "today-revenue":
+        return (
+          <DayReports
+            lockedView="revenue"
+            onNavigateView={(view) => setActiveTab(dayViewToTab(view))}
+            onBack={() => setActiveTab("dashboard")}
+          />
+        );
+      case "today-cash-sales":
+        return (
+          <DayReports
+            lockedView="cash"
+            onNavigateView={(view) => setActiveTab(dayViewToTab(view))}
+            onBack={() => setActiveTab("dashboard")}
+          />
+        );
+      case "today-credit-sales":
+        return (
+          <DayReports
+            lockedView="credit"
+            onNavigateView={(view) => setActiveTab(dayViewToTab(view))}
+            onBack={() => setActiveTab("dashboard")}
+          />
+        );
+      case "today-expenses":
+        return (
+          <DayReports
+            lockedView="expenses"
+            onNavigateView={(view) => setActiveTab(dayViewToTab(view))}
+            onBack={() => setActiveTab("dashboard")}
+          />
+        );
       case "barcode-generator":
         return <BarcodeGenerator />;
       case "new-sale":
         return <NewSale />;
       case "orders":
         return <Orders />;
-      case "website-orders":
-        return <WebsiteOrders />;
       case "units":
         return <Units />;
       case "sales-history":
         return <SalesHistory />;
+      case "register-report":
+        return <RegisterReport />;
+      case "till":
+        return <RegisterHub />;
+      case "sales-report":
+        return <SalesReport />;
       case "brand":
         return <Brands />;
       case "colors":
@@ -113,15 +205,19 @@ export function Dashboard({ onLogout }: DashboardProps) {
       case "branches":
         return <Branches />;
       case "suppliers":
-        return <Suppliers />;
+        return <SupplierHub />;
       case "purchase-orders":
         return <PurchaseOrders />;
       case "pricing":
         return <Pricing />;
       case "customers":
-        return <Customers />;
+        return <CustomerHub />;
       case "loyalty":
+        return <LoyaltyHub />;
+      case "loyalty-winners":
         return <LoyaltyWinners />;
+      case "gift-cards":
+        return <GiftCardsHub />;
       case "stock-management":
         return <StockManagement onNavigate={setActiveTab} />;
       case "inventory-dashboard":
@@ -140,28 +236,66 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <StockView onNavigate={setActiveTab} />;
       case "bulk-product-upload":
         return <BulkProductUpload />;
+      case "opening-stock-import":
+        return <OpeningStockImport />;
+      case "scan-stock-count":
+        return <ScanStockCount />;
       case "inventory-reports":
         return <InventoryReports />;
+      case "purchase-report":
+        return <PurchaseReport />;
+      case "stock-quantity-report":
+        return <StockQuantityReport />;
       case "inventory-audit":
         return <InventoryAudit />;
       case "designation":
         return <Designation />;
       case "employees":
-        return <EmployeeManagement />;
+        return <EmployeeHub />;
       case "shifts":
         return <Shifts />;
       case "salaries":
         return <Salaries />;
+      case "commissions":
+        return <CommissionHub />;
       case "promotions":
-        return <Promotions />;
+        return <PromotionsHub />;
       case "expenses":
         return <Expenses />;
       case "tax-management":
-        return <TaxManagement />;
+        return <TaxHub />;
+      case "budgets":
+        return <Budgets />;
+      case "close-books":
+        return <CloseBooks />;
+      case "insights":
+        return <InsightsHub />;
       case "reports":
         return <Reports />;
+      case "financial-statement":
+        return <FinancialStatement />;
+      case "profit-loss":
+        return <ProfitLoss />;
+      case "balance-sheet":
+        return <BalanceSheet />;
+      case "trial-balance":
+        return <TrialBalance />;
+      case "money-flow":
+        return <MoneyFlow />;
+      case "money-check":
+        return <MoneyCheck onNavigate={setActiveTab} />;
+      case "chart-of-accounts":
+        return <ChartOfAccounts initialTab="accounts" onNavigate={setActiveTab} />;
+      case "journal-vouchers":
+        return <ChartOfAccounts initialTab="vouchers" onNavigate={setActiveTab} />;
+      case "expense-breakdown":
+        return <ChartOfAccounts initialTab="breakdown" onNavigate={setActiveTab} />;
+      case "product-sales-profit":
+        return <ProductSalesProfit />;
       case "audit":
-        return <Audit />;
+        return <AuditTrail />;
+      case "users":
+        return <UsersPermissions />;
       case "multi-location":
         return <MultiLocation />;
       case "integrations":
@@ -175,18 +309,19 @@ export function Dashboard({ onLogout }: DashboardProps) {
       case "product-export":
         return <ProductExport />;
       default:
-        return <DashboardHome />;
+        return <DashboardHome onNavigate={setActiveTab} />;
     }
   };
 
   return (
     <div className="flex min-h-dvh bg-gray-50 lg:h-dvh lg:max-h-dvh lg:overflow-hidden">
+      <ApprovalDialogHost />
       <Sidebar
         activeTab={activeTab}
         setActiveTab={setActiveTab}
         onLogout={onLogout}
         isOpen={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
+        onClose={() => setSidebarOpenPersist(false)}
       />
       
       {/* Mobile Top App Bar */}
@@ -194,20 +329,29 @@ export function Dashboard({ onLogout }: DashboardProps) {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => setSidebarOpen(true)}
+          onClick={() => setSidebarOpenPersist(true)}
           className="h-9 w-9 p-0 text-gray-700 hover:bg-gray-100"
         >
           <Menu className="h-5 w-5" />
         </Button>
-        <div className="flex items-center gap-2">
-          {/* eslint-disable-next-line @next/next/no-img-element */}
-          <img src="/logo.png" alt="Manpasand" className="h-8 w-8 object-contain shrink-0" />
-          <div className="leading-tight">
-            <p className="text-sm font-bold text-gray-900">MANPASAND</p>
-            <p className="-mt-0.5 text-[10px] text-gray-500">Enterprise POS</p>
-          </div>
-        </div>
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src="/logo.png" alt="MANPASAND POS" className="h-11 w-auto max-w-[160px] object-contain" />
       </header>
+
+      {!sidebarOpen ? (
+        <Button
+          type="button"
+          variant="outline"
+          size="sm"
+          onClick={() => setSidebarOpenPersist(true)}
+          className="fixed left-3 top-3 z-30 hidden h-9 gap-2 border-gray-200 bg-white px-2 shadow-sm lg:inline-flex"
+          aria-label="Open sidebar"
+          title="Open menu"
+        >
+          <PanelLeftOpen className="h-5 w-5" />
+          <span className="text-sm font-medium">Menu</span>
+        </Button>
+      ) : null}
 
       <main
         id="app-main-scroll"

@@ -4,6 +4,12 @@
 
 import { type ReceiptData, type ReceiptItem, type ReceiptSection, type ReceiptSummaryLine } from "@/lib/print-server";
 import { parseReturnNotes, formatSettlementLabel } from "@/components/returns/utils";
+import {
+  ACE_STUDIOS_CONTACT,
+  PEHNAWA_DEFAULT_STORE_ADDRESS,
+  RECEIPT_EXCHANGE_POLICY_LINES,
+  RECEIPT_EXCHANGE_POLICY_TITLE,
+} from "@/config/constants";
 
 export type { ReceiptData, ReceiptItem, ReceiptSection, ReceiptSummaryLine };
 
@@ -21,7 +27,15 @@ export interface ReceiptSourceSale {
   tax_amount?: string | number | null;
   payment_method?: string | null;
   notes?: string | null;
-  customer?: { name?: string | null; email?: string | null } | null;
+  customer?: {
+    name?: string | null;
+    email?: string | null;
+    phone_number?: string | null;
+    mobile_number?: string | null;
+    phone?: string | null;
+  } | null;
+  user?: { email?: string | null } | null;
+  salesperson?: { name?: string | null } | null;
   branch?: { name?: string | null; address?: string | null } | null;
   sale_items?: Array<{
     product?: { name?: string | null; sku?: string | null } & Record<string, any>;
@@ -45,10 +59,15 @@ export const buildReceiptBranchLine = (
   _address?: string,
 ): string => {
   const name = typeof storeName === "string" ? storeName.trim() : "";
-  if (!name || ["ADMIN", "MANPASAND GENERAL STORE"].includes(name.toUpperCase())) {
-    return "Karachi, Pakistan";
+  const address =
+    typeof _address === "string" && _address.trim()
+      ? _address.trim()
+      : PEHNAWA_DEFAULT_STORE_ADDRESS;
+  if (!name || ["ADMIN", "MANPASAND GENERAL STORE", "PEHNAWA BOUTIQUE"].includes(name.toUpperCase())) {
+    return address;
   }
-  return `${name}, Karachi, Pakistan`;
+  if (address.toLowerCase().includes(name.toLowerCase())) return address;
+  return `${name}, ${address}`;
 };
 
 const num = (v: any): number => {
@@ -169,6 +188,11 @@ export const prepareReceiptDataFromSale = (
 
   const storeName = sale.branch?.name || branch.name || "MANPASAND GENERAL STORE";
   const storeAddress = sale.branch?.address || branch.address || "";
+  const customerPhone =
+    sale.customer?.phone_number ||
+    sale.customer?.mobile_number ||
+    sale.customer?.phone ||
+    undefined;
 
   return {
     storeName,
@@ -177,10 +201,12 @@ export const prepareReceiptDataFromSale = (
     transactionId: opts?.transactionLabel || sale.sale_number || sale.id || "",
     timestamp: sale.created_at || sale.sale_date || new Date().toISOString(),
     cashier:
-      (sale as any).user?.email?.split?.("@")?.[0] ||
-      (sale as any).user?.email ||
+      sale.user?.email?.split?.("@")?.[0] ||
+      sale.user?.email ||
       "Cashier",
+    salesperson: sale.salesperson?.name || undefined,
     customerType: sale.customer?.name || sale.customer?.email || "Walk-in",
+    customerPhone: customerPhone || undefined,
     items,
     subtotal,
     discount: discount > 0 ? discount : undefined,
@@ -343,8 +369,17 @@ export const prepareReturnReceiptDataFromSale = (
     transactionId: opts?.transactionLabel || sale.sale_number || sale.id || "",
     originalSaleNumber,
     timestamp: sale.created_at || sale.sale_date || new Date().toISOString(),
-    cashier: "Walk-in",
+    cashier:
+      sale.user?.email?.split?.("@")?.[0] ||
+      sale.user?.email ||
+      "Cashier",
+    salesperson: sale.salesperson?.name || undefined,
     customerType: sale.customer?.name || sale.customer?.email || "Walk-in",
+    customerPhone:
+      sale.customer?.phone_number ||
+      sale.customer?.mobile_number ||
+      sale.customer?.phone ||
+      undefined,
     items: flatItems,
     itemSections,
     summaryLines,
@@ -409,6 +444,17 @@ ${renderReceiptItemRowsHtml(section.items)}`,
   return renderReceiptItemRowsHtml(data.items || []);
 };
 
+const shouldShowExchangePolicy = (data: ReceiptData): boolean =>
+  RECEIPT_EXCHANGE_POLICY_LINES.length > 0 && !data.documentTitle?.trim();
+
+const renderReceiptPolicyHtml = (data: ReceiptData): string => {
+  if (!shouldShowExchangePolicy(data)) return "";
+  const lines = RECEIPT_EXCHANGE_POLICY_LINES.map(
+    (line) => `<div class="policy-line">${line}</div>`,
+  ).join("");
+  return `<div class="policy-title">${RECEIPT_EXCHANGE_POLICY_TITLE}</div>${lines}`;
+};
+
 const renderReceiptSummaryHtml = (data: ReceiptData): string => {
   if (data.summaryLines && data.summaryLines.length > 0) {
     return data.summaryLines
@@ -454,20 +500,24 @@ export const generateReceiptHtml = (data: ReceiptData, logoDataUri = ""): string
   const itemsHtml = renderReceiptSectionsHtml(data);
   const summaryHtml = renderReceiptSummaryHtml(data);
   const promoHtml = data.promo ? `<div class="promo">Notes: ${data.promo}</div>` : "";
+  const policyHtml = renderReceiptPolicyHtml(data);
   const branchLine = buildReceiptBranchLine(data.storeName, data.address);
   const docTitleHtml = data.documentTitle
     ? `<div class="doc-title">${data.documentTitle}</div>`
     : "";
+  const storeAddress =
+    (data.address && data.address.trim()) || PEHNAWA_DEFAULT_STORE_ADDRESS;
   const footerLines = [
-    "Branch: 021 34892110",
-    "Delivery Hotline WhatsApp: +92 342 3344040",
-    "Website: Manpasandstore.com",
+    "Call / WhatsApp: 03013181111",
+    "Website: manpasandstore.com",
+    storeAddress,
   ];
   const footerHtml = footerLines.map((line) => `<div class="footer-line">${line}</div>`).join("");
   const aceHtml = `
 <div class="divider-thin"></div>
 <div class="powered-by">Powered by Ace Studios</div>
-<div class="ace-line">Website: acestudiosus.com | Contact: +92 336 2500357</div>`;
+<div class="ace-line">Website: acestudiosus.com</div>
+<div class="ace-line">Contact: ${ACE_STUDIOS_CONTACT}</div>`;
   const logoSrc = logoDataUri || (typeof window !== "undefined" ? `${window.location.origin}/logo.png` : "/logo.png");
 
   return `
@@ -476,7 +526,7 @@ export const generateReceiptHtml = (data: ReceiptData, logoDataUri = ""): string
 <img src="${logoSrc}" alt="Logo" class="logo-img" />
 </div>
 <div class="store-name">${branchLine}</div>
-<div class="tagline">${data.tagline || "Quality - Service - Value"}</div>
+<div class="tagline">${data.tagline || "Quality • Service • Value"}</div>
 ${docTitleHtml}
 ${data.strn ? `<div class="strn">${data.strn}</div>` : ""}
 
@@ -489,8 +539,10 @@ ${
     : ""
 }
 <div class="row-lr"><span class="label">Date</span><span class="value">${timestamp.toLocaleDateString()} ${timestamp.toLocaleTimeString()}</span></div>
-<div class="row-lr"><span class="label">Cashier</span><span class="value">${data.cashier || "Walk-in"}</span></div>
+<div class="row-lr"><span class="label">Cashier</span><span class="value">${data.cashier || "Cashier"}</span></div>
+${data.salesperson ? `<div class="row-lr"><span class="label">Salesperson</span><span class="value">${data.salesperson}</span></div>` : ""}
 <div class="row-lr"><span class="label">Customer</span><span class="value">${data.customerType || "Walk-in"}</span></div>
+${data.customerPhone ? `<div class="row-lr"><span class="label">Phone</span><span class="value">${data.customerPhone}</span></div>` : ""}
 
 <div class="divider"></div>
 
@@ -513,13 +565,15 @@ ${promoHtml}
 
 <div class="divider"></div>
 
+<div class="thank-you">${data.thankYouMessage || "Thank you for shopping!"}</div>
+${policyHtml ? `<div class="divider-thin"></div>${policyHtml}` : ""}
+${footerHtml}
+
+<div class="divider-thin"></div>
 <div class="barcode-section">
   <svg id="barcode-svg"></svg>
   <div class="barcode-number" id="barcode-number">${data.transactionId}</div>
 </div>
-
-<div class="thank-you">${data.thankYouMessage || "Thank you for shopping!"}</div>
-${footerHtml}
 ${aceHtml}
 </div>
 `;
@@ -553,14 +607,16 @@ body { display: block; width: 100%; box-sizing: border-box; padding: 0; }
 }
 .logo { text-align: center; margin-bottom: 5mm; }
 .logo-img {
-  max-width: 42mm; max-height: 22mm;
+  max-width: 58mm; max-height: 16mm;
   width: auto; height: auto;
   display: block; margin: 0 auto;
   object-fit: contain;
 }
 .store-name {
   font-weight: bold; font-size: 11pt; text-align: center;
-  margin-top: 1mm; margin-bottom: 2mm; color: #000000; line-height: 1.2;
+  margin-top: 1mm; margin-bottom: 2mm; color: #000000; line-height: 1.25;
+  padding: 0 2mm; word-wrap: break-word; overflow-wrap: anywhere;
+  white-space: normal; max-width: 100%;
 }
 .tagline {
   font-size: 9.4pt; text-align: center;
@@ -607,11 +663,22 @@ body { display: block; width: 100%; box-sizing: border-box; padding: 0; }
 }
 .footer-line {
   font-size: 9.8pt; margin: 1mm 0; font-weight: bold;
-  text-align: center; color: #000000; line-height: 1.2;
+  text-align: center; color: #000000; line-height: 1.25;
+  padding: 0 2mm; word-wrap: break-word; overflow-wrap: anywhere;
+  white-space: normal;
 }
 .promo {
   font-size: 9.4pt; text-align: center; margin: 2mm 0;
   color: #000000; font-weight: bold; line-height: 1.3; word-break: break-word;
+}
+.policy-title {
+  font-size: 8.2pt; text-align: center; margin: 2mm 0 1mm 0;
+  color: #000000; font-weight: bold; letter-spacing: 0.4px;
+}
+.policy-line {
+  font-size: 7.6pt; text-align: center; margin: 0.5mm 0;
+  color: #000000; font-weight: normal; line-height: 1.2;
+  padding: 0 2mm; word-wrap: break-word; overflow-wrap: anywhere;
 }
 .doc-title {
   font-size: 11pt; text-align: center; margin: 2mm 0 1mm 0;
@@ -721,8 +788,17 @@ export const buildReceiptPdfBlob = async (
   }
 
   if (receiptData.storeName) writeCentered(receiptData.storeName, { bold: true, size: 11 });
-  if (receiptData.address) writeCentered(receiptData.address, { size: 8.5 });
-  writeCentered(receiptData.tagline || "Quality - Service - Value", { size: 8 });
+  const pdfAddress =
+    (receiptData.address && receiptData.address.trim()) || PEHNAWA_DEFAULT_STORE_ADDRESS;
+  if (pdfAddress) {
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8.5);
+    const addrLines: string[] = doc.splitTextToSize(pdfAddress, usable);
+    for (const line of addrLines) {
+      writeCentered(line, { size: 8.5 });
+    }
+  }
+  writeCentered(receiptData.tagline || "Quality • Service • Value", { size: 8 });
   if (receiptData.documentTitle) {
     writeCentered(receiptData.documentTitle, { bold: true, size: 10 });
   }
@@ -734,8 +810,10 @@ export const buildReceiptPdfBlob = async (
     writeRow("Original sale", String(receiptData.originalSaleNumber));
   }
   writeRow("Date", `${when.toLocaleDateString()} ${when.toLocaleTimeString()}`);
-  writeRow("Cashier", receiptData.cashier || "Walk-in");
+  writeRow("Cashier", receiptData.cashier || "Cashier");
+  if (receiptData.salesperson) writeRow("Salesperson", receiptData.salesperson);
   writeRow("Customer", receiptData.customerType || "Walk-in");
+  if (receiptData.customerPhone) writeRow("Phone", receiptData.customerPhone);
   hr();
 
   const colItemMaxWidth = usable * 0.6;
@@ -811,9 +889,27 @@ export const buildReceiptPdfBlob = async (
   }
 
   writeCentered(receiptData.thankYouMessage || "Thank you for shopping!", { bold: true, size: 9.5 });
-  writeCentered("Branch: 021 34892110", { size: 8 });
-  writeCentered("Delivery Hotline WhatsApp: +92 342 3344040", { size: 8 });
-  writeCentered("Website: Manpasandstore.com", { size: 8 });
+
+  if (shouldShowExchangePolicy(receiptData)) {
+    writeCentered(RECEIPT_EXCHANGE_POLICY_TITLE, { bold: true, size: 7.5 });
+    doc.setFont("helvetica", "normal");
+    for (const line of RECEIPT_EXCHANGE_POLICY_LINES) {
+      doc.setFontSize(7);
+      const wrapped: string[] = doc.splitTextToSize(line, usable);
+      for (const ln of wrapped) {
+        writeCentered(ln, { size: 7 });
+      }
+    }
+  }
+  writeCentered("Call / WhatsApp: 03013181111", { size: 8 });
+  writeCentered("Website: manpasandstore.com", { size: 8 });
+  const footerAddrLines: string[] = doc.splitTextToSize(pdfAddress, usable);
+  for (const line of footerAddrLines) {
+    writeCentered(line, { size: 8 });
+  }
+  writeCentered("Powered by Ace Studios", { size: 8 });
+  writeCentered("Website: acestudiosus.com", { size: 8 });
+  writeCentered(`Contact: ${ACE_STUDIOS_CONTACT}`, { size: 8 });
 
   const blob = doc.output("blob");
   const filename = `receipt-${receiptData.transactionId || "sale"}.pdf`;

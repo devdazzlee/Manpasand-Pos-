@@ -22,7 +22,7 @@ interface Product {
 type PrintJobInput = {
   printer: {
     name: string;
-    languageHint?: 'escpos' | 'zpl' | 'generic';
+    languageHint?: 'escpos' | 'zpl' | 'generic' | 'epl';
     columns?: { fontA: number; fontB: number };
   };
   job?: { copies?: number; cut?: boolean; openDrawer?: boolean };
@@ -47,7 +47,7 @@ interface PrinterInfo {
     orientation?: string | null;
     dpi?: { x?: number | null; y?: number | null } | null;
   } | null;
-  languageHint?: 'escpos' | 'zpl' | 'generic';
+  languageHint?: 'escpos' | 'zpl' | 'generic' | 'epl';
   receiptProfile?: {
     roll: '80mm' | '58mm';
     printableWidthMM: number;
@@ -180,9 +180,30 @@ function normalizeAndSort(
 
 function deriveLanguageHint(p: Partial<PrinterInfo>) {
   const s = `${p.driver?.name || ''} ${p.name || ''}`.toLowerCase();
+  if (
+    /\(epl\)|\bepl\b|eltron|\blp\s*2844\b|lp2844|ups lp|\bups\s*2844\b|\b2844\b/.test(s)
+  ) {
+    return 'epl';
+  }
   if (s.includes('zebra') || s.includes('zdesigner')) return 'zpl';
   if (s.includes('generic') || s.includes('escpos') || s.includes('blackcopper') || s.includes('80mm') || s.includes('58mm')) return 'escpos';
   return 'generic';
+}
+
+function deriveLabelProfile(p: Partial<PrinterInfo>) {
+  const hint = deriveLanguageHint(p);
+  if (hint === 'epl' || hint === 'zpl') {
+    return {
+      paperSize: '50x25mm' as const,
+      widthMM: 50,
+      heightMM: 25,
+      gapMM: 3,
+      dpi: 203 as const,
+      language: hint,
+      model: hint === 'epl' ? 'Eltron LP 2844 (EPL)' : 'Zebra (ZPL)',
+    };
+  }
+  return null;
 }
 
 // Windows ships a handful of virtual "printers" (Print to PDF, XPS Writer,
@@ -274,6 +295,7 @@ export class BarcodeService {
             };
             merged.languageHint = deriveLanguageHint(merged);
             merged.receiptProfile = deriveReceiptProfile(merged);
+            (merged as any).labelProfile = deriveLabelProfile(merged);
             return merged;
           } catch {
             const merged: PrinterInfo = {
@@ -281,6 +303,7 @@ export class BarcodeService {
               languageHint: deriveLanguageHint(p),
               receiptProfile: deriveReceiptProfile(p),
             };
+            (merged as any).labelProfile = deriveLabelProfile(merged);
             return merged;
           }
         }));
@@ -458,9 +481,11 @@ export class BarcodeService {
     await tp.newLine();
     await tp.alignCenter();
     await tp.println(receiptData.thankYouMessage || 'Thank you for shopping with us!');
+    await tp.println('Call / WhatsApp: 03013181111');
+    await tp.println('Website: manpasandstore.com');
+    await tp.println('Karachi, Pakistan');
     if (receiptData.footerMessage) await tp.println(receiptData.footerMessage);
 
-    // Optional barcode (ESC/POS Code128)
     if (receiptData.transactionId) {
       await tp.newLine();
       await tp.printBarcode(String(receiptData.transactionId), 73, { width: 2, height: 80, hriPos: 2 });

@@ -24,9 +24,10 @@ import {
 const EMPTY: Subcategory[] = [];
 
 export function useSubcategories(params: SubcategoryQuery = {}) {
+  const queryParams = { limit: 200, ...params };
   const query = useQuery({
-    queryKey: qk.subcategories.list(params as Record<string, unknown>),
-    queryFn: ({ signal }) => fetchSubcategories(params, signal),
+    queryKey: qk.subcategories.list(queryParams as Record<string, unknown>),
+    queryFn: ({ signal }) => fetchSubcategories(queryParams, signal),
     staleTime: STALE_TIME.reference,
     placeholderData: keepPreviousData,
   });
@@ -52,8 +53,11 @@ export function useSubcategory(id: string | null, options?: { enabled?: boolean 
 
 export function useSubcategoryMutations() {
   const qc = useQueryClient();
-  const invalidate = () =>
+  const invalidate = () => {
     qc.invalidateQueries({ queryKey: qk.subcategories.all });
+    // Report filter pickers list subcategories too.
+    qc.invalidateQueries({ queryKey: ["catalog-filter-options"] });
+  };
 
   return {
     create: useMutation({

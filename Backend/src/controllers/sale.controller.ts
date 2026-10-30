@@ -2,6 +2,8 @@ import { Request, Response } from "express";
 import asyncHandler from "../middleware/asyncHandler";
 import { SaleService } from "../services/sales.service";
 import { ApiResponse } from "../utils/apiResponse";
+import { parseYmdBound } from "../utils/timezone";
+import { parseProductFilters } from '../utils/product-filters';
 
 const saleService = new SaleService();
 
@@ -73,20 +75,17 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
     const status = (req.query.status as string | undefined)?.trim();
     const cashierId = (req.query.cashierId as string | undefined)?.trim();
     const customerId = (req.query.customerId as string | undefined)?.trim();
+    const salespersonId = (req.query.salespersonId as string | undefined)?.trim();
     const sortBy = (req.query.sortBy as string | undefined)?.trim() || "sale_date";
     const sortOrderRaw = (req.query.sortOrder as string | undefined)?.trim()?.toLowerCase();
     const sortOrder = sortOrderRaw === "asc" ? "asc" : "desc";
-    const includeReturns =
-      String(req.query.includeReturns ?? "").trim().toLowerCase() === "true";
+    // Default ON so Sales History matches old POS (sale + return as separate rows).
+    // Pass includeReturns=false to hide refund child rows.
+    const includeReturnsRaw = String(req.query.includeReturns ?? "true").trim().toLowerCase();
+    const includeReturns = includeReturnsRaw !== "false" && includeReturnsRaw !== "0";
 
-    const parsedStartDate =
-      startDateRaw && !Number.isNaN(new Date(startDateRaw).getTime())
-        ? new Date(startDateRaw)
-        : undefined;
-    const parsedEndDate =
-      endDateRaw && !Number.isNaN(new Date(endDateRaw).getTime())
-        ? new Date(endDateRaw)
-        : undefined;
+    const parsedStartDate = parseYmdBound(startDateRaw, "start");
+    const parsedEndDate = parseYmdBound(endDateRaw, "end");
 
     const result = await saleService.getSales({
         branchId,
@@ -100,9 +99,11 @@ const getSalesController = asyncHandler(async (req: Request, res: Response) => {
         status,
         cashierId,
         customerId,
+        salespersonId,
         sortBy,
         sortOrder,
         includeReturns,
+        filters: parseProductFilters(req.query),
     });
 
     console.log(
@@ -151,6 +152,8 @@ const refundSaleController = asyncHandler(async (req: Request, res: Response) =>
         returnReason,
         refundMethod,
         exchangeBalanceAction,
+        exchangeDiscountAmount,
+        returnCreditOverride,
     } = req.body;
     const originalSaleId = req.params.saleId;
     const createdBy = req.user!.id;
@@ -172,6 +175,8 @@ const refundSaleController = asyncHandler(async (req: Request, res: Response) =>
         returnReason,
         refundMethod,
         exchangeBalanceAction,
+        exchangeDiscountAmount,
+        returnCreditOverride,
     });
 
     new ApiResponse(sale, "Sale refunded/exchanged successfully").send(res);
@@ -251,7 +256,10 @@ const deleteHoldSaleController = asyncHandler(async (req: Request, res: Response
 });
 
 const cancelSaleController = asyncHandler(async (req: Request, res: Response) => {
-    const sale = await saleService.cancelSale(req.params.saleId);
+    const sale = await saleService.cancelSale(req.params.saleId, {
+        reason: typeof req.body?.reason === 'string' ? req.body.reason : undefined,
+        userId: req.user?.id,
+    });
     new ApiResponse(sale, "Sale cancelled successfully").send(res);
 });
 
@@ -266,6 +274,7 @@ const updateSaleController = asyncHandler(async (req: Request, res: Response) =>
                 ? Number(req.body.discountAmount)
                 : undefined,
         customerId: req.body?.customerId !== undefined ? req.body.customerId : undefined,
+        salespersonId: req.body?.salespersonId !== undefined ? req.body.salespersonId : undefined,
         paymentReceived:
             req.body?.paymentReceived !== undefined && req.body?.paymentReceived !== null
                 ? Number(req.body.paymentReceived)
@@ -277,7 +286,7 @@ const updateSaleController = asyncHandler(async (req: Request, res: Response) =>
 });
 
 const deleteSaleController = asyncHandler(async (req: Request, res: Response) => {
-    const result = await saleService.deleteSale(req.params.saleId);
+    const result = await saleService.deleteSale(req.params.saleId, { userId: req.user?.id });
     new ApiResponse(result, "Sale deleted successfully").send(res);
 });
 

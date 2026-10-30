@@ -53,7 +53,9 @@ export interface ReceiptData {
   originalSaleNumber?: string;
   timestamp?: string;
   cashier?: string;
+  salesperson?: string;
   customerType?: string;
+  customerPhone?: string;
   items: ReceiptItem[];
   /** When set, items are grouped under section headings on print/PDF */
   itemSections?: ReceiptSection[];
@@ -312,10 +314,35 @@ export interface BarcodeLabelItem {
 export interface PrintBarcodeLabelsInput {
   printerName: string;
   items: BarcodeLabelItem[];
-  paperSize?: '3x2inch' | '50x30mm' | '60x40mm';
+  paperSize?: '3x2inch' | '50x25mm' | '50x30mm' | '60x40mm' | '58x40mm' | '40x25mm';
+  /** Gap between labels on roll (mm), default 3 for 50×25 stock */
+  labelGapMM?: number;
   copies?: number;
   dpi?: 203 | 300;
   humanReadable?: boolean;
+  /** auto = EPL/ZPL printers get raw commands; pdf = always return PDF */
+  printMode?: 'auto' | 'raw' | 'pdf';
+  languageHint?: 'epl' | 'zpl' | 'generic' | 'escpos' | string;
+}
+
+/**
+ * Infer EPL/ZPL from the Windows queue name when the printers list has not
+ * loaded yet, or when languageHint is missing. Missing hint used to force the
+ * barcode UI into browser-print even while the print server was online.
+ */
+export function deriveLabelLanguageHint(
+  printerName: string,
+  hint?: string
+): 'epl' | 'zpl' | string {
+  if (hint === 'epl' || hint === 'zpl') return hint;
+  const s = (printerName || '').toLowerCase();
+  if (/\(epl\)|\bepl\b|eltron|\blp\s*2844\b|lp2844|ups\s*lp|\bups\s*2844\b|\b2844\b/.test(s)) {
+    return 'epl';
+  }
+  if (/zebra|zdesigner|\bzpl\b/.test(s)) {
+    return 'zpl';
+  }
+  return hint || 'generic';
 }
 
 /**
@@ -327,6 +354,7 @@ export async function printBarcodeLabelsViaServer(
   success: boolean;
   error?: string;
   message?: string;
+  mode?: 'raw' | 'pdf';
 }> {
   try {
     const response = await fetch(`${getPrintServerUrl()}/print-barcode-labels`, {
@@ -337,15 +365,29 @@ export async function printBarcodeLabelsViaServer(
       body: JSON.stringify(input),
     });
 
+    const contentType = response.headers.get('content-type') || '';
+
+    // Never open the browser print dialog for barcode labels.
+    // Client must use raw EPL/ZPL via the local print server only.
+    if (contentType.includes('application/pdf')) {
+      return {
+        success: false,
+        mode: 'pdf',
+        error:
+          'Print server returned PDF instead of raw labels. Use an EPL/ZPL label printer and keep Print Server running.',
+      };
+    }
+
     const result = await response.json();
 
     if (!response.ok) {
       throw new Error(result.message || result.error || 'Print failed');
     }
 
-    console.log('✅ Barcode labels printed via print server');
+    console.log('✅ Barcode labels printed via print server', result.mode || 'json');
     return {
       success: true,
+      mode: result.mode === 'raw' ? 'raw' : undefined,
       message: result.message || 'Barcode labels printed successfully',
     };
   } catch (error: any) {

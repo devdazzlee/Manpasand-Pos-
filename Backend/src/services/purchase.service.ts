@@ -2,8 +2,637 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { addDecimal, asNumber } from '../utils/helpers';
 import { Prisma } from '@prisma/client';
+import { startOfBusinessMonth } from '../utils/timezone';
+import { randomUUID } from 'crypto';
+import {
+  recordCashPayOnOpenRegister,
+  reverseCashPayOnRegisterByPaymentRefs,
+} from './register-cash-out.helper';
+import { ChartOfAccountsService } from './chart-of-accounts.service';
+import { applyWeightedAverageCost, productOnHandQty } from './product-cost.service';
+
+const PURCHASE_LIST_INCLUDE = {
+  product: true,
+  supplier: true,
+  warehouse_branch: true,
+  user: { select: { email: true } },
+} satisfies Prisma.PurchaseInclude;
+
+/** Remote DB (Neon) needs more than Prisma's default 5s interactive tx limit. */
+const PURCHASE_TX_OPTIONS = { maxWait: 20_000, timeout: 30_000 } as const;
+
+type PurchaseListRow = Prisma.PurchaseGetPayload<{ include: typeof PURCHASE_LIST_INCLUDE }>;
+
+function billKey(p: {
+  id: string;
+  bill_group_id?: string | null;
+  supplier_id: string;
+  warehouse_branch_id: string;
+  invoice_ref?: string | null;
+  purchase_date: Date;
+}) {
+  if (p.bill_group_id) return p.bill_group_id;
+  // Legacy rows without a group: keep each line as its own bill unless invoice_ref ties them.
+  const inv = (p.invoice_ref || '').trim();
+  if (inv) {
+    const day = p.purchase_date.toISOString().slice(0, 10);
+    return `legacy:${p.supplier_id}|${p.warehouse_branch_id}|${inv}|${day}`;
+  }
+  return `solo:${p.id}`;
+}
+
+type StockInPayMeta = {
+  mode: 'CASH' | 'CREDIT' | 'MIX' | null;
+  paidAmount: number;
+  creditAmount: number;
+};
+
+function parseStockInPayNotes(notes?: string | null): StockInPayMeta {
+  const raw = notes || '';
+  const match = raw.match(
+    /Pay:\s*(CASH|CREDIT|MIX)(?:\s*·\s*paid\s*([\d.]+))?(?:\s*·\s*credit\s*([\d.]+))?/i,
+  );
+  if (!match) return { mode: null, paidAmount: 0, creditAmount: 0 };
+  const mode = match[1].toUpperCase() as 'CASH' | 'CREDIT' | 'MIX';
+  const paidAmount = match[2] != null ? Number(match[2]) : 0;
+  const creditAmount = match[3] != null ? Number(match[3]) : 0;
+  return { mode, paidAmount, creditAmount };
+}
+
+function replaceStockInPayInNotes(notes: string | null | undefined, payLine: string): string {
+  const base = (notes || '').trim();
+  if (!base) return payLine;
+  if (/Pay:\s*(CASH|CREDIT|MIX)/i.test(base)) {
+    return base.replace(/Pay:\s*(CASH|CREDIT|MIX)[^|]*/i, payLine).trim();
+  }
+  return `${base} | ${payLine}`;
+}
 
 export class PurchaseService {
+  private billTotalFromLines(
+    lines: Array<{ quantity: Prisma.Decimal | number; cost_price: Prisma.Decimal | number }>,
+  ): number {
+    return lines.reduce(
+      (sum, line) => sum + asNumber(line.quantity) * asNumber(line.cost_price),
+      0,
+    );
+  }
+
+  /**
+   * Keeps supplier ledger in sync when Stock In bills change:
+   * payable = sum(purchase lines); auto-payments from stock-in follow bill total.
+   */
+  private async syncStockInBillPayments(
+    tx: Prisma.TransactionClient,
+    billGroupId: string | null | undefined,
+  ) {
+    if (!billGroupId) return;
+
+    const lines = await tx.purchase.findMany({
+      where: { bill_group_id: billGroupId, purchase_invoice_id: null },
+    });
+
+    const payments = await tx.supplierPayment.findMany({
+      where: { bill_group_id: billGroupId, type: 'PAYMENT' },
+    });
+
+    if (lines.length === 0) {
+      if (payments.length) {
+        await tx.supplierPayment.deleteMany({ where: { bill_group_id: billGroupId } });
+      }
+      return;
+    }
+
+    const billTotal = this.billTotalFromLines(lines);
+    const notesSample =
+      lines.map((l) => l.notes).find((n) => n && /Pay:/i.test(n)) || '';
+    const payMeta = parseStockInPayNotes(notesSample);
+
+    if (!payMeta.mode || payMeta.mode === 'CREDIT') {
+      if (payments.length) {
+        await tx.supplierPayment.deleteMany({ where: { bill_group_id: billGroupId } });
+      }
+      return;
+    }
+
+    const paidTarget =
+      payMeta.mode === 'CASH'
+        ? billTotal
+        : Math.min(Math.max(payMeta.paidAmount, 0), billTotal);
+    const creditTarget = Math.max(0, billTotal - paidTarget);
+
+    const payLine =
+      payMeta.mode === 'CASH'
+        ? `Pay: CASH · paid ${paidTarget.toFixed(2)} · credit 0.00`
+        : `Pay: MIX · paid ${paidTarget.toFixed(2)} · credit ${creditTarget.toFixed(2)}`;
+
+    for (const line of lines) {
+      const nextNotes = replaceStockInPayInNotes(line.notes, payLine);
+      if (nextNotes !== line.notes) {
+        await tx.purchase.update({
+          where: { id: line.id },
+          data: { notes: nextNotes },
+        });
+      }
+    }
+
+    if (paidTarget <= 0.005) {
+      await tx.supplierPayment.deleteMany({ where: { bill_group_id: billGroupId } });
+      return;
+    }
+
+    if (payments.length === 0 && lines[0]) {
+      const anchor = lines[0];
+      const dayStart = new Date(anchor.purchase_date);
+      dayStart.setHours(0, 0, 0, 0);
+      const dayEnd = new Date(anchor.purchase_date);
+      dayEnd.setHours(23, 59, 59, 999);
+      const inv = (anchor.invoice_ref || '').trim();
+      const legacy = await tx.supplierPayment.findFirst({
+        where: {
+          supplier_id: anchor.supplier_id,
+          bill_group_id: null,
+          type: 'PAYMENT',
+          ...(inv ? { OR: [{ reference: inv }, { notes: { contains: inv } }] } : {}),
+          notes: { contains: 'Stock-in', mode: 'insensitive' },
+          payment_date: { gte: dayStart, lte: dayEnd },
+        },
+        orderBy: { created_at: 'desc' },
+      });
+      if (legacy) {
+        await tx.supplierPayment.update({
+          where: { id: legacy.id },
+          data: { bill_group_id: billGroupId, amount: paidTarget },
+        });
+        return;
+      }
+    }
+
+    if (payments.length === 0) {
+      // Caller may recreate payments explicitly (updateStockInBill).
+      return;
+    }
+
+    await tx.supplierPayment.update({
+      where: { id: payments[0].id },
+      data: { amount: paidTarget },
+    });
+    if (payments.length > 1) {
+      await tx.supplierPayment.deleteMany({
+        where: { bill_group_id: billGroupId, id: { not: payments[0].id } },
+      });
+    }
+  }
+
+  /**
+   * Full Stock In bill edit: supplier, branch, payment mode, lines.
+   * Syncs stock, supplier ledger payments, and cash-register cash-outs.
+   */
+  async updateStockInBill(
+    anchorPurchaseId: string,
+    data: {
+      supplierId?: string;
+      warehouseBranchId?: string;
+      purchaseDate?: Date;
+      invoiceRef?: string | null;
+      deliveryStatus?: 'PARTIAL' | 'COMPLETE';
+      batchNo?: string;
+      expiryDate?: Date | null;
+      userNotes?: string | null;
+      source?: string | null;
+      paymentMode?: 'CASH' | 'CREDIT' | 'MIX';
+      paidAmount?: number;
+      paymentMethod?: string;
+      paidFromAccountId?: string | null;
+      paymentReference?: string | null;
+      lines: Array<{
+        id?: string;
+        productId: string;
+        quantity: number;
+        costPrice: number;
+        salePrice?: number;
+      }>;
+      updatedBy: string;
+    },
+  ) {
+    if (!Array.isArray(data.lines) || data.lines.length === 0) {
+      throw new AppError(400, 'At least one line is required');
+    }
+
+    const detail = await this.getPurchaseById(anchorPurchaseId);
+    const existingLines = detail.bill_lines || [detail];
+    let billGroupId = existingLines[0]?.bill_group_id || null;
+    if (!billGroupId) {
+      billGroupId = randomUUID();
+    }
+
+    const oldSupplierId = existingLines[0].supplier_id;
+    const oldBranchId = existingLines[0].warehouse_branch_id;
+    const nextSupplierId = data.supplierId || oldSupplierId;
+    const nextBranchId = data.warehouseBranchId || oldBranchId;
+
+    const supplier = await prisma.supplier.findUnique({ where: { id: nextSupplierId } });
+    if (!supplier) throw new AppError(404, 'Supplier not found');
+    const branch = await prisma.branch.findUnique({ where: { id: nextBranchId } });
+    if (!branch) throw new AppError(404, 'Warehouse branch not found');
+
+    const notesSample =
+      existingLines.map((l) => l.notes).find((n) => n && /Pay:/i.test(n)) ||
+      existingLines[0]?.notes ||
+      '';
+    const oldPayMeta = parseStockInPayNotes(notesSample);
+
+    const priorPayments = await prisma.supplierPayment.findMany({
+      where: { bill_group_id: billGroupId, type: 'PAYMENT' },
+      select: { id: true, amount: true, method: true },
+    });
+    const priorCashPaymentIds = priorPayments
+      .filter((p) => String(p.method || '').toUpperCase() === 'CASH')
+      .map((p) => p.id);
+
+    const billTotal = data.lines.reduce(
+      (sum, line) => sum + Number(line.quantity) * Number(line.costPrice),
+      0,
+    );
+    const paymentMode =
+      data.paymentMode ||
+      oldPayMeta.mode ||
+      'CREDIT';
+    const paidFromAccountId =
+      paymentMode === 'CREDIT'
+        ? null
+        : await new ChartOfAccountsService().resolveMoneyAccount(
+            data.paidFromAccountId,
+            data.paymentMethod || 'CASH',
+          );
+
+    let paidNow = 0;
+    if (paymentMode === 'CASH') {
+      paidNow = billTotal;
+    } else if (paymentMode === 'MIX') {
+      paidNow =
+        data.paidAmount !== undefined
+          ? Number(data.paidAmount) || 0
+          : oldPayMeta.paidAmount || 0;
+      if (paidNow <= 0) {
+        throw new AppError(400, 'Enter how much was paid now for a mix payment');
+      }
+      if (paidNow >= billTotal && billTotal > 0) {
+        throw new AppError(
+          400,
+          'Mix paid amount must be less than bill total (use Cash for full pay)',
+        );
+      }
+    }
+    const creditRemaining = Math.max(0, billTotal - paidNow);
+
+    const payLine =
+      paymentMode === 'CREDIT'
+        ? `Pay: CREDIT · credit ${billTotal.toFixed(2)}`
+        : paymentMode === 'CASH'
+          ? `Pay: CASH · paid ${paidNow.toFixed(2)} · credit 0.00`
+          : `Pay: MIX · paid ${paidNow.toFixed(2)} · credit ${creditRemaining.toFixed(2)}`;
+
+    const noteParts: string[] = [];
+    if (data.batchNo?.trim()) noteParts.push(`Batch: ${data.batchNo.trim()}`);
+    if (data.expiryDate) {
+      noteParts.push(`Expiry: ${data.expiryDate.toISOString().slice(0, 10)}`);
+    }
+    if (data.source?.trim()) noteParts.push(`Source: ${data.source.trim()}`);
+    if (data.userNotes?.trim()) noteParts.push(data.userNotes.trim());
+    noteParts.push(payLine);
+    const noteText = noteParts.join(' | ');
+
+    const existingById = new Map(existingLines.map((l) => [l.id, l]));
+    const keepIds = new Set(
+      data.lines.filter((l) => l.id && existingById.has(l.id)).map((l) => l.id as string),
+    );
+
+    const result = await prisma.$transaction(async (tx) => {
+      // Ensure all legacy siblings share bill_group_id
+      for (const line of existingLines) {
+        if (line.bill_group_id !== billGroupId) {
+          await tx.purchase.update({
+            where: { id: line.id },
+            data: { bill_group_id: billGroupId },
+          });
+        }
+      }
+
+      // Delete removed lines
+      for (const line of existingLines) {
+        if (keepIds.has(line.id)) continue;
+        if (line.purchase_invoice_id) {
+          throw new AppError(
+            400,
+            'Cannot remove a line that is on a supplier invoice',
+          );
+        }
+        const withReturns = await tx.purchase.findUnique({
+          where: { id: line.id },
+          include: { return_items: { select: { id: true } } },
+        });
+        if (withReturns?.return_items.length) {
+          throw new AppError(
+            400,
+            'Cannot remove a line with supplier returns — reverse returns first',
+          );
+        }
+        await this.deletePurchaseLineInTransaction(tx, line, data.updatedBy);
+      }
+
+      const purchaseDate = data.purchaseDate || existingLines[0].purchase_date;
+      const deliveryStatus =
+        data.deliveryStatus || existingLines[0].delivery_status || 'COMPLETE';
+      const invoiceRef =
+        data.invoiceRef !== undefined
+          ? data.invoiceRef
+          : existingLines[0].invoice_ref;
+
+      for (const line of data.lines) {
+        const qty = Number(line.quantity);
+        const cost = Number(line.costPrice);
+        const sale =
+          line.salePrice !== undefined ? Number(line.salePrice) : cost;
+        if (!Number.isFinite(qty) || qty <= 0) {
+          throw new AppError(400, 'Quantity must be greater than zero');
+        }
+        if (!Number.isFinite(cost) || cost < 0) {
+          throw new AppError(400, 'Cost price must be >= 0');
+        }
+        if (!Number.isFinite(sale) || sale < 0) {
+          throw new AppError(400, 'Sale price must be >= 0');
+        }
+
+        if (line.id && existingById.has(line.id)) {
+          const existing = existingById.get(line.id)!;
+          const returned = await tx.purchaseReturnItem.aggregate({
+            where: { purchase_id: existing.id },
+            _sum: { quantity: true },
+          });
+          const returnedQty = asNumber(returned._sum.quantity || 0);
+          if (qty < returnedQty) {
+            throw new AppError(
+              400,
+              `Quantity cannot be less than already returned (${returnedQty})`,
+            );
+          }
+
+          const oldQty = asNumber(existing.quantity);
+          const qtyDelta = qty - oldQty;
+          const oldBranch = existing.warehouse_branch_id;
+          const branchChanged = oldBranch !== nextBranchId;
+
+          if (branchChanged) {
+            // Remove full old qty from old branch, add new qty to new branch
+            await this.applyStockDeltaInTx(tx, {
+              productId: existing.product_id,
+              branchId: oldBranch,
+              qtyDelta: -oldQty,
+              unitCost: cost,
+              referenceId: existing.id,
+              referenceType: 'purchase_edit_branch',
+              notes: `Stock In branch change: leave ${oldBranch}`,
+              userId: data.updatedBy,
+              allowNegative: false,
+            });
+            await this.applyStockDeltaInTx(tx, {
+              productId: line.productId || existing.product_id,
+              branchId: nextBranchId,
+              qtyDelta: qty,
+              unitCost: cost,
+              referenceId: existing.id,
+              referenceType: 'purchase_edit_branch',
+              notes: `Stock In branch change: enter ${nextBranchId}`,
+              userId: data.updatedBy,
+              allowNegative: true,
+            });
+          } else if (qtyDelta !== 0) {
+            await this.applyStockDeltaInTx(tx, {
+              productId: existing.product_id,
+              branchId: nextBranchId,
+              qtyDelta,
+              unitCost: cost,
+              referenceId: existing.id,
+              referenceType: 'purchase_edit',
+              notes: `Stock In edit: qty ${oldQty} → ${qty}`,
+              userId: data.updatedBy,
+              allowNegative: false,
+            });
+          }
+
+          await tx.purchase.update({
+            where: { id: existing.id },
+            data: {
+              product_id: line.productId || existing.product_id,
+              supplier_id: nextSupplierId,
+              warehouse_branch_id: nextBranchId,
+              quantity: qty,
+              cost_price: cost,
+              sale_price: sale,
+              purchase_date: purchaseDate,
+              invoice_ref: invoiceRef,
+              notes: noteText,
+              delivery_status: deliveryStatus,
+              bill_group_id: billGroupId,
+            },
+          });
+        } else {
+          // New line
+          const purchase = await tx.purchase.create({
+            data: {
+              product_id: line.productId,
+              supplier_id: nextSupplierId,
+              warehouse_branch_id: nextBranchId,
+              quantity: qty,
+              cost_price: cost,
+              sale_price: sale,
+              purchase_date: purchaseDate,
+              invoice_ref: invoiceRef,
+              bill_group_id: billGroupId,
+              notes: noteText,
+              delivery_status: deliveryStatus,
+              created_by: data.updatedBy,
+            },
+          });
+          await this.applyStockDeltaInTx(tx, {
+            productId: line.productId,
+            branchId: nextBranchId,
+            qtyDelta: qty,
+            unitCost: cost,
+            referenceId: purchase.id,
+            referenceType: 'purchase',
+            notes: 'Added on Stock In edit',
+            userId: data.updatedBy,
+            allowNegative: true,
+            movementType: 'PURCHASE',
+          });
+        }
+      }
+
+      // Header sync for any remaining lines (notes already set per-line above)
+      await tx.purchase.updateMany({
+        where: { bill_group_id: billGroupId },
+        data: {
+          supplier_id: nextSupplierId,
+          warehouse_branch_id: nextBranchId,
+          purchase_date: purchaseDate,
+          invoice_ref: invoiceRef,
+          delivery_status: deliveryStatus,
+          notes: noteText,
+        },
+      });
+
+      // Rebuild supplier payments for this bill
+      await tx.supplierPayment.deleteMany({
+        where: { bill_group_id: billGroupId, type: 'PAYMENT' },
+      });
+
+      let paymentId: string | null = null;
+      if (paidNow > 0.005) {
+        const payNotes = [
+          `Stock-in ${paymentMode}`,
+          invoiceRef ? `Invoice ${invoiceRef}` : null,
+          creditRemaining > 0
+            ? `Remaining on credit ${creditRemaining.toFixed(2)}`
+            : 'Fully paid at stock-in',
+        ]
+          .filter(Boolean)
+          .join(' · ');
+
+        const payment = await tx.supplierPayment.create({
+          data: {
+            supplier_id: nextSupplierId,
+            amount: paidNow,
+            payment_date: purchaseDate,
+            method: data.paymentMethod || 'CASH',
+            paid_from_account_id: paidFromAccountId,
+            reference: data.paymentReference || invoiceRef || null,
+            notes: payNotes,
+            bill_group_id: billGroupId,
+            created_by: data.updatedBy,
+          },
+        });
+        paymentId = payment.id;
+      }
+
+      return {
+        billGroupId,
+        billTotal,
+        paymentMode,
+        paidAmount: paidNow,
+        creditRemaining,
+        paymentId,
+        supplierId: nextSupplierId,
+        warehouseBranchId: nextBranchId,
+        paymentMethod: data.paymentMethod || 'CASH',
+      };
+    }, PURCHASE_TX_OPTIONS);
+
+    // Cash drawer: reverse old cash-outs tied to prior payments, then post new if needed
+    await reverseCashPayOnRegisterByPaymentRefs(priorCashPaymentIds).catch(() => 0);
+
+    const method = String(result.paymentMethod || 'CASH').toUpperCase();
+    if (result.paidAmount > 0.005 && method === 'CASH' && result.paymentId) {
+      await recordCashPayOnOpenRegister({
+        particular: `Purchase payment · ${supplier.name || 'Supplier'}`,
+        amount: result.paidAmount,
+        branchId: result.warehouseBranchId,
+        userId: data.updatedBy,
+        reference: result.paymentId,
+        notes: data.paymentReference || data.invoiceRef || null,
+      }).catch(() => undefined);
+    }
+
+    // Anchor may have been deleted if that line was removed — resolve any remaining line.
+    const surviving = await prisma.purchase.findFirst({
+      where: {
+        OR: [
+          { id: anchorPurchaseId },
+          { bill_group_id: result.billGroupId },
+        ],
+      },
+      orderBy: { created_at: 'asc' },
+      select: { id: true },
+    });
+    if (!surviving) {
+      throw new AppError(404, 'Bill not found after update');
+    }
+    return this.getPurchaseById(surviving.id);
+  }
+
+  private async applyStockDeltaInTx(
+    tx: Prisma.TransactionClient,
+    opts: {
+      productId: string;
+      branchId: string;
+      qtyDelta: number;
+      unitCost: number;
+      referenceId: string;
+      referenceType: string;
+      notes: string;
+      userId: string;
+      allowNegative: boolean;
+      movementType?: 'PURCHASE' | 'ADJUSTMENT';
+    },
+  ) {
+    if (Math.abs(opts.qtyDelta) < 0.000001) return;
+
+    let stock = await tx.stock.findUnique({
+      where: {
+        product_id_branch_id: {
+          product_id: opts.productId,
+          branch_id: opts.branchId,
+        },
+      },
+    });
+
+    const previousQty = stock ? asNumber(stock.current_quantity) : 0;
+    const newStockQty = previousQty + opts.qtyDelta;
+    if (!opts.allowNegative && newStockQty < -0.000001) {
+      throw new AppError(
+        400,
+        `Cannot reduce quantity: only ${previousQty} units remain in stock at this branch`,
+      );
+    }
+
+    if (stock) {
+      await tx.stock.update({
+        where: {
+          product_id_branch_id: {
+            product_id: opts.productId,
+            branch_id: opts.branchId,
+          },
+        },
+        data: { current_quantity: newStockQty },
+      });
+    } else {
+      await tx.stock.create({
+        data: {
+          product_id: opts.productId,
+          branch_id: opts.branchId,
+          current_quantity: newStockQty,
+        },
+      });
+    }
+
+    await tx.stockMovement.create({
+      data: {
+        product_id: opts.productId,
+        branch_id: opts.branchId,
+        movement_type: opts.movementType || 'ADJUSTMENT',
+        reference_id: opts.referenceId,
+        reference_type: opts.referenceType,
+        quantity_change: opts.qtyDelta,
+        previous_qty: previousQty,
+        new_qty: newStockQty,
+        unit_cost: opts.unitCost,
+        notes: opts.notes,
+        created_by: opts.userId,
+      },
+    });
+  }
+
   async createPurchase(data: {
     productId: string;
     supplierId: string;
@@ -28,6 +657,7 @@ export class PurchaseService {
     }
 
     return prisma.$transaction(async (tx) => {
+      const billGroupId = randomUUID();
       const purchase = await tx.purchase.create({
         data: {
           product_id: data.productId,
@@ -38,6 +668,7 @@ export class PurchaseService {
           sale_price: data.salePrice,
           purchase_date: data.purchaseDate || new Date(),
           invoice_ref: data.invoiceRef,
+          bill_group_id: billGroupId,
           notes: data.notes,
           delivery_status: data.deliveryStatus || 'COMPLETE',
           created_by: data.createdBy,
@@ -62,6 +693,16 @@ export class PurchaseService {
       const qty = data.quantity;
       const previousQty = stock ? asNumber(stock.current_quantity) : 0;
       const newQty = stock ? addDecimal(stock.current_quantity, qty) : qty;
+
+      const onHandBefore = await productOnHandQty(tx, data.productId);
+      await applyWeightedAverageCost(tx, {
+        productId: data.productId,
+        onHandBefore,
+        incomingQty: qty,
+        unitCost: data.costPrice,
+        userId: data.createdBy,
+        source: 'STOCK_IN',
+      });
 
       if (stock) {
         await tx.stock.update({
@@ -100,7 +741,7 @@ export class PurchaseService {
       });
 
       return purchase;
-    });
+    }, PURCHASE_TX_OPTIONS);
   }
 
   // Multi-line GRN — saves the supplier delivery as N Purchase rows + one
@@ -123,6 +764,8 @@ export class PurchaseService {
     paymentMode?: 'CASH' | 'CREDIT' | 'MIX';
     paidAmount?: number;
     paymentMethod?: string;
+    /** Cash / bank account the paid part comes out of */
+    paidFromAccountId?: string | null;
     paymentReference?: string;
     paymentNotes?: string;
     lines: Array<{
@@ -152,6 +795,10 @@ export class PurchaseService {
       0,
     );
     const paymentMode = data.paymentMode || 'CREDIT';
+    const paidFromAccountId =
+      paymentMode === 'CREDIT'
+        ? null
+        : await new ChartOfAccountsService().resolveMoneyAccount(data.paidFromAccountId, data.paymentMethod || 'CASH');
     let paidNow = 0;
     if (paymentMode === 'CASH') {
       paidNow = billTotal;
@@ -169,8 +816,9 @@ export class PurchaseService {
     }
     const creditRemaining = Math.max(0, billTotal - paidNow);
 
-    return prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const purchaseIds: string[] = [];
+      const billGroupId = randomUUID();
 
       for (const [lineNo, line] of data.lines.entries()) {
         if (!line.productId) throw new AppError(400, 'Product is required on every line');
@@ -204,6 +852,7 @@ export class PurchaseService {
             purchase_date: data.purchaseDate || new Date(),
             line_no: lineNo,
             invoice_ref: data.invoiceRef,
+            bill_group_id: billGroupId,
             notes: noteText,
             delivery_status: data.deliveryStatus || 'COMPLETE',
             created_by: data.createdBy,
@@ -223,6 +872,17 @@ export class PurchaseService {
         const newQty = stock
           ? addDecimal(stock.current_quantity, line.quantity)
           : line.quantity;
+
+        // WAC before stock bump so on-hand excludes this receipt.
+        const onHandBefore = await productOnHandQty(tx, line.productId);
+        await applyWeightedAverageCost(tx, {
+          productId: line.productId,
+          onHandBefore,
+          incomingQty: line.quantity,
+          unitCost: line.costPrice,
+          userId: data.createdBy,
+          source: 'STOCK_IN',
+        });
 
         if (stock) {
           await tx.stock.update({
@@ -282,8 +942,10 @@ export class PurchaseService {
             amount: paidNow,
             payment_date: data.purchaseDate || new Date(),
             method: data.paymentMethod || 'CASH',
+            paid_from_account_id: paidFromAccountId,
             reference: data.paymentReference || data.invoiceRef || null,
             notes: payNotes || null,
+            bill_group_id: billGroupId,
             created_by: data.createdBy,
           },
         });
@@ -293,13 +955,31 @@ export class PurchaseService {
       return {
         count: purchaseIds.length,
         purchaseIds,
+        billGroupId,
         billTotal,
         paymentMode,
         paidAmount: paidNow,
         creditRemaining,
         paymentId,
       };
-    });
+    }, PURCHASE_TX_OPTIONS);
+
+    const method = String(data.paymentMethod || 'CASH').toUpperCase();
+    if (result.paidAmount > 0 && method === 'CASH') {
+      const supplier = await prisma.supplier.findUnique({
+        where: { id: data.supplierId },
+        select: { name: true },
+      });
+      await recordCashPayOnOpenRegister({
+        particular: `Purchase payment · ${supplier?.name || 'Supplier'}`,
+        amount: result.paidAmount,
+        branchId: data.warehouseBranchId,
+        userId: data.createdBy,
+        reference: result.paymentId,
+        notes: data.paymentNotes || data.invoiceRef || null,
+      }).catch(() => undefined);
+    }
+    return result;
   }
 
   async listPurchases(params: {
@@ -313,10 +993,23 @@ export class PurchaseService {
     userId?: string;
     sortBy?: 'date' | 'name';
     sortOrder?: 'asc' | 'desc';
+    search?: string;
+    /** line = each product row (default). bill = one row per supplier receipt. */
+    groupBy?: 'line' | 'bill';
   }) {
-    const page = params.page || 1;
-    const limit = params.limit || 20;
+    const page = Math.max(params.page || 1, 1);
+    const limit = Math.min(Math.max(params.limit || 20, 1), 100);
     const skip = (page - 1) * limit;
+    const groupBy = params.groupBy === 'bill' ? 'bill' : 'line';
+    const sortOrder = params.sortOrder || 'desc';
+    // line_no always breaks ties, because every line in one bulk Stock In
+    // submission shares the same purchase_date — without it, products from
+    // the same entry would come back in an arbitrary order instead of the
+    // order they were added.
+    const orderBy: Prisma.PurchaseOrderByWithRelationInput[] =
+      params.sortBy === 'name'
+        ? [{ product: { name: sortOrder } }, { line_no: 'asc' }]
+        : [{ purchase_date: sortOrder }, { line_no: 'asc' }];
 
     const where: Prisma.PurchaseWhereInput = {};
     if (params.productId) where.product_id = params.productId;
@@ -328,57 +1021,607 @@ export class PurchaseService {
       if (params.startDate) where.purchase_date.gte = params.startDate;
       if (params.endDate) where.purchase_date.lte = params.endDate;
     }
+    const search = params.search?.trim();
+    if (search) {
+      where.OR = [
+        { invoice_ref: { contains: search, mode: 'insensitive' } },
+        { product: { name: { contains: search, mode: 'insensitive' } } },
+        { product: { sku: { contains: search, mode: 'insensitive' } } },
+        { product: { code: { contains: search, mode: 'insensitive' } } },
+        { supplier: { name: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
 
-    const sortOrder = params.sortOrder || 'desc';
-    // line_no always breaks ties, because every line in one bulk Stock In
-    // submission shares the same purchase_date — without it, products from
-    // the same entry would come back in an arbitrary order instead of the
-    // order they were added.
-    const orderBy: Prisma.PurchaseOrderByWithRelationInput[] =
-      params.sortBy === 'name'
-        ? [{ product: { name: sortOrder } }, { line_no: 'asc' }]
-        : [{ purchase_date: sortOrder }, { line_no: 'asc' }];
+    const totalsRows = await prisma.purchase.findMany({
+      where,
+      select: { quantity: true, cost_price: true },
+    });
+    let totalQuantity = 0;
+    let totalValue = 0;
+    for (const row of totalsRows) {
+      const qty = Number(row.quantity) || 0;
+      totalQuantity += qty;
+      totalValue += qty * (Number(row.cost_price) || 0);
+    }
+    const totalsMeta = {
+      totalQuantity: Math.round(totalQuantity * 100) / 100,
+      totalValue: Math.round(totalValue * 100) / 100,
+    };
 
-    const [total, purchases] = await Promise.all([
-      prisma.purchase.count({ where }),
-      prisma.purchase.findMany({
-        where,
-        skip,
-        take: limit,
-        orderBy,
-        include: {
-          product: true,
-          supplier: true,
-          warehouse_branch: true,
-          user: { select: { email: true } },
+    if (groupBy === 'line') {
+      const [total, purchases] = await Promise.all([
+        prisma.purchase.count({ where }),
+        prisma.purchase.findMany({
+          where,
+          skip,
+          take: limit,
+          orderBy,
+          include: PURCHASE_LIST_INCLUDE,
+        }),
+      ]);
+      return {
+        data: purchases,
+        meta: {
+          total,
+          page,
+          limit,
+          totalPages: Math.max(1, Math.ceil(total / limit)),
+          groupBy: 'line' as const,
+          ...totalsMeta,
         },
-      }),
-    ]);
+      };
+    }
+
+    // Bill-wise: load matching lines, group, then paginate groups.
+    const allLines = await prisma.purchase.findMany({
+      where,
+      orderBy: [{ purchase_date: 'desc' }, { line_no: 'asc' }],
+      include: PURCHASE_LIST_INCLUDE,
+      take: 5000,
+    });
+
+    const groupMap = new Map<
+      string,
+      {
+        bill_group_id: string;
+        purchase_date: Date;
+        invoice_ref: string | null;
+        supplier: PurchaseListRow['supplier'];
+        warehouse_branch: PurchaseListRow['warehouse_branch'];
+        user: PurchaseListRow['user'];
+        delivery_status: string | null;
+        lines: PurchaseListRow[];
+        quantity: number;
+        value: number;
+      }
+    >();
+
+    for (const row of allLines) {
+      const key = billKey(row);
+      const qty = Number(row.quantity) || 0;
+      const cost = Number(row.cost_price) || 0;
+      const existing = groupMap.get(key);
+      if (existing) {
+        existing.lines.push(row);
+        existing.quantity += qty;
+        existing.value += qty * cost;
+        if (row.purchase_date > existing.purchase_date) {
+          existing.purchase_date = row.purchase_date;
+        }
+      } else {
+        groupMap.set(key, {
+          bill_group_id: key,
+          purchase_date: row.purchase_date,
+          invoice_ref: row.invoice_ref,
+          supplier: row.supplier,
+          warehouse_branch: row.warehouse_branch,
+          user: row.user,
+          delivery_status: row.delivery_status,
+          lines: [row],
+          quantity: qty,
+          value: qty * cost,
+        });
+      }
+    }
+
+    const bills = Array.from(groupMap.values()).sort(
+      (a, b) => b.purchase_date.getTime() - a.purchase_date.getTime(),
+    );
+    const total = bills.length;
+    const pageBills = bills.slice(skip, skip + limit).map((b) => ({
+      id: b.lines[0]?.id,
+      bill_group_id: b.bill_group_id,
+      purchase_date: b.purchase_date,
+      invoice_ref: b.invoice_ref,
+      supplier: b.supplier,
+      warehouse_branch: b.warehouse_branch,
+      user: b.user,
+      delivery_status: b.delivery_status,
+      line_count: b.lines.length,
+      quantity: Math.round(b.quantity * 100) / 100,
+      cost_price: b.quantity > 0 ? Math.round((b.value / b.quantity) * 100) / 100 : 0,
+      value: Math.round(b.value * 100) / 100,
+      product: {
+        id: b.lines[0]?.product_id,
+        name:
+          b.lines.length === 1
+            ? b.lines[0]?.product?.name || '—'
+            : `${b.lines.length} products`,
+        sku: b.lines.length === 1 ? b.lines[0]?.product?.sku : null,
+      },
+      lines: b.lines.map((l) => ({
+        id: l.id,
+        product: l.product,
+        quantity: Number(l.quantity) || 0,
+        cost_price: Number(l.cost_price) || 0,
+        value: (Number(l.quantity) || 0) * (Number(l.cost_price) || 0),
+      })),
+    }));
 
     return {
-      data: purchases,
-      meta: { total, page, limit, totalPages: Math.ceil(total / limit) },
+      data: pageBills,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+        groupBy: 'bill' as const,
+        ...totalsMeta,
+      },
     };
   }
 
   async getPurchaseById(id: string) {
     const purchase = await prisma.purchase.findUnique({
       where: { id },
-      include: {
-        product: true,
-        supplier: true,
-        warehouse_branch: true,
-        user: { select: { email: true } },
-      },
+      include: PURCHASE_LIST_INCLUDE,
     });
     if (!purchase) throw new AppError(404, 'Purchase not found');
-    return purchase;
+
+    const groupId = purchase.bill_group_id;
+    let billLines = [purchase];
+    if (groupId) {
+      billLines = await prisma.purchase.findMany({
+        where: { bill_group_id: groupId },
+        orderBy: { created_at: 'asc' },
+        include: PURCHASE_LIST_INCLUDE,
+      });
+    } else {
+      const inv = (purchase.invoice_ref || '').trim();
+      if (inv) {
+        const dayStart = new Date(purchase.purchase_date);
+        dayStart.setHours(0, 0, 0, 0);
+        const dayEnd = new Date(purchase.purchase_date);
+        dayEnd.setHours(23, 59, 59, 999);
+        billLines = await prisma.purchase.findMany({
+          where: {
+            supplier_id: purchase.supplier_id,
+            warehouse_branch_id: purchase.warehouse_branch_id,
+            invoice_ref: purchase.invoice_ref,
+            purchase_date: { gte: dayStart, lte: dayEnd },
+          },
+          orderBy: { created_at: 'asc' },
+          include: PURCHASE_LIST_INCLUDE,
+        });
+      }
+    }
+
+    const billQuantity = billLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+    const billValue = billLines.reduce(
+      (s, l) => s + (Number(l.quantity) || 0) * (Number(l.cost_price) || 0),
+      0,
+    );
+
+    return {
+      ...purchase,
+      bill_group_id: groupId || billKey(purchase),
+      bill_lines: billLines,
+      bill_line_count: billLines.length,
+      bill_quantity: Math.round(billQuantity * 100) / 100,
+      bill_value: Math.round(billValue * 100) / 100,
+    };
+  }
+
+  /**
+   * Correct a Stock In line: qty/cost/meta. Quantity changes adjust on-hand stock
+   * by the delta and write an ADJUSTMENT movement linked to the purchase.
+   */
+  async updatePurchase(
+    id: string,
+    data: {
+      quantity?: number;
+      costPrice?: number;
+      salePrice?: number;
+      purchaseDate?: Date;
+      invoiceRef?: string | null;
+      notes?: string | null;
+      deliveryStatus?: 'PARTIAL' | 'COMPLETE';
+      updatedBy: string;
+    },
+  ) {
+    const existing = await prisma.purchase.findUnique({
+      where: { id },
+      include: {
+        return_items: { select: { quantity: true } },
+      },
+    });
+    if (!existing) throw new AppError(404, 'Purchase not found');
+
+    const oldQty = asNumber(existing.quantity);
+    const returnedQty = existing.return_items.reduce(
+      (s, r) => s + asNumber(r.quantity),
+      0,
+    );
+
+    const nextQty =
+      data.quantity !== undefined ? Number(data.quantity) : oldQty;
+    if (!Number.isFinite(nextQty) || nextQty <= 0) {
+      throw new AppError(400, 'Quantity must be greater than zero');
+    }
+    if (nextQty < returnedQty) {
+      throw new AppError(
+        400,
+        `Quantity cannot be less than already returned (${returnedQty})`,
+      );
+    }
+
+    const nextCost =
+      data.costPrice !== undefined ? Number(data.costPrice) : asNumber(existing.cost_price);
+    if (!Number.isFinite(nextCost) || nextCost < 0) {
+      throw new AppError(400, 'Cost price must be >= 0');
+    }
+
+    const nextSale =
+      data.salePrice !== undefined
+        ? Number(data.salePrice)
+        : asNumber(existing.sale_price);
+    if (!Number.isFinite(nextSale) || nextSale < 0) {
+      throw new AppError(400, 'Sale price must be >= 0');
+    }
+
+    const qtyDelta = nextQty - oldQty;
+
+    return prisma.$transaction(async (tx) => {
+      if (qtyDelta !== 0) {
+        let stock = await tx.stock.findUnique({
+          where: {
+            product_id_branch_id: {
+              product_id: existing.product_id,
+              branch_id: existing.warehouse_branch_id,
+            },
+          },
+        });
+
+        const previousQty = stock ? asNumber(stock.current_quantity) : 0;
+        const newStockQty = previousQty + qtyDelta;
+        if (newStockQty < 0) {
+          throw new AppError(
+            400,
+            `Cannot reduce quantity: only ${previousQty} units remain in stock at this branch`,
+          );
+        }
+
+        if (stock) {
+          await tx.stock.update({
+            where: {
+              product_id_branch_id: {
+                product_id: existing.product_id,
+                branch_id: existing.warehouse_branch_id,
+              },
+            },
+            data: { current_quantity: newStockQty },
+          });
+        } else {
+          await tx.stock.create({
+            data: {
+              product_id: existing.product_id,
+              branch_id: existing.warehouse_branch_id,
+              current_quantity: Math.max(0, newStockQty),
+            },
+          });
+        }
+
+        await tx.stockMovement.create({
+          data: {
+            product_id: existing.product_id,
+            branch_id: existing.warehouse_branch_id,
+            movement_type: 'ADJUSTMENT',
+            reference_id: existing.id,
+            reference_type: 'purchase_edit',
+            quantity_change: qtyDelta,
+            previous_qty: previousQty,
+            new_qty: newStockQty,
+            unit_cost: nextCost,
+            notes: `Stock In edit: qty ${oldQty} → ${nextQty}`,
+            created_by: data.updatedBy,
+          },
+        });
+      }
+
+      const purchase = await tx.purchase.update({
+        where: { id },
+        data: {
+          quantity: nextQty,
+          cost_price: nextCost,
+          sale_price: nextSale,
+          ...(data.purchaseDate !== undefined
+            ? { purchase_date: data.purchaseDate }
+            : {}),
+          ...(data.invoiceRef !== undefined ? { invoice_ref: data.invoiceRef } : {}),
+          ...(data.notes !== undefined ? { notes: data.notes } : {}),
+          ...(data.deliveryStatus !== undefined
+            ? { delivery_status: data.deliveryStatus }
+            : {}),
+        },
+        include: PURCHASE_LIST_INCLUDE,
+      });
+
+      await this.syncStockInBillPayments(tx, existing.bill_group_id);
+
+      return purchase;
+    }, PURCHASE_TX_OPTIONS);
+  }
+
+  /** Stock reversal + movement + row delete (no payment sync). */
+  private async deletePurchaseLineInTransaction(
+    tx: Prisma.TransactionClient,
+    existing: {
+      id: string;
+      product_id: string;
+      warehouse_branch_id: string;
+      quantity: Prisma.Decimal | number;
+      cost_price: Prisma.Decimal | number;
+    },
+    deletedBy: string,
+  ) {
+    const qty = asNumber(existing.quantity);
+    const cost = asNumber(existing.cost_price);
+
+    const stock = await tx.stock.findUnique({
+      where: {
+        product_id_branch_id: {
+          product_id: existing.product_id,
+          branch_id: existing.warehouse_branch_id,
+        },
+      },
+    });
+
+    const previousQty = stock ? asNumber(stock.current_quantity) : 0;
+    const newStockQty = previousQty - qty;
+
+    if (stock) {
+      await tx.stock.update({
+        where: {
+          product_id_branch_id: {
+            product_id: existing.product_id,
+            branch_id: existing.warehouse_branch_id,
+          },
+        },
+        data: { current_quantity: newStockQty },
+      });
+    } else {
+      await tx.stock.create({
+        data: {
+          product_id: existing.product_id,
+          branch_id: existing.warehouse_branch_id,
+          current_quantity: newStockQty,
+        },
+      });
+    }
+
+    const movementNote =
+      newStockQty < 0
+        ? `Stock In line removed (${qty} units) · on-hand now ${newStockQty} (some units may already have been sold)`
+        : `Stock In line removed (${qty} units)`;
+
+    await tx.stockMovement.create({
+      data: {
+        product_id: existing.product_id,
+        branch_id: existing.warehouse_branch_id,
+        movement_type: 'ADJUSTMENT',
+        reference_id: existing.id,
+        reference_type: 'purchase_delete',
+        quantity_change: -qty,
+        previous_qty: previousQty,
+        new_qty: newStockQty,
+        unit_cost: cost,
+        notes: movementNote,
+        created_by: deletedBy,
+      },
+    });
+
+    await tx.purchase.delete({ where: { id: existing.id } });
+  }
+
+  /** Remove one Stock In line and reverse received quantity from branch stock. */
+  async deletePurchaseLine(id: string, deletedBy: string) {
+    const existing = await prisma.purchase.findUnique({
+      where: { id },
+      include: { return_items: { select: { id: true, quantity: true } } },
+    });
+    if (!existing) throw new AppError(404, 'Purchase not found');
+    if (existing.return_items.length > 0) {
+      throw new AppError(
+        400,
+        'Cannot remove this line: supplier returns exist against it. Reverse returns first.',
+      );
+    }
+    if (existing.purchase_invoice_id) {
+      throw new AppError(
+        400,
+        'Cannot remove this line: it is on a supplier invoice. Unlink the invoice first.',
+      );
+    }
+
+    return prisma.$transaction(async (tx) => {
+      await this.deletePurchaseLineInTransaction(tx, existing, deletedBy);
+      await this.syncStockInBillPayments(tx, existing.bill_group_id);
+      return { deletedId: id };
+    }, PURCHASE_TX_OPTIONS);
+  }
+
+  /** Delete every line on the same supplier bill (bill_group_id). */
+  async deleteBill(anchorPurchaseId: string, deletedBy: string) {
+    const detail = await this.getPurchaseById(anchorPurchaseId);
+    const lines = detail.bill_lines || [detail];
+    if (lines.length === 0) throw new AppError(404, 'Bill not found');
+
+    const invoiced = lines.find((l) => l.purchase_invoice_id);
+    if (invoiced) {
+      throw new AppError(
+        400,
+        'Cannot delete this bill: one or more lines are on a supplier invoice. Unlink the invoice in Suppliers first.',
+      );
+    }
+
+    for (const line of lines) {
+      const row = await prisma.purchase.findUnique({
+        where: { id: line.id },
+        include: { return_items: { select: { id: true } } },
+      });
+      if (row?.return_items.length) {
+        throw new AppError(
+          400,
+          'Cannot delete this bill: supplier returns exist on one or more lines. Reverse returns first.',
+        );
+      }
+    }
+
+    const billGroupId = lines[0]?.bill_group_id ?? null;
+
+    return prisma.$transaction(async (tx) => {
+      for (const line of lines) {
+        await this.deletePurchaseLineInTransaction(tx, line, deletedBy);
+      }
+      await this.syncStockInBillPayments(tx, billGroupId);
+      return { deletedLineCount: lines.length };
+    }, PURCHASE_TX_OPTIONS);
+  }
+
+  /** Add a product line to an existing supplier bill (same bill_group_id). */
+  async appendBillLine(
+    anchorPurchaseId: string,
+    data: {
+      productId: string;
+      quantity: number;
+      costPrice: number;
+      salePrice?: number;
+      createdBy: string;
+    },
+  ) {
+    const anchor = await prisma.purchase.findUnique({
+      where: { id: anchorPurchaseId },
+      include: { product: true },
+    });
+    if (!anchor) throw new AppError(404, 'Bill not found');
+
+    const qty = Number(data.quantity);
+    const cost = Number(data.costPrice);
+    if (!Number.isFinite(qty) || qty <= 0) {
+      throw new AppError(400, 'Quantity must be positive');
+    }
+    if (!Number.isFinite(cost) || cost < 0) {
+      throw new AppError(400, 'Cost price must be >= 0');
+    }
+
+    const sale =
+      data.salePrice !== undefined ? Number(data.salePrice) : cost;
+    if (!Number.isFinite(sale) || sale < 0) {
+      throw new AppError(400, 'Sale price must be >= 0');
+    }
+
+    let billGroupId = anchor.bill_group_id;
+    if (!billGroupId) {
+      billGroupId = randomUUID();
+    }
+
+    return prisma.$transaction(async (tx) => {
+      if (!anchor.bill_group_id) {
+        const siblings = await this.getPurchaseById(anchorPurchaseId);
+        const siblingLines = siblings.bill_lines || [anchor];
+        for (const line of siblingLines) {
+          await tx.purchase.update({
+            where: { id: line.id },
+            data: { bill_group_id: billGroupId },
+          });
+        }
+      }
+
+      const purchase = await tx.purchase.create({
+        data: {
+          product_id: data.productId,
+          supplier_id: anchor.supplier_id,
+          warehouse_branch_id: anchor.warehouse_branch_id,
+          quantity: qty,
+          cost_price: cost,
+          sale_price: sale,
+          purchase_date: anchor.purchase_date,
+          invoice_ref: anchor.invoice_ref,
+          bill_group_id: billGroupId,
+          notes: anchor.notes,
+          delivery_status: anchor.delivery_status,
+          purchase_order_id: anchor.purchase_order_id,
+          created_by: data.createdBy,
+        },
+        include: PURCHASE_LIST_INCLUDE,
+      });
+
+      let stock = await tx.stock.findUnique({
+        where: {
+          product_id_branch_id: {
+            product_id: data.productId,
+            branch_id: anchor.warehouse_branch_id,
+          },
+        },
+      });
+
+      const previousQty = stock ? asNumber(stock.current_quantity) : 0;
+      const newQty = stock ? addDecimal(stock.current_quantity, qty) : qty;
+
+      if (stock) {
+        await tx.stock.update({
+          where: {
+            product_id_branch_id: {
+              product_id: data.productId,
+              branch_id: anchor.warehouse_branch_id,
+            },
+          },
+          data: { current_quantity: newQty },
+        });
+      } else {
+        await tx.stock.create({
+          data: {
+            product_id: data.productId,
+            branch_id: anchor.warehouse_branch_id,
+            current_quantity: qty,
+          },
+        });
+      }
+
+      await tx.stockMovement.create({
+        data: {
+          product_id: data.productId,
+          branch_id: anchor.warehouse_branch_id,
+          movement_type: 'PURCHASE',
+          reference_id: purchase.id,
+          reference_type: 'purchase',
+          quantity_change: qty,
+          previous_qty: previousQty,
+          new_qty: typeof newQty === 'number' ? newQty : asNumber(newQty as Prisma.Decimal),
+          unit_cost: cost,
+          notes: 'Added to existing supplier bill',
+          created_by: data.createdBy,
+        },
+      });
+
+      await this.syncStockInBillPayments(tx, billGroupId);
+
+      return purchase;
+    }, PURCHASE_TX_OPTIONS);
   }
 
   async getMonthlyStats(warehouseBranchId?: string) {
-    const startOfMonth = new Date();
-    startOfMonth.setDate(1);
-    startOfMonth.setHours(0, 0, 0, 0);
+    const startOfMonth = startOfBusinessMonth();
 
     const where: Prisma.PurchaseWhereInput = {
       purchase_date: { gte: startOfMonth },
@@ -404,5 +1647,105 @@ export class PurchaseService {
       totalQuantity,
       totalValue,
     };
+  }
+
+  // ─── Hold / Resume (unposted Stock In drafts) ───────────────────────────
+
+  async getHoldPurchases({ branchId }: { branchId?: string }) {
+    return prisma.holdPurchase.findMany({
+      where: branchId ? { branch_id: branchId } : undefined,
+      include: {
+        branch: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true } },
+        user: { select: { id: true, email: true } },
+      },
+      orderBy: { created_at: 'desc' },
+    });
+  }
+
+  async createHoldPurchase(data: {
+    branchId: string;
+    supplierId?: string | null;
+    createdBy?: string;
+    payload: unknown;
+    label?: string | null;
+  }) {
+    const branch = await prisma.branch.findUnique({ where: { id: data.branchId } });
+    if (!branch) throw new AppError(400, 'Invalid branch');
+
+    if (data.supplierId) {
+      const supplier = await prisma.supplier.findUnique({
+        where: { id: data.supplierId },
+        select: { id: true },
+      });
+      if (!supplier) throw new AppError(400, 'Invalid supplier');
+    }
+
+    const payload = data.payload ?? {};
+    const linesCount = Array.isArray((payload as any)?.lines)
+      ? (payload as any).lines.length
+      : Array.isArray((payload as any)?.bills)
+        ? (payload as any).bills.reduce(
+            (n: number, b: any) => n + (Array.isArray(b?.lines) ? b.lines.length : 0),
+            0,
+          )
+        : 0;
+
+    return prisma.holdPurchase.create({
+      data: {
+        branch_id: data.branchId,
+        supplier_id: data.supplierId?.trim() || null,
+        created_by: data.createdBy || null,
+        label: data.label?.trim() || null,
+        payload: payload as Prisma.InputJsonValue,
+        line_count: linesCount,
+      },
+      include: {
+        branch: { select: { id: true, name: true } },
+        supplier: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async retrieveHoldPurchase({
+    holdId,
+    branchId,
+  }: {
+    holdId: string;
+    branchId?: string;
+  }) {
+    return prisma.$transaction(async (tx) => {
+      const hold = await tx.holdPurchase.findFirst({
+        where: {
+          id: holdId,
+          ...(branchId ? { branch_id: branchId } : {}),
+        },
+        include: {
+          branch: { select: { id: true, name: true } },
+          supplier: { select: { id: true, name: true } },
+        },
+      });
+      if (!hold) throw new AppError(404, 'Hold purchase not found');
+      await tx.holdPurchase.delete({ where: { id: holdId } });
+      return hold;
+    });
+  }
+
+  async deleteHoldPurchase({
+    holdId,
+    branchId,
+  }: {
+    holdId: string;
+    branchId?: string;
+  }) {
+    const hold = await prisma.holdPurchase.findFirst({
+      where: {
+        id: holdId,
+        ...(branchId ? { branch_id: branchId } : {}),
+      },
+      select: { id: true },
+    });
+    if (!hold) throw new AppError(404, 'Hold purchase not found');
+    await prisma.holdPurchase.delete({ where: { id: holdId } });
   }
 }

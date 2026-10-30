@@ -1,5 +1,6 @@
 "use client"
 
+import { ProductPriceHistory } from "@/components/inventory/product-price-history"
 import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -22,8 +23,33 @@ import { ChevronDown } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Label } from "@/components/ui/label"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { extractApiError } from "@/lib/api/errors"
+import { useSubcategoryMutations } from "@/hooks/queries/use-subcategories"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
 import { Switch } from "@/components/ui/switch"
 import { useToast } from "@/hooks/use-toast"
@@ -46,12 +72,42 @@ import {
   PackageCheck,
   PackageX,
   Globe,
+  Check,
+  ChevronsUpDown,
+  Copy,
+  ExternalLink,
+  ArrowLeft,
+  MoreHorizontal,
+  Power,
+  PowerOff,
 } from "lucide-react"
 import apiClient from "@/lib/apiClient"
 import { usePosData } from "@/hooks/use-pos-data"
 import { usePosBranch } from "@/hooks/use-pos-branch"
 import { cn } from "@/lib/utils"
 import { formatMoneyDisplay } from "@/lib/money"
+import {
+  buildInventoryProductDuplicateHref,
+  clearInventoryEditProductFromUrl,
+  readInventoryDuplicateProductFromUrl,
+  readInventoryEditProductFromUrl,
+} from "@/lib/dashboard-tabs"
+import {
+  getProductBarcodeDisplay,
+  previewAutoBarcodeValue,
+  sanitizeManualBarcodeValue,
+  type LabelBarcodeMode,
+} from "@/lib/labelBarcode"
+import { isReadOnlyRole } from "@/lib/role-utils"
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  StitchTabs,
+  catalogFilterParams,
+  hasCatalogFilters,
+  type CatalogFilters,
+  type StitchType,
+} from "@/components/catalog-filter-bar"
 
 // Image compression utility
 const compressImage = (file: File, quality = 0.7, maxWidth = 800, maxHeight = 600): Promise<File> => {
@@ -118,6 +174,8 @@ interface Product {
   name: string
   sku: string
   code: string
+  label_barcode?: string
+  custom_code?: string
   pct_or_hs_code?: string
   description?: string
   purchase_rate: number
@@ -157,6 +215,8 @@ const mapStoreProductToCard = (product: any): Product => ({
   name: product.name,
   sku: product.sku || "",
   code: product.code || "",
+  label_barcode: product.label_barcode || "",
+  custom_code: product.custom_code || "",
   pct_or_hs_code: product.pct_or_hs_code,
   description: product.description,
   purchase_rate: Number(product.purchase_rate) || 0,
@@ -193,6 +253,20 @@ const mapStoreProductToCard = (product: any): Product => ({
 
 const getProductStock = (product: Product) =>
   Number(product.available_stock ?? product.current_stock ?? 0)
+
+function ProductBarcodeSubline({ product }: { product: Product }) {
+  const value = getProductBarcodeDisplay(product)
+  return (
+    <p className="mt-0.5 flex min-w-0 items-baseline gap-1.5 truncate">
+      <span className="shrink-0 text-[10px] font-medium uppercase tracking-wide text-gray-400">
+        Barcode
+      </span>
+      <span className="truncate font-mono text-xs font-bold tabular-nums text-gray-900">
+        {value || "—"}
+      </span>
+    </p>
+  )
+}
 
 const formatRs = (amount: number | string | undefined) =>
   formatMoneyDisplay(Number(amount) || 0)
@@ -282,6 +356,7 @@ const getStockTone = (product: Product) => {
 interface ProductFormData {
   name: string
   unit_id: string
+  label_barcode?: string
   pct_or_hs_code?: string
   description?: string
   sku: string
@@ -298,6 +373,8 @@ interface ProductFormData {
   brand_id?: string
   color_id?: string
   size_id?: string
+  collection?: string
+  stitch_type?: StitchType | null
   is_active?: boolean
   display_on_pos?: boolean
   display_on_website?: boolean
@@ -383,6 +460,8 @@ function FormDropdown({
   options,
   allowNone = false,
   noneLabel = "None",
+  onCreateNew,
+  createLabel,
 }: {
   label: string
   htmlFor: string
@@ -393,32 +472,137 @@ function FormDropdown({
   options: DropdownOption[]
   allowNone?: boolean
   noneLabel?: string
+  onCreateNew?: (nameFromSearch: string) => void
+  createLabel?: string
 }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+
+  const selected = useMemo(
+    () => options.find((option) => option.id === value) ?? null,
+    [options, value],
+  )
+
+  const filtered = useMemo(() => {
+    const needle = query.trim().toLowerCase()
+    if (!needle) return options
+    return options.filter((option) => option.name.toLowerCase().includes(needle))
+  }, [options, query])
+
+  const triggerLabel =
+    allowNone && value === "none"
+      ? noneLabel
+      : selected?.name ?? placeholder
+
+  const hasSelection = allowNone ? value === "none" || !!selected : !!selected
+
   return (
     <div>
       <Label htmlFor={htmlFor}>
         {label}
         {required ? " *" : ""}
       </Label>
-      <Select value={value || undefined} onValueChange={onValueChange}>
-        <SelectTrigger id={htmlFor}>
-          <SelectValue placeholder={placeholder} />
-        </SelectTrigger>
-        <SelectContent>
-          {allowNone && <SelectItem value="none">{noneLabel}</SelectItem>}
-          {!allowNone && options.length === 0 ? (
-            <div className="px-3 py-6 text-center text-sm text-muted-foreground">
-              No options available
-            </div>
-          ) : (
-            options.map((option) => (
-              <SelectItem key={option.id} value={option.id}>
-                {option.name}
-              </SelectItem>
-            ))
-          )}
-        </SelectContent>
-      </Select>
+      <Popover
+        open={open}
+        onOpenChange={(next) => {
+          setOpen(next)
+          if (!next) setQuery("")
+        }}
+      >
+        <PopoverTrigger asChild>
+          <Button
+            id={htmlFor}
+            type="button"
+            variant="outline"
+            role="combobox"
+            aria-expanded={open}
+            disabled={!allowNone && options.length === 0 && !onCreateNew}
+            className="h-10 w-full justify-between font-normal"
+          >
+            <span className={cn("truncate text-left", !hasSelection && "text-muted-foreground")}>
+              {triggerLabel}
+            </span>
+            <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent className="w-[var(--radix-popover-trigger-width)] p-0" align="start">
+          <Command shouldFilter={false}>
+            <CommandInput
+              placeholder={`Search ${label.toLowerCase()}…`}
+              value={query}
+              onValueChange={setQuery}
+            />
+            <CommandList>
+              {options.length === 0 && !onCreateNew ? (
+                <div className="px-3 py-6 text-center text-sm text-muted-foreground">
+                  No options available
+                </div>
+              ) : (
+                <>
+                  <CommandEmpty>No matches</CommandEmpty>
+                  <CommandGroup>
+                    {allowNone ? (
+                      <CommandItem
+                        value="__none__"
+                        onSelect={() => {
+                          onValueChange("none")
+                          setOpen(false)
+                          setQuery("")
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            "mr-2 h-4 w-4",
+                            value === "none" ? "opacity-100" : "opacity-0",
+                          )}
+                        />
+                        {noneLabel}
+                      </CommandItem>
+                    ) : null}
+                    {filtered.map((option) => (
+                      <CommandItem
+                        key={option.id}
+                        value={option.id}
+                        onSelect={() => {
+                          onValueChange(option.id)
+                          setOpen(false)
+                          setQuery("")
+                        }}
+                      >
+                        <Check
+                          className={cn(
+                            "mr-2 h-4 w-4",
+                            value === option.id ? "opacity-100" : "opacity-0",
+                          )}
+                        />
+                        {option.name}
+                      </CommandItem>
+                    ))}
+                    {onCreateNew ? (
+                      <CommandItem
+                        value="__create_new__"
+                        onSelect={() => {
+                          const typed = query.trim()
+                          setOpen(false)
+                          setQuery("")
+                          onCreateNew(typed)
+                        }}
+                      >
+                        <Plus className="mr-2 h-4 w-4 text-indigo-600" />
+                        <span className="font-medium text-indigo-700">
+                          {query.trim()
+                            ? `Create “${query.trim()}”`
+                            : createLabel || `Create new ${label.toLowerCase()}`}
+                        </span>
+                      </CommandItem>
+                    ) : null}
+                  </CommandGroup>
+                </>
+              )}
+            </CommandList>
+          </Command>
+        </PopoverContent>
+      </Popover>
     </div>
   )
 }
@@ -449,7 +633,26 @@ const ProductForm = ({
   branchOptions,
   stockLabel,
   currentBranchStocks,
+  productId,
+  productInternalCode,
+  barcodeMode,
+  setBarcodeMode,
+  barcodeHint,
+  autoFocusBarcode,
+  onBarcodeTakenChange,
+  onSubcategoryCreated,
 }: {
+  productId?: string
+  productInternalCode?: string
+  barcodeMode: LabelBarcodeMode
+  setBarcodeMode: (mode: LabelBarcodeMode) => void
+  /** Shown under the custom code, e.g. "Next free code after PA-144 (the original)" */
+  barcodeHint?: string | null
+  /** Focus + select the custom code on open (duplicate) */
+  autoFocusBarcode?: boolean
+  /** Lets the page block saving while the code belongs to another product */
+  onBarcodeTakenChange?: (taken: boolean) => void
+  onSubcategoryCreated?: (item: DropdownOption) => void
   onSubmit: () => void
   loading: boolean
   submitText: string
@@ -476,7 +679,40 @@ const ProductForm = ({
   stockLabel: string
   currentBranchStocks?: Record<string, number>
 }) => {
+  const { toast } = useToast()
+  const { create: createSubcat } = useSubcategoryMutations()
+  const [newSubcatOpen, setNewSubcatOpen] = useState(false)
+  const [newSubcatName, setNewSubcatName] = useState("")
+  const [creatingSubcat, setCreatingSubcat] = useState(false)
   const hasErrors = Object.values(formErrors).some((error) => !!error)
+
+  const openCreateSubcategory = (typedName: string) => {
+    setNewSubcatName(typedName)
+    setNewSubcatOpen(true)
+  }
+
+  const submitNewSubcategory = async () => {
+    const name = newSubcatName.trim()
+    if (!name) return
+    setCreatingSubcat(true)
+    try {
+      const created = await createSubcat.mutateAsync({ name, display_on_pos: true, is_active: true })
+      const option: DropdownOption = { id: created.id, name: created.name }
+      onSubcategoryCreated?.(option)
+      updateFormData("subcategory_id", created.id)
+      setNewSubcatOpen(false)
+      setNewSubcatName("")
+      toast({ title: "Subcategory created", description: created.name })
+    } catch (e) {
+      toast({
+        variant: "destructive",
+        title: "Could not create subcategory",
+        description: extractApiError(e, "Try another name"),
+      })
+    } finally {
+      setCreatingSubcat(false)
+    }
+  }
 
   // Raw text state for numeric inputs. We keep it independent of formData
   // so users can naturally type "0.", "1.5", clear to empty, etc., without the
@@ -522,11 +758,71 @@ const ProductForm = ({
   const numberInputClass =
     "[appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
 
+  // Live check: is the custom code free? Debounced while typing.
+  const barcodeInputRef = useRef<HTMLInputElement>(null)
+  const [barcodeCheck, setBarcodeCheck] = useState<{
+    status: "idle" | "checking" | "free" | "taken"
+    code?: string
+    usedBy?: { id: string; name: string } | null
+    suggestion?: string | null
+  }>({ status: "idle" })
+  const manualCode = barcodeMode === "manual" ? sanitizeManualBarcodeValue(formData.label_barcode || "") : ""
+  useEffect(() => {
+    if (!manualCode) {
+      setBarcodeCheck({ status: "idle" })
+      onBarcodeTakenChange?.(false)
+      return
+    }
+    setBarcodeCheck((prev) => ({ ...prev, status: "checking", code: manualCode }))
+    let cancelled = false
+    const t = setTimeout(() => {
+      apiClient
+        .get("/products/barcode-availability", { params: { code: manualCode, excludeId: productId || undefined } })
+        .then((res) => {
+          if (cancelled) return
+          const d = res.data?.data || {}
+          setBarcodeCheck({ status: d.available ? "free" : "taken", code: manualCode, usedBy: d.usedBy, suggestion: d.suggestion })
+          onBarcodeTakenChange?.(!d.available)
+        })
+        .catch(() => {
+          if (!cancelled) setBarcodeCheck({ status: "idle" })
+        })
+    }, 350)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- onBarcodeTakenChange is a stable setter from the page
+  }, [manualCode, productId])
+  useEffect(() => {
+    if (!autoFocusBarcode || barcodeMode !== "manual") return
+    const t = setTimeout(() => {
+      barcodeInputRef.current?.focus()
+      barcodeInputRef.current?.select()
+    }, 150)
+    return () => clearTimeout(t)
+  }, [autoFocusBarcode, barcodeMode])
+
+  const autoBarcodePreview = previewAutoBarcodeValue(
+    formData.sku,
+    productInternalCode || "",
+    Math.round(Number(formData.sales_rate_exc_dis_and_tax) || 0),
+  )
+
   return (
     <div className="space-y-6">
       {/* Basic Information */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Basic Information</h3>
+        <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
+          <Label className="text-sm font-medium">Stitched / Unstitched</Label>
+          <StitchTabs
+            value={formData.stitch_type ?? "all"}
+            onChange={(value) => updateFormData("stitch_type", value === "all" ? null : value)}
+            allLabel="Not set"
+          />
+          <span className="text-xs text-muted-foreground">Used by every report&apos;s Stitched / Unstitched tab.</span>
+        </div>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="name">Product Name *</Label>
@@ -536,6 +832,89 @@ const ProductForm = ({
               onChange={(e) => updateFormData("name", e.target.value)}
               placeholder="Enter product name"
             />
+          </div>
+          <div className="md:col-span-2 space-y-2">
+            <Label>Barcode (scan &amp; print)</Label>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant={barcodeMode === "auto" ? "default" : "outline"}
+                className="h-8"
+                onClick={() => {
+                  setBarcodeMode("auto")
+                  updateFormData("label_barcode", "")
+                }}
+              >
+                Auto (system)
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                variant={barcodeMode === "manual" ? "default" : "outline"}
+                className="h-8"
+                onClick={() => setBarcodeMode("manual")}
+              >
+                Custom (your code)
+              </Button>
+            </div>
+            {barcodeMode === "auto" ? (
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[11px] text-muted-foreground">
+                  Generated from 9-digit SKU or product code (same as Barcode Generator).
+                </p>
+                <p className="mt-1 font-mono text-sm font-medium text-slate-900">{autoBarcodePreview}</p>
+              </div>
+            ) : (
+              <>
+                <div className="relative">
+                  <Input
+                    ref={barcodeInputRef}
+                    id="label_barcode"
+                    value={formData.label_barcode || ""}
+                    onChange={(e) => updateFormData("label_barcode", e.target.value)}
+                    placeholder="e.g. TAKAFUL-12 or 123456789"
+                    className={cn(
+                      "font-mono pr-28",
+                      barcodeCheck.status === "taken" && "border-rose-400 focus-visible:ring-rose-300",
+                      barcodeCheck.status === "free" && "border-emerald-400 focus-visible:ring-emerald-300",
+                    )}
+                    aria-invalid={barcodeCheck.status === "taken"}
+                  />
+                  <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs font-medium">
+                    {barcodeCheck.status === "checking" ? (
+                      <span className="text-muted-foreground">Checking…</span>
+                    ) : barcodeCheck.status === "free" ? (
+                      <span className="text-emerald-600">✓ Available</span>
+                    ) : barcodeCheck.status === "taken" ? (
+                      <span className="text-rose-600">Already used</span>
+                    ) : null}
+                  </span>
+                </div>
+                {barcodeCheck.status === "taken" ? (
+                  <div className="flex flex-wrap items-center gap-2 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs text-rose-800">
+                    <span>
+                      <span className="font-mono font-semibold">{barcodeCheck.code}</span> is already used by{" "}
+                      <span className="font-semibold">{barcodeCheck.usedBy?.name || "another product"}</span>.
+                    </span>
+                    {barcodeCheck.suggestion ? (
+                      <button
+                        type="button"
+                        className="rounded-md bg-white px-2 py-1 font-medium text-rose-800 ring-1 ring-rose-200 hover:bg-rose-100"
+                        onClick={() => updateFormData("label_barcode", barcodeCheck.suggestion)}
+                      >
+                        Use <span className="font-mono">{barcodeCheck.suggestion}</span>
+                      </button>
+                    ) : null}
+                  </div>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    {barcodeHint ? <span className="font-medium text-slate-700">{barcodeHint} · </span> : null}
+                    Saved on the product for POS scan and label print.
+                  </p>
+                )}
+              </>
+            )}
           </div>
           <FormDropdown
             label="Unit"
@@ -563,6 +942,9 @@ const ProductForm = ({
             placeholder="Select subcategory"
             options={subcategories}
             allowNone
+            noneLabel="None"
+            createLabel="Create new subcategory"
+            onCreateNew={openCreateSubcategory}
           />
         </div>
         <div>
@@ -887,7 +1269,18 @@ const ProductForm = ({
             options={sizes}
             allowNone
           />
+          <div>
+            <Label htmlFor="collection">Collection</Label>
+            <Input
+              id="collection"
+              value={formData.collection || ""}
+              onChange={(e) => updateFormData("collection", e.target.value)}
+              placeholder="e.g. Eid 2026, Winter Luxe, Bridal"
+              maxLength={80}
+            />
+          </div>
         </div>
+        {productId ? <ProductPriceHistory productId={productId} /> : null}
       </div>
 
       {/* Product Images */}
@@ -999,6 +1392,40 @@ const ProductForm = ({
           )}
         </Button>
       </div>
+
+      <Dialog open={newSubcatOpen} onOpenChange={setNewSubcatOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>New subcategory</DialogTitle>
+            <DialogDescription>This will be saved to the catalog and selected on this product.</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5">
+            <Label htmlFor="new-subcat-name">Name</Label>
+            <Input
+              id="new-subcat-name"
+              value={newSubcatName}
+              onChange={(e) => setNewSubcatName(e.target.value)}
+              placeholder="e.g. Unstitched, Stitched, Kids"
+              autoFocus
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault()
+                  void submitNewSubcategory()
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setNewSubcatOpen(false)} disabled={creatingSubcat}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void submitNewSubcategory()} disabled={creatingSubcat || !newSubcatName.trim()}>
+              {creatingSubcat ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Plus className="mr-2 h-4 w-4" />}
+              Create subcategory
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }
@@ -1037,8 +1464,8 @@ export default function Inventory() {
   // dropdowns. Must not collide with any real ID — using "all" alone broke
   // when a record happened to have id="all" and Radix Select treated two items
   // as selected at once ("All CategoriesAll" in the trigger).
-  const [selectedCategory, setSelectedCategory] = useState("__all__")
-  const [selectedSubcategory, setSelectedSubcategory] = useState("__all__")
+  // Vendor / category / subcategory (multi-select) + Stitched / Unstitched tab.
+  const [catalogFilters, setCatalogFilters] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS)
   // Catalog quick filters: status / stock health / featured
   const [statusFilter, setStatusFilter] = useState<
     "ALL" | "ACTIVE" | "INACTIVE" | "OUT" | "LOW" | "FEATURED" | "HIDDEN_WEB"
@@ -1058,6 +1485,14 @@ export default function Inventory() {
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [isEditDialogOpen, setIsEditDialogOpen] = useState(false)
   const [editingProduct, setEditingProduct] = useState<Product | null>(null)
+  /** When set, Add form was opened via Duplicate — banner + clearer title. */
+  const [duplicatingFromName, setDuplicatingFromName] = useState<string | null>(null)
+  // View-only accounts never get the add / edit / duplicate forms.
+  const readOnly = typeof window !== "undefined" && isReadOnlyRole(localStorage.getItem("role"))
+  // Custom-barcode helpers: hint under the field (duplicate) and "code already used" guard.
+  const [barcodeHint, setBarcodeHint] = useState<string | null>(null)
+  const [barcodeTaken, setBarcodeTaken] = useState(false)
+  const deepLinkEditOpenedRef = useRef(false)
 
   // Delete-confirmation modal state. We track the product directly (so we can
   // show its name in the dialog) and a separate `isDeleting` flag so the
@@ -1103,6 +1538,7 @@ export default function Inventory() {
     is_featured: false,
     images: [],
   })
+  const [productBarcodeMode, setProductBarcodeMode] = useState<LabelBarcodeMode>("auto")
   const [formLoading, setFormLoading] = useState(false)
   const [formErrors, setFormErrors] = useState<{ sku?: string; pct_or_hs_code?: string }>({})
   const [dropdownsLoading, setDropdownsLoading] = useState(false)
@@ -1306,8 +1742,7 @@ export default function Inventory() {
         page: currentPage,
         limit,
         search: searchTerm.trim() || undefined,
-        categoryId: selectedCategory !== "__all__" ? selectedCategory : undefined,
-        subcategoryId: selectedSubcategory !== "__all__" ? selectedSubcategory : undefined,
+        catalogParams: catalogFilterParams(catalogFilters),
         isActive:
           statusFilter === "ACTIVE" ? true : statusFilter === "INACTIVE" ? false : undefined,
         isFeatured: statusFilter === "FEATURED" ? true : undefined,
@@ -1322,8 +1757,7 @@ export default function Inventory() {
     currentPage,
     pageSize,
     searchTerm,
-    selectedCategory,
-    selectedSubcategory,
+    catalogFilters,
     statusFilter,
   ])
 
@@ -1374,8 +1808,7 @@ export default function Inventory() {
 
   const hasActiveFilters =
     searchTerm.trim() !== "" ||
-    selectedCategory !== "__all__" ||
-    selectedSubcategory !== "__all__" ||
+    hasCatalogFilters(catalogFilters) ||
     statusFilter !== "ALL"
 
   // "Loading" = a fetch is in flight, or none has completed yet (no meta), and
@@ -1416,24 +1849,6 @@ export default function Inventory() {
     }
   }, [globalProducts, productsMeta])
 
-  const subcategoryFilterOptions = useMemo(() => {
-    return subcategories
-      .filter((sub) => {
-        if (!sub.id || !sub.name) return false
-        if (String(sub.name).trim().toLowerCase() === "unknown") return false
-        if (
-          selectedCategory !== "__all__" &&
-          sub.category_id &&
-          sub.category_id !== selectedCategory
-        ) {
-          return false
-        }
-        return true
-      })
-      .map((sub) => ({ id: sub.id, name: sub.name }))
-      .sort((a, b) => a.name.localeCompare(b.name))
-  }, [subcategories, selectedCategory])
-
   const filteredProductCount = productsMeta?.total ?? filteredProductsAll.length
 
   const products = useMemo(
@@ -1465,16 +1880,28 @@ export default function Inventory() {
   }
 
   const handleCreateProduct = async () => {
+    if (productBarcodeMode === "manual" && barcodeTaken) {
+      toast({ title: "Barcode already used", description: "Pick a different custom code (or use the suggested one).", variant: "destructive" })
+      return
+    }
     setFormLoading(true)
     try {
+      // Backend requires exactly 9 digits or omit (auto-generate). There is no
+      // SKU field in the form, so never send an empty/invalid value.
+      const { sku: formSku, ...formWithoutSku } = formData
+      const sku = String(formSku || "").trim()
       const dataToSubmit = {
-        ...formData,
-        sku: String(formData.sku),
+        ...formWithoutSku,
+        ...( /^\d{9}$/.test(sku) ? { sku } : {}),
+        label_barcode:
+          productBarcodeMode === "manual"
+            ? sanitizeManualBarcodeValue(formData.label_barcode || "") || undefined
+            : undefined,
         pct_or_hs_code: formData.pct_or_hs_code ? String(formData.pct_or_hs_code) : undefined,
       }
 
       // Images are already uploaded — existingImageUrls has all Cloudinary URLs
-      const created = await apiService.createProduct(dataToSubmit, existingImageUrls)
+      const created = await apiService.createProduct(dataToSubmit as ProductFormData, existingImageUrls)
       const createdId = created?.data?.id as string | undefined
 
       // If the user entered a per-branch stock quantity, write it to that
@@ -1526,12 +1953,25 @@ export default function Inventory() {
 
   const handleUpdateProduct = async () => {
     if (!editingProduct) return
+    if (productBarcodeMode === "manual" && barcodeTaken) {
+      toast({ title: "Barcode already used", description: "Pick a different custom code (or use the suggested one).", variant: "destructive" })
+      return
+    }
 
     setFormLoading(true)
     try {
+      // Do not re-send legacy/non-9-digit SKUs on edit — validation rejects them
+      // and the form has no SKU editor. Omitting keeps the existing DB value.
+      const { sku: formSku, ...formWithoutSku } = formData
+      const sku = String(formSku || "").trim()
       const dataToSubmit = {
-        ...formData,
-        sku: String(formData.sku),
+        ...formWithoutSku,
+        ...( /^\d{9}$/.test(sku) ? { sku } : {}),
+        label_barcode:
+          productBarcodeMode === "manual"
+            ? sanitizeManualBarcodeValue(formData.label_barcode || "") || null
+            : null,
+        custom_code: null,
         pct_or_hs_code: formData.pct_or_hs_code ? String(formData.pct_or_hs_code) : undefined,
       }
       // All images are already Cloudinary URLs — no base64, no large payload
@@ -1681,6 +2121,8 @@ export default function Inventory() {
     // don't apply. Quantity per branch is left blank (opt-in per branch).
     setStockBranchIds(posBranches.map((b) => b.id))
     setCurrentBranchStocks({})
+    setProductBarcodeMode("auto")
+    setDuplicatingFromName(null)
   }
 
   const closeProductForm = () => {
@@ -1688,55 +2130,66 @@ export default function Inventory() {
     setEditingProduct(null)
     setIsAddDialogOpen(false)
     setIsEditDialogOpen(false)
+    setDuplicatingFromName(null)
+    clearInventoryEditProductFromUrl()
+  }
+
+  const extractImageUrls = (fresh: any): string[] =>
+    fresh.ProductImage?.map((img: any) => img.image) ||
+    (Array.isArray(fresh.images)
+      ? fresh.images.map((img: any) => (typeof img === "string" ? img : img.image))
+      : []) ||
+    []
+
+  const toFormNumber = (v: any): number => {
+    if (v === null || v === undefined || v === "") return 0
+    const n = typeof v === "string" ? parseFloat(v) : Number(v)
+    return Number.isFinite(n) ? n : 0
   }
 
   const openEditDialog = async (product: Product) => {
     // Open the modal in a "loading" state — we DON'T show the form until the
     // canonical record arrives, so the user never sees fields flash from
     // empty/"Unknown" to their real values.
+    setDuplicatingFromName(null)
+    setIsAddDialogOpen(false)
     setEditingProduct(product)
     setIsEditDialogOpen(true)
     setIsLoadingEditProduct(true)
     setStockQtyByBranch({})
     loadDropdownData()
 
-    const toNum = (v: any): number => {
-      if (v === null || v === undefined || v === "") return 0
-      const n = typeof v === "string" ? parseFloat(v) : Number(v)
-      return Number.isFinite(n) ? n : 0
-    }
-
     try {
       const detail = await apiService.getProductById(product.id)
       const fresh = detail?.data ?? detail
       if (!fresh) throw new Error("Empty product detail response")
 
-      const existingUrls: string[] =
-        fresh.ProductImage?.map((img: any) => img.image) ||
-        (Array.isArray(fresh.images)
-          ? fresh.images.map((img: any) => (typeof img === "string" ? img : img.image))
-          : []) ||
-        []
+      const existingUrls = extractImageUrls(fresh)
 
+      const savedBarcode = (fresh.label_barcode ?? fresh.custom_code ?? "").trim()
+      setProductBarcodeMode(savedBarcode ? "manual" : "auto")
       setFormData({
         name: fresh.name ?? "",
         unit_id: fresh.unit?.id ?? "",
+        label_barcode: fresh.label_barcode ?? fresh.custom_code ?? "",
         pct_or_hs_code: fresh.pct_or_hs_code ?? "",
         description: fresh.description ?? "",
         sku: fresh.sku ?? product.sku,
-        purchase_rate: toNum(fresh.purchase_rate),
-        sales_rate_exc_dis_and_tax: toNum(fresh.sales_rate_exc_dis_and_tax),
-        sales_rate_inc_dis_and_tax: toNum(fresh.sales_rate_inc_dis_and_tax),
-        discount_amount: toNum(fresh.discount_amount),
+        purchase_rate: toFormNumber(fresh.purchase_rate),
+        sales_rate_exc_dis_and_tax: toFormNumber(fresh.sales_rate_exc_dis_and_tax),
+        sales_rate_inc_dis_and_tax: toFormNumber(fresh.sales_rate_inc_dis_and_tax),
+        discount_amount: toFormNumber(fresh.discount_amount),
         tax_id: fresh.tax?.id ?? "",
         category_id: fresh.category?.id ?? "",
         subcategory_id: fresh.subcategory?.id ?? "",
-        min_qty: toNum(fresh.min_qty),
-        max_qty: toNum(fresh.max_qty),
+        min_qty: toFormNumber(fresh.min_qty),
+        max_qty: toFormNumber(fresh.max_qty),
         supplier_id: fresh.supplier?.id ?? "",
         brand_id: fresh.brand?.id ?? "",
         color_id: fresh.color?.id ?? "",
         size_id: fresh.size?.id ?? "",
+        collection: fresh.collection ?? "",
+        stitch_type: fresh.stitch_type ?? null,
         is_active: fresh.is_active ?? true,
         display_on_pos: fresh.display_on_pos ?? true,
         display_on_website: fresh.display_on_website ?? true,
@@ -1765,8 +2218,8 @@ export default function Inventory() {
       if (Array.isArray(fresh.stock)) {
         for (const s of fresh.stock) {
           if (!s?.branch_id) continue
-          const cur = toNum(s.current_quantity)
-          const res = toNum(s.reserved_quantity)
+          const cur = toFormNumber(s.current_quantity)
+          const res = toFormNumber(s.reserved_quantity)
           branchStockMap[s.branch_id] = cur - res // available
         }
       }
@@ -1789,6 +2242,7 @@ export default function Inventory() {
       // record.
       setIsEditDialogOpen(false)
       setEditingProduct(null)
+      clearInventoryEditProductFromUrl()
       toast({
         title: "Couldn't load product",
         description: "Please try again.",
@@ -1798,6 +2252,160 @@ export default function Inventory() {
       setIsLoadingEditProduct(false)
     }
   }
+
+  /**
+   * Clone catalog fields into the Add Product form. Unique identity (SKU,
+   * internal code, label barcode) is cleared so the backend allocates new
+   * values — same pattern as professional POS size/variant workflows.
+   */
+  const openDuplicateDialog = async (product: Product) => {
+    setBarcodeTaken(false)
+    setEditingProduct(null)
+    setIsEditDialogOpen(false)
+    setIsAddDialogOpen(true)
+    // Stub from a deep link has no name yet — set after the product loads.
+    setDuplicatingFromName(product.name || "…")
+    if (typeof window !== "undefined") window.scrollTo({ top: 0, behavior: "smooth" })
+    setIsLoadingEditProduct(true)
+    setStockQtyByBranch({})
+    setCurrentBranchStocks({})
+    loadDropdownData()
+
+    try {
+      const detail = await apiService.getProductById(product.id)
+      const fresh = detail?.data ?? detail
+      if (!fresh) throw new Error("Empty product detail response")
+      setDuplicatingFromName(fresh.name || product.name || "this product")
+
+      const existingUrls = extractImageUrls(fresh)
+
+      // SKU is always new. A custom barcode is carried over as the next free
+      // code (PA-144 → PA-145) so only the part that changes needs typing.
+      const sourceCode = String(fresh.label_barcode ?? fresh.custom_code ?? "").trim()
+      let nextCode = ""
+      if (sourceCode) {
+        try {
+          const res = await apiClient.get("/products/barcode-availability", { params: { code: sourceCode } })
+          nextCode = res.data?.data?.suggestion || ""
+        } catch {
+          nextCode = ""
+        }
+      }
+      setProductBarcodeMode(sourceCode ? "manual" : "auto")
+      setBarcodeHint(
+        sourceCode
+          ? nextCode
+            ? `Original: ${sourceCode} — next free code filled in, change it if needed`
+            : `Original: ${sourceCode} — enter a new code`
+          : null,
+      )
+      setFormData({
+        name: fresh.name ?? product.name ?? "",
+        unit_id: fresh.unit?.id ?? "",
+        label_barcode: nextCode || (sourceCode ? sourceCode : ""),
+        pct_or_hs_code: fresh.pct_or_hs_code ?? "",
+        description: fresh.description ?? "",
+        sku: "",
+        purchase_rate: toFormNumber(fresh.purchase_rate),
+        sales_rate_exc_dis_and_tax: toFormNumber(fresh.sales_rate_exc_dis_and_tax),
+        sales_rate_inc_dis_and_tax: toFormNumber(fresh.sales_rate_inc_dis_and_tax),
+        discount_amount: toFormNumber(fresh.discount_amount),
+        tax_id: fresh.tax?.id ?? "",
+        category_id: fresh.category?.id ?? "",
+        subcategory_id: fresh.subcategory?.id ?? "",
+        min_qty: toFormNumber(fresh.min_qty),
+        max_qty: toFormNumber(fresh.max_qty),
+        supplier_id: fresh.supplier?.id ?? "",
+        brand_id: fresh.brand?.id ?? "",
+        color_id: fresh.color?.id ?? "",
+        size_id: fresh.size?.id ?? "",
+        collection: fresh.collection ?? "",
+        stitch_type: fresh.stitch_type ?? null,
+        is_active: fresh.is_active ?? true,
+        display_on_pos: fresh.display_on_pos ?? true,
+        display_on_website: fresh.display_on_website ?? true,
+        is_batch: fresh.is_batch ?? false,
+        auto_fill_on_demand_sheet: fresh.auto_fill_on_demand_sheet ?? false,
+        non_inventory_item: fresh.non_inventory_item ?? false,
+        is_deal: fresh.is_deal ?? false,
+        is_featured: fresh.is_featured ?? false,
+        images: existingUrls,
+      })
+
+      if (fresh.supplier?.id && fresh.supplier?.name) {
+        setSuppliers((prev) =>
+          prev.some((item) => item.id === fresh.supplier.id)
+            ? prev
+            : [...prev, { id: fresh.supplier.id, name: fresh.supplier.name }]
+        )
+      }
+      setImagePreviews(existingUrls)
+      setExistingImageUrls(existingUrls)
+      // Fresh product — no stock yet; user can set Initial Stock before create.
+      setStockBranchIds(posBranches.map((b) => b.id))
+
+      toast({
+        title: "Duplicating product",
+        description:
+          "Name, prices, images and barcode are copied — the barcode is set to the next free code. A new SKU is created on save.",
+      })
+    } catch {
+      setIsAddDialogOpen(false)
+      setDuplicatingFromName(null)
+      toast({
+        title: "Couldn't duplicate product",
+        description: "Please try again.",
+        variant: "destructive",
+      })
+    } finally {
+      setIsLoadingEditProduct(false)
+    }
+  }
+
+  const stubProductForDeepLink = (productId: string): Product => ({
+    id: productId,
+    name: "",
+    sku: "",
+    code: "",
+    purchase_rate: 0,
+    sales_rate_exc_dis_and_tax: 0,
+    sales_rate_inc_dis_and_tax: 0,
+    is_active: true,
+    display_on_pos: true,
+    display_on_website: true,
+    is_batch: false,
+    auto_fill_on_demand_sheet: false,
+    non_inventory_item: false,
+    is_deal: false,
+    is_featured: false,
+    created_at: "",
+    updated_at: "",
+  })
+
+  /** Duplicate opens in a new tab so the catalog list stays available. */
+  const openDuplicateInNewTab = (product: Product) => {
+    window.open(
+      buildInventoryProductDuplicateHref(product.id),
+      "_blank",
+      "noopener,noreferrer",
+    )
+  }
+
+  // Deep-link: editProduct / duplicateProduct open the matching form (new tab).
+  useEffect(() => {
+    if (deepLinkEditOpenedRef.current) return
+    if (readOnly) return
+    const duplicateId = readInventoryDuplicateProductFromUrl()
+    const editId = readInventoryEditProductFromUrl()
+    if (!duplicateId && !editId) return
+    deepLinkEditOpenedRef.current = true
+    if (duplicateId) {
+      void openDuplicateDialog(stubProductForDeepLink(duplicateId))
+      return
+    }
+    void openEditDialog(stubProductForDeepLink(editId as string))
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- run once on mount for deep-link
+  }, [])
 
   const updateFormData = (field: keyof ProductFormData, value: any) => {
     // Functional setState so two consecutive updates in the same tick (e.g.
@@ -1852,8 +2460,7 @@ export default function Inventory() {
 
   const clearCatalogFilters = () => {
     setSearchTerm("")
-    setSelectedCategory("__all__")
-    setSelectedSubcategory("__all__")
+    setCatalogFilters(EMPTY_CATALOG_FILTERS)
     setStatusFilter("ALL")
     setCurrentPage(1)
   }
@@ -1872,45 +2479,71 @@ export default function Inventory() {
     { key: "HIDDEN_WEB", label: "Hidden on web", count: catalogStats.hiddenOnWeb },
   ]
 
-  const renderProductActions = (product: Product) => (
-    <div className="flex items-center gap-1.5">
+  const renderProductActions = (product: Product) => readOnly ? (
+    <span className="text-xs text-muted-foreground">View only</span>
+  ) : (
+    <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
       <Button
         size="sm"
         variant="outline"
-        className="h-8 text-xs"
+        className="h-8 shrink-0 px-2.5 text-xs"
         onClick={() => openEditDialog(product)}
       >
         <Edit className="mr-1.5 h-3.5 w-3.5" />
         Edit
       </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        className={cn(
-          "h-8 text-xs min-w-[72px]",
-          product.is_active
-            ? "text-amber-700 hover:bg-amber-50 hover:text-amber-800"
-            : "text-green-700 hover:bg-green-50 hover:text-green-800",
-        )}
-        onClick={() => handleToggleStatus(product)}
-        disabled={toggleStatusProductId === product.id}
-      >
-        {toggleStatusProductId === product.id ? (
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-        ) : product.is_active ? (
-          "Disable"
-        ) : (
-          "Enable"
-        )}
-      </Button>
-      <Button
-        size="sm"
-        variant="outline"
-        className="h-8 w-8 p-0 text-red-600 hover:bg-red-50 hover:text-red-700"
-        onClick={() => setProductToDelete(product)}
-      >
-        <Trash2 className="h-3.5 w-3.5" />
-      </Button>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-8 w-8 shrink-0 p-0"
+            title="More actions"
+            disabled={toggleStatusProductId === product.id}
+          >
+            {toggleStatusProductId === product.id ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <MoreHorizontal className="h-4 w-4" />
+            )}
+            <span className="sr-only">More actions</span>
+          </Button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-52">
+          <DropdownMenuItem onSelect={() => void openDuplicateDialog(product)}>
+            <Copy className="mr-2 h-4 w-4" />
+            Duplicate
+          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => openDuplicateInNewTab(product)}>
+            <ExternalLink className="mr-2 h-4 w-4" />
+            Duplicate in new tab
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onSelect={() => handleToggleStatus(product)}
+            disabled={toggleStatusProductId === product.id}
+          >
+            {product.is_active ? (
+              <>
+                <PowerOff className="mr-2 h-4 w-4 text-amber-600" />
+                Disable
+              </>
+            ) : (
+              <>
+                <Power className="mr-2 h-4 w-4 text-green-600" />
+                Enable
+              </>
+            )}
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            className="text-red-600 focus:bg-red-50 focus:text-red-700"
+            onSelect={() => setProductToDelete(product)}
+          >
+            <Trash2 className="mr-2 h-4 w-4" />
+            Delete
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     </div>
   )
 
@@ -1940,25 +2573,54 @@ export default function Inventory() {
 
   if (isAddDialogOpen || isEditDialogOpen) {
     const isEdit = isEditDialogOpen
-    const formBusy = (isEdit && isLoadingEditProduct) || isFormDropdownsLoading
+    const isDuplicate = !isEdit && !!duplicatingFromName
+    const formBusy = isLoadingEditProduct || isFormDropdownsLoading
     return (
       <div className="p-4 md:p-6 space-y-4 min-w-0">
+        <button
+          type="button"
+          onClick={closeProductForm}
+          disabled={formLoading}
+          className="-mb-1 inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-sm font-medium text-muted-foreground transition hover:text-foreground disabled:opacity-50"
+        >
+          <ArrowLeft className="h-4 w-4" />
+          Back to products
+        </button>
         <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between pb-3 border-b">
           <div>
             <h1 className="text-2xl font-bold tracking-tight">
-              {isEdit ? "Edit product" : "Add product"}
+              {isEdit ? "Edit product" : isDuplicate ? "Duplicate product" : "Add product"}
             </h1>
             <p className="text-sm text-muted-foreground mt-1">
-              {isEdit ? "Update catalog details and branch stock." : "Create a product, then return to the catalog."}
+              {isEdit
+                ? "Update catalog details and branch stock."
+                : isDuplicate
+                  ? "Copied from an existing product. Adjust name/size, then save — a new SKU and code are generated."
+                  : "Create a product, then return to the catalog."}
             </p>
           </div>
           <Button variant="outline" onClick={closeProductForm} disabled={formLoading}>
             Cancel
           </Button>
         </div>
+        {isDuplicate && duplicatingFromName ? (
+          <Alert className="border-blue-200 bg-blue-50/80 text-blue-950">
+            <Copy className="h-4 w-4 text-blue-700" />
+            <AlertTitle>Based on “{duplicatingFromName}”</AlertTitle>
+            <AlertDescription>
+              Change the name or size for this variant. Stock starts empty. A custom barcode is carried over as the next free code; a new SKU is created on save.
+            </AlertDescription>
+          </Alert>
+        ) : null}
         {formBusy ? (
           <ProductFormSkeleton
-            message={isLoadingEditProduct ? "Loading product details…" : "Preparing form…"}
+            message={
+              isLoadingEditProduct
+                ? isDuplicate
+                  ? "Loading product to duplicate…"
+                  : "Loading product details…"
+                : "Preparing form…"
+            }
           />
         ) : dropdownsLoadError ? (
           <Alert variant="destructive">
@@ -1976,13 +2638,16 @@ export default function Inventory() {
           <ProductForm
             onSubmit={isEdit ? handleUpdateProduct : handleCreateProduct}
             loading={formLoading}
-            submitText={isEdit ? "Update Product" : "Create Product"}
+            submitText={isEdit ? "Update Product" : isDuplicate ? "Create Duplicate" : "Create Product"}
             formData={formData}
             formErrors={formErrors}
             updateFormData={updateFormData}
             units={units}
             categories={categoryOptions}
             subcategories={subcategories}
+            onSubcategoryCreated={(item) =>
+              setSubcategories((prev) => (prev.some((s) => s.id === item.id) ? prev : [...prev, item].sort((a, b) => a.name.localeCompare(b.name))))
+            }
             taxes={taxes}
             suppliers={suppliers}
             brands={brands}
@@ -1998,6 +2663,13 @@ export default function Inventory() {
             setStockBranchIds={setStockBranchIds}
             branchOptions={posBranches}
             stockLabel={isEdit ? "Add Stock" : "Initial Stock"}
+            productId={isEdit ? editingProduct?.id : undefined}
+            productInternalCode={isEdit ? editingProduct?.code : undefined}
+            barcodeMode={productBarcodeMode}
+            setBarcodeMode={setProductBarcodeMode}
+            barcodeHint={isDuplicate ? barcodeHint : null}
+            autoFocusBarcode={isDuplicate}
+            onBarcodeTakenChange={setBarcodeTaken}
             currentBranchStocks={currentBranchStocks}
           />
         )}
@@ -2030,18 +2702,24 @@ export default function Inventory() {
           </p>
         </div>
 
-        <Button
-          className="self-start sm:self-auto bg-gray-900 hover:bg-gray-800"
-          onClick={() => {
-            resetForm()
-            setEditingProduct(null)
-            loadDropdownData()
-            setIsAddDialogOpen(true)
-          }}
-        >
-          <Plus className="h-4 w-4 mr-2" />
-          Add Product
-        </Button>
+        {readOnly ? (
+          <span className="self-start rounded-full bg-slate-100 px-3 py-1 text-xs font-medium text-slate-600 sm:self-auto">
+            View only
+          </span>
+        ) : (
+          <Button
+            className="self-start sm:self-auto bg-gray-900 hover:bg-gray-800"
+            onClick={() => {
+              resetForm()
+              setEditingProduct(null)
+              loadDropdownData()
+              setIsAddDialogOpen(true)
+            }}
+          >
+            <Plus className="h-4 w-4 mr-2" />
+            Add Product
+          </Button>
+        )}
       </div>
 
       {/* KPI cards */}
@@ -2167,7 +2845,7 @@ export default function Inventory() {
           })}
         </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-6 gap-2.5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
           <form
             className="relative min-w-0 sm:col-span-2"
             autoComplete="off"
@@ -2214,45 +2892,6 @@ export default function Inventory() {
             ) : null}
           </form>
           <Select
-            value={selectedCategory}
-            onValueChange={(v) => {
-              setSelectedCategory(v)
-              setSelectedSubcategory("__all__")
-              setCurrentPage(1)
-            }}
-          >
-            <SelectTrigger className="h-10 w-full">
-              <SelectValue placeholder="All Categories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Categories</SelectItem>
-              {categoryOptions.map((category) => (
-                <SelectItem key={category.id} value={category.id}>
-                  {category.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
-            value={selectedSubcategory}
-            onValueChange={(v) => {
-              setSelectedSubcategory(v)
-              setCurrentPage(1)
-            }}
-          >
-            <SelectTrigger className="h-10 w-full">
-              <SelectValue placeholder="All Subcategories" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="__all__">All Subcategories</SelectItem>
-              {subcategoryFilterOptions.map((sub) => (
-                <SelectItem key={sub.id} value={sub.id}>
-                  {sub.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          <Select
             value={sortBy}
             onValueChange={(v) => {
               setSortBy(v)
@@ -2292,6 +2931,14 @@ export default function Inventory() {
           </Select>
         </div>
 
+        <CatalogFilterBar
+          value={catalogFilters}
+          onChange={(next) => {
+            setCatalogFilters(next)
+            setCurrentPage(1)
+          }}
+        />
+
         {hasActiveFilters && (
           <div className="flex justify-end">
             <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={clearCatalogFilters}>
@@ -2315,7 +2962,7 @@ export default function Inventory() {
                   ? "Loading catalog..."
                   : hasActiveFilters
                     ? `Showing ${filteredProductCount} of ${catalogStats.total}`
-                    : "Edit, enable/disable, or delete products"}
+                    : "Edit, duplicate, open in a new tab, enable/disable, or delete"}
               </p>
             </div>
             <div className="inline-flex rounded-lg border border-gray-200 p-0.5 self-start">
@@ -2375,17 +3022,31 @@ export default function Inventory() {
             <>
               {viewMode === "table" ? (
                 <>
-                  <div className="hidden lg:block overflow-x-auto">
-                    <Table>
+                  <div className="hidden w-full lg:block">
+                    <Table className="w-full table-fixed">
                       <TableHeader>
                         <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
-                          <TableHead className="text-xs font-semibold text-gray-600 pl-3 pr-2">Product</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 px-2">Category</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2 whitespace-nowrap">Stock</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">Purchase</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">Sales</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 px-2">Status</TableHead>
-                          <TableHead className="text-xs font-semibold text-gray-600 text-right pl-2 pr-3">Actions</TableHead>
+                          <TableHead className="w-[32%] pl-4 pr-3 text-xs font-semibold text-gray-600">
+                            Product
+                          </TableHead>
+                          <TableHead className="w-[14%] px-3 text-xs font-semibold text-gray-600">
+                            Category
+                          </TableHead>
+                          <TableHead className="w-[10%] whitespace-nowrap px-3 text-right text-xs font-semibold text-gray-600">
+                            Stock
+                          </TableHead>
+                          <TableHead className="w-[11%] px-3 text-right text-xs font-semibold text-gray-600">
+                            Purchase
+                          </TableHead>
+                          <TableHead className="w-[11%] px-3 text-right text-xs font-semibold text-gray-600">
+                            Sales
+                          </TableHead>
+                          <TableHead className="w-[10%] px-3 text-xs font-semibold text-gray-600">
+                            Status
+                          </TableHead>
+                          <TableHead className="w-[12%] whitespace-nowrap pl-3 pr-4 text-right text-xs font-semibold text-gray-600">
+                            Actions
+                          </TableHead>
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -2394,23 +3055,20 @@ export default function Inventory() {
                           const stockTone = getStockTone(product)
                           return (
                             <TableRow key={`${product.id}-${product.updated_at}`}>
-                              <TableCell className="py-2.5 pl-3 pr-2">
-                                <div className="flex items-center gap-2.5 min-w-0">
-                                  <div className="h-10 w-10 rounded-lg overflow-hidden border border-gray-100 shrink-0 bg-slate-50">
+                              <TableCell className="py-2.5 pl-4 pr-3">
+                                <div className="flex min-w-0 items-center gap-2.5">
+                                  <div className="h-10 w-10 shrink-0 overflow-hidden rounded-lg border border-gray-100 bg-slate-50">
                                     <ProductThumb product={product} iconClassName="h-4 w-4" />
                                   </div>
-                                  <div className="min-w-0">
-                                    <p className="text-sm font-semibold text-gray-900 truncate">{product.name}</p>
-                                    <p className="text-[11px] text-gray-500 font-mono mt-0.5 truncate">
-                                      SKU {product.sku || "—"}
-                                      {product.code ? ` · ${product.code}` : ""}
-                                    </p>
-                                    <div className="flex flex-wrap gap-1 mt-1">
+                                  <div className="min-w-0 flex-1">
+                                    <p className="truncate text-sm font-semibold text-gray-900">{product.name}</p>
+                                    <ProductBarcodeSubline product={product} />
+                                    <div className="mt-1 flex flex-wrap gap-1">
                                       {product.is_featured ? (
-                                        <Badge className="h-5 text-[10px] bg-blue-600 hover:bg-blue-600">Featured</Badge>
+                                        <Badge className="h-5 bg-blue-600 text-[10px] hover:bg-blue-600">Featured</Badge>
                                       ) : null}
                                       {product.display_on_website === false ? (
-                                        <Badge variant="outline" className="h-5 text-[10px] text-amber-700 border-amber-200 bg-amber-50">
+                                        <Badge variant="outline" className="h-5 border-amber-200 bg-amber-50 text-[10px] text-amber-700">
                                           Hidden on web
                                         </Badge>
                                       ) : null}
@@ -2421,18 +3079,18 @@ export default function Inventory() {
                                   </div>
                                 </div>
                               </TableCell>
-                              <TableCell className="py-2.5 px-2">
-                                <p className="text-sm text-gray-800 truncate max-w-[160px]">
+                              <TableCell className="px-3 py-2.5">
+                                <p className="truncate text-sm text-gray-800">
                                   {product.category?.name || "Uncategorized"}
                                 </p>
                                 {product.subcategory?.name &&
                                 product.subcategory.name.trim().toLowerCase() !== "unknown" ? (
-                                  <p className="text-[11px] text-gray-500 truncate max-w-[160px]">
+                                  <p className="truncate text-[11px] text-gray-500">
                                     {product.subcategory.name}
                                   </p>
                                 ) : null}
                               </TableCell>
-                              <TableCell className="py-2.5 px-2 text-right whitespace-nowrap">
+                              <TableCell className="whitespace-nowrap px-3 py-2.5 text-right">
                                 <p className={cn("text-sm font-semibold tabular-nums", stockTone.valueClassName)}>
                                   {formatStockQty(stock)}
                                 </p>
@@ -2440,26 +3098,26 @@ export default function Inventory() {
                                   {stockTone.label}
                                 </p>
                               </TableCell>
-                              <TableCell className="py-2.5 px-2 text-right text-sm tabular-nums text-gray-800 whitespace-nowrap">
+                              <TableCell className="whitespace-nowrap px-3 py-2.5 text-right text-sm tabular-nums text-gray-800">
                                 {formatRs(product.purchase_rate)}
                               </TableCell>
-                              <TableCell className="py-2.5 px-2 text-right text-sm font-semibold tabular-nums text-blue-700 whitespace-nowrap">
+                              <TableCell className="whitespace-nowrap px-3 py-2.5 text-right text-sm font-semibold tabular-nums text-blue-700">
                                 {formatRs(product.sales_rate_exc_dis_and_tax)}
                               </TableCell>
-                              <TableCell className="py-2.5 px-2">
+                              <TableCell className="px-3 py-2.5">
                                 <Badge
                                   variant="outline"
                                   className={cn(
                                     "text-[10px] font-semibold",
                                     product.is_active
-                                      ? "bg-green-50 text-green-800 border-green-200"
-                                      : "bg-red-50 text-red-800 border-red-200",
+                                      ? "border-green-200 bg-green-50 text-green-800"
+                                      : "border-red-200 bg-red-50 text-red-800",
                                   )}
                                 >
                                   {product.is_active ? "Active" : "Inactive"}
                                 </Badge>
                               </TableCell>
-                              <TableCell className="py-2.5 pl-2 pr-3 text-right">
+                              <TableCell className="whitespace-nowrap py-2.5 pl-3 pr-4 text-right align-middle">
                                 {renderProductActions(product)}
                               </TableCell>
                             </TableRow>
@@ -2494,9 +3152,7 @@ export default function Inventory() {
                                   {product.is_active ? "Active" : "Inactive"}
                                 </Badge>
                               </div>
-                              <p className="text-[11px] text-gray-500 font-mono mt-0.5">
-                                SKU {product.sku || "—"}
-                              </p>
+                              <ProductBarcodeSubline product={product} />
                               <p className="text-[11px] text-gray-500 mt-0.5">
                                 {product.category?.name || "Uncategorized"}
                               </p>
@@ -2576,9 +3232,7 @@ export default function Inventory() {
                           <h3 className="line-clamp-2 min-h-[2.5rem] text-sm font-semibold leading-snug text-gray-900">
                             {product.name}
                           </h3>
-                          <p className="font-mono text-[11px] text-gray-500 mt-1">
-                            SKU {product.sku || "—"}
-                          </p>
+                          <ProductBarcodeSubline product={product} />
                           <div className="flex flex-wrap gap-1.5 mt-2">
                             <Badge variant="secondary" className="gap-1 bg-slate-100 text-slate-700 text-[10px]">
                               <Tag className="h-3 w-3" />

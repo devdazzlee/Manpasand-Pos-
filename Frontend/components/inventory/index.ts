@@ -8,4 +8,6 @@ export { StockView } from "./stock-view";
 export { InventoryReports } from "./inventory-reports";
 export { InventoryAudit } from "./inventory-audit";
 export { BulkProductUpload } from "./bulk-product-upload";
+export { OpeningStockImport } from "./opening-stock-import";
+export { ScanStockCount } from "./scan-stock-count";
 

@@ -23,11 +23,19 @@ const allInventoryRoles = [
   'BRANCH_MANAGER',
 ];
 
+// Cashier History on Stock Quantity Report needs this GET only — not the rest of inventory.
+router.get(
+  '/movements',
+  authenticate,
+  authorize([...allInventoryRoles, 'CASHIER']),
+  validate(listMovementsSchema),
+  getStockMovements,
+);
+
 router.use(authenticate, authorize(allInventoryRoles));
 
 router.get('/dashboard', getDashboardStats);
 router.get('/low-stock', getLowStockProducts);
-router.get('/movements', validate(listMovementsSchema), getStockMovements);
 router.get('/stock-by-location', getStockByLocation);
 router.get('/reports', validate(reportsSchema), getReports);
 

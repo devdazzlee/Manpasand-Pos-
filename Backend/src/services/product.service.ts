@@ -9,6 +9,7 @@ import { randomUUID } from 'crypto';
 import { addDecimal, asNumber } from '../utils/helpers';
 import { generateUniqueNumericSku, isNineDigitNumericSku } from '../utils/numericBarcodeSku';
 import { parsePagination, paginationMeta, MAX_LIMIT } from '../utils/pagination';
+import { ProductFilters, productFilterWhere } from '../utils/product-filters';
 
 
 type RelationField =
@@ -27,14 +28,17 @@ export class ProductService {
         is_active?: boolean;
         display_on_pos?: boolean;
         display_on_website?: boolean;
+        catalog?: ProductFilters;
     }) {
-        const where: Prisma.ProductWhereInput = {};
+        const where: Prisma.ProductWhereInput = { ...productFilterWhere(filters?.catalog) };
 
         if (filters?.search) {
             where.OR = [
                 { name: { contains: filters.search, mode: 'insensitive' } },
                 { sku: { contains: filters.search, mode: 'insensitive' } },
                 { code: { contains: filters.search, mode: 'insensitive' } },
+                { label_barcode: { contains: filters.search, mode: 'insensitive' } },
+                { custom_code: { contains: filters.search, mode: 'insensitive' } },
             ];
         }
 
@@ -329,6 +333,14 @@ export class ProductService {
         if (data.description !== undefined) {
             productData.description = data.description;
         }
+        if ((data as any).collection !== undefined) {
+            productData.collection = (data as any).collection?.trim() || null;
+        }
+        if (data.stitch_type !== undefined) productData.stitch_type = data.stitch_type || null;
+        const lb = data.label_barcode?.trim();
+        if (lb) productData.label_barcode = lb;
+        const cc = data.custom_code?.trim();
+        if (cc) productData.custom_code = cc;
 
         return productData;
     }
@@ -355,6 +367,16 @@ export class ProductService {
         if (data.non_inventory_item !== undefined) updateData.non_inventory_item = data.non_inventory_item;
         if (data.is_deal !== undefined) updateData.is_deal = data.is_deal;
         if (data.is_featured !== undefined) updateData.is_featured = data.is_featured;
+        if ((data as any).collection !== undefined) updateData.collection = (data as any).collection?.trim() || null;
+        if (data.stitch_type !== undefined) updateData.stitch_type = data.stitch_type || null;
+        if (data.label_barcode !== undefined) {
+            const lb = data.label_barcode?.trim();
+            updateData.label_barcode = lb ? lb : null;
+        }
+        if (data.custom_code !== undefined) {
+            const cc = data.custom_code?.trim();
+            updateData.custom_code = cc ? cc : null;
+        }
 
         return updateData;
     }
@@ -374,17 +396,34 @@ export class ProductService {
         return includes;
     }
 
+    /**
+     * Next internal product `code`. Legacy rows use text codes (PA-123, ZWU-31…);
+     * `parseInt` on those becomes NaN and used to write code "NaN", then every
+     * create collided on that unique value. Allocate from max all-digit code.
+     */
+    private async allocateNextProductCode(db: Pick<Prisma.TransactionClient, '$queryRaw' | 'product'> = prisma): Promise<string> {
+        const rows = await db.$queryRaw<{ max_num: bigint | number | null }[]>`
+            SELECT MAX(CASE WHEN code ~ '^[0-9]+$' THEN code::bigint END) AS max_num
+            FROM "Product"
+        `;
+        let next = Number(rows[0]?.max_num ?? 999) + 1;
+        if (!Number.isFinite(next) || next < 1000) next = 1000;
+
+        for (let i = 0; i < 50; i++) {
+            const candidate = String(next + i);
+            const exists = await db.product.findUnique({ where: { code: candidate }, select: { id: true } });
+            if (!exists) return candidate;
+        }
+        return `P-${Date.now().toString(36)}-${randomUUID().slice(0, 6)}`;
+    }
+
     async createProduct(data: CreateProductInput): Promise<Product> {
         // Step 1: Resolve the next product code and all "Unknown" fallback
         // entries OUTSIDE the transaction. These are idempotent lookups that
         // don't need to be atomic with the insert, and pulling them out of the
         // transaction is what stops Prisma's P2028 timeout on a slow remote
         // Postgres (each query was a fresh round-trip costing ~1s).
-        const lastProduct = await prisma.product.findFirst({
-            orderBy: { created_at: 'desc' },
-            select: { code: true }
-        });
-        const newCode = lastProduct ? (parseInt(lastProduct.code) + 1).toString() : '1000';
+        const newCode = await this.allocateNextProductCode(prisma);
 
         const unknownEntries = await this.ensureUnknownEntriesExist(prisma);
         console.log('✅ Unknown entries ensured:', unknownEntries);
@@ -402,7 +441,11 @@ export class ProductService {
             console.log('🚀 Starting transaction for product creation...');
 
             const sku = await this.resolveSkuForCreate(data, tx);
-            const productData = this.buildProductData(data, newCode);
+            // Re-check code inside the tx in case another create raced.
+            const code = (await tx.product.findUnique({ where: { code: newCode }, select: { id: true } }))
+                ? await this.allocateNextProductCode(tx)
+                : newCode;
+            const productData = this.buildProductData(data, code);
 
             const finalData = {
                 ...productData,
@@ -824,9 +867,44 @@ export class ProductService {
         return product;
     }
 
-    async updateProduct(id: string, data: UpdateProductInput) {
+    /** Manual price edits plus purchase cost history (newest first). */
+    async getProductPriceHistory(id: string) {
+        const [changes, purchases] = await Promise.all([
+            prisma.productPriceHistory.findMany({ where: { product_id: id }, orderBy: { created_at: 'desc' }, take: 200 }),
+            prisma.purchase.findMany({
+                where: { product_id: id },
+                orderBy: { purchase_date: 'desc' },
+                take: 100,
+                select: { purchase_date: true, cost_price: true, quantity: true, invoice_ref: true, supplier: { select: { name: true } } },
+            }),
+        ]);
+        const userIds = [...new Set(changes.map((c) => c.changed_by).filter((v): v is string => !!v))];
+        const users = userIds.length ? await prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true } }) : [];
+        const email = new Map(users.map((u) => [u.id, u.email]));
+        return {
+            changes: changes.map((c) => ({
+                ...c,
+                old_value: Number(c.old_value),
+                new_value: Number(c.new_value),
+                changed_by_email: c.changed_by ? email.get(c.changed_by) ?? null : null,
+            })),
+            purchases: purchases.map((p) => ({
+                date: p.purchase_date,
+                unit_cost: Number(p.cost_price),
+                quantity: Number(p.quantity),
+                supplier: p.supplier?.name ?? null,
+                reference: p.invoice_ref,
+            })),
+        };
+    }
+
+    async updateProduct(id: string, data: UpdateProductInput, userId?: string) {
         // Verify product exists
         const product = await this.getProductById(id);
+        const priceBefore = await prisma.product.findUnique({
+            where: { id },
+            select: { purchase_rate: true, sales_rate_exc_dis_and_tax: true, sales_rate_inc_dis_and_tax: true, discount_amount: true },
+        });
 
         if (data.sku !== undefined && data.sku !== null && String(data.sku).trim() !== '') {
             const nextSku = String(data.sku).trim();
@@ -868,7 +946,7 @@ export class ProductService {
         console.log('📦 Product update payload:', JSON.stringify(updateData, null, 2));
 
         try {
-            return await prisma.product.update({
+            const updated = await prisma.product.update({
                 where: { id },
                 data: updateData,
                 include: {
@@ -883,6 +961,23 @@ export class ProductService {
                     ProductImage: { select: { id: true, image: true } },
                 },
             });
+            // Price-change history (cost, selling price, discount)
+            if (priceBefore) {
+                const fields = ['purchase_rate', 'sales_rate_exc_dis_and_tax', 'sales_rate_inc_dis_and_tax', 'discount_amount'] as const;
+                const changes = fields
+                    .map((field) => ({
+                        field,
+                        old_value: Number(priceBefore[field] ?? 0),
+                        new_value: Number((updated as any)[field] ?? 0),
+                    }))
+                    .filter((c) => Math.abs(c.old_value - c.new_value) > 0.0001);
+                if (changes.length) {
+                    await prisma.productPriceHistory.createMany({
+                        data: changes.map((c) => ({ ...c, product_id: id, changed_by: userId ?? null, source: 'MANUAL' })),
+                    });
+                }
+            }
+            return updated;
         } catch (error: any) {
             // If FK constraint fails, give a friendly message
             if (error?.code === 'P2003') {
@@ -891,6 +986,19 @@ export class ProductService {
             }
             if (error?.code === 'P2025') {
                 throw new AppError(404, 'Product not found');
+            }
+            if (error?.code === 'P2002') {
+                const target = String(error?.meta?.target ?? '');
+                if (target.includes('label_barcode')) {
+                    throw new AppError(
+                        409,
+                        'This barcode is already saved on another product. Use a different code or clear it on the other product first.',
+                    );
+                }
+                if (target.includes('sku')) {
+                    throw new AppError(409, 'This SKU is already used on another product.');
+                }
+                throw new AppError(409, 'This value is already used on another product.');
             }
             throw error;
         }
@@ -980,6 +1088,7 @@ export class ProductService {
         stock_status,
         branch_id,
         fetchAll = false,
+        filters,
     }: {
         page?: number;
         limit?: number;
@@ -998,14 +1107,18 @@ export class ProductService {
         stock_status?: 'out' | 'low';
         branch_id?: string;
         fetchAll?: boolean;
+        /** Multi-select vendor / category / subcategory / stitch filters. */
+        filters?: ProductFilters;
     }) {
-        const where: Prisma.ProductWhereInput = {};
+        const where: Prisma.ProductWhereInput = { ...productFilterWhere(filters) };
 
         if (search) {
             where.OR = [
                 { name: { contains: search, mode: 'insensitive' } },
                 { sku: { contains: search, mode: 'insensitive' } },
                 { code: { contains: search, mode: 'insensitive' } },
+                { label_barcode: { contains: search, mode: 'insensitive' } },
+                { custom_code: { contains: search, mode: 'insensitive' } },
                 { description: { contains: search, mode: 'insensitive' } },
             ];
         }
@@ -1053,6 +1166,8 @@ export class ProductService {
             name: true,
             sku: true,
             code: true,
+            custom_code: true,
+            label_barcode: true,
             pct_or_hs_code: true,
             purchase_rate: true,
             sales_rate_exc_dis_and_tax: true,
@@ -1062,6 +1177,7 @@ export class ProductService {
             display_on_pos: true,
             display_on_website: true,
             is_featured: true,
+            stitch_type: true,
             created_at: true,
             updated_at: true,
             category: {
@@ -1228,7 +1344,9 @@ export class ProductService {
                 id: true,
                 name: true,
                 code: true,
+                custom_code: true,
                 sku: true,
+                label_barcode: true,
                 purchase_rate: true,
                 sales_rate_exc_dis_and_tax: true,
                 sales_rate_inc_dis_and_tax: true,
@@ -1243,6 +1361,8 @@ export class ProductService {
                 is_featured: true,
                 is_loose_item: true,
                 updated_at: true,
+                supplier_id: true,
+                stitch_type: true,
                 category: { select: { id: true, name: true } },
                 subcategory: { select: { id: true, name: true } },
                 unit: { select: { id: true, name: true } },
@@ -1729,7 +1849,7 @@ export class ProductService {
         });
     }
 
-    private async buildRelationsFromNames(data: any, tx: any) {
+    async buildRelationsFromNames(data: any, tx: any) {
         const relations: Record<string, { connect: { id: string } }> = {};
         
         // Map of field names to their corresponding model names and code prefixes

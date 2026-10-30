@@ -10,12 +10,19 @@ const bwipjs = require('bwip-js');
 const app = express();
 const PORT = 3001; // Local print server port
 
-// Resolve logo path - handle both src and dist directories (same as backend)
-const logoPath = fs.existsSync(path.join(__dirname, '../Frontend/public/Printserver-logo.png'))
-  ? path.resolve(__dirname, '../Frontend/public/Printserver-logo.png')
-  : fs.existsSync(path.join(__dirname, 'Printserver-logo.png'))
-    ? path.resolve(__dirname, 'Printserver-logo.png')
-    : null;
+const ACE_STUDIOS_CONTACT = '+92 336 2500357';
+
+const RECEIPT_EXCHANGE_POLICY_TITLE = 'EXCHANGE POLICY';
+// Manpasand prints no exchange policy; add lines here to show one on receipts.
+const RECEIPT_EXCHANGE_POLICY_LINES = [];
+
+function shouldPrintReceiptExchangePolicy(receiptData) {
+  return RECEIPT_EXCHANGE_POLICY_LINES.length > 0 && !receiptData?.documentTitle?.trim();
+}
+
+// Use logo from PrintServer folder only (client laptop deploy)
+const localLogo = path.join(__dirname, 'Printserver-logo.png');
+const logoPath = fs.existsSync(localLogo) ? path.resolve(localLogo) : null;
 
 if (logoPath) {
   console.log('Logo path resolved to:', logoPath);
@@ -185,9 +192,45 @@ function normalizeAndSort(printers, defaultName = null) {
 // Derive language hint - same as backend
 function deriveLanguageHint(p) {
   const s = `${p.driver?.name || ''} ${p.name || ''}`.toLowerCase();
+  // Eltron / UPS LP 2844 — EPL (queue often named "Zebra UPS 2844")
+  if (
+    /\(epl\)|\bepl\b|eltron|\blp\s*2844\b|lp2844|ups lp|\bups\s*2844\b|\b2844\b/.test(s)
+  ) {
+    return 'epl';
+  }
   if (s.includes('zebra') || s.includes('zdesigner')) return 'zpl';
   if (s.includes('generic') || s.includes('escpos') || s.includes('blackcopper') || s.includes('80mm') || s.includes('58mm')) return 'escpos';
   return 'generic';
+}
+
+function deriveLabelProfile(p) {
+  const hint = deriveLanguageHint(p);
+  if (hint === 'epl' || hint === 'zpl') {
+    return {
+      paperSize: '50x25mm',
+      widthMM: 50,
+      heightMM: 25,
+      gapMM: 3,
+      dpi: 203,
+      language: hint,
+      model: hint === 'epl' ? 'Eltron LP 2844 (EPL, 50×25 mm)' : 'Zebra (ZPL)',
+    };
+  }
+  return null;
+}
+
+function labelDimensionsMM(paperSize) {
+  if (paperSize === '50x25mm') return { w: 50, h: 25 };
+  if (paperSize === '50x30mm') return { w: 50, h: 30 };
+  if (paperSize === '60x40mm') return { w: 60, h: 40 };
+  if (paperSize === '58x40mm') return { w: 58, h: 40 };
+  if (paperSize === '3x2inch') return { w: 76.2, h: 50.8 };
+  if (paperSize === '40x25mm') return { w: 40, h: 25 };
+  return { w: 50, h: 25 };
+}
+
+function labelGapDots(dpi, gapMm = 3) {
+  return Math.max(8, Math.round((gapMm * dpi) / 25.4));
 }
 
 // Windows ships a handful of virtual "printers" (Print to PDF, XPS Writer,
@@ -202,6 +245,29 @@ const VIRTUAL_PRINTER_PATTERNS = [
   /onenote/i,
 ];
 const isVirtualPrinter = (name) => VIRTUAL_PRINTER_PATTERNS.some((re) => re.test(name || ''));
+
+// Installed printer queue names from HKLM (works when PowerShell fails or service runs as SYSTEM)
+async function getPrintersViaRegistry() {
+  const { stdout } = await execFileAsync(
+    'reg',
+    ['query', 'HKLM\\SYSTEM\\CurrentControlSet\\Control\\Print\\Printers'],
+    { timeout: 8000, windowsHide: true, maxBuffer: 4 * 1024 * 1024 }
+  );
+  const names = new Set();
+  stdout.split(/\r?\n/).forEach((line) => {
+    const m = line.match(/Printers\\([^\\\r\n]+)/);
+    if (m?.[1]) names.add(m[1].trim());
+  });
+  const def = await getDefaultPrinterFromRegistryHKCU().catch(() => null);
+  return Array.from(names)
+    .filter((name) => name && !isVirtualPrinter(name))
+    .map((name) => ({
+      name,
+      id: `${name.toLowerCase().replace(/\s+/g, '-')}@${process.env.COMPUTERNAME || 'local'}`,
+      isDefault: def ? name === def : false,
+      status: 'available',
+    }));
+}
 
 // Derive receipt profile - same as backend
 function deriveReceiptProfile(p) {
@@ -226,21 +292,36 @@ async function getAvailablePrinters() {
     let printers = [];
 
     // Try CIM first
-    const cimPrinters = await getPrintersViaCIM().catch(() => []);
+    const cimPrinters = await getPrintersViaCIM().catch((err) => {
+      console.warn('[printers] CIM failed:', err?.message || err);
+      return [];
+    });
     if (cimPrinters.length) {
       printers = normalizeAndSort(cimPrinters);
     } else {
       // Fallback to Get-Printer
       const [gpPrintersRaw, defName] = await Promise.all([
-        getPrintersViaGetPrinter().catch(() => []),
-        getDefaultPrinterFromRegistryHKCU().catch(() => null)
+        getPrintersViaGetPrinter().catch((err) => {
+          console.warn('[printers] Get-Printer failed:', err?.message || err);
+          return [];
+        }),
+        getDefaultPrinterFromRegistryHKCU().catch(() => null),
       ]);
       const gpPrinters = gpPrintersRaw.map((p) => ({
         ...p,
-        id: `${String(p.name).toLowerCase().replace(/\s+/g, '-')}@windows`
+        id: `${String(p.name).toLowerCase().replace(/\s+/g, '-')}@windows`,
       }));
       if (gpPrinters.length) {
         printers = normalizeAndSort(gpPrinters, defName);
+      } else {
+        const regPrinters = await getPrintersViaRegistry().catch((err) => {
+          console.warn('[printers] Registry enumerate failed:', err?.message || err);
+          return [];
+        });
+        if (regPrinters.length) {
+          console.log(`[printers] Using registry list (${regPrinters.length} queues)`);
+          printers = normalizeAndSort(regPrinters, defName);
+        }
       }
     }
 
@@ -248,7 +329,8 @@ async function getAvailablePrinters() {
     printers = printers.map(p => ({
       ...p,
       languageHint: deriveLanguageHint(p),
-      receiptProfile: deriveReceiptProfile(p)
+      receiptProfile: deriveReceiptProfile(p),
+      labelProfile: deriveLabelProfile(p),
     }));
 
     // Drop virtual printers (Print to PDF, XPS, Fax, OneNote) — see
@@ -257,14 +339,18 @@ async function getAvailablePrinters() {
 
     // Fallback to default if no printers found
     if (printers.length === 0) {
-      console.log('No printers detected, returning default printer');
+      console.warn(
+        '[printers] No queues found — restart Print Server as your Windows user (not only as a service), or run SETUP-CLIENT-LAPTOP.bat as Admin.'
+      );
       return [{
         name: 'Default Printer',
         id: 'default@local',
         isDefault: true,
         status: 'available',
         languageHint: 'escpos',
-        receiptProfile: { roll: '80mm', printableWidthMM: 72, columns: { fontA: 48, fontB: 64 } }
+        receiptProfile: { roll: '80mm', printableWidthMM: 72, columns: { fontA: 48, fontB: 64 } },
+        detectionWarning:
+          'Could not enumerate Windows printers. Restart the print server on the PC where printers are installed.',
       }];
     }
 
@@ -406,6 +492,19 @@ app.post('/print-receipt', async (req, res) => {
       return size;
     }
 
+    /** Word-wrap within printable width (for long store addresses). */
+    function drawWrapped(text, x, y, width, opts) {
+      const font = opts.font || baseFont;
+      const size = opts.maxSize ?? BODY_MAX;
+      const align = opts.align || 'center';
+      const content = String(text || '').trim();
+      if (!content) return { size, height: 0 };
+      doc.font(font).fontSize(size);
+      const blockH = doc.heightOfString(content, { width, align });
+      doc.text(content, x, y, { width, align });
+      return { size, height: blockH };
+    }
+
     // Draw a two-column row (left label, right value)
     function rowLR(label, value, y, opts) {
       const LBL_W = W * 0.45;
@@ -534,7 +633,7 @@ app.post('/print-receipt', async (req, res) => {
 
       if (
         !normalizedStoreName ||
-        ['ADMIN', 'MANPASAND GENERAL STORE'].includes(
+        ['ADMIN', 'MANPASAND GENERAL STORE', 'PEHNAWA BOUTIQUE'].includes(
           normalizedStoreName.toUpperCase()
         )
       ) {
@@ -555,18 +654,16 @@ app.post('/print-receipt', async (req, res) => {
     // ===== HEADER =====
     let y = margins.top;
 
-    // Logo (if provided)
+    // Wide wordmark. Size the box to the printable width and advance by the
+    // fitted height so a short logo does not leave a large blank gap.
     if (logoToUse && fs.existsSync(logoToUse)) {
-      // Logo is a square (1024x1024) image. `fit` keeps aspect ratio, so the
-      // SMALLER box side controls the rendered size -- a square box lets it scale
-      // up to fill the receipt width instead of being capped by a short height.
-      const maxW = mm(28);
-      const maxH = mm(28);
+      const maxW = Math.min(mm(62), W);
+      const maxH = mm(16);
       const x = (pageWidth - maxW) / 2;
       doc.save();
       doc.image(logoToUse, x, y, { fit: [maxW, maxH], align: 'center', valign: 'center' });
       doc.restore();
-      y += maxH + mm(3);
+      y += maxH + mm(2);
     }
 
     // Address + Tagline
@@ -575,16 +672,15 @@ app.post('/print-receipt', async (req, res) => {
       receiptData.storeName,
       receiptData.address
     );
-    const usedAddrTop = drawFit(branchAddress, margins.left, y, W, {
+    const addrTop = drawWrapped(branchAddress, margins.left, y, W, {
       maxSize: 11,
-      minSize: 8.5,
       align: 'center',
       font: boldFont
     });
-    y += lineH(usedAddrTop) * 0.9;
+    y += addrTop.height + 2;
 
     doc.font(baseFont);
-    const tg = 'Quality - Service - Value';
+    const tg = receiptData.tagline || 'Quality • Service • Value';
     const usedTg = drawFit(tg, margins.left, y, W, {
       maxSize: BODY_MAX,
       minSize: BODY_MIN,
@@ -630,17 +726,28 @@ app.post('/print-receipt', async (req, res) => {
     );
     y += lh2;
 
-    // Cashier | Customer
+    // Cashier | Salesperson | Customer | Phone
     const rawCashier =
       typeof receiptData.cashier === 'string' ? receiptData.cashier.trim() : '';
+    const salesperson =
+      typeof receiptData.salesperson === 'string' ? receiptData.salesperson.trim() : '';
     const customerType = receiptData.customerType || 'Walk-in';
+    const customerPhone =
+      typeof receiptData.customerPhone === 'string' ? receiptData.customerPhone.trim() : '';
     // Only show Cashier when a real employee name is provided. "Walk-in" is a
     // customer type, not a cashier, so showing it here is meaningless.
     if (rawCashier && rawCashier.toLowerCase() !== 'walk-in') {
       y += rowLR('Cashier', rawCashier, y);
     }
-    const lh4 = rowLR('Customer', customerType, y);
-    y += lh4 + 2;
+    if (salesperson) {
+      y += rowLR('Salesperson', salesperson, y);
+    }
+    y += rowLR('Customer', customerType, y);
+    if (customerPhone) {
+      y += rowLR('Phone', customerPhone, y) + 2;
+    } else {
+      y += 2;
+    }
 
     y += hr(y, 'dotted');
 
@@ -820,10 +927,30 @@ app.post('/print-receipt', async (req, res) => {
       { maxSize: 10.6, minSize: 8.6, align: 'center', font: boldFont }
     );
     y += lineH(usedTy) - 2;
+
+    if (shouldPrintReceiptExchangePolicy(receiptData)) {
+      y += hr(y, 'dotted') + 2;
+      const usedPolicyTitle = drawFit(RECEIPT_EXCHANGE_POLICY_TITLE, margins.left, y, W, {
+        maxSize: 7.6,
+        minSize: 7.0,
+        align: 'center',
+        font: boldFont
+      });
+      y += lineH(usedPolicyTitle) - 1;
+      for (const line of RECEIPT_EXCHANGE_POLICY_LINES) {
+        const block = drawWrapped(line, margins.left, y, W, {
+          maxSize: 7.0,
+          align: 'center',
+          font: baseFont
+        });
+        y += block.height + 1;
+      }
+    }
+
+    const footerAddress = normalizeReceiptAddress(receiptData.address);
     const footerLines = [
-      'Branch: 021 34892110',
-      'Delivery Hotline WhatsApp: +92 342 3344040',
-      'Website: Manpasandstore.com'
+      'Call / WhatsApp: 03013181111',
+      'Website: manpasandstore.com'
     ];
     for (const line of footerLines) {
       const usedF = drawFit(line, margins.left, y, W, {
@@ -833,6 +960,12 @@ app.post('/print-receipt', async (req, res) => {
       });
       y += lineH(usedF) - 1;
     }
+    const footerAddr = drawWrapped(footerAddress, margins.left, y, W, {
+      maxSize: 9.8,
+      align: 'center',
+      font: baseFont
+    });
+    y += footerAddr.height + 1;
 
     // Powered by credit (Ace Studios)
     y += hr(y, 'dotted', 0.5) + 3;
@@ -846,16 +979,16 @@ app.post('/print-receipt', async (req, res) => {
     y += lineH(poweredBy) + 1;
 
     const aceLines = [
-      'Website: acestudiosus.com | Contact: +92 336 2500357'
+      'Website: acestudiosus.com',
+      `Contact: ${ACE_STUDIOS_CONTACT}`
     ];
     for (const line of aceLines) {
-      const usedAce = drawFit(line, margins.left, y, W, {
+      const aceBlock = drawWrapped(line, margins.left, y, W, {
         maxSize: 8.0,
-        minSize: 7.0,
         align: 'center',
         font: baseFont
       });
-      y += lineH(usedAce) + 1;
+      y += aceBlock.height + 1;
     }
 
     // Trim height with safety buffer to avoid bottom cut (same as backend)
@@ -898,6 +1031,17 @@ app.post('/print-receipt', async (req, res) => {
 });
 
 // ZPL helper functions
+const BARCODE_LABEL_BRAND_PREFIX = 'MANPASAND';
+
+function formatBarcodeLabelTitle(productName) {
+  const name = String(productName || '').trim();
+  if (!name) return BARCODE_LABEL_BRAND_PREFIX;
+  const upper = name.toUpperCase();
+  if (upper.startsWith(`${BARCODE_LABEL_BRAND_PREFIX} `)) return upper;
+  if (upper.startsWith('PEHNAVA ')) return `${BARCODE_LABEL_BRAND_PREFIX} ${upper.slice(8)}`;
+  return `${BARCODE_LABEL_BRAND_PREFIX} ${upper}`;
+}
+
 function escapeZPL(text) {
   if (!text) return '';
   return String(text)
@@ -916,15 +1060,358 @@ function formatDateZPL(iso) {
   return `${day}/${month}/${year}`;
 }
 
+function formatDateEplShort(iso) {
+  if (!iso) return '--/--/--';
+  const d = new Date(iso);
+  const day = String(d.getDate()).padStart(2, '0');
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const year = String(d.getFullYear()).slice(-2);
+  return `${day}/${month}/${year}`;
+}
+
+function formatLabelPrice(price) {
+  const n = Number(price);
+  if (!Number.isFinite(n)) return '';
+  return `PRICE ${n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+}
+
+/** EPL is 7-bit; strip smart punctuation so nothing prints as garbage on LP 2844. */
+function toEplAscii(text) {
+  return String(text || '')
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^\x20-\x7E]/g, '')
+    .replace(/"/g, "'")
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function escapeEPL(text) {
+  return toEplAscii(text);
+}
+
+function splitPehnawaLabelTitle(productName) {
+  const full = formatBarcodeLabelTitle(productName || '');
+  const upper = toEplAscii(full).toUpperCase();
+  const brand = BARCODE_LABEL_BRAND_PREFIX.toUpperCase();
+  if (upper.startsWith(`${brand} `)) {
+    return { brand, product: upper.slice(brand.length + 1).trim() };
+  }
+  return { brand, product: upper.replace(/^PEHNAVA\s+/i, '').trim() || upper };
+}
+
+/** EPL built-in font approximate cell heights at 203 DPI (v-mul 1). */
+function eplFontCellHeight(font, vMul = 1) {
+  const h = { 1: 14, 2: 18, 3: 22, 4: 26, 5: 30 }[font] || 14;
+  return h * vMul;
+}
+
+function eplCharWidthDots(font, hMul = 1) {
+  // Slightly pessimistic — Eltron fonts print wider than nominal on LP 2844
+  const w = { 1: 8, 2: 10, 3: 12, 4: 14, 5: 16 }[font] || 8;
+  return Math.ceil(w * hMul * 1.12);
+}
+
+function eplCenteredX(text, font, hMul, widthDots, marginH) {
+  const inner = widthDots - 2 * marginH;
+  const tw = text.length * eplCharWidthDots(font, hMul);
+  return marginH + Math.max(0, Math.floor((inner - tw) / 2));
+}
+
+function eplMaxCharsPerLine(widthDots, marginH, font, hMul) {
+  const inner = widthDots - 2 * marginH;
+  const cw = eplCharWidthDots(font, hMul);
+  return Math.max(8, Math.floor(inner / cw) - 1);
+}
+
+function wrapEplText(text, maxChars, maxLines) {
+  const words = toEplAscii(text).toUpperCase().split(/\s+/).filter(Boolean);
+  if (!words.length) return [];
+  const lines = [];
+  let current = '';
+  for (const word of words) {
+    const next = current ? `${current} ${word}` : word;
+    if (next.length <= maxChars) {
+      current = next;
+      continue;
+    }
+    if (current) lines.push(current);
+    current = word.length > maxChars ? `${word.slice(0, maxChars - 3)}...` : word;
+    if (lines.length >= maxLines - 1) break;
+  }
+  if (current && lines.length < maxLines) lines.push(current);
+  if (lines.length > maxLines) lines.length = maxLines;
+  if (lines.length === maxLines) {
+    const last = lines[maxLines - 1];
+    if (last.length > maxChars) lines[maxLines - 1] = `${last.slice(0, maxChars - 3)}...`;
+  }
+  return lines;
+}
+
+/**
+ * Code 128 data symbols, following the printer's automatic subset switching.
+ * Digit pairs ride in subset C as one symbol, so "123456789" is 6 symbols, not 9.
+ */
+function code128DataSymbols(data) {
+  const isDigit = (ch) => ch >= '0' && ch <= '9';
+  const digitRun = (from) => {
+    let n = 0;
+    while (from + n < data.length && isDigit(data[from + n])) n += 1;
+    return n;
+  };
+
+  const len = data.length;
+  let symbols = 0;
+  let i = 0;
+  const lead = digitRun(0);
+  let subsetC = lead >= 4 || (lead === len && len % 2 === 0);
+
+  while (i < len) {
+    if (subsetC) {
+      symbols += 1;
+      if (isDigit(data[i]) && isDigit(data[i + 1] || '')) {
+        i += 2;
+      } else {
+        subsetC = false; // CODE B switch symbol, no data consumed
+      }
+      continue;
+    }
+    const run = digitRun(i);
+    if (run >= 6 || (i + run === len && run >= 4 && run % 2 === 0)) {
+      symbols += 1; // CODE C switch symbol
+      subsetC = true;
+      continue;
+    }
+    symbols += 1;
+    i += 1;
+  }
+  return symbols;
+}
+
+/** Printed width: start + data + checksum symbols (11 modules each) plus the 13-module stop. */
+function code128WidthDots(data, narrow) {
+  if (!data) return 0;
+  return (11 * (code128DataSymbols(data) + 2) + 13) * narrow;
+}
+
+/**
+ * Keep one module width for every label so barcodes print the same size,
+ * only stepping down when the data genuinely cannot fit.
+ */
+function chooseEplBarNarrow(data, printableW, preferred = 3) {
+  for (let narrow = preferred; narrow > 1; narrow -= 1) {
+    if (code128WidthDots(data, narrow) <= printableW) return narrow;
+  }
+  return 1;
+}
+
+function eplRowAdvance(row, gap) {
+  return eplFontCellHeight(row.font, row.vMul || 1) + gap;
+}
+
+/** Compact 50 mm × 25 mm — one sticker, top-down (LP 2844 / GC420t EPL). */
+function generateEPLFor50x25Label(item, options, widthDots, heightDots, gapDots, humanReadable) {
+  const marginH = 14;
+  const marginTop = 8;
+  const marginBottom = 8;
+  const gapBetweenLines = 2;
+  const gapBeforeBarcode = 4;
+  const gapAfterBars = 3;
+  const fontBrand = 2;
+  const fontName = 1;
+  const fontPrice = 2;
+  const fontHri = 3;
+  const bcData = item.barcode ? escapeEPL(String(item.barcode)) : '';
+  // Bars may use the full web minus the printer's unprintable edge, so long
+  // codes keep thick modules instead of collapsing to hairlines.
+  const barPrintableW = widthDots - 2 * 6;
+  const barNarrow = bcData ? chooseEplBarNarrow(bcData, barPrintableW) : 3;
+  const barWide = barNarrow * 2;
+
+  const { brand, product } = splitPehnawaLabelTitle(item.name || '');
+  const nameMaxChars = Math.min(20, eplMaxCharsPerLine(widthDots, marginH, fontName, 1));
+  const productLines = wrapEplText(product, nameMaxChars, 2);
+
+  const textRows = [];
+  textRows.push({ font: fontBrand, hMul: 1, vMul: 1, text: brand });
+  for (const line of productLines) {
+    textRows.push({ font: fontName, hMul: 1, vMul: 1, text: line });
+  }
+  if (item.price !== undefined && item.price !== null) {
+    const n = Math.round(Number(item.price));
+    textRows.push({
+      font: fontPrice,
+      hMul: 1,
+      vMul: 1,
+      text: `RS ${n.toLocaleString('en-US')}`,
+    });
+  }
+
+  function measureLayout(rows) {
+    let endY = marginTop;
+    for (const row of rows) endY += eplRowAdvance(row, gapBetweenLines);
+    if (rows.length) endY -= gapBetweenLines;
+    const hriH = humanReadable ? eplFontCellHeight(fontHri, 1) + gapAfterBars : 0;
+    const barsY = endY + gapBeforeBarcode;
+    let barsH = heightDots - marginBottom - hriH - barsY;
+    barsH = Math.max(34, Math.min(66, barsH));
+    const overflow = barsY + barsH + hriH + marginBottom > heightDots;
+    return { endY, barsY, barsH, overflow };
+  }
+
+  let layout = measureLayout(textRows);
+  if (layout.overflow && productLines.length > 1) {
+    const compact = [];
+    compact.push({ font: fontBrand, hMul: 1, vMul: 1, text: brand });
+    const one = wrapEplText(product, nameMaxChars, 1)[0] || '';
+    if (one) compact.push({ font: fontName, hMul: 1, vMul: 1, text: one });
+    if (item.price !== undefined && item.price !== null) {
+      const n = Math.round(Number(item.price));
+      compact.push({ font: fontPrice, hMul: 1, vMul: 1, text: `RS ${n.toLocaleString('en-US')}` });
+    }
+    textRows.length = 0;
+    textRows.push(...compact);
+    layout = measureLayout(textRows);
+  }
+
+  const finalBcY = layout.barsY;
+  const bcHeight = layout.barsH;
+  const textEndY = layout.endY;
+
+  let epl = 'N\n';
+  epl += `q${widthDots}\n`;
+  epl += `Q${heightDots},${gapDots}\n`;
+  epl += 'S3\n';
+  epl += 'D12\n';
+  epl += 'ZT\n';
+
+  let y = marginTop;
+  for (const row of textRows) {
+    const x = eplCenteredX(row.text, row.font, row.hMul, widthDots, marginH);
+    epl += `A${x},${y},0,${row.font},${row.hMul},${row.vMul},N,"${escapeEPL(row.text)}"\n`;
+    y += eplRowAdvance(row, gapBetweenLines);
+  }
+
+  if (bcData) {
+    const barsW = code128WidthDots(bcData, barNarrow);
+    const bcX = Math.max(0, Math.round((widthDots - barsW) / 2));
+    epl += `B${bcX},${finalBcY},0,1,${barNarrow},${barWide},${bcHeight},N,"${bcData}"\n`;
+    if (humanReadable) {
+      const hriY = finalBcY + bcHeight + gapAfterBars;
+      const hriX = eplCenteredX(bcData, fontHri, 1, widthDots, marginH);
+      epl += `A${hriX},${hriY},0,${fontHri},1,1,N,"${bcData}"\n`;
+    }
+  }
+
+  epl += 'P1\n';
+  return epl;
+}
+
+// Eltron LP 2844 — EPL2, 203 DPI (paperSize must match physical roll)
+function generateEPLForLabel(item, options) {
+  const dpi = options.dpi || 203;
+  const humanReadable = options.humanReadable !== false;
+  const gapMm = options.labelGapMM ?? options.gapMm ?? 3;
+  const { w, h } = labelDimensionsMM(options.paperSize || '50x25mm');
+  const widthDots = Math.round((w * dpi) / 25.4);
+  const heightDots = Math.round((h * dpi) / 25.4);
+  const gapDots = labelGapDots(dpi, gapMm);
+  const is5025 = w <= 51 && h <= 26;
+
+  if (is5025) {
+    return generateEPLFor50x25Label(
+      item,
+      options,
+      widthDots,
+      heightDots,
+      gapDots,
+      humanReadable,
+    );
+  }
+
+  const marginH = 32;
+  const marginV = 14;
+  const gapBetweenLines = 6;
+  const gapBeforeBarcode = 10;
+  const fontName = 3;
+  const fontPrice = 4;
+  const fontDates = 2;
+  const hrReserve = humanReadable ? 22 : 0;
+  const bcData = item.barcode ? escapeEPL(String(item.barcode)) : '';
+  const barPrintableW = widthDots - 2 * 8;
+  const barNarrow = bcData ? chooseEplBarNarrow(bcData, barPrintableW, 4) : 3;
+  const barWide = barNarrow * 2;
+  const minBarcodeHeight = 64;
+  const maxBarcodeHeight = 96;
+
+  const textRows = [];
+  const maxNameChars = eplMaxCharsPerLine(widthDots, marginH, fontName, 1);
+  for (const line of wrapEplText(formatBarcodeLabelTitle(item.name || ''), maxNameChars, 3)) {
+    textRows.push({ font: fontName, hMul: 1, vMul: 1, text: line });
+  }
+  if (item.netWeight) {
+    textRows.push({ font: fontDates, hMul: 1, vMul: 1, text: `NET WT: ${escapeEPL(item.netWeight)}` });
+  }
+  if (item.price !== undefined && item.price !== null) {
+    textRows.push({
+      font: fontPrice,
+      hMul: 1,
+      vMul: 2,
+      text: formatLabelPrice(item.price),
+    });
+  }
+
+  let textBlockHeight = 0;
+  for (const row of textRows) {
+    textBlockHeight += eplFontCellHeight(row.font, row.vMul) + gapBetweenLines;
+  }
+  if (textRows.length) textBlockHeight -= gapBetweenLines;
+
+  let bcHeight = Math.min(
+    maxBarcodeHeight,
+    Math.max(minBarcodeHeight, Math.floor(heightDots * 0.32)),
+  );
+
+  const blockHeight = textBlockHeight + gapBeforeBarcode + bcHeight + hrReserve;
+  let y = Math.max(marginV, Math.floor((heightDots - blockHeight) / 2));
+
+  let epl = 'N\n';
+  epl += `q${widthDots}\n`;
+  epl += `Q${heightDots},${gapDots}\n`;
+  epl += 'S3\n';
+  epl += 'D12\n';
+  epl += 'ZT\n';
+
+  for (const row of textRows) {
+    const x = eplCenteredX(row.text, row.font, row.hMul, widthDots, marginH);
+    epl += `A${x},${y},0,${row.font},${row.hMul},${row.vMul},N,"${escapeEPL(row.text)}"\n`;
+    y += eplFontCellHeight(row.font, row.vMul) + gapBetweenLines;
+  }
+
+  y += gapBeforeBarcode - gapBetweenLines;
+
+  if (bcData) {
+    const barsW = code128WidthDots(bcData, barNarrow);
+    const bcX = Math.max(0, Math.round((widthDots - barsW) / 2));
+    epl += `B${bcX},${y},0,1,${barNarrow},${barWide},${bcHeight},N,"${bcData}"\n`;
+    if (humanReadable) {
+      const hriY = y + bcHeight + 8;
+      const hriX = eplCenteredX(bcData, 3, 1, widthDots, marginH);
+      epl += `A${hriX},${hriY},0,3,1,1,N,"${bcData}"\n`;
+    }
+  }
+
+  epl += 'P1\n';
+  return epl;
+}
+
 // Generate ZPL for 58mm x 40mm labels (landscape, horizontal barcode)
 function generateZPLForLabel(item, options) {
-  const { dpi, humanReadable } = options;
-  
-  // CORRECT DIMENSIONS: 58mm wide x 40mm tall (horizontal/landscape) - SAME AS PDF/BROWSER PRINT
-  // 58mm x 40mm at 203 DPI: 58*203/25.4 = 464 dots wide, 40*203/25.4 = 320 dots tall
-  // 58mm x 40mm at 300 DPI: 58*300/25.4 = 685 dots wide, 40*300/25.4 = 472 dots tall
-  const width = Math.round((58 * dpi) / 25.4);   // 58mm wide (horizontal/landscape)
-  const height = Math.round((40 * dpi) / 25.4);  // 40mm tall (horizontal/landscape)
+  const dpi = options.dpi || 203;
+  const humanReadable = options.humanReadable;
+  const { w, h } = labelDimensionsMM(options.paperSize || '50x25mm');
+  const width = Math.round((w * dpi) / 25.4);
+  const height = Math.round((h * dpi) / 25.4);
   
   // Generous margins to prevent cutting on all printers
   const marginX = dpi === 300 ? 50 : 40;  // Left/Right margin (~4mm)
@@ -933,9 +1420,8 @@ function generateZPLForLabel(item, options) {
   const startX = marginX;
   
   // Font sizes for horizontal layout
-  const fontSizeLarge = dpi === 300 ? 18 : 16;   // Product name
-  const fontSizeMedium = dpi === 300 ? 14 : 12;  // Weight/Price
-  const fontSizeSmall = dpi === 300 ? 11 : 9;    // Dates
+  const fontSizeLarge = dpi === 300 ? 22 : 20;
+  const fontSizeMedium = dpi === 300 ? 18 : 16;
   
   // Y positions - horizontal layout
   let yPos = marginY;
@@ -943,7 +1429,7 @@ function generateZPLForLabel(item, options) {
   const lineSpacing = dpi === 300 ? 2 : 1;
   
   // Product name
-  const productName = escapeZPL((item.name || '').trim().toUpperCase());
+  const productName = escapeZPL(formatBarcodeLabelTitle(item.name || ''));
   const titleY = yPos;
   
   // Barcode settings - horizontal layout
@@ -977,8 +1463,9 @@ function generateZPLForLabel(item, options) {
   
   // Meta row - Weight and Price (stacked vertically, compact)
   const netWeightText = item.netWeight ? `NET WT: ${escapeZPL(item.netWeight)}` : '';
-  const priceText = (item.price !== undefined && item.price !== null) ? `RS ${Math.round(Number(item.price))}` : '';
-  
+  const priceText =
+    item.price !== undefined && item.price !== null ? formatLabelPrice(item.price) : '';
+
   if (netWeightText || priceText) {
     zpl += `^CF0,${fontSizeMedium}\n`;
     if (netWeightText) {
@@ -986,20 +1473,12 @@ function generateZPLForLabel(item, options) {
       currentY += lineHeight + lineSpacing;
     }
     if (priceText) {
-      zpl += `^FO${textStartX},${currentY}^FD${escapeZPL(priceText)}^FS\n`;
+      zpl += `^FO${textStartX},${currentY}^FB${textWidth},1,0,C,0^FD${escapeZPL(priceText)}^FS\n`;
       currentY += lineHeight + lineSpacing;
     }
   }
-  
-  // Dates row - PKG and EXP (stacked vertically, compact)
-  const pkgText = `PKG: ${formatDateZPL(item.packageDateISO)}`;
-  const expText = `EXP: ${formatDateZPL(item.expiryDateISO)}`;
-  
-  zpl += `^CF0,${fontSizeSmall}\n`;
-  zpl += `^FO${textStartX},${currentY}^FD${escapeZPL(pkgText)}^FS\n`;
-  currentY += lineHeight + lineSpacing;
-  zpl += `^FO${textStartX},${currentY}^FD${escapeZPL(expText)}^FS\n`;
-  currentY += lineHeight + lineSpacing; // Spacing before barcode
+
+  currentY += lineSpacing;
   
   // Barcode - Code 128, adjusted for 40mm width constraint
   if (item.barcode) {
@@ -1021,314 +1500,33 @@ function generateZPLForLabel(item, options) {
   return zpl;
 }
 
-// Send ZPL to printer using proper RAW printing (like backend)
-async function sendZPLToPrinter(printerName, zpl) {
-  const { exec, execFile } = require('child_process');
-  const { promisify } = require('util');
-  const execAsync = promisify(exec);
-  const execFileAsync = promisify(execFile);
-  
-  const tmpFile = path.join(os.tmpdir(), `zpl_${Date.now()}_${Math.random().toString(36).slice(2)}.zpl`);
-  
-  // Write ZPL to file
-  fs.writeFileSync(tmpFile, zpl, 'utf8');
-  console.log(`[ZPL] ZPL file saved to: ${tmpFile}`);
-  console.log(`[ZPL] ZPL content (first 500 chars):\n${zpl.substring(0, 500)}...`);
-  console.log(`[ZPL] ZPL content (last 200 chars):\n...${zpl.substring(zpl.length - 200)}`);
-  
-  // Try multiple printer name variations (in case one fails)
-  const printerNameVariations = [
-    printerName,  // Original name
-    printerName.replace(/\s*\(EPL\)\s*/i, ''),  // Without (EPL)
-    printerName.replace(/\s*\(ZPL\)\s*/i, ''),  // Without (ZPL)
-  ].filter((name, index, self) => self.indexOf(name) === index); // Remove duplicates
-  
-  console.log(`[ZPL] Will try printer names: ${printerNameVariations.join(', ')}`);
-  
-  let success = false;
-  let lastError = null;
-  
-  // Get printer port information using PowerShell (wmic is deprecated)
-  let printerPort = null;
-  let shareName = null;
-  let workingPrinterName = null;
-  
-  // Try to get printer info for each variation
-  for (const nameToTry of printerNameVariations) {
-    try {
-      // Use PowerShell to get printer info - use single quotes to avoid parsing issues
-      const escapedName = nameToTry.replace(/'/g, "''");
-      const psCommand = `Get-Printer -Name '${escapedName}' | Select-Object PortName,ShareName | ConvertTo-Json`;
-      const { stdout } = await execAsync(`powershell -Command "${psCommand}"`, { windowsHide: true, timeout: 5000 });
-      
-      try {
-        const printerInfo = JSON.parse(stdout);
-        printerPort = printerInfo.PortName || printerInfo.portName || null;
-        shareName = printerInfo.ShareName || printerInfo.shareName || null;
-        if (printerPort === 'NULL' || !printerPort) printerPort = null;
-        if (shareName === 'NULL' || !shareName) shareName = null;
-        if (printerPort || shareName) {
-          workingPrinterName = nameToTry;
-          break; // Found working printer name
-        }
-      } catch (parseError) {
-        // Try parsing as separate lines
-        const lines = stdout.split(/\r?\n/).filter(Boolean);
-        for (const line of lines) {
-          if (line.includes('PortName')) {
-            const match = line.match(/PortName["\s:]+([^",\s]+)/i);
-            if (match) {
-              printerPort = match[1];
-              workingPrinterName = nameToTry;
-            }
-          }
-          if (line.includes('ShareName')) {
-            const match = line.match(/ShareName["\s:]+([^",\s]+)/i);
-            if (match) {
-              shareName = match[1];
-              workingPrinterName = nameToTry;
-            }
-          }
-        }
-        if (workingPrinterName) break;
-      }
-    } catch (error) {
-      console.log(`[ZPL] Failed to get printer info for "${nameToTry}":`, error.message);
-      continue; // Try next variation
-    }
-  }
-  
-  if (!workingPrinterName) {
-    console.log('[ZPL] Could not find printer info, will try all name variations');
-    workingPrinterName = printerName; // Fallback to original
-  }
-  
-  console.log(`[ZPL] Using printer name: "${workingPrinterName}"`);
-  console.log(`[ZPL] Printer Port: ${printerPort || 'Not found'}, Share: ${shareName || 'Not found'}`);
-  
-  if (!shareName) {
-    // Try alternative: use printer name as share name
-    shareName = workingPrinterName;
-  }
-  
-  // Method 1: Direct port write (ONLY for COM/LPT - USB ports CANNOT use direct write)
-  // Note: USB ports like USB001 are virtual and don't support direct file copy
-  if (printerPort && !printerPort.startsWith('USB') && (printerPort.startsWith('COM') || printerPort.startsWith('LPT'))) {
-    try {
-      console.log(`[ZPL] Attempting direct write to port: ${printerPort}`);
-      const { stdout } = await execAsync(`copy /b "${tmpFile}" "${printerPort}"`, { windowsHide: true, timeout: 10000 });
-      if (stdout && stdout.includes('file(s) copied') && !stdout.includes('0 file')) {
-        success = true;
-        console.log(`[ZPL] ✅ Sent via direct port ${printerPort}`);
-      } else {
-        console.log(`[ZPL] Direct port write returned: ${stdout || 'no output'}`);
-      }
-    } catch (error) {
-      console.log(`[ZPL] Direct port write failed:`, error.message);
-      lastError = error;
-    }
-  } else if (printerPort && printerPort.startsWith('USB')) {
-    console.log(`[ZPL] USB port detected (${printerPort}) - skipping direct write, will use .NET RawPrinterHelper`);
-  }
-  
-  // Method 2: Use .NET RawPrinterHelper via PowerShell (BEST for USB and ZPL printers - try early)
-  if (!success) {
-    // Try each printer name variation
-    for (const nameToTry of printerNameVariations) {
-      if (success) break; // Already succeeded
-      
-      try {
-        console.log(`[ZPL] Attempting .NET RawPrinterHelper with printer: "${nameToTry}"`);
-        const psScriptFile = path.join(os.tmpdir(), `print_raw_${Date.now()}_${Math.random().toString(36).slice(2)}.ps1`);
-        const psScript = `
-$printerName = '${nameToTry.replace(/'/g, "''")}'
-$filePath = '${tmpFile.replace(/\\/g, '\\\\').replace(/'/g, "''")}'
+const { sendRawLabelToPrinter } = require('./lib/raw-print-windows');
 
-if (-not (Test-Path $filePath)) {
-    Write-Host "ERROR: File not found: $filePath"
-    exit 1
-}
-
-$fileContent = [System.IO.File]::ReadAllBytes($filePath)
-Write-Host "Read $($fileContent.Length) bytes from file"
-
-Add-Type -TypeDefinition @"
-using System;
-using System.Runtime.InteropServices;
-
-public class RawPrinterHelper {
-    [DllImport("winspool.drv", CharSet = CharSet.Auto, SetLastError = true)]
-    public static extern bool OpenPrinter([MarshalAs(UnmanagedType.LPStr)] string printerName, out IntPtr hPrinter, IntPtr printerDefaults);
-    
-    [DllImport("winspool.drv", SetLastError = true, ExactSpelling = true)]
-    public static extern bool ClosePrinter(IntPtr hPrinter);
-    
-    [DllImport("winspool.drv", SetLastError = true)]
-    public static extern bool StartDocPrinter(IntPtr hPrinter, [MarshalAs(UnmanagedType.LPStr)] string jobName, int level, IntPtr docInfo);
-    
-    [DllImport("winspool.drv", SetLastError = true)]
-    public static extern bool EndDocPrinter(IntPtr hPrinter);
-    
-    [DllImport("winspool.drv", SetLastError = true)]
-    public static extern bool StartPagePrinter(IntPtr hPrinter);
-    
-    [DllImport("winspool.drv", SetLastError = true)]
-    public static extern bool EndPagePrinter(IntPtr hPrinter);
-    
-    [DllImport("winspool.drv", SetLastError = true)]
-    public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, int dwCount, out int dwWritten);
-}
-
-public static class PrinterHelper {
-    public static bool SendRawData(string printerName, byte[] data) {
-        IntPtr hPrinter = IntPtr.Zero;
-        try {
-            if (!RawPrinterHelper.OpenPrinter(printerName, out hPrinter, IntPtr.Zero)) {
-                return false;
-            }
-            
-            string jobName = "ZPL Print Job";
-            int level = 1;
-            
-            if (!RawPrinterHelper.StartDocPrinter(hPrinter, jobName, level, IntPtr.Zero)) {
-                return false;
-            }
-            
-            if (!RawPrinterHelper.StartPagePrinter(hPrinter)) {
-                return false;
-            }
-            
-            IntPtr pBytes = Marshal.AllocHGlobal(data.Length);
-            Marshal.Copy(data, 0, pBytes, data.Length);
-            int dwWritten = 0;
-            
-            bool success = RawPrinterHelper.WritePrinter(hPrinter, pBytes, data.Length, out dwWritten);
-            
-            Marshal.FreeHGlobal(pBytes);
-            RawPrinterHelper.EndPagePrinter(hPrinter);
-            RawPrinterHelper.EndDocPrinter(hPrinter);
-            
-            return success;
-        } finally {
-            if (hPrinter != IntPtr.Zero) {
-                RawPrinterHelper.ClosePrinter(hPrinter);
-            }
-        }
-    }
-}
-"@
-
-try {
-    $result = [PrinterHelper]::SendRawData($printerName, $fileContent)
-    if ($result) {
-        Write-Host "SUCCESS"
-        exit 0
-    } else {
-        $errorCode = [System.Runtime.InteropServices.Marshal]::GetLastWin32Error()
-        Write-Host "FAILED: OpenPrinter or WritePrinter returned false. Error code: $errorCode"
-        Write-Error "Print failed with error code: $errorCode"
-        exit 1
-    }
-} catch {
-    Write-Host "EXCEPTION: $($_.Exception.Message)"
-    Write-Error $_.Exception.Message
-    exit 1
-}
-      `;
-      
-        fs.writeFileSync(psScriptFile, psScript, 'utf8');
-        console.log(`[ZPL] PowerShell script saved to: ${psScriptFile}`);
-        
-        const { stdout, stderr } = await execAsync(`powershell -ExecutionPolicy Bypass -File "${psScriptFile}"`, { windowsHide: true, timeout: 20000 });
-        
-        console.log(`[ZPL] PowerShell stdout: ${stdout || '(empty)'}`);
-        if (stderr) console.log(`[ZPL] PowerShell stderr: ${stderr}`);
-        
-        // Clean up script file
-        setTimeout(() => fs.unlink(psScriptFile, () => {}), 1000);
-        
-        if (stdout && stdout.includes('SUCCESS')) {
-          success = true;
-          console.log(`[ZPL] ✅ Sent via .NET RawPrinterHelper using printer: "${nameToTry}"`);
-          break; // Success, exit loop
-        } else {
-          const errorMsg = stderr || stdout || 'Failed to send via .NET';
-          console.log(`[ZPL] .NET method failed for "${nameToTry}": ${errorMsg}`);
-          lastError = new Error(errorMsg);
-          // Continue to next printer name variation
-        }
-      } catch (error) {
-        console.log(`[ZPL] .NET RawPrinterHelper failed for "${nameToTry}":`, error.message);
-        if (error.stdout) console.log('[ZPL] Error stdout:', error.stdout);
-        if (error.stderr) console.log('[ZPL] Error stderr:', error.stderr);
-        lastError = error;
-        // Continue to next printer name variation
-      }
-    }
-  }
-  
-  // Method 3: COPY to printer share (UNC path) - fallback only
-  if (!success && shareName) {
-    try {
-      const hostname = os.hostname();
-      const uncPaths = [
-        `\\\\localhost\\${shareName}`,
-        `\\\\${hostname}\\${shareName}`,
-        `\\\\127.0.0.1\\${shareName}`,
-      ];
-      
-      for (const uncPath of uncPaths) {
-        try {
-          console.log(`[ZPL] Attempting COPY to UNC: ${uncPath}`);
-          await execAsync(`copy /b "${tmpFile}" "${uncPath}"`, { windowsHide: true, timeout: 10000 });
-          success = true;
-          console.log(`[ZPL] ✅ Sent via UNC path`);
-          break;
-        } catch (error) {
-          console.log(`[ZPL] UNC path ${uncPath} failed`);
-          lastError = error;
-        }
-      }
-    } catch (error) {
-      console.log('[ZPL] COPY to UNC failed:', error.message);
-      lastError = error;
-    }
-  }
-  
-  // Method 4: Use cmd /c copy to printer name (better escaping) - try all variations
-  if (!success) {
-    for (const nameToTry of printerNameVariations) {
-      if (success) break;
-      try {
-        console.log(`[ZPL] Attempting cmd copy to printer: ${nameToTry}`);
-        const { stdout } = await execAsync(`cmd /c copy /b "${tmpFile}" "\\\\localhost\\${nameToTry}"`, { windowsHide: true, timeout: 10000 });
-        if (stdout && stdout.includes('file(s) copied') && !stdout.includes('0 file')) {
-          success = true;
-          console.log(`[ZPL] ✅ Sent via cmd copy using printer: "${nameToTry}"`);
-          break;
-        } else {
-          throw new Error(`Copy returned: ${stdout || 'no output'}`);
-        }
-      } catch (error) {
-        console.log(`[ZPL] cmd copy failed for "${nameToTry}":`, error.message);
-        lastError = error;
-        // Continue to next variation
-      }
-    }
-  }
-  
-  // Cleanup
-  setTimeout(() => fs.unlink(tmpFile, () => {}), 2000);
-  
-  if (!success) {
-    throw new Error(`Failed to send ZPL to printer. Port: ${printerPort || 'N/A'}, Share: ${shareName || 'N/A'}. Error: ${lastError?.message || 'Unknown'}`);
+// EPL/ZPL → Windows spooler (rawprint.exe / koffi — no PowerShell; works as Windows service)
+async function sendRawToPrinter(printerName, rawContent, logTag = 'RAW') {
+  console.log(`[${logTag}] ${rawContent.length} chars for "${printerName}"`);
+  console.log(`[${logTag}] Head:\n${rawContent.substring(0, 400)}`);
+  try {
+    await sendRawLabelToPrinter(printerName, rawContent, logTag);
+  } catch (err) {
+    throw new Error(`Failed to send raw label data to printer "${printerName}". ${err.message}`);
   }
 }
 
 app.post('/print-barcode-labels', async (req, res) => {
   let tmp; // Declare outside try block for cleanup in catch
   try {
-    const { printerName, items, paperSize, copies, dpi, humanReadable } = req.body || {};
+    const {
+      printerName,
+      items,
+      paperSize,
+      copies,
+      dpi: dpiBody,
+      humanReadable,
+      printMode,
+      languageHint: languageHintBody,
+      labelGapMM: labelGapMMBody,
+    } = req.body || {};
 
     if (!printerName || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({
@@ -1337,15 +1535,49 @@ app.post('/print-barcode-labels', async (req, res) => {
       });
     }
 
-    const paper = paperSize || '3x2inch';
+    const languageHint =
+      languageHintBody || deriveLanguageHint({ name: printerName });
+    const mode = printMode || 'auto';
+    const useRaw =
+      mode === 'raw' ||
+      (mode === 'auto' && (languageHint === 'epl' || languageHint === 'zpl'));
+
+    const paper = paperSize || (languageHint === 'epl' ? '50x25mm' : '3x2inch');
     const copiesCount = Math.max(1, copies || 1);
-    const human = !!humanReadable;  // Show human-readable text below barcode
+    const human = !!humanReadable;
+    const dpi = dpiBody || 203;
+    const labelGapMM = labelGapMMBody ?? 3;
+
+    if (useRaw) {
+      let raw = '';
+      for (const it of items) {
+        for (let c = 0; c < copiesCount; c++) {
+          if (languageHint === 'epl') {
+            raw += generateEPLForLabel(it, {
+              dpi,
+              paperSize: paper,
+              humanReadable: human,
+              labelGapMM,
+            });
+          } else {
+            raw += generateZPLForLabel(it, { dpi, humanReadable: human, paperSize: paper });
+          }
+        }
+      }
+      const tag = languageHint === 'epl' ? 'EPL' : 'ZPL';
+      await sendRawToPrinter(printerName, raw, tag);
+      const total = items.length * copiesCount;
+      return res.json({
+        success: true,
+        mode: 'raw',
+        languageHint,
+        message: `Sent ${total} label(s) to ${printerName} via ${tag}`,
+      });
+    }
 
     function pageSize(p) {
-      if (p === '50x30mm') return { w: mm(50), h: mm(30) };
-      if (p === '60x40mm') return { w: mm(60), h: mm(40) };
-      // User's actual label size: 5.8cm x 4cm = 58mm x 40mm
-      return { w: mm(58), h: mm(40) }; // 5.8cm x 4cm (landscape) 
+      const dim = labelDimensionsMM(p || '50x25mm');
+      return { w: mm(dim.w), h: mm(dim.h) };
     }
 
     function shortDate(iso) {
@@ -1388,8 +1620,9 @@ app.post('/print-barcode-labels', async (req, res) => {
     doc.pipe(stream);
 
     // Compact font sizes – fits within safe area
-    const TITLE = paper === '3x2inch' ? 9 : 8;
-    const META = paper === '3x2inch' ? 6 : 6;
+    const TITLE = paper === '3x2inch' ? 11 : 10;
+    const META = paper === '3x2inch' ? 9 : 8;
+    const PRICE = paper === '3x2inch' ? 10 : 9;
     
     // Barcode dimensions – use 65% of safe content width to avoid edge clipping
     const BAR_W_MAX = CW * 0.65;
@@ -1407,7 +1640,7 @@ app.post('/print-barcode-labels', async (req, res) => {
 
         // ---- TITLE (Product Name) ----
         doc.font('Helvetica-Bold').fontSize(TITLE);
-        let title = (it.name || '').toUpperCase().trim();
+        let title = formatBarcodeLabelTitle(it.name || '');
         let fontSize = TITLE;
         
         // Auto-shrink title if too wide (EXACT match to backend)
@@ -1424,32 +1657,17 @@ app.post('/print-barcode-labels', async (req, res) => {
         // ---- META ROW (Weight & Price) ----
         doc.font('Helvetica').fontSize(META);
         const leftText = it.netWeight ? `NET WT: ${it.netWeight}` : '';
-        const rightText = (it.price !== undefined && it.price !== null) ? `RS ${Math.round(Number(it.price))}` : '';
-        
-        if (leftText || rightText) {
-          const gap = mm(3);
-          const leftW = doc.widthOfString(leftText);
-          const rightW = doc.widthOfString(rightText);
-          const totalW = leftW + (leftText && rightText ? gap : 0) + rightW;
-          const startX = leftMargin + (contentWidth - totalW) / 2;
-          
-          if (leftText) doc.text(leftText, startX, y, { lineBreak: false });
-          if (rightText) doc.text(rightText, startX + leftW + (leftText ? gap : 0), y, { lineBreak: false });
-          y += doc.heightOfString('Ag') + mm(0.2); // Very minimal spacing
+        if (leftText) {
+          doc.font('Helvetica').fontSize(META);
+          doc.text(leftText, leftMargin, y, { width: contentWidth, align: 'center', lineBreak: false });
+          y += doc.heightOfString('Ag') + mm(0.2);
         }
-
-        // ---- DATES ROW (PKG & EXP) ----
-        const pkgText = `PKG: ${shortDate(it.packageDateISO)}`;
-        const expText = `EXP: ${shortDate(it.expiryDateISO)}`;
-        const pkgW = doc.widthOfString(pkgText);
-        const expW = doc.widthOfString(expText);
-        const datesGap = mm(4);
-        const datesTotal = pkgW + datesGap + expW;
-        const datesX = leftMargin + (contentWidth - datesTotal) / 2;
-        
-        doc.text(pkgText, datesX, y, { lineBreak: false });
-        doc.text(expText, datesX + pkgW + datesGap, y, { lineBreak: false });
-        y += doc.heightOfString('Ag') + mm(0.3); // Minimal spacing before barcode
+        if (it.price !== undefined && it.price !== null) {
+          doc.font('Helvetica-Bold').fontSize(PRICE);
+          const priceLine = formatLabelPrice(it.price);
+          doc.text(priceLine, leftMargin, y, { width: contentWidth, align: 'center', lineBreak: false });
+          y += doc.heightOfString('Ag') + mm(0.35);
+        }
 
         // ---- BARCODE ----
         try {

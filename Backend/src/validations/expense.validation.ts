@@ -41,6 +41,8 @@ export const createExpenseSchema = z.object({
         particular: z.string().trim().min(1, 'Description is required').max(200),
         amount: money,
         category_id: z.string().uuid().nullable().optional(),
+        account_id: z.string().uuid().nullable().optional(),
+        paid_from_account_id: z.string().uuid().nullable().optional(),
         payment_method: z.enum(PAYMENT_METHODS).optional(),
         bank_account: z.string().trim().max(120).nullable().optional(),
         reference: z.string().trim().max(120).nullable().optional(),
@@ -48,6 +50,8 @@ export const createExpenseSchema = z.object({
         notes: z.string().trim().max(500).nullable().optional(),
         expense_date: optionalDate,
         branch_id: z.string().uuid().nullable().optional(),
+        /** Record in the open cash register (any payment method; only cash reduces the drawer). */
+        from_drawer: z.boolean().optional(),
     }),
 });
 
@@ -59,9 +63,12 @@ export const updateExpenseSchema = z.object({
 export const listExpensesSchema = z.object({
     query: z.object({
         page: z.coerce.number().int().positive().optional(),
-        limit: z.coerce.number().int().positive().max(200).optional(),
+        limit: z.coerce.number().int().positive().max(5000).optional(),
+        fetch_all: z.enum(['true', 'false']).optional(),
         search: z.string().trim().optional(),
         category_id: z.string().uuid().optional(),
+        account_id: z.string().uuid().optional(),
+        paid_from_account_id: z.string().uuid().optional(),
         payment_method: z.enum(PAYMENT_METHODS).optional(),
         status: z.enum(STATUSES).optional(),
         branch_id: z.string().uuid().optional(),
@@ -90,6 +97,8 @@ export const createRecurringExpenseSchema = z.object({
         particular: z.string().trim().min(1).max(200),
         amount: money,
         category_id: z.string().uuid().nullable().optional(),
+        account_id: z.string().uuid().nullable().optional(),
+        paid_from_account_id: z.string().uuid().nullable().optional(),
         payment_method: z.enum(PAYMENT_METHODS).optional(),
         bank_account: z.string().trim().max(120).nullable().optional(),
         vendor: z.string().trim().max(120).nullable().optional(),

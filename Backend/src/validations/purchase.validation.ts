@@ -35,6 +35,7 @@ export const createBulkPurchaseSchema = z.object({
         .optional()
         .default('CASH'),
       paymentReference: z.string().optional(),
+      paidFromAccountId: z.string().uuid().nullish(),
       paymentNotes: z.string().optional(),
       lines: z
         .array(
@@ -83,5 +84,146 @@ export const listPurchasesSchema = z.object({
     endDate: z.string().optional(),
     sortBy: z.enum(['date', 'name']).optional(),
     sortOrder: z.enum(['asc', 'desc']).optional(),
+    search: z.string().optional(),
+    groupBy: z.enum(['line', 'bill']).optional().default('line'),
   }),
+});
+
+export const appendBillLineSchema = z.object({
+  params: z.object({
+    anchorId: z.string().uuid('Invalid bill anchor id'),
+  }),
+  body: z.object({
+    productId: z.string().min(1, 'Product is required'),
+    quantity: z.number().positive('Quantity must be positive'),
+    costPrice: z.number().min(0, 'Cost price must be >= 0'),
+    salePrice: z.number().min(0).optional(),
+  }),
+});
+
+export const billAnchorParamSchema = z.object({
+  params: z.object({
+    anchorId: z.string().uuid('Invalid bill anchor id'),
+  }),
+});
+
+export const deletePurchaseParamSchema = z.object({
+  params: z.object({
+    id: z.string().uuid('Invalid purchase id'),
+  }),
+});
+
+export const updatePurchaseSchema = z.object({
+  params: z.object({
+    id: z.string().uuid('Invalid purchase id'),
+  }),
+  body: z
+    .object({
+      quantity: z.number().positive('Quantity must be positive').optional(),
+      costPrice: z.number().min(0, 'Cost price must be >= 0').optional(),
+      salePrice: z.number().min(0, 'Sale price must be >= 0').optional(),
+      purchaseDate: z.union([z.string(), z.date()]).optional(),
+      invoiceRef: z.string().nullable().optional(),
+      notes: z.string().nullable().optional(),
+      deliveryStatus: z.enum(['PARTIAL', 'COMPLETE']).optional(),
+    })
+    .refine(
+      (body) =>
+        body.quantity !== undefined ||
+        body.costPrice !== undefined ||
+        body.salePrice !== undefined ||
+        body.purchaseDate !== undefined ||
+        body.invoiceRef !== undefined ||
+        body.notes !== undefined ||
+        body.deliveryStatus !== undefined,
+      { message: 'Provide at least one field to update' },
+    ),
+});
+
+export const updateStockInBillSchema = z.object({
+  params: z.object({
+    anchorId: z.string().uuid('Invalid bill anchor id'),
+  }),
+  body: z
+    .object({
+      supplierId: z.string().min(1).optional(),
+      warehouseBranchId: z.string().min(1).optional(),
+      purchaseDate: z.union([z.string(), z.date()]).optional(),
+      invoiceRef: z.string().nullable().optional(),
+      deliveryStatus: z.enum(['PARTIAL', 'COMPLETE']).optional(),
+      batchNo: z.string().optional(),
+      expiryDate: z.union([z.string(), z.date()]).nullable().optional(),
+      userNotes: z.string().nullable().optional(),
+      source: z.string().nullable().optional(),
+      paymentMode: z.enum(['CASH', 'CREDIT', 'MIX']).optional(),
+      paidAmount: z.coerce.number().min(0).optional(),
+      paymentMethod: z
+        .enum(['CASH', 'BANK_TRANSFER', 'CHEQUE', 'CARD', 'OTHER'])
+        .optional(),
+      paidFromAccountId: z.string().uuid().nullish(),
+      paymentReference: z.string().optional(),
+      lines: z
+        .array(
+          z.object({
+            id: z.string().uuid().optional(),
+            productId: z.string().min(1, 'Product is required'),
+            quantity: z.number().positive('Quantity must be positive'),
+            costPrice: z.number().min(0, 'Cost price must be >= 0'),
+            salePrice: z.number().min(0).optional(),
+          }),
+        )
+        .min(1, 'At least one line is required'),
+    })
+    .superRefine((body, ctx) => {
+      if (body.paymentMode !== 'MIX') return;
+      const total = body.lines.reduce(
+        (sum, line) => sum + line.quantity * line.costPrice,
+        0,
+      );
+      const paid = body.paidAmount ?? 0;
+      if (paid <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paidAmount'],
+          message: 'Enter how much was paid now for a mix payment',
+        });
+      } else if (paid >= total && total > 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['paidAmount'],
+          message: 'Mix paid amount must be less than bill total (use Cash for full pay)',
+        });
+      }
+    }),
+});
+
+export const createHoldPurchaseSchema = z.object({
+  body: z.object({
+    branchId: z.string().min(1, 'Branch is required'),
+    supplierId: z.string().nullish(),
+    label: z.string().nullish(),
+    payload: z.unknown(),
+  }),
+});
+
+export const listHoldPurchasesSchema = z.object({
+  query: z.object({
+    branchId: z.string().optional(),
+  }),
+});
+
+export const holdPurchaseParamSchema = z.object({
+  params: z.object({
+    holdId: z.string().uuid('Invalid hold id'),
+  }),
+  query: z
+    .object({
+      branchId: z.string().optional(),
+    })
+    .optional(),
+  body: z
+    .object({
+      branchId: z.string().optional(),
+    })
+    .optional(),
 });

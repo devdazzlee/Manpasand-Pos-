@@ -9,9 +9,28 @@ const saleItemSchema = z.object({
 const createSaleSchema = z.object({
     body: z.object({
         customerId: z.string().optional(),
+        salespersonId: z.string().uuid().nullable().optional(),
         paymentMethod: z.enum(["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER", "CREDIT"]),
+        /** Split tenders. When omitted the whole bill is paid with `paymentMethod`. */
+        payments: z
+            .array(
+                z.object({
+                    method: z.enum(["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER"]),
+                    amount: z.number().positive("Payment amount must be greater than 0"),
+                    reference: z.string().max(120).nullable().optional(),
+                })
+            )
+            .max(10)
+            .optional(),
         items: z.array(saleItemSchema).min(1),
         discountAmount: z.number().nonnegative("Discount amount must be non-negative").optional().default(0),
+        promotionCode: z.string().trim().max(24).nullable().optional(),
+        applyPromotions: z.boolean().optional(),
+        loyaltyPoints: z.number().int().nonnegative().optional(),
+        giftCards: z
+            .array(z.object({ code: z.string().trim().min(3).max(30), amount: z.number().positive() }))
+            .max(5)
+            .optional(),
     }),
 });
 
@@ -44,6 +63,10 @@ const refundSaleSchema = z.object({
         returnReason: returnReasonSchema.optional(),
         refundMethod: refundMethodSchema.optional(),
         exchangeBalanceAction: z.enum(["collect", "refund", "store_credit"]).optional(),
+        /** Order-level discount on replacement items (Rs). */
+        exchangeDiscountAmount: z.number().nonnegative().optional(),
+        /** Override return credit (Rs) applied toward exchange; cannot exceed list value of returns. */
+        returnCreditOverride: z.number().nonnegative().optional(),
         returnedItems: z
             .array(
                 z.object({
@@ -60,6 +83,8 @@ const refundSaleSchema = z.object({
                     productId: z.string().min(1, "Product ID is required"),
                     quantity: z.number().positive("Quantity must be positive"),
                     price: z.number().nonnegative("Price must be non-negative"),
+                    listPrice: z.number().nonnegative("List price must be non-negative").optional(),
+                    discountAmount: z.number().nonnegative("Discount must be non-negative").optional(),
                 })
             )
             .optional()

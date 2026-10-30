@@ -6,6 +6,7 @@ import util from 'util';
 import { execFile } from 'child_process';
 const execFileAsync = util.promisify(execFile);
 import { encodeLabelBarcodeValue } from '../utils/numericBarcodeSku';
+import { formatBarcodeLabelTitle } from '../utils/labelTitle';
 
 export interface PrinterInfo {
   name: string;
@@ -132,11 +133,12 @@ export class BarcodeService {
 
     const blocks: string[] = [];
     for (const it of input.items) {
-      const title = (it.name || '').toUpperCase().slice(0, 26);
+      const title = formatBarcodeLabelTitle(it.name || '').slice(0, 26);
       const wt    = it.netWeight ? `NET WT: ${it.netWeight}` : '';
       const price = Number.isFinite(it.price) ? `RS ${Math.round(it.price!)}` : '';
-      const pkg   = it.packageDateISO ? new Date(it.packageDateISO).toLocaleDateString('en-GB') : '';
-      const exp   = it.expiryDateISO ? new Date(it.expiryDateISO).toLocaleDateString('en-GB') : '';
+      const priceLine = Number.isFinite(it.price)
+        ? `PRICE ${Number(it.price).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+        : '';
 
       blocks.push(
 `^XA
@@ -144,18 +146,17 @@ export class BarcodeService {
 ^LL${dims.h}
 ^LH0,0
 ^CI28
+^CF0,32
+^FO10,10^FB${dims.w-20},2,0,C,0^FD${title}^FS
 ^CF0,28
-^FO10,10^FB${dims.w-20},2,0,L,0^FD${title}^FS
-^CF0,26
-^FO${dims.w-160},10^FB150,1,0,R,0^FD${price}^FS
-^BY2,2,60
-^FO10,80^BCN,60,${HRI},N,N
-^FD${encodeLabelBarcodeValue(it.sku, it.code, Math.round(Number(it.price ?? 0)))}^FS
-^CF0,20
-^FO10,150^FD${wt}^FS
-^CF0,18
-^FO10,170^FDPKG: ${pkg}^FS
-^FO${dims.w-160},170^FDEXP: ${exp}^FS
+^FO10,70^FB${dims.w-20},1,0,C,0^FD${priceLine}^FS
+^BY2,2,70
+^FO10,110^BCN,70,${HRI},N,N
+^FD${(it.barcode && String(it.barcode).trim())
+  ? String(it.barcode).trim()
+  : encodeLabelBarcodeValue(it.sku, it.code, Math.round(Number(it.price ?? 0)))}^FS
+^CF0,22
+^FO10,190^FD${wt}^FS
 ^XZ`
       );
     }
@@ -217,9 +218,6 @@ function buildZplLabel(p: {
 ^FO30,95
 ^BCN,180,N,N,N
 ^FD${p.code}^FS
-^CF0,20
-^FO20,290^FDPKG: ${p.pkg}^FS
-^FO320,290^FDEXP: ${p.exp}^FS
 ^XZ`;
 }
 
@@ -238,13 +236,15 @@ export async function printZplRaw(printerName: string, zpl: string) {
 }
 
 export function buildLabelsZpl(items: Array<{
-  name: string; sku?: string; code?: string;
+  name: string; sku?: string; code?: string; barcode?: string;
   netWeight: string; price: number; packageDateISO: string; expiryDateISO?: string;
 }>) {
   return items.map((it) =>
     buildZplLabel({
-      code: encodeLabelBarcodeValue(it.sku, it.code, Math.round(it.price)),
-      title: it.name.toUpperCase().slice(0, 28),
+      code:
+        (it.barcode && String(it.barcode).trim()) ||
+        encodeLabelBarcodeValue(it.sku, it.code, Math.round(it.price)),
+      title: formatBarcodeLabelTitle(it.name).slice(0, 28),
       netWt: it.netWeight,
       price: Math.round(it.price).toString(),
       pkg: new Date(it.packageDateISO).toLocaleDateString("en-GB"),

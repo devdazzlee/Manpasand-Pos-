@@ -19,6 +19,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { DateField, YmdDatePicker } from "@/components/ui/date-picker"
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -56,6 +57,7 @@ import {
 import { PageHeader, PageBody } from "@/components/ui/page-header";
 import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
 import { formatMoney } from "@/components/inventory/stock-ops/export-utils";
+import { LoadingButton } from "@/components/ui/loading-button";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { extractApiError } from "@/lib/api/errors";
@@ -63,6 +65,7 @@ import { extractApiError } from "@/lib/api/errors";
 import { useSuppliers } from "@/hooks/queries/use-suppliers";
 import { useBranches } from "@/hooks/queries/use-branches";
 import { useProducts } from "@/hooks/queries/use-products";
+import { formatProductSearchLabel } from "@/lib/labelBarcode";
 import {
   usePurchaseOrders,
   usePurchaseOrder,
@@ -118,20 +121,26 @@ export function PurchaseOrders() {
     <>
       <PageHeader
         title="Purchase Management"
-        description="PO → goods received → invoice → payable → payment"
+        description="Create a purchase order, receive goods into stock, then raise a supplier invoice. Stock In is a separate shortcut for deliveries without a PO."
       />
       <PageBody className="space-y-5">
-        <div className="flex gap-1.5">
+        <div
+          role="tablist"
+          aria-label="Purchase management sections"
+          className="inline-flex flex-wrap gap-1 rounded-lg border border-border bg-muted/40 p-1"
+        >
           {(["orders", "invoices", "returns"] as const).map((k) => (
             <button
               key={k}
               type="button"
+              role="tab"
+              aria-selected={tab === k}
               onClick={() => setTab(k)}
               className={cn(
-                "rounded-md border px-3 py-1.5 text-xs font-medium transition-colors",
+                "rounded-md px-3.5 py-2 text-sm font-medium transition-colors",
                 tab === k
-                  ? "border-primary bg-primary/10 text-primary"
-                  : "border-border bg-background text-foreground hover:bg-muted/50",
+                  ? "bg-background text-foreground shadow-sm"
+                  : "text-muted-foreground hover:text-foreground",
               )}
             >
               {TAB_LABEL[k]}
@@ -200,7 +209,18 @@ function ProductPicker({
                   setOpen(false);
                 }}
               >
-                <span className="truncate">{p.name}</span>
+                <span className="min-w-0 truncate">
+                  {formatProductSearchLabel({
+                    name: p.name,
+                    label_barcode: p.label_barcode,
+                    custom_code: p.custom_code,
+                    sku: p.sku,
+                    code: p.code,
+                    barcode: p.barcode,
+                    price: p.price,
+                    sales_rate_exc_dis_and_tax: p.sales_rate_exc_dis_and_tax,
+                  })}
+                </span>
                 <span className="shrink-0 text-xs text-muted-foreground nums">
                   {formatMoney(Number(p.price) || 0)}
                 </span>
@@ -243,9 +263,20 @@ function OrdersTab({ toast }: { toast: Toast }) {
   const [receiveTarget, setReceiveTarget] = useState<PurchaseOrder | null>(null);
   const [cancelTarget, setCancelTarget] = useState<PurchaseOrder | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<PurchaseOrder | null>(null);
+  const [statusTarget, setStatusTarget] = useState<{
+    po: PurchaseOrder;
+    next: PurchaseOrderStatus;
+  } | null>(null);
 
   const err = (e: unknown, t: string) =>
     toast({ variant: "destructive", title: t, description: extractApiError(e, t) });
+
+  const busyId =
+    (m.setStatus.isPending && m.setStatus.variables?.id) ||
+    (m.cancel.isPending && m.cancel.variables) ||
+    (m.remove.isPending && m.remove.variables) ||
+    (m.receive.isPending && m.receive.variables?.id) ||
+    null;
 
   return (
     <div className="space-y-4">
@@ -287,9 +318,16 @@ function OrdersTab({ toast }: { toast: Toast }) {
             ))}
           </SelectContent>
         </Select>
-        <Button variant="outline" size="sm" className="h-9" onClick={() => refetch()} disabled={isRefreshing}>
-          <RefreshCcw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
-        </Button>
+        <LoadingButton
+          variant="outline"
+          size="sm"
+          className="h-9"
+          loading={isRefreshing}
+          onClick={() => refetch()}
+          aria-label="Refresh"
+        >
+          <RefreshCcw className="h-4 w-4" />
+        </LoadingButton>
         <Button size="sm" className="h-9" onClick={() => { setEditing(null); setFormOpen(true); }}>
           <Plus className="mr-1.5 h-4 w-4" />
           New order
@@ -305,9 +343,26 @@ function OrdersTab({ toast }: { toast: Toast }) {
               ))}
             </div>
           ) : purchaseOrders.length === 0 ? (
-            <div className="m-4 flex flex-col items-center gap-2 rounded-lg border border-dashed py-12">
-              <FileText className="h-8 w-8 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">No purchase orders</p>
+            <div className="m-4 flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-14 text-center">
+              <FileText className="h-9 w-9 text-muted-foreground/50" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">No purchase orders yet</p>
+                <p className="max-w-md text-xs text-muted-foreground">
+                  Create a PO when you order from a supplier. Receiving against a PO adds stock.
+                  Direct Stock In receipts do not appear here.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                className="mt-1"
+                onClick={() => {
+                  setEditing(null);
+                  setFormOpen(true);
+                }}
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                Create first order
+              </Button>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -320,7 +375,7 @@ function OrdersTab({ toast }: { toast: Toast }) {
                     <TableHead className="text-xs uppercase tracking-wide">Received</TableHead>
                     <TableHead className="text-right text-xs uppercase tracking-wide">Total</TableHead>
                     <TableHead className="text-xs uppercase tracking-wide">Status</TableHead>
-                    <TableHead className="w-[180px] text-right text-xs uppercase tracking-wide">Actions</TableHead>
+                    <TableHead className="min-w-[280px] text-right text-xs uppercase tracking-wide">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -329,8 +384,10 @@ function OrdersTab({ toast }: { toast: Toast }) {
                     const received = po.purchase_order_items.reduce((a, i) => a + i.received_quantity, 0);
                     const canReceive = !["RECEIVED", "CANCELLED"].includes(po.status);
                     const canEdit = ["PENDING", "APPROVED", "ORDERED"].includes(po.status);
+                    const next = NEXT_STATUS[po.status];
+                    const rowBusy = busyId === po.id;
                     return (
-                      <TableRow key={po.id} className="h-11 hover:bg-muted/50">
+                      <TableRow key={po.id} className="h-12 hover:bg-muted/50">
                         <TableCell className="font-mono text-xs">{po.po_number}</TableCell>
                         <TableCell className="text-sm font-medium">{po.supplier?.name ?? "—"}</TableCell>
                         <TableCell className="text-sm text-muted-foreground nums">{fmtDate(po.order_date)}</TableCell>
@@ -344,49 +401,78 @@ function OrdersTab({ toast }: { toast: Toast }) {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <div className="flex justify-end gap-1">
-                            <Button size="icon" variant="ghost" className="h-8 w-8" title="View"
-                              onClick={() => setViewId(po.id)}>
-                              <Eye className="h-4 w-4" />
+                          <div className="flex flex-wrap items-center justify-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 px-2 text-xs"
+                              disabled={rowBusy}
+                              onClick={() => setViewId(po.id)}
+                            >
+                              <Eye className="mr-1 h-3.5 w-3.5" />
+                              View
                             </Button>
-                            {NEXT_STATUS[po.status] && (
+                            {next && (
+                              <LoadingButton
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2 text-xs"
+                                loading={m.setStatus.isPending && m.setStatus.variables?.id === po.id}
+                                disabled={rowBusy}
+                                onClick={() => setStatusTarget({ po, next })}
+                              >
+                                Mark {titleCase(next)}
+                              </LoadingButton>
+                            )}
+                            {canReceive && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                className="h-8 px-2 text-xs text-green-800 border-green-200 hover:bg-green-50"
+                                disabled={rowBusy}
+                                onClick={() => setReceiveTarget(po)}
+                              >
+                                <PackageCheck className="mr-1 h-3.5 w-3.5" />
+                                Receive
+                              </Button>
+                            )}
+                            {canEdit && (
                               <Button
                                 size="sm"
                                 variant="ghost"
                                 className="h-8 px-2 text-xs"
-                                title={`Mark ${titleCase(NEXT_STATUS[po.status]!)}`}
-                                onClick={() =>
-                                  m.setStatus.mutate(
-                                    { id: po.id, status: NEXT_STATUS[po.status]! },
-                                    { onError: (e) => err(e, "Could not update status") },
-                                  )
-                                }
+                                disabled={rowBusy}
+                                onClick={() => {
+                                  setEditing(po);
+                                  setFormOpen(true);
+                                }}
                               >
-                                {titleCase(NEXT_STATUS[po.status]!)}
+                                <Pencil className="mr-1 h-3.5 w-3.5" />
+                                Edit
                               </Button>
                             )}
                             {canReceive && (
-                              <Button size="icon" variant="ghost" className="h-8 w-8 text-green-700"
-                                title="Receive" onClick={() => setReceiveTarget(po)}>
-                                <PackageCheck className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {canEdit && (
-                              <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit"
-                                onClick={() => { setEditing(po); setFormOpen(true); }}>
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                            )}
-                            {canReceive && (
-                              <Button size="icon" variant="ghost" className="h-8 w-8 text-rose-700"
-                                title="Cancel" onClick={() => setCancelTarget(po)}>
-                                <Ban className="h-4 w-4" />
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs text-rose-700"
+                                disabled={rowBusy}
+                                onClick={() => setCancelTarget(po)}
+                              >
+                                <Ban className="mr-1 h-3.5 w-3.5" />
+                                Cancel
                               </Button>
                             )}
                             {po.status === "PENDING" && received === 0 && (
-                              <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive"
-                                title="Delete" onClick={() => setDeleteTarget(po)}>
-                                <Trash2 className="h-4 w-4" />
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-8 px-2 text-xs text-destructive"
+                                disabled={rowBusy}
+                                onClick={() => setDeleteTarget(po)}
+                              >
+                                <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                Delete
                               </Button>
                             )}
                           </div>
@@ -414,13 +500,19 @@ function OrdersTab({ toast }: { toast: Toast }) {
 
       <POFormSheet
         open={formOpen}
-        onOpenChange={setFormOpen}
+        onOpenChange={(open) => {
+          if (!open && (m.create.isPending || m.update.isPending)) return;
+          setFormOpen(open);
+        }}
         editing={editing}
         suppliers={suppliers}
         saving={m.create.isPending || m.update.isPending}
         onSave={(body) => {
           const opts = {
-            onSuccess: () => { toast({ title: editing ? "Purchase order updated" : "Purchase order created" }); setFormOpen(false); },
+            onSuccess: () => {
+              toast({ title: editing ? "Purchase order updated" : "Purchase order created" });
+              setFormOpen(false);
+            },
             onError: (e: unknown) => err(e, "Could not save purchase order"),
           };
           if (editing) m.update.mutate({ id: editing.id, body }, opts);
@@ -432,65 +524,156 @@ function OrdersTab({ toast }: { toast: Toast }) {
 
       <ReceiveSheet
         po={receiveTarget}
-        onClose={() => setReceiveTarget(null)}
+        onClose={() => {
+          if (m.receive.isPending) return;
+          setReceiveTarget(null);
+        }}
         saving={m.receive.isPending}
         onReceive={(body) => {
           if (!receiveTarget) return;
           m.receive.mutate(
             { id: receiveTarget.id, body },
             {
-              onSuccess: () => { toast({ title: "Stock received" }); setReceiveTarget(null); },
+              onSuccess: () => {
+                toast({ title: "Stock received into inventory" });
+                setReceiveTarget(null);
+              },
               onError: (e) => err(e, "Could not receive"),
             },
           );
         }}
       />
 
-      <AlertDialog open={!!cancelTarget} onOpenChange={(o) => !o && setCancelTarget(null)}>
+      <AlertDialog
+        open={!!statusTarget}
+        onOpenChange={(o) => {
+          if (!o && !m.setStatus.isPending) setStatusTarget(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancel {cancelTarget?.po_number}?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Mark {statusTarget?.po.po_number} as {statusTarget ? titleCase(statusTarget.next) : ""}?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              The order stays on record for history but can no longer receive stock.
+              {statusTarget?.next === "APPROVED"
+                ? "Confirms this draft is approved and ready to place with the supplier."
+                : "Marks the order as placed with the supplier. You can receive stock after this."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogCancel disabled={m.setStatus.isPending}>Go back</AlertDialogCancel>
             <AlertDialogAction
-              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                if (!cancelTarget) return;
-                m.cancel.mutate(cancelTarget.id, {
-                  onSuccess: () => { toast({ title: "Purchase order cancelled" }); setCancelTarget(null); },
-                  onError: (e) => err(e, "Could not cancel"),
-                });
+              disabled={m.setStatus.isPending}
+              onClick={(e) => {
+                e.preventDefault();
+                if (!statusTarget) return;
+                m.setStatus.mutate(
+                  { id: statusTarget.po.id, status: statusTarget.next },
+                  {
+                    onSuccess: () => {
+                      toast({ title: `Marked ${titleCase(statusTarget.next)}` });
+                      setStatusTarget(null);
+                    },
+                    onError: (errVal) => err(errVal, "Could not update status"),
+                  },
+                );
               }}
             >
-              Cancel order
+              {m.setStatus.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Updating…
+                </>
+              ) : (
+                `Confirm ${statusTarget ? titleCase(statusTarget.next) : ""}`
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+      <AlertDialog
+        open={!!cancelTarget}
+        onOpenChange={(o) => {
+          if (!o && !m.cancel.isPending) setCancelTarget(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Delete {deleteTarget?.po_number}?</AlertDialogTitle>
-            <AlertDialogDescription>This draft order will be permanently removed.</AlertDialogDescription>
+            <AlertDialogTitle>Cancel {cancelTarget?.po_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The order stays on record for history but can no longer receive stock. This cannot be undone from here.
+            </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={m.cancel.isPending}>Keep order</AlertDialogCancel>
             <AlertDialogAction
+              disabled={m.cancel.isPending}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
-                if (!deleteTarget) return;
-                m.remove.mutate(deleteTarget.id, {
-                  onSuccess: () => { toast({ title: "Purchase order deleted" }); setDeleteTarget(null); },
-                  onError: (e) => err(e, "Could not delete"),
+              onClick={(e) => {
+                e.preventDefault();
+                if (!cancelTarget) return;
+                m.cancel.mutate(cancelTarget.id, {
+                  onSuccess: () => {
+                    toast({ title: "Purchase order cancelled" });
+                    setCancelTarget(null);
+                  },
+                  onError: (e2) => err(e2, "Could not cancel"),
                 });
               }}
             >
-              Delete
+              {m.cancel.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Cancelling…
+                </>
+              ) : (
+                "Cancel order"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => {
+          if (!o && !m.remove.isPending) setDeleteTarget(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {deleteTarget?.po_number}?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This draft order will be permanently removed. Only pending orders with no receipts can be deleted.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={m.remove.isPending}>Keep draft</AlertDialogCancel>
+            <AlertDialogAction
+              disabled={m.remove.isPending}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              onClick={(e) => {
+                e.preventDefault();
+                if (!deleteTarget) return;
+                m.remove.mutate(deleteTarget.id, {
+                  onSuccess: () => {
+                    toast({ title: "Purchase order deleted" });
+                    setDeleteTarget(null);
+                  },
+                  onError: (e2) => err(e2, "Could not delete"),
+                });
+              }}
+            >
+              {m.remove.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete permanently"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -593,15 +776,8 @@ function POFormSheet({
               </SelectContent>
             </Select>
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Order date</Label>
-            <Input type="date" value={orderDate} onChange={(e) => setOrderDate(e.target.value)} className="h-9" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Expected delivery</Label>
-            <Input type="date" value={expected} min={orderDate || undefined}
-              onChange={(e) => setExpected(e.target.value)} className="h-9" />
-          </div>
+          <DateField label="Order date" value={orderDate} onChange={setOrderDate} triggerClassName="h-9" />
+          <DateField label="Expected delivery" value={expected} onChange={setExpected} triggerClassName="h-9" />
         </div>
 
         <div className="space-y-2">
@@ -680,8 +856,12 @@ function POFormSheet({
         </div>
       </DetailSheetBody>
       <DetailSheetFooter>
-        <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-        <Button
+        <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          Cancel
+        </Button>
+        <LoadingButton
+          loading={saving}
+          loadingText={editing ? "Saving…" : "Creating…"}
           disabled={!valid || saving}
           onClick={() =>
             onSave({
@@ -699,9 +879,8 @@ function POFormSheet({
             })
           }
         >
-          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {editing ? "Save changes" : "Create order"}
-        </Button>
+        </LoadingButton>
       </DetailSheetFooter>
     </DetailSheet>
   );
@@ -809,7 +988,14 @@ function ReceiveSheet({
   const overReceiving = lines.some((l) => l.quantity > l.outstanding + 1e-9);
 
   return (
-    <DetailSheet open={!!po} onOpenChange={(o) => !o && onClose()} size="lg">
+    <DetailSheet
+      open={!!po}
+      onOpenChange={(o) => {
+        if (!o && saving) return;
+        if (!o) onClose();
+      }}
+      size="lg"
+    >
       <DetailSheetHeader title={`Receive ${po.po_number}`} subtitle={po.supplier?.name} icon={<PackageCheck className="h-5 w-5" />} />
       <DetailSheetBody className="space-y-4">
         <div className="space-y-1">
@@ -856,8 +1042,12 @@ function ReceiveSheet({
         )}
       </DetailSheetBody>
       <DetailSheetFooter>
-        <Button variant="outline" onClick={onClose}>Cancel</Button>
-        <Button
+        <Button variant="outline" onClick={onClose} disabled={saving}>
+          Cancel
+        </Button>
+        <LoadingButton
+          loading={saving}
+          loadingText="Receiving…"
           disabled={!anything || overReceiving || saving}
           onClick={() =>
             onReceive({
@@ -866,9 +1056,8 @@ function ReceiveSheet({
             })
           }
         >
-          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Receive stock
-        </Button>
+          Receive into stock
+        </LoadingButton>
       </DetailSheetFooter>
     </DetailSheet>
   );
@@ -938,9 +1127,14 @@ function ReturnsTab({ toast }: { toast: Toast }) {
               ))}
             </div>
           ) : purchaseReturns.length === 0 ? (
-            <div className="m-4 flex flex-col items-center gap-2 rounded-lg border border-dashed py-12">
-              <Undo2 className="h-8 w-8 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">No purchase returns</p>
+            <div className="m-4 flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-14 text-center">
+              <Undo2 className="h-9 w-9 text-muted-foreground/50" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">No purchase returns</p>
+                <p className="max-w-md text-xs text-muted-foreground">
+                  Returns are recorded from Stock In → Returns, linked to a previous supplier bill.
+                </p>
+              </div>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -981,9 +1175,15 @@ function ReturnsTab({ toast }: { toast: Toast }) {
                       <TableCell>
                         <div className="flex justify-end">
                           {r.status === "COMPLETED" && (
-                            <Button size="icon" variant="ghost" className="h-8 w-8 text-rose-700"
-                              title="Cancel return" onClick={() => setCancelTarget(r)}>
-                              <Ban className="h-4 w-4" />
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 px-2 text-xs text-rose-700"
+                              disabled={m.cancel.isPending && m.cancel.variables === r.id}
+                              onClick={() => setCancelTarget(r)}
+                            >
+                              <Ban className="mr-1 h-3.5 w-3.5" />
+                              Cancel
                             </Button>
                           )}
                         </div>
@@ -1021,7 +1221,12 @@ function ReturnsTab({ toast }: { toast: Toast }) {
         }}
       />
 
-      <AlertDialog open={!!cancelTarget} onOpenChange={(o) => !o && setCancelTarget(null)}>
+      <AlertDialog
+        open={!!cancelTarget}
+        onOpenChange={(o) => {
+          if (!o && !m.cancel.isPending) setCancelTarget(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Cancel {cancelTarget?.return_number}?</AlertDialogTitle>
@@ -1030,18 +1235,30 @@ function ReturnsTab({ toast }: { toast: Toast }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Keep it</AlertDialogCancel>
+            <AlertDialogCancel disabled={m.cancel.isPending}>Keep return</AlertDialogCancel>
             <AlertDialogAction
+              disabled={m.cancel.isPending}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
+              onClick={(e) => {
+                e.preventDefault();
                 if (!cancelTarget) return;
                 m.cancel.mutate(cancelTarget.id, {
-                  onSuccess: () => { toast({ title: "Return cancelled" }); setCancelTarget(null); },
-                  onError: (e) => err(e, "Could not cancel"),
+                  onSuccess: () => {
+                    toast({ title: "Return cancelled" });
+                    setCancelTarget(null);
+                  },
+                  onError: (e2) => err(e2, "Could not cancel"),
                 });
               }}
             >
-              Cancel return
+              {m.cancel.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Cancelling…
+                </>
+              ) : (
+                "Cancel return"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1053,9 +1270,6 @@ function ReturnsTab({ toast }: { toast: Toast }) {
 function ReturnFormSheet({
   open,
   onOpenChange,
-  suppliers,
-  onSave,
-  saving,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
@@ -1063,123 +1277,24 @@ function ReturnFormSheet({
   onSave: (body: any) => void;
   saving: boolean;
 }) {
-  const { branches } = useBranches({ isActive: true });
-  const [supplierId, setSupplierId] = useState("");
-  const [branchId, setBranchId] = useState("");
-  const [returnDate, setReturnDate] = useState(today());
-  const [reason, setReason] = useState("");
-  const [lines, setLines] = useState<LineDraft[]>([]);
-
-  useEffect(() => {
-    if (!open) return;
-    setSupplierId("");
-    setBranchId(branches[0]?.id ?? "");
-    setReturnDate(today());
-    setReason("");
-    setLines([]);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open]);
-
-  const total = lines.reduce(
-    (a, l) => a + (Number(l.ordered_quantity) || 0) * (Number(l.unit_cost) || 0),
-    0,
-  );
-  const valid =
-    supplierId &&
-    branchId &&
-    lines.length > 0 &&
-    lines.every((l) => l.product_id && Number(l.ordered_quantity) > 0 && Number(l.unit_cost) >= 0);
-
   return (
     <DetailSheet open={open} onOpenChange={onOpenChange} size="lg">
-      <DetailSheetHeader title="New purchase return" subtitle="Send goods back to a supplier" />
+      <DetailSheetHeader
+        title="New purchase return"
+        subtitle="Returns must be linked to a previous supplier bill"
+      />
       <DetailSheetBody className="space-y-4">
-        <div className="grid grid-cols-2 gap-3">
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Supplier</Label>
-            <Select value={supplierId} onValueChange={setSupplierId}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select supplier" /></SelectTrigger>
-              <SelectContent>
-                {suppliers.map((s) => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">From branch</Label>
-            <Select value={branchId} onValueChange={setBranchId}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Select branch" /></SelectTrigger>
-              <SelectContent>
-                {branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Return date</Label>
-            <Input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} className="h-9" />
-          </div>
-          <div className="space-y-1">
-            <Label className="text-xs text-muted-foreground">Reason</Label>
-            <Input value={reason} onChange={(e) => setReason(e.target.value)}
-              placeholder="Damaged / wrong item / expired" className="h-9" />
-          </div>
-        </div>
-
-        <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">Items</Label>
-          <ProductPicker
-            onPick={(p) =>
-              setLines((ls) =>
-                ls.some((l) => l.product_id === p.id)
-                  ? ls
-                  : [...ls, { product_id: p.id, name: p.name, ordered_quantity: "1", unit_cost: String(p.price) }],
-              )
-            }
-          />
-          {lines.map((l, idx) => (
-            <div key={l.product_id} className="flex items-center gap-2">
-              <span className="min-w-0 flex-1 truncate text-sm">{l.name}</span>
-              <Input type="number" min="0" step="0.01" value={l.ordered_quantity}
-                onChange={(e) => setLines((ls) => ls.map((x, i) => (i === idx ? { ...x, ordered_quantity: e.target.value } : x)))}
-                className="h-8 w-20 nums" aria-label="Quantity" />
-              <Input type="number" min="0" step="0.01" value={l.unit_cost}
-                onChange={(e) => setLines((ls) => ls.map((x, i) => (i === idx ? { ...x, unit_cost: e.target.value } : x)))}
-                className="h-8 w-24 nums" aria-label="Unit cost" />
-              <span className="w-24 shrink-0 text-right text-sm nums">
-                {formatMoney((Number(l.ordered_quantity) || 0) * (Number(l.unit_cost) || 0))}
-              </span>
-              <Button size="icon" variant="ghost" className="h-8 w-8 shrink-0"
-                onClick={() => setLines((ls) => ls.filter((_, i) => i !== idx))}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-          ))}
-        </div>
-
-        <div className="flex justify-end text-sm">
-          <span className="text-muted-foreground">Total credit&nbsp;</span>
-          <span className="font-semibold nums">{formatMoney(total)}</span>
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-950">
+          <p className="font-medium">Use Stock In → Returns</p>
+          <p className="mt-1 text-xs text-amber-900/90">
+            Pick the supplier, choose a previous bill, then return only those purchased lines.
+            Free catalog returns are blocked so quantities stay tied to real purchases.
+          </p>
         </div>
       </DetailSheetBody>
       <DetailSheetFooter>
-        <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-        <Button
-          disabled={!valid || saving}
-          onClick={() =>
-            onSave({
-              supplier_id: supplierId,
-              branch_id: branchId,
-              return_date: returnDate,
-              reason: reason.trim() || null,
-              items: lines.map((l) => ({
-                product_id: l.product_id,
-                quantity: Number(l.ordered_quantity),
-                unit_cost: Number(l.unit_cost),
-              })),
-            })
-          }
-        >
-          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-          Record return
+        <Button variant="outline" onClick={() => onOpenChange(false)}>
+          Close
         </Button>
       </DetailSheetFooter>
     </DetailSheet>
@@ -1268,9 +1383,25 @@ function InvoicesTab({ toast }: { toast: Toast }) {
               ))}
             </div>
           ) : invoices.length === 0 ? (
-            <div className="m-4 flex flex-col items-center gap-2 rounded-lg border border-dashed py-12">
-              <FileText className="h-8 w-8 text-muted-foreground/50" />
-              <p className="text-sm text-muted-foreground">No purchase invoices</p>
+            <div className="m-4 flex flex-col items-center gap-3 rounded-lg border border-dashed px-6 py-14 text-center">
+              <FileText className="h-9 w-9 text-muted-foreground/50" />
+              <div className="space-y-1">
+                <p className="text-sm font-medium text-foreground">No purchase invoices</p>
+                <p className="max-w-md text-xs text-muted-foreground">
+                  After stock is received, create an invoice against those deliveries so the supplier balance is tracked.
+                </p>
+              </div>
+              <Button
+                size="sm"
+                className="mt-1"
+                onClick={() => {
+                  setEditing(null);
+                  setFormOpen(true);
+                }}
+              >
+                <Plus className="mr-1.5 h-4 w-4" />
+                Create invoice
+              </Button>
             </div>
           ) : (
             <div className="overflow-x-auto">
@@ -1307,20 +1438,39 @@ function InvoicesTab({ toast }: { toast: Toast }) {
                           </Badge>
                         </TableCell>
                         <TableCell>
-                          <div className="flex justify-end gap-1">
-                            <Button size="icon" variant="ghost" className="h-8 w-8" title="View"
-                              onClick={() => setViewId(inv.id)}>
-                              <Eye className="h-4 w-4" />
+                          <div className="flex flex-wrap justify-end gap-1">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              className="h-8 px-2 text-xs"
+                              onClick={() => setViewId(inv.id)}
+                            >
+                              <Eye className="mr-1 h-3.5 w-3.5" />
+                              View
                             </Button>
                             {inv.amount_paid === 0 && (
                               <>
-                                <Button size="icon" variant="ghost" className="h-8 w-8" title="Edit"
-                                  onClick={() => { setEditing(inv); setFormOpen(true); }}>
-                                  <Pencil className="h-4 w-4" />
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 px-2 text-xs"
+                                  onClick={() => {
+                                    setEditing(inv);
+                                    setFormOpen(true);
+                                  }}
+                                >
+                                  <Pencil className="mr-1 h-3.5 w-3.5" />
+                                  Edit
                                 </Button>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 text-destructive"
-                                  title="Delete" onClick={() => setDeleteTarget(inv)}>
-                                  <Trash2 className="h-4 w-4" />
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-8 px-2 text-xs text-destructive"
+                                  disabled={m.remove.isPending && m.remove.variables === inv.id}
+                                  onClick={() => setDeleteTarget(inv)}
+                                >
+                                  <Trash2 className="mr-1 h-3.5 w-3.5" />
+                                  Delete
                                 </Button>
                               </>
                             )}
@@ -1349,7 +1499,10 @@ function InvoicesTab({ toast }: { toast: Toast }) {
 
       <InvoiceFormSheet
         open={formOpen}
-        onOpenChange={setFormOpen}
+        onOpenChange={(open) => {
+          if (!open && (m.create.isPending || m.update.isPending)) return;
+          setFormOpen(open);
+        }}
         editing={editing}
         suppliers={suppliers}
         saving={m.create.isPending || m.update.isPending}
@@ -1365,7 +1518,12 @@ function InvoicesTab({ toast }: { toast: Toast }) {
 
       <InvoiceViewSheet id={viewId} onClose={() => setViewId(null)} />
 
-      <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>
+      <AlertDialog
+        open={!!deleteTarget}
+        onOpenChange={(o) => {
+          if (!o && !m.remove.isPending) setDeleteTarget(null);
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>Delete invoice {deleteTarget?.invoice_number}?</AlertDialogTitle>
@@ -1374,18 +1532,30 @@ function InvoicesTab({ toast }: { toast: Toast }) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={m.remove.isPending}>Keep invoice</AlertDialogCancel>
             <AlertDialogAction
+              disabled={m.remove.isPending}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
-              onClick={() => {
+              onClick={(e) => {
+                e.preventDefault();
                 if (!deleteTarget) return;
                 m.remove.mutate(deleteTarget.id, {
-                  onSuccess: () => { toast({ title: "Invoice deleted" }); setDeleteTarget(null); },
-                  onError: (e) => err(e, "Could not delete"),
+                  onSuccess: () => {
+                    toast({ title: "Invoice deleted" });
+                    setDeleteTarget(null);
+                  },
+                  onError: (e2) => err(e2, "Could not delete"),
                 });
               }}
             >
-              Delete
+              {m.remove.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete permanently"
+              )}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1497,12 +1667,11 @@ function InvoiceFormSheet({
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">Invoice date</Label>
-            <Input type="date" value={invoiceDate} onChange={(e) => setInvoiceDate(e.target.value)} className="h-9" />
+            <YmdDatePicker value={invoiceDate} onChange={setInvoiceDate} className="h-9" />
           </div>
           <div className="space-y-1">
             <Label className="text-xs text-muted-foreground">Due date</Label>
-            <Input type="date" value={dueDate} min={invoiceDate || undefined}
-              onChange={(e) => setDueDate(e.target.value)} className="h-9" />
+            <YmdDatePicker value={dueDate} onChange={setDueDate} className="h-9" />
           </div>
         </div>
 
@@ -1573,8 +1742,12 @@ function InvoiceFormSheet({
         </div>
       </DetailSheetBody>
       <DetailSheetFooter>
-        <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-        <Button
+        <Button variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
+          Cancel
+        </Button>
+        <LoadingButton
+          loading={saving}
+          loadingText={editing ? "Saving…" : "Creating…"}
           disabled={!valid || saving}
           onClick={() =>
             onSave({
@@ -1589,9 +1762,8 @@ function InvoiceFormSheet({
             })
           }
         >
-          {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
           {editing ? "Save changes" : "Create invoice"}
-        </Button>
+        </LoadingButton>
       </DetailSheetFooter>
     </DetailSheet>
   );

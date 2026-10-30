@@ -49,9 +49,12 @@ export interface Expense {
   cashflow_id: string | null;
   recurring_id: string | null;
   category?: { id: string; name: string } | null;
+  account?: { id: string; code: string; name: string } | null;
+  paid_from?: { id: string; code: string; name: string } | null;
   branch?: { id: string; name: string } | null;
   creator?: { id: string; email: string } | null;
   approver?: { id: string; email: string } | null;
+  _count?: { attachments: number };
   created_at: string;
 }
 
@@ -72,6 +75,8 @@ export interface ExpenseListMeta {
 export interface ExpenseQuery {
   page?: number;
   limit?: number;
+  /** Ask the API for every matching row in one response (server cap 5000). */
+  fetchAll?: boolean;
   search?: string;
   categoryId?: string;
   paymentMethod?: ExpensePaymentMethod;
@@ -84,6 +89,9 @@ export interface ExpensePayload {
   particular: string;
   amount: number;
   category_id?: string | null;
+  account_id?: string | null;
+  /** Cash / bank account the money left from */
+  paid_from_account_id?: string | null;
   payment_method?: ExpensePaymentMethod;
   bank_account?: string | null;
   reference?: string | null;
@@ -109,6 +117,8 @@ export interface RecurringExpense {
   is_active: boolean;
   auto_approve: boolean;
   category?: { id: string; name: string } | null;
+  account?: { id: string; code: string; name: string } | null;
+  paid_from?: { id: string; code: string; name: string } | null;
   branch?: { id: string; name: string } | null;
   _count?: { generated: number };
 }
@@ -117,6 +127,9 @@ export interface RecurringExpensePayload {
   particular: string;
   amount: number;
   category_id?: string | null;
+  account_id?: string | null;
+  /** Cash / bank account the money left from */
+  paid_from_account_id?: string | null;
   payment_method?: ExpensePaymentMethod;
   bank_account?: string | null;
   vendor?: string | null;
@@ -163,8 +176,9 @@ export async function fetchExpenses(
   // Direct call (not getList) so the extended `meta.summary` survives.
   const res = await apiClient.get("/expenses", {
     params: cleanParams({
-      page: q.page ?? 1,
-      limit: q.limit ?? 20,
+      page: q.fetchAll ? 1 : (q.page ?? 1),
+      limit: q.fetchAll ? undefined : (q.limit ?? 20),
+      fetch_all: q.fetchAll ? "true" : undefined,
       search: q.search?.trim() || undefined,
       category_id: q.categoryId,
       payment_method: q.paymentMethod,

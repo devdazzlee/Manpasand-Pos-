@@ -21,6 +21,7 @@ export interface SaleCashier {
 
 export interface SalesSummary {
   totalSales: number;
+  totalPaid?: number;
   totalOrders: number;
   completedOrders: number;
   totalRefunds: number;
@@ -44,12 +45,18 @@ export interface SalesQuery {
   paymentMethod?: string;
   paymentStatus?: string;
   cashierId?: string;
+  /** employee credited with the sale; "none" = no salesperson picked */
+  salespersonId?: string;
   /** resolved branch id (`params.branchId`) */
   branchId?: string;
   startDate?: string;
   endDate?: string;
   sortBy?: string;
   sortOrder?: "asc" | "desc";
+  /** When true (default), return rows appear like old POS. */
+  includeReturns?: boolean;
+  /** Vendor / category / subcategory / stitch params (see catalogFilterParams). */
+  catalog?: Record<string, string>;
 }
 
 export interface SalesListResult {
@@ -68,11 +75,14 @@ function toParams(q: SalesQuery): Record<string, unknown> {
     paymentStatus: q.paymentStatus,
     status: q.status,
     cashierId: q.cashierId,
+    salespersonId: q.salespersonId,
     branchId: q.branchId,
     startDate: q.startDate,
     endDate: q.endDate,
     sortBy: q.sortBy,
     sortOrder: q.sortOrder,
+    includeReturns: q.includeReturns === false ? false : true,
+    ...(q.catalog ?? {}),
   });
 }
 
@@ -119,8 +129,8 @@ export function deleteSale(id: string) {
   return del<void>(`/sale/${id}`);
 }
 
-export function cancelSale(id: string) {
-  return apiClient.patch(`/sale/${id}/cancel`).then((r) => r.data);
+export function cancelSale(id: string, reason?: string) {
+  return apiClient.patch(`/sale/${id}/cancel`, { reason }).then((r) => r.data);
 }
 
 /**

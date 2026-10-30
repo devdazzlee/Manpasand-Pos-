@@ -22,14 +22,26 @@ import {
   type UserRole,
 } from "@/lib/role-utils";
 import {
+  buildDashboardTabHref,
+  isInAppNavClick,
+} from "@/lib/dashboard-tabs";
+import { buttonVariants } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import {
   Store,
   LayoutDashboard,
   ShoppingCart,
   Package,
   Users,
   BarChart3,
+  Scale,
   LogOut,
   History,
+  ClipboardList,
+  Receipt,
+  Wallet,
+  BookOpen,
+  Banknote,
   UserCheck,
   Truck,
   Grid3X3,
@@ -43,18 +55,30 @@ import {
   Clock,
   Shield,
   StoreIcon,
-  X,
   Warehouse,
-  Globe,
   Printer as PrinterIcon,
   Download,
   LineChart,
+  Percent,
+  Boxes,
   Tags,
   KeyRound,
+  PanelLeftClose,
   Eye,
   EyeOff,
   Loader2,
+  ListTree,
+  NotebookPen,
+  PieChart,
+  Lightbulb,
+  Target,
+  BookLock,
+  BadgePercent,
+  Award,
   Gift,
+  FileUp,
+  Waves,
+  ShieldCheck,
 } from "lucide-react";
 import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 
@@ -126,6 +150,30 @@ const menuSections: SidebarMenuSection[] = [
         icon: LayoutDashboard,
         roles: SALES_ROLES,
       },
+      {
+        id: "today-revenue",
+        label: "Today's Revenue",
+        icon: Banknote,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "today-cash-sales",
+        label: "Today's Cash Sales",
+        icon: Wallet,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "today-credit-sales",
+        label: "Today's Credit Sales",
+        icon: CreditCard,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "today-expenses",
+        label: "Today's Expenses",
+        icon: Receipt,
+        roles: SALES_ROLES,
+      },
     ],
   },
   {
@@ -138,6 +186,24 @@ const menuSections: SidebarMenuSection[] = [
         id: "sales-history",
         label: "Sales History",
         icon: History,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "till",
+        label: "Cash Register",
+        icon: Wallet,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "register-report",
+        label: "Register Report",
+        icon: ClipboardList,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "sales-report",
+        label: "Sales Report",
+        icon: Receipt,
         roles: SALES_ROLES,
       },
       {
@@ -157,19 +223,6 @@ const menuSections: SidebarMenuSection[] = [
         label: "Barcode Generator",
         icon: BarcodeScanIcon,
         roles: SALES_ROLES,
-      },
-    ],
-  },
-  {
-    id: "website-orders",
-    label: "Website Orders",
-    expandable: true,
-    items: [
-      {
-        id: "website-orders",
-        label: "Website Orders",
-        icon: Globe,
-        roles: STAFF_ROLES,
       },
     ],
   },
@@ -233,6 +286,18 @@ const menuSections: SidebarMenuSection[] = [
         icon: SlidersHorizontal,
         roles: INVENTORY_ROLES,
       },
+      {
+        id: "scan-stock-count",
+        label: "Scan Stock Count",
+        icon: BarcodeScanIcon,
+        roles: INVENTORY_ROLES,
+      },
+      {
+        id: "opening-stock-import",
+        label: "Opening Stock Import",
+        icon: FileUp,
+        roles: INVENTORY_ROLES,
+      },
     ],
   },
   {
@@ -260,6 +325,18 @@ const menuSections: SidebarMenuSection[] = [
         roles: INVENTORY_ROLES,
       },
       {
+        id: "purchase-report",
+        label: "Purchase Report",
+        icon: Truck,
+        roles: INVENTORY_ROLES,
+      },
+      {
+        id: "stock-quantity-report",
+        label: "Stock Quantity Report",
+        icon: Boxes,
+        roles: INVENTORY_ROLES,
+      },
+      {
         id: "inventory-audit",
         label: "Inventory Financial Audit",
         icon: Shield,
@@ -278,14 +355,12 @@ const menuSections: SidebarMenuSection[] = [
         icon: Grid3X3,
         roles: BRANCH_DATA_ROLES,
       },
-      /*
       {
         id: "sub-categories",
         label: "Sub-Categories",
         icon: Tags,
-        roles: ADMIN_ROLES,
+        roles: BRANCH_DATA_ROLES,
       },
-      */
       { id: "units", label: "Units", icon: Package, roles: ADMIN_ROLES },
       { id: "brand", label: "Brands", icon: StoreIcon, roles: ADMIN_ROLES },
       { id: "colors", label: "Colors", icon: Package, roles: ADMIN_ROLES },
@@ -312,12 +387,22 @@ const menuSections: SidebarMenuSection[] = [
     ],
   },
   {
+    id: "marketing",
+    label: "Marketing",
+    expandable: true,
+    items: [
+      { id: "promotions", label: "Promotions", icon: BadgePercent, roles: SALES_ROLES },
+      { id: "loyalty", label: "Loyalty", icon: Award, roles: SALES_ROLES },
+      { id: "gift-cards", label: "Gift Cards", icon: Gift, roles: SALES_ROLES },
+    ],
+  },
+  {
     id: "customers",
     label: "Customers",
     expandable: true,
     items: [
       { id: "customers", label: "Customers", icon: Users, roles: SALES_ROLES },
-      { id: "loyalty", label: "Loyalty Winners", icon: Gift, roles: SALES_ROLES },
+      { id: "loyalty-winners", label: "Loyalty Winners", icon: Gift, roles: SALES_ROLES },
     ],
   },
   {
@@ -328,12 +413,27 @@ const menuSections: SidebarMenuSection[] = [
       { id: "employees", label: "Employees", icon: UserCheck, roles: ADMIN_ROLES },
       { id: "shifts", label: "Shift Management", icon: Clock, roles: ADMIN_ROLES },
       { id: "salaries", label: "Salaries", icon: CreditCard, roles: ADMIN_ROLES },
+      { id: "commissions", label: "Commissions", icon: Percent, roles: ADMIN_ROLES },
       {
         id: "designation",
         label: "Designation",
         icon: Shield,
         roles: ADMIN_ROLES,
       },
+    ],
+  },
+  {
+    id: "accounts",
+    label: "Accounts",
+    expandable: true,
+    items: [
+      { id: "chart-of-accounts", label: "Accounts Overview", icon: ListTree, roles: SALES_ROLES },
+      { id: "money-flow", label: "Money Flow", icon: Waves, roles: SALES_ROLES },
+      { id: "money-check", label: "Money Check", icon: ShieldCheck, roles: ADMIN_ROLES },
+      { id: "journal-vouchers", label: "Adjustments (Journal)", icon: NotebookPen, roles: SALES_ROLES },
+      { id: "expense-breakdown", label: "Expense Breakdown", icon: PieChart, roles: SALES_ROLES },
+      { id: "budgets", label: "Budgets", icon: Target, roles: SALES_ROLES },
+      { id: "close-books", label: "Close Books", icon: BookLock, roles: SALES_ROLES },
     ],
   },
   {
@@ -345,6 +445,60 @@ const menuSections: SidebarMenuSection[] = [
         id: "reports",
         label: "Reports & Analytics",
         icon: BarChart3,
+        roles: ADMIN_ROLES,
+      },
+      {
+        id: "tax-management",
+        label: "Tax Setup",
+        icon: Percent,
+        roles: ADMIN_ROLES,
+      },
+      {
+        id: "insights",
+        label: "Business Insights",
+        icon: Lightbulb,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "financial-statement",
+        label: "Financial Statement",
+        icon: Scale,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "profit-loss",
+        label: "Profit & Loss",
+        icon: LineChart,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "balance-sheet",
+        label: "Balance Sheet",
+        icon: Wallet,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "trial-balance",
+        label: "Trial Balance",
+        icon: BookOpen,
+        roles: SALES_ROLES,
+      },
+      {
+        id: "product-sales-profit",
+        label: "Product Sales & Profit",
+        icon: Percent,
+        roles: SALES_ROLES,
+      },
+      // {
+      //   id: "users",
+      //   label: "Users & Permissions",
+      //   icon: KeyRound,
+      //   roles: ADMIN_ROLES,
+      // },
+      {
+        id: "audit",
+        label: "Audit Trail",
+        icon: Shield,
         roles: ADMIN_ROLES,
       },
       {
@@ -372,11 +526,37 @@ const filterMenuSectionsByRole = (role: UserRole | null): SidebarMenuSection[] =
     return [];
   }
 
+  // Cashiers see only the counter screens; supervisors see what a branch manager sees.
+  const CASHIER_TABS = new Set([
+    "new-sale",
+    "sales-history",
+    "sales-report",
+    "stock-quantity-report",
+    "returns",
+    "exchanges",
+    "customers",
+    "till",
+    "printer-settings",
+    "today-revenue",
+    "today-cash-sales",
+  ]);
+  // View-only account: products and stock screens only.
+  const VIEWER_TABS = new Set(["inventory", "stock-view", "stock-quantity-report"]);
+  const roleAllows = (roles?: UserRole[]) => {
+    if (!roles) return role !== "CASHIER";
+    if (roles.includes(role)) return true;
+    return role === "SUPERVISOR" && roles.includes("BRANCH_MANAGER");
+  };
+
   return menuSections
     .map((section) => ({
       ...section,
-      items: section.items.filter(
-        (item) => !item.roles || item.roles.includes(role)
+      items: section.items.filter((item) =>
+        role === "CASHIER"
+          ? CASHIER_TABS.has(item.id)
+          : role === "INVENTORY_VIEWER"
+            ? VIEWER_TABS.has(item.id)
+            : roleAllows(item.roles)
       ),
     }))
     .filter((section) => section.items.length > 0);
@@ -394,7 +574,6 @@ export function Sidebar({
 }: SidebarProps) {
   const [expandedSections, setExpandedSections] = useState<string[]>([
     "sales",
-    "website-orders",
     "inv-overview",
     "inv-stock",
     "inv-insights",
@@ -503,9 +682,45 @@ export function Sidebar({
 
   const handleMenuClick = (itemId: string) => {
     setActiveTab(itemId);
-    if (onClose) {
-      onClose();
-    }
+  };
+
+  const renderMenuItem = (item: SidebarMenuItem, extraClassName?: string) => {
+    const Icon = item.icon;
+    const isActive = activeTab === item.id;
+    const href = buildDashboardTabHref(item.id);
+
+    return (
+      <a
+        key={item.id}
+        href={href}
+        className={cn(
+          buttonVariants({ variant: isActive ? "default" : "ghost" }),
+          "h-10 w-full justify-start font-medium",
+          isActive
+            ? "bg-blue-600 text-white shadow-sm hover:bg-blue-700 hover:text-white"
+            : "text-gray-700 hover:bg-gray-100",
+          extraClassName
+        )}
+        onClick={(e) => {
+          if (!isInAppNavClick(e)) {
+            return;
+          }
+          e.preventDefault();
+          handleMenuClick(item.id);
+        }}
+      >
+        <Icon className="mr-3 h-4 w-4" />
+        {item.label}
+        {item.badge && (
+          <Badge
+            variant={item.badge === "Live" ? "destructive" : "secondary"}
+            className="ml-auto text-xs"
+          >
+            {item.badge}
+          </Badge>
+        )}
+      </a>
+    );
   };
 
   return (
@@ -518,33 +733,29 @@ export function Sidebar({
       )}
 
       <div
-        className={`
-          fixed inset-y-0 left-0 z-50
-          flex w-72 flex-col border-r border-gray-200 bg-white shadow-sm
-          transition-transform duration-300 ease-in-out lg:static
-          ${isOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}
-        `}
+        className={cn(
+          "fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r border-gray-200 bg-white shadow-sm transition-transform duration-300 ease-in-out",
+          isOpen ? "translate-x-0 lg:static lg:shrink-0" : "-translate-x-full lg:hidden",
+        )}
       >
-        <div className="absolute right-4 top-4 z-10 lg:hidden">
+        <div className="relative flex shrink-0 items-center justify-center border-b border-gray-200 px-4 py-2 pr-12">
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src="/logo.png"
+            alt="MANPASAND POS"
+            className="mx-auto h-[72px] w-[200px] max-w-[88%] object-contain"
+          />
           <Button
+            type="button"
             variant="ghost"
             size="sm"
             onClick={onClose}
-            className="h-8 w-8 p-0"
+            className="absolute right-2 top-1/2 h-9 w-9 -translate-y-1/2 p-0 text-gray-600 hover:bg-gray-100"
+            aria-label="Close sidebar"
+            title="Close menu"
           >
-            <X className="h-5 w-5" />
+            <PanelLeftClose className="h-5 w-5 lg:h-[1.35rem] lg:w-[1.35rem]" />
           </Button>
-        </div>
-
-        <div className="border-b border-gray-200 p-6">
-          <div className="flex items-center space-x-3">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/logo.png" alt="Manpasand" className="h-11 w-11 object-contain shrink-0" />
-            <div>
-              <h1 className="text-xl font-bold text-gray-900">MANPASAND</h1>
-              <p className="text-sm text-gray-500">Enterprise POS</p>
-            </div>
-          </div>
         </div>
 
         <nav className="flex-1 overflow-y-auto p-4">
@@ -567,37 +778,9 @@ export function Sidebar({
                     </Button>
                     {expandedSections.includes(section.id) && (
                       <div className="space-y-1">
-                        {section.items.map((item) => {
-                          const Icon = item.icon;
-
-                          return (
-                            <Button
-                              key={item.id}
-                              variant={activeTab === item.id ? "default" : "ghost"}
-                              className={`w-full justify-start pl-6 ${
-                                activeTab === item.id
-                                  ? "bg-blue-600 text-white shadow-sm hover:bg-blue-700"
-                                  : "text-gray-700 hover:bg-gray-100"
-                              }`}
-                              onClick={() => handleMenuClick(item.id)}
-                            >
-                              <Icon className="mr-3 h-4 w-4" />
-                              {item.label}
-                              {item.badge && (
-                                <Badge
-                                  variant={
-                                    item.badge === "Live"
-                                      ? "destructive"
-                                      : "secondary"
-                                  }
-                                  className="ml-auto text-xs"
-                                >
-                                  {item.badge}
-                                </Badge>
-                              )}
-                            </Button>
-                          );
-                        })}
+                        {section.items.map((item) =>
+                          renderMenuItem(item, "pl-6")
+                        )}
                       </div>
                     )}
                   </div>
@@ -607,37 +790,7 @@ export function Sidebar({
                       {section.label}
                     </div>
                     <div className="space-y-1">
-                      {section.items.map((item) => {
-                        const Icon = item.icon;
-
-                        return (
-                          <Button
-                            key={item.id}
-                            variant={activeTab === item.id ? "default" : "ghost"}
-                            className={`w-full justify-start ${
-                              activeTab === item.id
-                                ? "bg-blue-600 text-white shadow-sm hover:bg-blue-700"
-                                : "text-gray-700 hover:bg-gray-100"
-                            }`}
-                            onClick={() => handleMenuClick(item.id)}
-                          >
-                            <Icon className="mr-3 h-4 w-4" />
-                            {item.label}
-                            {item.badge && (
-                              <Badge
-                                variant={
-                                  item.badge === "Live"
-                                    ? "destructive"
-                                    : "secondary"
-                                }
-                                className="ml-auto text-xs"
-                              >
-                                {item.badge}
-                              </Badge>
-                            )}
-                          </Button>
-                        );
-                      })}
+                      {section.items.map((item) => renderMenuItem(item))}
                     </div>
                   </div>
                 )}

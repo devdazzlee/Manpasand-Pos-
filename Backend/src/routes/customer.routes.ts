@@ -1,3 +1,4 @@
+import { requirePermission } from '../middleware/permission.middleware';
 import express, { Request, Response } from 'express';
 import {
   createCustomer,
@@ -14,8 +15,10 @@ import {
   getCustomerStatement,
   getCustomerActivity,
   createCustomerPayment,
+  updateCustomerPayment,
   deleteCustomerPayment,
   getCustomerLoyaltyStatus,
+  getReceivablesSummary,
 } from '../controllers/customer.controller';
 import { validate } from '../middleware/validation.middleware';
 import {
@@ -25,6 +28,7 @@ import {
   customerUpdateSchema,
   getCustomerParamsSchema,
   createCustomerPaymentSchema,
+  updateCustomerPaymentSchema,
   deleteCustomerPaymentSchema,
 } from '../validations/customer.validation';
 import { authenticate, authorize } from '../middleware/auth.middleware';
@@ -58,12 +62,13 @@ router.get('/me', authenticateCustomer, asyncHandler(async (req: Request, res: R
 }));
 
 // Admin routes (protected by admin auth - MUST come after customer routes)
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER', 'CASHIER']));
 // Admin-side create — full form (email + optional name/phone/address/billing).
 // Old route used cusRegisterationSchema which only validated email, letting
 // every other field through unchecked.
 router.post('/', validate(customerCreateByAdminSchema), createShopCustomer);
 router.get('/', getCustomers);
+router.get('/receivables/summary', getReceivablesSummary);
 router.put('/:customerId', validate(customerUpdateSchema), updateCustomerByAdmin);
 router.delete('/:customerId', deleteCustomer);
 router.get('/:customerId/purchases', validate(getCustomerParamsSchema), getCustomerPurchases);
@@ -71,7 +76,8 @@ router.get('/:customerId/ledger', validate(getCustomerParamsSchema), getCustomer
 router.get('/:customerId/statement', validate(getCustomerParamsSchema), getCustomerStatement);
 router.get('/:customerId/activity', validate(getCustomerParamsSchema), getCustomerActivity);
 router.get('/:customerId/loyalty-status', validate(getCustomerParamsSchema), getCustomerLoyaltyStatus);
-router.post('/:customerId/payments', validate(createCustomerPaymentSchema), createCustomerPayment);
+router.post('/:customerId/payments', validate(createCustomerPaymentSchema), requirePermission((req) => (['REFUND', 'CREDIT_NOTE', 'DEBIT_NOTE', 'WRITE_OFF'].includes(req.body?.type) ? 'customers.adjust' : null)), createCustomerPayment);
+router.patch('/:customerId/payments/:paymentId', validate(updateCustomerPaymentSchema), updateCustomerPayment);
 router.delete('/:customerId/payments/:paymentId', validate(deleteCustomerPaymentSchema), deleteCustomerPayment);
 router.get('/:customerId', getCustomerById);
 

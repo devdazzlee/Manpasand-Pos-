@@ -5,6 +5,13 @@ import path from 'path';
 import PDFDocument from 'pdfkit';
 import { print } from 'pdf-to-printer';
 import * as bwipjs from 'bwip-js';
+import {
+  RECEIPT_EXCHANGE_POLICY_LINES,
+  RECEIPT_EXCHANGE_POLICY_TITLE,
+  shouldPrintReceiptExchangePolicy,
+} from '../config/receipt-policy';
+
+const ACE_STUDIOS_CONTACT = '+92 336 2500357';
 
 type PrintJobInput = {
   printer: { name: string; columns?: { fontA: number; fontB: number } };
@@ -34,6 +41,7 @@ type PrintJobInput = {
     promo?: string;
     thankYouMessage?: string;
     footerMessage?: string;
+    documentTitle?: string;
   };
   logoPath?: string;
 };
@@ -114,6 +122,24 @@ export async function printReceiptPDF(input: PrintJobInput) {
     // Draw without width constraint to show full text
     doc.text(text, drawX, y);
     return size;
+  }
+
+  function drawWrapped(
+    text: string,
+    x: number,
+    y: number,
+    width: number,
+    opts: { maxSize: number; align?: 'left' | 'center' | 'right'; font?: string },
+  ): { size: number; height: number } {
+    const font = opts.font || baseFont;
+    const size = opts.maxSize;
+    const align = opts.align || 'center';
+    const content = String(text || '').trim();
+    if (!content) return { size, height: 0 };
+    doc.font(font).fontSize(size);
+    const blockH = doc.heightOfString(content, { width, align });
+    doc.text(content, x, y, { width, align });
+    return { size, height: blockH };
   }
 
   // Draw a two-column row (left label, right value) fully on one line each
@@ -205,8 +231,8 @@ export async function printReceiptPDF(input: PrintJobInput) {
 
   // Logo with guaranteed gap - center on full page width
   if (logoPath && fs.existsSync(logoPath)) {
-    const maxW = mm(30);
-    const maxH = mm(14);
+    const maxW = Math.min(mm(64), W);
+    const maxH = mm(16);
     // Center on full page width, not just content width
     const x = (pageWidth - maxW) / 2;
     doc.image(logoPath, x, y, { fit: [maxW, maxH] });
@@ -216,20 +242,20 @@ export async function printReceiptPDF(input: PrintJobInput) {
   // Store name (center) — shrink to fit once (no wrap)
   doc.font(boldFont);
   const usedHead = drawFit(
-    (receiptData.storeName || 'MANPASAND SUPERMARKET').toUpperCase(),
+    (receiptData.storeName || 'MANPASAND GENERAL STORE').toUpperCase(),
     margins.left, y, W, { maxSize: HEAD_MAX, minSize: 11.0, align: 'center', font: boldFont }
   );
   y += lineH(usedHead) * 0.9;
 
   // Tagline / Address / STRN
   doc.font(baseFont);
-  const tg = receiptData.tagline || 'Fresh • Fast • Friendly';
+  const tg = receiptData.tagline || 'Quality • Service • Value';
   const usedTg = drawFit(tg, margins.left, y, W, { maxSize: BODY_MAX, minSize: BODY_MIN, align: 'center' });
   y += lineH(usedTg) - 2;
 
-  const addr = receiptData.address || 'Main Shahrah-e-Faisal, Karachi';
-  const usedAddr = drawFit(addr, margins.left, y, W, { maxSize: BODY_MAX, minSize: BODY_MIN, align: 'center' });
-  y += lineH(usedAddr) - 2;
+  const addr = receiptData.address || 'Karachi, Pakistan';
+  const addrBlock = drawWrapped(addr, margins.left, y, W, { maxSize: BODY_MAX, align: 'center' });
+  y += addrBlock.height + 2;
 
   if (receiptData.strn) {
     const usedStrn = drawFit(receiptData.strn, margins.left, y, W, { maxSize: BODY_MAX, minSize: BODY_MIN, align: 'center' });
@@ -332,10 +358,35 @@ export async function printReceiptPDF(input: PrintJobInput) {
   // ===== FOOTER =====
   const usedTy = drawFit(receiptData.thankYouMessage || 'Thank you for shopping!', margins.left, y, W, { maxSize: 10.6, minSize: 8.6, align: 'center', font: boldFont });
   y += lineH(usedTy) - 2;
-  if (receiptData.footerMessage) {
-    const usedF = drawFit(receiptData.footerMessage, margins.left, y, W, { maxSize: 9.8, minSize: 8.0, align: 'center' });
-    y += lineH(usedF);
+
+  if (shouldPrintReceiptExchangePolicy(receiptData)) {
+    y += hr(y, 'dotted');
+    const usedTitle = drawFit(RECEIPT_EXCHANGE_POLICY_TITLE, margins.left, y, W, { maxSize: 7.6, minSize: 7.0, align: 'center', font: boldFont });
+    y += lineH(usedTitle) - 1;
+    for (const line of RECEIPT_EXCHANGE_POLICY_LINES) {
+      const block = drawWrapped(line, margins.left, y, W, { maxSize: 7.0, align: 'center' });
+      y += block.height + 1;
+    }
   }
+
+  const footerLines = [
+    'Call / WhatsApp: 03013181111',
+    'Website: manpasandstore.com',
+  ];
+  if (receiptData.footerMessage) footerLines.unshift(receiptData.footerMessage);
+  for (const line of footerLines) {
+    const usedF = drawFit(line, margins.left, y, W, { maxSize: 9.8, minSize: 8.0, align: 'center' });
+    y += lineH(usedF) - 1;
+  }
+  const footerAddr = drawWrapped(addr, margins.left, y, W, { maxSize: 9.8, align: 'center' });
+  y += footerAddr.height + 1;
+  y += lineH(8) - 1;
+  const usedAce1 = drawFit('Powered by Ace Studios', margins.left, y, W, { maxSize: 8.5, minSize: 7.0, align: 'center' });
+  y += lineH(usedAce1) - 1;
+  const aceSite = drawWrapped('Website: acestudiosus.com', margins.left, y, W, { maxSize: 8.0, align: 'center' });
+  y += aceSite.height;
+  const aceContact = drawWrapped(`Contact: ${ACE_STUDIOS_CONTACT}`, margins.left, y, W, { maxSize: 8.0, align: 'center' });
+  y += aceContact.height + 1;
 
   // Trim height with safety buffer to avoid bottom cut
   const needed = y + margins.bottom + 16;

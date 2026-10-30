@@ -38,6 +38,7 @@ import {
   format,
 } from "date-fns"
 import { toast } from "sonner"
+import { formatProductSearchLabel, productMatchesSearch } from "@/lib/labelBarcode"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -78,6 +79,7 @@ import {
   getReturnQuantityExceededMessage,
   buildReturnTransactionSummary,
   computePaymentSettlement,
+  computeOriginalSalePaidFactor,
   paymentSettlementFromTransactionSummary,
   getReturnReasonLabel,
 } from "@/components/returns/utils"
@@ -150,6 +152,8 @@ interface NewReturn {
     productId: string
     quantity: number
     price: number
+    listPrice?: number
+    discountAmount?: number
   }>
   notes: string
 }
@@ -196,7 +200,12 @@ interface ExchangeItem {
   productName: string
   sku: string
   quantity: number
+  /** List / catalog unit price before exchange discount */
+  listPrice: number
+  /** Net unit price charged on the exchange line */
   price: number
+  /** Per-unit discount (Rs) off list price */
+  discount: number
   unit?: string
 }
 
@@ -554,6 +563,10 @@ export function ReturnsModule({
   const [returnReason, setReturnReason] = useState<ReturnReason | "">("")
   const [exchangeBalanceAction, setExchangeBalanceAction] =
     useState<ExchangeBalanceAction>("collect")
+  /** Whole-exchange discount (Rs) on new items subtotal, after per-line discounts. */
+  const [exchangeOrderDiscountInput, setExchangeOrderDiscountInput] = useState("")
+  const [adjustReturnCredit, setAdjustReturnCredit] = useState(false)
+  const [customReturnCreditInput, setCustomReturnCreditInput] = useState("")
   const [exchangePaymentOption, setExchangePaymentOption] =
     useState<ExchangePaymentOption>("cash")
   const [confirmOpen, setConfirmOpen] = useState(false)
@@ -587,31 +600,34 @@ export function ReturnsModule({
     exchangeItems?: string
   }>({})
 
-  // Fetch products for exchange
-  const fetchProducts = async () => {
+  // Fetch products for exchange (full catalog — was hard-capped at 20, so most
+  // dresses never appeared in Process Exchange on production).
+  const fetchProducts = async (search = "") => {
     setProductsLoading(true)
     try {
       const userRole = localStorage.getItem("role")
       const isAdmin = userRole === "ADMIN" || userRole === "SUPER_ADMIN"
-      
-      const params: any = {
+
+      const params: Record<string, string | number | boolean> = {
         page: 1,
-        limit: 20,
+        limit: 2000,
         is_active: true,
       }
-      
+      const q = search.trim()
+      if (q) params.search = q
+
       if (!isAdmin) {
         const branchStr = localStorage.getItem("branch")
         if (branchStr && branchStr !== "Not Found") {
           try {
             const branchObj = JSON.parse(branchStr)
             params.branch_id = branchObj.id || branchStr
-          } catch (e) {
+          } catch {
             params.branch_id = branchStr
           }
         }
       }
-      
+
       const response = await apiClient.get("/products", { params })
       setProducts(response.data?.data || [])
     } catch (error: any) {
@@ -760,6 +776,15 @@ export function ReturnsModule({
     fetchProducts()
   }, [])
 
+  // Re-fetch exchange catalog when search changes (server search covers full inventory)
+  useEffect(() => {
+    if (moduleTab !== "exchanges") return
+    const t = window.setTimeout(() => {
+      void fetchProducts(exchangeProductSearch)
+    }, 300)
+    return () => window.clearTimeout(t)
+  }, [exchangeProductSearch, moduleTab])
+
   useEffect(() => {
     if (!isProcessOpen) {
       setSaleSearch("")
@@ -768,6 +793,9 @@ export function ReturnsModule({
       setExchangeProductSearch("")
       setExchangeCategoryFilter("all")
       setExchangeItems([])
+      setExchangeOrderDiscountInput("")
+      setAdjustReturnCredit(false)
+      setCustomReturnCreditInput("")
       setSelectedReturnItems([])
       setReturnQuantityInputs({})
       setItemSearch("")
@@ -915,24 +943,43 @@ export function ReturnsModule({
     return Array.from(dedupedSales.values())
   }, [allSalesForMetrics, sales])
 
+  // When searching by bill # on Returns/Exchanges: if no completed history for
+  // this tab, surface matching ORIGINAL sales so staff can start the flow.
   const pageSearchMatchingSales = useMemo(() => {
     const term = normalizeSaleSearchTerm(searchTerm).toLowerCase()
-    const refundedMatches = filteredReturns.filter((returnItem) => returnItem.status === "REFUNDED")
-    if (!term || refundedMatches.length > 0) {
-      return []
-    }
+    if (!term) return []
+
+    const historyMatches =
+      moduleTab === "exchanges"
+        ? filteredReturns.filter((returnItem) => returnItem.status === "EXCHANGED")
+        : filteredReturns.filter((returnItem) => returnItem.status === "REFUNDED")
+    if (historyMatches.length > 0) return []
 
     return searchableSales.filter((sale) => matchesSaleSearch(sale, term)).slice(0, 5)
-  }, [filteredReturns, searchableSales, searchTerm])
+  }, [filteredReturns, moduleTab, searchableSales, searchTerm])
 
   const pageSearchIneligibleSaleMatch = useMemo(() => {
-    const refundedMatches = filteredReturns.filter((returnItem) => returnItem.status === "REFUNDED")
-    if (!normalizeSaleSearchTerm(searchTerm) || refundedMatches.length > 0 || pageSearchMatchingSales.length > 0) {
+    if (
+      !normalizeSaleSearchTerm(searchTerm) ||
+      pageSearchMatchingSales.length > 0
+    ) {
       return null
     }
 
+    const historyMatches =
+      moduleTab === "exchanges"
+        ? filteredReturns.filter((returnItem) => returnItem.status === "EXCHANGED")
+        : filteredReturns.filter((returnItem) => returnItem.status === "REFUNDED")
+    if (historyMatches.length > 0) return null
+
     return findIneligibleSaleMatch(allSalesForMetrics, searchTerm)
-  }, [allSalesForMetrics, filteredReturns, pageSearchMatchingSales.length, searchTerm])
+  }, [
+    allSalesForMetrics,
+    filteredReturns,
+    moduleTab,
+    pageSearchMatchingSales.length,
+    searchTerm,
+  ])
 
   const filteredSales = useMemo(() => {
     const term = normalizeSaleSearchTerm(saleSearch).toLowerCase()
@@ -982,7 +1029,7 @@ export function ReturnsModule({
               }
             : (selectedReturn as any).original_sale,
         },
-        { name: "MANPASAND GENERAL STORE", address: "Karachi" },
+        { name: "MANPASAND GENERAL STORE", address: "Karachi, Pakistan" },
         {
           transactionLabel: selectedReturn.sale_number,
           originalSaleNumber: selectedReturn.original_sale_number || undefined,
@@ -1087,62 +1134,51 @@ export function ReturnsModule({
       ? ((totalExchangeCount / allSalesForMetrics.length) * 100).toFixed(1)
       : "0.0"
 
+  const mapExchangeItemsToPayload = (items: ExchangeItem[]) =>
+    items
+      .filter((item) => item.quantity > 0)
+      .map((item) => ({
+        productId: item.productId,
+        quantity: item.quantity,
+        price: item.price,
+        listPrice: item.listPrice,
+        ...(item.discount > 0 ? { discountAmount: item.discount } : {}),
+      }))
+
   // Handle exchange product selection
   const handleExchangeProductSelect = (productId: string) => {
     const product = products.find((p) => p.id === productId)
     if (!product) return
 
-    const price = getProductSalePrice(product)
-    
-    // Check if product already in exchange items
-    const existingItem = exchangeItems.find((item) => item.productId === productId)
-    if (existingItem) {
-      // Increment quantity
-      setExchangeItems((prev) =>
-        prev.map((item) =>
-          item.productId === productId
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        )
-      )
-    } else {
-      // Add new exchange item — capture the unit (kg / pcs / etc.) so we can
-      // show it next to the quantity input.
-      const unitLabel =
-        product.unit?.name || product.unit_name || undefined
-      setExchangeItems((prev) => [
-        ...prev,
-        {
-          productId: product.id,
-          productName: product.name,
-          sku: product.sku,
-          quantity: 1,
-          price: price,
-          unit: unitLabel || undefined,
-        },
-      ])
-    }
+    const listPrice = getProductSalePrice(product)
 
-    // Update newReturn.exchangedItems
-    const updatedExchangeItems = existingItem
-      ? exchangeItems.map((item) =>
-          item.productId === productId
-            ? { ...item, quantity: item.quantity + 1 }
-            : item
-        )
-      : [
-          ...exchangeItems,
-          {
-            productId: product.id,
-            quantity: 1,
-            price: price,
-          },
-        ]
-
-    setNewReturn((prev) => ({
-      ...prev,
-      exchangedItems: updatedExchangeItems,
-    }))
+    setExchangeItems((prev) => {
+      const existingItem = prev.find((item) => item.productId === productId)
+      const next = existingItem
+        ? prev.map((item) =>
+            item.productId === productId
+              ? { ...item, quantity: item.quantity + 1 }
+              : item,
+          )
+        : [
+            ...prev,
+            {
+              productId: product.id,
+              productName: product.name,
+              sku: product.sku,
+              quantity: 1,
+              listPrice,
+              price: listPrice,
+              discount: 0,
+              unit: product.unit?.name || product.unit_name || undefined,
+            },
+          ]
+      setNewReturn((form) => ({
+        ...form,
+        exchangedItems: mapExchangeItemsToPayload(next),
+      }))
+      return next
+    })
   }
 
   // Handle exchange item quantity change
@@ -1151,25 +1187,48 @@ export function ReturnsModule({
     // value like "0.5" without the row disappearing on the first "0".
     // Use removeExchangeItem to explicitly drop a row.
     const safeQty = Number.isFinite(quantity) && quantity >= 0 ? quantity : 0;
-    setExchangeItems((prev) =>
-      prev.map((item) =>
+    setExchangeItems((prev) => {
+      const next = prev.map((item) =>
         item.productId === productId ? { ...item, quantity: safeQty } : item,
-      ),
-    );
-    setNewReturn((prev) => ({
-      ...prev,
-      exchangedItems: prev.exchangedItems.map((item) =>
-        item.productId === productId ? { ...item, quantity: safeQty } : item,
-      ),
-    }));
+      )
+      setNewReturn((form) => ({
+        ...form,
+        exchangedItems: mapExchangeItemsToPayload(next),
+      }))
+      return next
+    })
   };
 
+  const handleExchangeDiscountChange = (productId: string, rawDiscount: string) => {
+    const parsed = rawDiscount.trim() === "" ? 0 : Number(rawDiscount)
+    const discount = Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+    setExchangeItems((prev) => {
+      const next = prev.map((item) => {
+        if (item.productId !== productId) return item
+        const capped = Math.min(discount, item.listPrice)
+        return {
+          ...item,
+          discount: capped,
+          price: Math.max(0, item.listPrice - capped),
+        }
+      })
+      setNewReturn((form) => ({
+        ...form,
+        exchangedItems: mapExchangeItemsToPayload(next),
+      }))
+      return next
+    })
+  }
+
   const removeExchangeItem = (productId: string) => {
-    setExchangeItems((prev) => prev.filter((item) => item.productId !== productId));
-    setNewReturn((prev) => ({
-      ...prev,
-      exchangedItems: prev.exchangedItems.filter((item) => item.productId !== productId),
-    }));
+    setExchangeItems((prev) => {
+      const next = prev.filter((item) => item.productId !== productId)
+      setNewReturn((form) => ({
+        ...form,
+        exchangedItems: mapExchangeItemsToPayload(next),
+      }))
+      return next
+    })
   };
 
   // Filter products for exchange
@@ -1195,11 +1254,7 @@ export function ReturnsModule({
     }
     const searchLower = exchangeProductSearch.trim().toLowerCase()
     if (searchLower) {
-      list = list.filter(
-        (product) =>
-          product.name.toLowerCase().includes(searchLower) ||
-          product.sku.toLowerCase().includes(searchLower),
-      )
+      list = list.filter((product) => productMatchesSearch(product, searchLower))
     }
     return list
   }, [products, exchangeProductSearch, exchangeCategoryFilter])
@@ -1231,9 +1286,10 @@ export function ReturnsModule({
     }
 
     if (newReturn.returnType === "EXCHANGE") {
-      if (newReturn.exchangedItems.length === 0) {
+      const exchangePayload = mapExchangeItemsToPayload(exchangeItems)
+      if (exchangePayload.length === 0) {
         nextErrors.exchangeItems = "Please add at least one item for exchange."
-      } else if (newReturn.exchangedItems.some((it) => !it.quantity || it.quantity <= 0)) {
+      } else if (exchangePayload.some((it) => !it.quantity || it.quantity <= 0)) {
         nextErrors.exchangeItems = "Exchange item quantity must be greater than 0."
       }
     }
@@ -1272,11 +1328,16 @@ export function ReturnsModule({
       setNewReturn((prev) => ({ ...prev, saleId, returnType }))
 
       const alreadyReturned = getAlreadyReturnedForSale(saleId)
+      const paidFactor = computeOriginalSalePaidFactor(sale)
       const items: SelectedReturnItem[] = (sale.sale_items || [])
         .map((item) => {
           const purchased = item.quantity
           const prior = alreadyReturned.get(item.product.id) || 0
           const remaining = Math.max(0, purchased - prior)
+          const perUnitList =
+            purchased > 0 ? Number(item.line_total) / purchased : Number(item.unit_price)
+          const paidUnitPrice =
+            Math.round(perUnitList * paidFactor * 100) / 100
           return {
             productId: item.product.id,
             productName: item.product.name,
@@ -1285,7 +1346,7 @@ export function ReturnsModule({
             remainingQuantity: remaining,
             returnQuantity: remaining,
             selected: true,
-            unitPrice: item.unit_price,
+            unitPrice: paidUnitPrice,
             disposition: "RESTOCK" as InventoryDisposition,
           }
         })
@@ -1293,6 +1354,9 @@ export function ReturnsModule({
 
       setSelectedReturnItems(items)
       setReturnScope("FULL")
+      setExchangeOrderDiscountInput("")
+      setAdjustReturnCredit(false)
+      setCustomReturnCreditInput("")
 
       if (items.length === 0) {
         toast.error("No returnable items", {
@@ -1364,6 +1428,12 @@ export function ReturnsModule({
     setModuleTab("returns")
     setIsProcessOpen(true)
     void handleSaleSelect(saleId, "REFUND")
+  }
+
+  const handleStartExchangeForSale = (saleId: string) => {
+    setModuleTab("exchanges")
+    setIsProcessOpen(true)
+    void handleSaleSelect(saleId, "EXCHANGE")
   }
 
   // Open refund flow when navigated from Sales History
@@ -1608,14 +1678,7 @@ export function ReturnsModule({
   // subtotal. e.g. Rs 430 of goods with a Rs 30 order discount -> 400/430.
   const orderDiscountFactor = useMemo(() => {
     if (!selectedSale) return 1
-    const netSubtotal =
-      (selectedSale.sale_items || []).reduce(
-        (s, i) => s + (Number(i.line_total) || 0),
-        0,
-      ) || Number(selectedSale.subtotal) || 0
-    const discount = Number(selectedSale.discount_amount) || 0
-    if (netSubtotal <= 0 || discount <= 0) return 1
-    return Math.max(0, (netSubtotal - discount) / netSubtotal)
+    return computeOriginalSalePaidFactor(selectedSale)
   }, [selectedSale])
 
   // Returned-items value BEFORE the order discount is prorated out (Rs 430).
@@ -1642,13 +1705,40 @@ export function ReturnsModule({
     [returnRefundGross, orderDiscountFactor],
   )
 
-  const exchangeTotal = useMemo(() => {
+  const exchangeSubtotal = useMemo(() => {
     return exchangeItems.reduce((sum, item) => sum + item.quantity * item.price, 0)
   }, [exchangeItems])
 
+  const exchangeOrderDiscount = useMemo(() => {
+    const raw = exchangeOrderDiscountInput.trim()
+    if (raw === "") return 0
+    const n = Number(raw)
+    if (!Number.isFinite(n) || n <= 0) return 0
+    return Math.min(Math.round(n * 100) / 100, exchangeSubtotal)
+  }, [exchangeOrderDiscountInput, exchangeSubtotal])
+
+  const exchangeNetTotal = useMemo(
+    () => Math.max(0, Math.round((exchangeSubtotal - exchangeOrderDiscount) * 100) / 100),
+    [exchangeSubtotal, exchangeOrderDiscount],
+  )
+
+  const effectiveReturnCredit = useMemo(() => {
+    if (!adjustReturnCredit) return returnRefundTotal
+    const raw = customReturnCreditInput.trim()
+    const parsed = raw === "" ? returnRefundTotal : Number(raw)
+    if (!Number.isFinite(parsed) || parsed < 0) return returnRefundTotal
+    const capped = Math.min(parsed, returnRefundGross)
+    return Math.round(capped * 100) / 100
+  }, [
+    adjustReturnCredit,
+    customReturnCreditInput,
+    returnRefundTotal,
+    returnRefundGross,
+  ])
+
   const exchangeBalance = useMemo(() => {
-    return exchangeTotal - returnRefundTotal
-  }, [exchangeTotal, returnRefundTotal])
+    return exchangeNetTotal - effectiveReturnCredit
+  }, [exchangeNetTotal, effectiveReturnCredit])
 
   useEffect(() => {
     if (exchangeBalance < 0 && exchangeBalanceAction === "collect") {
@@ -1680,17 +1770,19 @@ export function ReturnsModule({
       transactionType: newReturn.returnType === "EXCHANGE" ? "EXCHANGE" : "RETURN",
       returnScope,
       originalOrderAmount: Math.abs(Number(selectedSale.total_amount)),
-      returnedItemsValue: returnRefundTotal,
+      returnedItemsValue: effectiveReturnCredit,
       returnedItemsGrossValue: returnRefundGross,
-      replacementItemsValue: exchangeTotal,
+      replacementItemsValue: exchangeNetTotal,
+      replacementItemsGrossValue: exchangeSubtotal,
     })
   }, [
     selectedSale,
     newReturn.returnType,
     returnScope,
-    returnRefundTotal,
+    effectiveReturnCredit,
     returnRefundGross,
-    exchangeTotal,
+    exchangeNetTotal,
+    exchangeSubtotal,
   ])
 
   const handleViewReturn = (returnItem: ReturnItem) => {
@@ -1728,13 +1820,19 @@ export function ReturnsModule({
         payload.returnReason = returnReason
       }
 
-      if (newReturn.returnType === "EXCHANGE" && newReturn.exchangedItems.length > 0) {
-        payload.exchangedItems = newReturn.exchangedItems.map((item) => ({
-          productId: item.productId,
-          quantity: Number(item.quantity),
-          price: Number(item.price),
-        }))
+      const exchangePayload = mapExchangeItemsToPayload(exchangeItems)
+      if (newReturn.returnType === "EXCHANGE" && exchangePayload.length > 0) {
+        payload.exchangedItems = exchangePayload
         payload.exchangeBalanceAction = exchangeBalanceAction
+        if (exchangeOrderDiscount > 0) {
+          payload.exchangeDiscountAmount = exchangeOrderDiscount
+        }
+        if (
+          adjustReturnCredit &&
+          Math.abs(effectiveReturnCredit - returnRefundTotal) > 0.005
+        ) {
+          payload.returnCreditOverride = effectiveReturnCredit
+        }
       }
 
       if (newReturn.returnType === "REFUND" && newReturn.refundMethod) {
@@ -1767,6 +1865,9 @@ export function ReturnsModule({
       })
       setSelectedReturnItems([])
       setExchangeItems([])
+      setExchangeOrderDiscountInput("")
+      setAdjustReturnCredit(false)
+      setCustomReturnCreditInput("")
       setExchangeProductSearch("")
       setSelectedSale(null)
       setFormErrors({})
@@ -2680,14 +2781,11 @@ export function ReturnsModule({
                                 selectedItem && "border-blue-500 bg-blue-50 shadow-sm",
                               )}
                             >
-                              <span className="text-xs font-semibold text-gray-900 leading-tight line-clamp-2">
-                                {product.name}
+                              <span className="text-xs font-semibold text-gray-900 leading-tight line-clamp-3">
+                                {formatProductSearchLabel(product)}
                               </span>
                               <span className="mt-1 text-sm font-bold text-blue-600">
                                 Rs {formatMoney(price)}
-                              </span>
-                              <span className="mt-auto pt-1 text-[10px] text-gray-500 truncate">
-                                {product.sku || "—"}
                               </span>
                               {selectedItem && selectedItem.quantity > 0 && (
                                 <Badge className="mt-1 w-fit bg-blue-600 text-[10px] px-1.5 py-0">
@@ -2709,13 +2807,35 @@ export function ReturnsModule({
                           key={item.productId}
                           className="flex flex-col gap-3 rounded border bg-gray-50/50 p-3 sm:flex-row sm:items-center sm:justify-between"
                         >
-                          <div className="flex-1">
+                          <div className="flex-1 space-y-2">
                             <div className="font-medium">{item.productName}</div>
                             <div className="text-sm text-gray-500">
-                              SKU: {item.sku} • Rs {formatMoney(item.price)}
+                              SKU: {item.sku} • List: {formatMoney(item.listPrice)}
                             </div>
-                            <div className="text-sm font-semibold text-green-700 mt-0.5">
-                              Subtotal: Rs {formatMoney(item.quantity * item.price)}
+                            <div className="flex flex-wrap items-end gap-3">
+                              <div className="space-y-1">
+                                <Label className="text-xs text-gray-500">Discount on this dress (Rs)</Label>
+                                <Input
+                                  type="number"
+                                  inputMode="decimal"
+                                  min={0}
+                                  max={item.listPrice}
+                                  step="1"
+                                  className="h-8 w-28"
+                                  value={item.discount > 0 ? String(item.discount) : ""}
+                                  placeholder="0"
+                                  onChange={(e) =>
+                                    handleExchangeDiscountChange(item.productId, e.target.value)
+                                  }
+                                />
+                              </div>
+                              <div className="text-sm">
+                                <span className="text-gray-500">Net unit: </span>
+                                <span className="font-semibold">{formatMoney(item.price)}</span>
+                              </div>
+                            </div>
+                            <div className="text-sm font-semibold text-green-700">
+                              Subtotal: {formatMoney(item.quantity * item.price)}
                             </div>
                           </div>
                           <div className="flex items-center gap-2">
@@ -2789,6 +2909,115 @@ export function ReturnsModule({
                           </div>
                         </div>
                       ))}
+                    </div>
+                  )}
+
+                  {exchangeItems.length > 0 && (
+                    <div className="space-y-4 rounded-lg border border-stone-200 bg-white p-4">
+                      <div>
+                        <p className="text-sm font-semibold text-stone-900">Exchange amounts</p>
+                        <p className="text-xs text-stone-500 mt-0.5">
+                          Old dress = credit. New dresses = what customer pays (minus credit).
+                        </p>
+                      </div>
+
+                      <div className="rounded-lg border border-emerald-200 bg-emerald-50/80 px-3 py-3">
+                        <div className="flex flex-wrap items-start justify-between gap-2">
+                          <div>
+                            <p className="text-xs font-medium text-emerald-900">
+                              1. Credit for old dress (returned item)
+                            </p>
+                            <p className="text-xl font-bold tabular-nums text-emerald-800 mt-0.5">
+                              {formatMoney(
+                                adjustReturnCredit ? effectiveReturnCredit : returnRefundTotal,
+                              )}
+                            </p>
+                            {!adjustReturnCredit && (
+                              <p className="text-xs text-emerald-800/90 mt-1">
+                                Auto: same amount customer paid on the original bill.
+                              </p>
+                            )}
+                          </div>
+                          {!adjustReturnCredit ? (
+                            <Button
+                              type="button"
+                              variant="outline"
+                              size="sm"
+                              className="shrink-0 border-emerald-300 bg-white text-emerald-900 hover:bg-emerald-100"
+                              onClick={() => {
+                                setAdjustReturnCredit(true)
+                                setCustomReturnCreditInput(String(returnRefundTotal))
+                              }}
+                            >
+                              Change credit
+                            </Button>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="shrink-0 text-emerald-900"
+                              onClick={() => {
+                                setAdjustReturnCredit(false)
+                                setCustomReturnCreditInput("")
+                              }}
+                            >
+                              Use auto ({formatMoney(returnRefundTotal)})
+                            </Button>
+                          )}
+                        </div>
+                        {adjustReturnCredit && (
+                          <div className="mt-3 space-y-1.5 border-t border-emerald-200/80 pt-3">
+                            <Label htmlFor="custom-return-credit" className="text-xs text-emerald-900">
+                              Credit amount (Rs)
+                            </Label>
+                            <Input
+                              id="custom-return-credit"
+                              type="number"
+                              inputMode="decimal"
+                              min={0}
+                              max={returnRefundGross}
+                              step="1"
+                              className="bg-white"
+                              value={customReturnCreditInput}
+                              onChange={(e) => setCustomReturnCreditInput(e.target.value)}
+                            />
+                            <p className="text-xs text-emerald-800/80">
+                              Maximum {formatMoney(returnRefundGross)} (full tag price of returned
+                              dress). Usually use {formatMoney(returnRefundTotal)} (what they paid).
+                            </p>
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-3 space-y-2">
+                        <p className="text-xs font-medium text-stone-800">
+                          2. Extra discount on all new dresses — optional
+                        </p>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Label htmlFor="exchange-order-discount" className="sr-only">
+                            Extra discount on new dresses
+                          </Label>
+                          <Input
+                            id="exchange-order-discount"
+                            type="number"
+                            inputMode="decimal"
+                            min={0}
+                            max={exchangeSubtotal}
+                            step="1"
+                            placeholder="0"
+                            className="max-w-[140px] bg-white"
+                            value={exchangeOrderDiscountInput}
+                            onChange={(e) => setExchangeOrderDiscountInput(e.target.value)}
+                          />
+                          <span className="text-sm text-stone-600">Rs off total</span>
+                        </div>
+                        <p className="text-xs text-stone-600">
+                          New dresses total (before this): {formatMoney(exchangeSubtotal)}. Set
+                          per-dress discount on each item above if needed; use this only for one
+                          discount on the whole bill.
+                        </p>
+                      </div>
                     </div>
                   )}
 
@@ -3071,15 +3300,21 @@ export function ReturnsModule({
             </Card>
           )}
 
-          {moduleTab === "returns" &&
+          {(moduleTab === "returns" || moduleTab === "exchanges") &&
             normalizeSaleSearchTerm(searchTerm) &&
-            refundHistory.length === 0 &&
+            activeHistory.length === 0 &&
             pageSearchMatchingSales.length > 0 && (
               <Alert className="border-green-200 bg-green-50 text-green-950">
                 <CheckCircle className="h-4 w-4 text-green-700" />
-                <AlertTitle>Matching sales ready for return</AlertTitle>
+                <AlertTitle>
+                  {moduleTab === "exchanges"
+                    ? "Matching sales ready for exchange"
+                    : "Matching sales ready for return"}
+                </AlertTitle>
                 <AlertDescription>
-                  These sales have not been returned yet. You can start the return flow directly from here.
+                  {moduleTab === "exchanges"
+                    ? "These sales can be exchanged. Start the exchange flow directly from here."
+                    : "These sales have not been returned yet. You can start the return flow directly from here."}
                 </AlertDescription>
                 <div className="mt-4 space-y-3">
                   {pageSearchMatchingSales.map((sale) => (
@@ -3091,7 +3326,7 @@ export function ReturnsModule({
                         <div className="flex flex-wrap items-center gap-2">
                           <span className="font-semibold">{sale.sale_number}</span>
                           <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
-                            READY FOR RETURN
+                            {moduleTab === "exchanges" ? "READY FOR EXCHANGE" : "READY FOR RETURN"}
                           </Badge>
                         </div>
                         <div className="text-sm text-gray-600 truncate">
@@ -3102,8 +3337,15 @@ export function ReturnsModule({
                           {Math.abs(Number(sale.total_amount)).toLocaleString()}
                         </div>
                       </div>
-                      <Button className="w-full md:w-auto shrink-0" onClick={() => handleStartReturnForSale(sale.id)}>
-                        Process Return
+                      <Button
+                        className="w-full md:w-auto shrink-0"
+                        onClick={() =>
+                          moduleTab === "exchanges"
+                            ? handleStartExchangeForSale(sale.id)
+                            : handleStartReturnForSale(sale.id)
+                        }
+                      >
+                        {moduleTab === "exchanges" ? "Process Exchange" : "Process Return"}
                       </Button>
                     </div>
                   ))}
@@ -3111,9 +3353,9 @@ export function ReturnsModule({
               </Alert>
             )}
 
-          {moduleTab === "returns" &&
+          {(moduleTab === "returns" || moduleTab === "exchanges") &&
             normalizeSaleSearchTerm(searchTerm) &&
-            refundHistory.length === 0 &&
+            activeHistory.length === 0 &&
             pageSearchMatchingSales.length === 0 &&
             pageSearchIneligibleSaleMatch && (
               <Alert className="border-amber-200 bg-amber-50 text-amber-950">
@@ -3140,9 +3382,12 @@ export function ReturnsModule({
                 {renderReturnsTable(activeHistory, {
                   emptyMessage:
                     moduleTab === "exchanges"
-                      ? activeFilterCount > 0
-                        ? "No exchange history matches your filters."
-                        : "No exchanges found"
+                      ? normalizeSaleSearchTerm(searchTerm) &&
+                        pageSearchMatchingSales.length > 0
+                        ? "No exchange history found for this search. Matching sales are shown above."
+                        : activeFilterCount > 0
+                          ? "No exchange history matches your filters."
+                          : "No exchanges found"
                       : activeFilterCount > 0
                         ? normalizeSaleSearchTerm(searchTerm) &&
                           pageSearchMatchingSales.length > 0

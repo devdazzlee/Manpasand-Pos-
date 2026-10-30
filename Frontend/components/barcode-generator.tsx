@@ -35,17 +35,66 @@ import {
   ChevronUp,
   Download,
   FileSpreadsheet,
+  AlertTriangle,
+  Boxes,
+  Check,
+  CheckSquare,
+  Eye,
+  ListChecks,
+  Minus,
+  MinusSquare,
+  MoreHorizontal,
+  Package,
+  Plus,
+  Ruler,
+  ScanLine,
+  Settings2,
+  SlidersHorizontal,
+  Tags,
+  Upload,
+  Wand2,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 import JsBarcode from "jsbarcode";
 import { PageLoader } from "./ui/page-loader";
-import { useProducts } from "@/hooks/queries/use-products";
+import { useAllPosProducts } from "@/hooks/queries/use-products";
+import { useQueryClient } from "@tanstack/react-query";
+import apiClient from "@/lib/apiClient";
+import { qk } from "@/lib/query/query-keys";
 import { useToast } from "@/hooks/use-toast";
 import { toast as sonnerToast } from "sonner";
 import { extractApiError } from "@/lib/api/errors";
-import { isKioskMode, silentPrint, enableKioskMode } from "@/utils/kiosk-printing";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
-import { encodeLabelBarcodeValue } from "@/lib/labelBarcode";
+import {
+  type LabelBarcodeMode,
+  previewAutoBarcodeValue,
+  customBarcodeInputSeed,
+  initialBarcodeModeForProduct,
+  resolveLabelBarcodeValue,
+  sanitizeManualBarcodeValue,
+  initialManualBarcodeForProduct,
+  formatBarcodeLabelTitle,
+} from "@/lib/labelBarcode";
+import {
+  checkPrintServer,
+  deriveLabelLanguageHint,
+  printBarcodeLabelsViaServer,
+  type BarcodeLabelItem,
+} from "@/lib/print-server";
+import {
+  CatalogFilterBar,
+  EMPTY_CATALOG_FILTERS,
+  hasCatalogFilters,
+  type CatalogFilters,
+} from "@/components/catalog-filter-bar";
 
 interface Product {
   id: string;
@@ -53,10 +102,16 @@ interface Product {
   name: string;
   sku?: string;
   barcode?: string;
+  label_barcode?: string;
+  custom_code?: string;
   sales_rate_exc_dis_and_tax?: number;
   unitName?: string;
   unitId?: string;
   category?: string;
+  categoryId?: string;
+  subcategoryId?: string;
+  supplierId?: string;
+  stitch_type?: "STITCHED" | "UNSTITCHED" | null;
   brandName?: string;
   weight?: string;
   mfgDate?: string;
@@ -74,9 +129,62 @@ interface SelectedProductItem {
   expiryDuration: string;
   expiryDate?: Date;
   copies: number;
+  /** Per-product: auto, saved barcode, or typed custom */
+  barcodeMode?: LabelBarcodeMode;
+  /** Used when barcode mode is manual */
+  customBarcode?: string;
 }
 
 const TABLE_PAGE_SIZE = 20;
+
+/** Physical label stock. `w`/`h` drive the generated PDF; `css` the @page size. */
+const LABEL_SIZES: Record<string, { label: string; w: number; h: number; css: string }> = {
+  "50x25mm": {
+    label: "50 × 25 mm (2 × 1 in, 3 mm gap)",
+    w: 50,
+    h: 25,
+    css: "50mm 25mm",
+  },
+  "58x40mm": { label: "58 × 40 mm", w: 58, h: 40, css: "58mm 40mm" },
+  "50x30mm": { label: "50 × 30 mm", w: 50, h: 30, css: "50mm 30mm" },
+  "60x40mm": { label: "60 × 40 mm", w: 60, h: 40, css: "60mm 40mm" },
+  "40x25mm": { label: "40 × 25 mm (small)", w: 40, h: 25, css: "40mm 25mm" },
+  "3x2inch": { label: "3 × 2 in (Zebra)", w: 76.2, h: 50.8, css: "3in 2in" },
+  "76x51mm": { label: "76 × 51 mm", w: 76, h: 51, css: "76mm 51mm" },
+};
+/** Must match physical roll (LP 2844: 50×25 mm, 3 mm gap). */
+const DEFAULT_LABEL_SIZE = "50x25mm";
+const SETTINGS_KEY = "barcode-generator-settings";
+
+function BarcodeSourceToggle({
+  value,
+  onChange,
+  compact,
+}: {
+  value: LabelBarcodeMode;
+  onChange: (mode: LabelBarcodeMode) => void;
+  /** Smaller buttons for each queue row */
+  compact?: boolean;
+}) {
+  const mk = (mode: LabelBarcodeMode, label: string, short: string) => (
+    <Button
+      key={mode}
+      type="button"
+      size="sm"
+      variant={value === mode ? "default" : "outline"}
+      className={compact ? "h-7 px-2 text-[10px]" : "h-8"}
+      onClick={() => onChange(mode)}
+    >
+      {compact ? short : label}
+    </Button>
+  );
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {mk("auto", "Auto (system)", "Auto")}
+      {mk("manual", "Custom (your code)", "Custom")}
+    </div>
+  );
+}
 
 export default function BarcodeGenerator() {
   const [selectedProducts, setSelectedProducts] = useState<
@@ -92,38 +200,88 @@ export default function BarcodeGenerator() {
   const productSearchInputRef = useRef<HTMLInputElement | null>(null);
   // Global printer settings (configured in Printer Settings page)
   const { barcodePrinter, printers: globalPrinters } = usePrinterSettings();
-  const [selectedPaperSize, setSelectedPaperSize] = useState("3x2inch");
+  // 58×40 matches what the PDF always printed before the size picker was wired.
+  const [selectedPaperSize, setSelectedPaperSize] = useState(DEFAULT_LABEL_SIZE);
   const [isPrinting, setIsPrinting] = useState(false);
   const printRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
-  const [kioskMode, setKioskMode] = useState(false);
 
   // Product picker table state
-  const [categoryFilter, setCategoryFilter] = useState("all");
+  // Vendor / category / subcategory (multi-select) + Stitched / Unstitched.
+  const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const [tablePage, setTablePage] = useState(1);
   const [showMoreOptions, setShowMoreOptions] = useState(false);
+  const [inStockOnly, setInStockOnly] = useState(false);
+  const [previewIndex, setPreviewIndex] = useState(0);
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
 
-  // What gets printed on the label — wired into generatePDFAndPrint below.
+  // What gets printed on the label.
   const [includeProductName, setIncludeProductName] = useState(true);
   const [includePrice, setIncludePrice] = useState(true);
   const [includeSku, setIncludeSku] = useState(false);
+  const [saveCustomBarcodeToProduct, setSaveCustomBarcodeToProduct] = useState(true);
+  const queryClient = useQueryClient();
 
   // Bulk Upload tab
   const [bulkParsing, setBulkParsing] = useState(false);
   const bulkFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Detect kiosk mode on mount
-  useEffect(() => {
-    const kiosk = isKioskMode();
-    setKioskMode(kiosk);
-    if (kiosk) {
-      enableKioskMode();
-    }
-  }, []);
-
   useEffect(() => {
     productSearchInputRef.current?.focus();
   }, []);
+
+  // Remember label settings between visits (per browser).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(SETTINGS_KEY);
+      if (raw) {
+        const saved = JSON.parse(raw);
+        if (saved.paperSize === "58x40mm") {
+          setSelectedPaperSize("50x25mm");
+        } else if (saved.paperSize && LABEL_SIZES[saved.paperSize]) {
+          setSelectedPaperSize(saved.paperSize);
+        }
+        if (typeof saved.includeProductName === "boolean") setIncludeProductName(saved.includeProductName);
+        if (typeof saved.includePrice === "boolean") setIncludePrice(saved.includePrice);
+        if (typeof saved.includeSku === "boolean") setIncludeSku(saved.includeSku);
+        if (typeof saved.expiry === "string") setGlobalExpiryDuration(saved.expiry);
+        if (typeof saved.netWeight === "string") setGlobalNetWeight(saved.netWeight);
+        if (typeof saved.copies === "string") setGlobalCopies(saved.copies);
+      }
+    } catch {
+      // ignore unreadable settings
+    }
+    setSettingsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!settingsLoaded) return;
+    try {
+      localStorage.setItem(
+        SETTINGS_KEY,
+        JSON.stringify({
+          paperSize: selectedPaperSize,
+          includeProductName,
+          includePrice,
+          includeSku,
+          expiry: globalExpiryDuration,
+          netWeight: globalNetWeight,
+          copies: globalCopies,
+        }),
+      );
+    } catch {
+      // storage unavailable — settings just won't persist
+    }
+  }, [
+    settingsLoaded,
+    selectedPaperSize,
+    includeProductName,
+    includePrice,
+    includeSku,
+    globalExpiryDuration,
+    globalNetWeight,
+    globalCopies,
+  ]);
 
   const expiryOptions = [
     { value: "3", label: "3 Months" },
@@ -134,18 +292,7 @@ export default function BarcodeGenerator() {
     { value: "36", label: "36 Months" },
   ];
 
-  const paperSizes = [
-    { value: "50x30mm", label: "50 × 30 mm" },
-    { value: "60x40mm", label: "60 × 40 mm" },
-    { value: "40x25mm", label: "40 × 25 mm" },
-    { value: "3x2inch", label: "3 × 2 in (Zebra)" },
-    { value: "76x51mm", label: "76 × 51 mm" },
-  ];
-
-  // Direct printing function
-  const printDirectly = () => {
-    window.print();
-  };
+  const paperSizes = Object.entries(LABEL_SIZES).map(([value, size]) => ({ value, label: size.label }));
 
   // Generate proper barcode using JsBarcode
   const generateBarcodeDataURL = (value: string): string => {
@@ -185,19 +332,107 @@ export default function BarcodeGenerator() {
 
   const buildSelectedItem = (
     product: Product,
-    overrides?: Partial<Pick<SelectedProductItem, "netWeight" | "expiryDuration" | "copies">>,
+    overrides?: Partial<
+      Pick<SelectedProductItem, "netWeight" | "expiryDuration" | "copies" | "barcodeMode">
+    >,
   ): SelectedProductItem => {
     const expiryDuration = overrides?.expiryDuration || globalExpiryDuration || "12";
     const packageDate = new Date();
     return {
       id: `${Date.now()}-${product.id}`,
       product,
+      barcodeMode: overrides?.barcodeMode ?? initialBarcodeModeForProduct(product),
       netWeight: overrides?.netWeight || globalNetWeight || "",
       packageDate,
       expiryDuration,
       expiryDate: calculateExpiryDate(packageDate, expiryDuration),
       copies: Math.max(1, overrides?.copies ?? (parseInt(globalCopies, 10) || 1)),
+      customBarcode:
+        initialBarcodeModeForProduct(product) === "manual"
+          ? initialManualBarcodeForProduct({
+              label_barcode: product.label_barcode,
+              custom_code: product.custom_code,
+            })
+          : "",
     };
+  };
+
+  const itemBarcodeMode = (sp: SelectedProductItem): LabelBarcodeMode => {
+    const m = sp.barcodeMode as string | undefined;
+    if (m === "manual" || m === "auto") return m;
+    // Legacy queue rows may still have "existing" — treat as Custom.
+    if (m === "existing") return "manual";
+    return "auto";
+  };
+
+  const applyBarcodeModeToItem = (
+    item: SelectedProductItem,
+    mode: LabelBarcodeMode,
+  ): SelectedProductItem => {
+    const next = { ...item, barcodeMode: mode };
+    if (mode === "manual" && !sanitizeManualBarcodeValue(item.customBarcode || "")) {
+      next.customBarcode = customBarcodeInputSeed(
+        item.product,
+        Math.round(Number(item.product.sales_rate_exc_dis_and_tax) || 0),
+      );
+    }
+    return next;
+  };
+
+  const setItemBarcodeMode = (itemId: string, mode: LabelBarcodeMode) => {
+    setSelectedProducts((prev) =>
+      prev.map((item) =>
+        item.id === itemId ? applyBarcodeModeToItem(item, mode) : item,
+      ),
+    );
+  };
+
+  const applySavedLabelBarcodes = (byProduct: Map<string, string>) => {
+    if (byProduct.size === 0) return;
+    setSelectedProducts((prev) =>
+      prev.map((item) => {
+        const code = byProduct.get(item.product.id);
+        if (!code) return item;
+        return {
+          ...item,
+          product: { ...item.product, label_barcode: code, barcode: code },
+        };
+      }),
+    );
+    void queryClient.invalidateQueries({ queryKey: qk.products.posCatalog });
+  };
+
+  const labelBarcodeLastSavedRef = useRef<Map<string, string>>(new Map());
+
+  const persistLabelBarcodeToProduct = async (
+    productId: string,
+    raw: string,
+  ): Promise<boolean> => {
+    const code = sanitizeManualBarcodeValue(raw);
+    if (!code) return true;
+    if (labelBarcodeLastSavedRef.current.get(productId) === code) return true;
+    try {
+      await apiClient.patch(`/products/${productId}`, { label_barcode: code });
+      labelBarcodeLastSavedRef.current.set(productId, code);
+      applySavedLabelBarcodes(new Map([[productId, code]]));
+      return true;
+    } catch (err: unknown) {
+      const apiErr = err as { response?: { status?: number }; code?: string };
+      const noResponse =
+        !apiErr.response &&
+        (apiErr.code === "ERR_NETWORK" || apiErr.code === "ECONNABORTED");
+      toast({
+        variant: "destructive",
+        title: "Could not save barcode",
+        description: noResponse
+          ? "Backend is not reachable at localhost:5000. Run yarn dev in Backend and ensure the database tunnel is connected."
+          : extractApiError(
+              err,
+              "Code may already be used on another product.",
+            ),
+      });
+      return false;
+    }
   };
 
   const withPrintDefaults = (item: SelectedProductItem): SelectedProductItem => {
@@ -213,7 +448,7 @@ export default function BarcodeGenerator() {
   };
 
   useEffect(() => {
-    const delay = searchTerm.trim().length >= 2 ? 250 : 0;
+    const delay = searchTerm.trim() ? 150 : 0;
     const t = window.setTimeout(
       () => setDebouncedSearch(searchTerm.trim()),
       delay,
@@ -226,12 +461,9 @@ export default function BarcodeGenerator() {
     isFirstLoad,
     isRefreshing,
     error: listError,
-  } = useProducts({
-    search: debouncedSearch.length >= 2 ? debouncedSearch : undefined,
-    isActive: true,
-    page: 1,
-    limit: 20,
-  });
+  } = useAllPosProducts();
+  // Whole cached catalog, filtered in memory — previously only the first 20
+  // products were fetched, so search, categories and bulk upload missed items.
   const products = rawProducts as unknown as Product[];
 
   useEffect(() => {
@@ -428,32 +660,43 @@ export default function BarcodeGenerator() {
     }
   };
 
-  // Every non-empty category currently in the catalog, for the table filter.
-  const categoryOptions = useMemo(() => {
-    const set = new Set<string>();
-    products.forEach((p) => {
-      if (p.is_active !== false && p.category) set.add(p.category);
-    });
-    return Array.from(set).sort((a, b) => a.localeCompare(b));
-  }, [products]);
-
   const filteredProducts = useMemo(() => {
     // Inactive products are kept out of the barcode generator — there's no
     // point printing barcodes for items that can't be sold.
     let list = products.filter((p) => p.is_active !== false);
 
-    if (categoryFilter !== "all") {
-      list = list.filter((p) => p.category === categoryFilter);
+    if (hasCatalogFilters(catalog)) {
+      const { categoryIds, subcategoryIds, supplierIds, stitchType } = catalog;
+      list = list.filter(
+        (p) =>
+          (!categoryIds.length || categoryIds.includes(p.categoryId || "")) &&
+          (!subcategoryIds.length || subcategoryIds.includes(p.subcategoryId || "")) &&
+          (!supplierIds.length || supplierIds.includes(p.supplierId || "")) &&
+          (stitchType === "all" || p.stitch_type === stitchType),
+      );
+    }
+
+    if (inStockOnly) {
+      list = list.filter((p) => (p.current_stock ?? p.stock ?? 0) > 0);
+    }
+
+    const term = debouncedSearch.toLowerCase();
+    if (term) {
+      list = list.filter((p) =>
+        [p.name, p.sku, p.code, p.barcode, p.category, p.brandName].some((value) =>
+          (value || "").toLowerCase().includes(term),
+        ),
+      );
     }
 
     return list;
-  }, [products, categoryFilter]);
+  }, [products, catalog, inStockOnly, debouncedSearch]);
 
   // Reset to page 1 whenever the visible set changes, so the user never
   // lands on a page that no longer exists after filtering.
   useEffect(() => {
     setTablePage(1);
-  }, [searchTerm, categoryFilter]);
+  }, [searchTerm, catalog, inStockOnly]);
 
   const totalTablePages = Math.max(1, Math.ceil(filteredProducts.length / TABLE_PAGE_SIZE));
   const pagedProducts = useMemo(
@@ -558,6 +801,7 @@ export default function BarcodeGenerator() {
     const exact =
       products.find((p) => (p.sku || "").toLowerCase() === lower) ||
       products.find((p) => (p.code || "").toLowerCase() === lower) ||
+      products.find((p) => (p.barcode || "").toLowerCase() === lower) ||
       products.find((p) => p.name.toLowerCase() === lower);
     const match = exact || (filteredProducts.length === 1 ? filteredProducts[0] : null);
     if (!match) return;
@@ -703,6 +947,73 @@ export default function BarcodeGenerator() {
   // Printer detection is now handled globally in Printer Settings page
 
 
+  const labelPriceForItem = (sp: SelectedProductItem) =>
+    Math.round(
+      Number(
+        calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax),
+      ),
+    );
+
+  const labelBarcodeForItem = (sp: SelectedProductItem) =>
+    resolveLabelBarcodeValue({
+      mode: itemBarcodeMode(sp),
+      manualValue: sp.customBarcode,
+      sku: sp.product.sku,
+      code: sp.product.code,
+      calculatedPriceInt: labelPriceForItem(sp),
+    });
+
+  /** Save Custom-mode barcodes so New Sale scan/search matches the sticker. */
+  const persistCustomBarcodesForPosScan = async (): Promise<boolean> => {
+    if (!saveCustomBarcodeToProduct) return true;
+    for (const sp of selectedProducts) {
+      if (itemBarcodeMode(sp) !== "manual") continue;
+      const printed = labelBarcodeForItem(withPrintDefaults(sp));
+      if (!printed) continue;
+      const ok = await persistLabelBarcodeToProduct(sp.product.id, printed);
+      if (!ok) return false;
+    }
+    return true;
+  };
+
+  const paperSizeForPrintServer = (key: string) => {
+    const allowed = [
+      "50x25mm",
+      "58x40mm",
+      "50x30mm",
+      "60x40mm",
+      "40x25mm",
+      "3x2inch",
+    ] as const;
+    if ((allowed as readonly string[]).includes(key)) {
+      return key as (typeof allowed)[number];
+    }
+    return "50x25mm" as const;
+  };
+
+  const buildBarcodeLabelItems = (): BarcodeLabelItem[] => {
+    return selectedProducts
+      .map(withPrintDefaults)
+      .flatMap((sp) => {
+        const n = Math.max(1, sp.copies || 1);
+        const price = labelPriceForItem(sp);
+        const barcodeValue = labelBarcodeForItem(sp);
+        const netWeight = sp.netWeight
+          ? formatWeightDisplay(sp.netWeight)
+          : undefined;
+        const base: BarcodeLabelItem = {
+          id: sp.id,
+          name: includeProductName ? formatBarcodeLabelTitle(sp.product.name) : "",
+          barcode: barcodeValue,
+          netWeight: netWeight || undefined,
+          price: includePrice ? price : undefined,
+          packageDateISO: sp.packageDate?.toISOString(),
+          expiryDateISO: sp.expiryDate?.toISOString(),
+        };
+        return Array.from({ length: n }, () => ({ ...base }));
+      });
+  };
+
   const handlePrintAll = async () => {
     if (selectedProducts.length === 0) {
       toast({
@@ -713,511 +1024,84 @@ export default function BarcodeGenerator() {
       return;
     }
 
-    setIsPrinting(true);
-    
-    try {
-      // Generate PDF in frontend and open browser print dialog (like boxhero.io)
-      await generatePDFAndPrint();
+    const queueSnapshot = selectedProducts.map(withPrintDefaults);
+    const missingCustom = queueSnapshot.filter(
+      (sp) =>
+        itemBarcodeMode(sp) === "manual" &&
+        !sanitizeManualBarcodeValue(sp.customBarcode || ""),
+    );
+    if (missingCustom.length > 0) {
       toast({
-        title: "Print Dialog Opened",
-        description: "Select your printer from the print dialog",
+        variant: "destructive",
+        title: "Custom barcode required",
+        description: `${missingCustom.length} item(s) use Custom but have no code entered.`,
+      });
+      return;
+    }
+    const itemsAtPrint = buildBarcodeLabelItems();
+
+    setIsPrinting(true);
+
+    try {
+      const savedForPos = await persistCustomBarcodesForPosScan();
+      if (!savedForPos) return;
+
+      if (!barcodePrinter) {
+        throw new Error("No barcode printer set. Open Printer Settings and choose your label printer.");
+      }
+
+      const printerObj = globalPrinters.find((p) => p.name === barcodePrinter);
+      const languageHint = deriveLabelLanguageHint(
+        barcodePrinter,
+        printerObj?.languageHint,
+      );
+      const serverUp = await checkPrintServer();
+      if (!serverUp) {
+        throw new Error("Print server is offline. Start the Print Server on this PC (localhost:3001), then try again.");
+      }
+
+      if (languageHint !== "epl" && languageHint !== "zpl") {
+        throw new Error(
+          `"${barcodePrinter}" is not a label printer (EPL/ZPL). Select Zebra UPS 2844 (or another label printer) in Printer Settings.`,
+        );
+      }
+
+      const result = await printBarcodeLabelsViaServer({
+        printerName: barcodePrinter,
+        items: itemsAtPrint,
+        paperSize: paperSizeForPrintServer(selectedPaperSize),
+        copies: 1,
+        dpi: (printerObj?.labelProfile?.dpi as 203 | 300) ?? 203,
+        labelGapMM: 3,
+        humanReadable: true,
+        printMode: "raw",
+        languageHint,
+      });
+      if (!result.success) {
+        throw new Error(result.error || "Label print failed");
+      }
+      if (result.mode === "pdf") {
+        throw new Error("Print server returned PDF instead of raw labels. Check that the Print Server supports this printer.");
+      }
+
+      toast({
+        title: "Labels sent to printer",
+        description:
+          result.message ||
+          (languageHint === "epl"
+            ? "Eltron LP 2844 (EPL, 50×25 mm)"
+            : `Printer: ${barcodePrinter}`),
       });
     } catch (error: any) {
-      console.error('Printing error:', error);
+      console.error("Printing error:", error);
       toast({
         variant: "destructive",
         title: "Print Error",
-        description: error.message || "Failed to generate PDF. Please install jspdf: npm install jspdf",
+        description: error.message || "Failed to print labels via print server",
       });
     } finally {
       setIsPrinting(false);
     }
-  };
-
-  // Generate PDF in frontend and open for browser print (like boxhero.io)
-  const generatePDFAndPrint = async () => {
-    // Dynamic import of jsPDF (install: npm install jspdf)
-    const { jsPDF } = await import('jspdf');
-    
-    // Paper size: 58mm x 40mm (landscape/horizontal) - same as boxhero.io
-    const labelWidth = 58; // mm
-    const labelHeight = 40; // mm
-    
-    // Convert mm to points (1mm = 2.83464567 points)
-    const mmToPt = (mm: number) => mm * 2.83464567;
-    const widthPt = mmToPt(labelWidth);
-    const heightPt = mmToPt(labelHeight);
-    
-    // Margins (1.5mm on all sides like boxhero.io)
-    const margin = 1.5;
-    const marginPt = mmToPt(margin);
-    const contentWidth = widthPt - (marginPt * 2);
-    const contentHeight = heightPt - (marginPt * 2);
-    
-    // Create PDF document (landscape: width > height)
-    const doc = new jsPDF({
-      orientation: 'landscape',
-      unit: 'pt',
-      format: [widthPt, heightPt]
-    });
-    
-    // Set default text color to pure black for darker text
-    doc.setTextColor(0, 0, 0);
-    
-    // Font sizes - larger and darker for better visibility
-    const titleFontSize = 10; // pt - larger for better visibility
-    const labelFontSize = 8; // pt - bold labels (NET WT, PKG, EXP) - larger
-    const valueFontSize = 8; // pt - bold values - larger
-    const priceFontSize = 9; // pt - price in bold - larger
-    
-    // Expand each product into N labels based on its copies count, so a
-    // single click prints continuous strips from the thermal printer.
-    const labelsToRender: SelectedProductItem[] = selectedProducts
-      .map(withPrintDefaults)
-      .flatMap((sp) => {
-        const n = Math.max(1, sp.copies || 1);
-        return Array.from({ length: n }, () => sp);
-      });
-
-    // Process each label
-    for (let labelIdx = 0; labelIdx < labelsToRender.length; labelIdx++) {
-      const sp = labelsToRender[labelIdx];
-      // Add new page for each label after the first
-      if (labelIdx > 0) {
-        doc.addPage([widthPt, heightPt], 'landscape');
-      }
-      
-      // Start lower from top - use more of the label space
-      let y = marginPt + mmToPt(3); // Start 3mm from top margin (pushed down)
-      const leftMargin = marginPt;
-      
-      // Title (Product Name) - centered, bold, larger, dark
-      if (includeProductName) {
-        const title = (sp.product.name || '').toUpperCase().trim();
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(titleFontSize);
-        doc.setTextColor(0, 0, 0); // Pure black for darker text
-
-        // Calculate text width and wrap if needed (max 2 lines)
-        const titleLines = doc.splitTextToSize(title, contentWidth * 0.95);
-        const titleHeight = Math.min(titleLines.length, 2) * titleFontSize * 1.4;
-
-        // Center the title
-        titleLines.slice(0, 2).forEach((line: string, index: number) => {
-          const lineWidth = doc.getTextWidth(line);
-          const lineX = leftMargin + (contentWidth - lineWidth) / 2;
-          doc.text(line, lineX, y + titleFontSize + (index * titleFontSize * 1.4));
-        });
-
-        y += titleHeight + mmToPt(0.8); // More spacing
-      }
-
-      // SKU line (optional) - small, left-aligned
-      if (includeSku) {
-        const skuText = `SKU: ${sp.product.sku || sp.product.code || '-'}`;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(labelFontSize);
-        doc.setTextColor(0, 0, 0);
-        doc.text(skuText, leftMargin, y + labelFontSize);
-        y += labelFontSize * 1.5 + mmToPt(0.3);
-      }
-
-      // Meta row (Weight & Price) - ALL BOLD AND DARK
-      const netWeightValue = sp.netWeight ? formatWeightDisplay(sp.netWeight) : '';
-      const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
-      const priceText = `RS ${price}`;
-
-      if (netWeightValue || includePrice) {
-        if (netWeightValue) {
-          // NET WT - ALL BOLD
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(labelFontSize);
-          doc.setTextColor(0, 0, 0); // Pure black
-          doc.text('NET WT:', leftMargin, y + labelFontSize);
-
-          // Weight value - ALSO BOLD
-          const labelWidth = doc.getTextWidth('NET WT: ');
-          doc.setFont('helvetica', 'bold'); // Changed to bold
-          doc.setFontSize(valueFontSize);
-          doc.setTextColor(0, 0, 0);
-          doc.text(netWeightValue, leftMargin + labelWidth, y + labelFontSize);
-        }
-
-        // Price on the right side in bold
-        if (includePrice) {
-          doc.setFont('helvetica', 'bold');
-          doc.setFontSize(priceFontSize);
-          doc.setTextColor(0, 0, 0);
-          const priceWidth = doc.getTextWidth(priceText);
-          doc.text(priceText, leftMargin + contentWidth - priceWidth, y + priceFontSize);
-        }
-
-        y += labelFontSize * 1.5 + mmToPt(0.5); // More spacing
-      }
-
-      // Dates row (PKG & EXP) - ALL BOLD AND DARK
-      const pkgDate = formatDate(sp.packageDate);
-      const expDate = formatDate(sp.expiryDate);
-      
-      // PKG label and value - ALL BOLD
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(labelFontSize);
-      doc.setTextColor(0, 0, 0);
-      doc.text('PKG:', leftMargin, y + labelFontSize);
-      const pkgLabelWidth = doc.getTextWidth('PKG: ');
-      doc.setFont('helvetica', 'bold'); // Changed to bold
-      doc.setFontSize(valueFontSize);
-      doc.setTextColor(0, 0, 0);
-      doc.text(pkgDate, leftMargin + pkgLabelWidth, y + labelFontSize);
-      
-      // EXP label and value - ALL BOLD (right side)
-      const expLabel = 'EXP:';
-      const expFullText = `${expLabel} ${expDate}`;
-      doc.setFont('helvetica', 'bold');
-      doc.setFontSize(labelFontSize);
-      doc.setTextColor(0, 0, 0);
-      const expLabelWidth = doc.getTextWidth(expLabel);
-      const expFullWidth = doc.getTextWidth(expFullText);
-      const expX = leftMargin + contentWidth - expFullWidth;
-      doc.text(expLabel, expX, y + labelFontSize);
-      doc.setFont('helvetica', 'bold'); // Changed to bold
-      doc.setFontSize(valueFontSize);
-      doc.setTextColor(0, 0, 0);
-      doc.text(expDate, expX + expLabelWidth, y + labelFontSize);
-      
-      y += labelFontSize * 1.5 + mmToPt(0.3); // Less spacing - barcode will be positioned at bottom
-      
-      // Barcode: 9-digit numeric SKU only; legacy products use SANITIZED-PRICE until SKU is migrated
-      const barcodeValue = encodeLabelBarcodeValue(
-        sp.product.sku,
-        sp.product.code,
-        price
-      );
-      
-      try {
-        // Generate barcode - LARGER width and height, VERY DARK, with LARGER number
-        const canvas = document.createElement('canvas');
-        
-        // Much higher resolution for better quality and darker rendering
-        const barcodeHeightPx = 120; // Increased from 100 for larger barcode
-        canvas.height = barcodeHeightPx;
-        canvas.width = 600; // Wider canvas for better quality
-        
-        // Set canvas context for VERY DARK rendering
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#000000'; // Pure black
-          ctx.strokeStyle = '#000000'; // Pure black
-          ctx.lineWidth = 2; // Thicker lines for darker appearance
-        }
-        
-        // Generate barcode with VERY DARK bars - NO number in image (we'll add large text separately)
-        JsBarcode(canvas, barcodeValue, {
-          format: "CODE128",
-          width: 4.5, // MUCH wider bars for VERY DARK appearance
-          height: barcodeHeightPx,
-          displayValue: false, // NO number in barcode image - we'll add large text separately below
-          margin: 10, // Quiet zones for better scanning
-          background: "#FFFFFF",
-          lineColor: "#000000" // Pure black - VERY DARK
-        });
-        
-        // Ensure barcode is rendered VERY DARK
-        if (ctx) {
-          ctx.globalCompositeOperation = 'source-over';
-          // Enhance contrast for darker appearance
-          const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-          const data = imageData.data;
-          for (let i = 0; i < data.length; i += 4) {
-            // Make black pixels even darker (ensure pure black)
-            if (data[i] < 128) { // If it's dark
-              data[i] = 0;     // R
-              data[i + 1] = 0; // G
-              data[i + 2] = 0; // B
-            }
-          }
-          ctx.putImageData(imageData, 0, 0);
-        }
-        
-        const barcodeDataURL = canvas.toDataURL('image/png', 1.0);
-
-        // Position the barcode *below the dates row* — the old code anchored
-        // it from the bottom of the label, which caused it to overlap the
-        // PKG/EXP text when the title wrapped or fonts grew.
-        const barcodeTopGap = mmToPt(1.5); // gap between dates row and barcode
-        const barcodeStartY = y + barcodeTopGap;
-
-        // Reserve room for the barcode number text below the bars.
-        const textFontSize = 9;
-        const textTopGap = mmToPt(1.5);
-        const reservedTextSpace = textFontSize + textTopGap + mmToPt(0.5);
-
-        // Vertical room actually available between the dates row and the
-        // bottom margin, minus the text below the barcode.
-        const availableHeight =
-          heightPt - marginPt - barcodeStartY - reservedTextSpace;
-
-        // Cap width at 90% of content width.
-        const targetBarcodeWidthPt = contentWidth * 0.9;
-
-        const barcodeAspectRatio = canvas.width / canvas.height;
-
-        // Start from the width target and derive height; if that overflows the
-        // available vertical space, shrink to fit instead.
-        let finalBarcodeWidthPt = targetBarcodeWidthPt;
-        let finalBarcodeHeightPt = finalBarcodeWidthPt / barcodeAspectRatio;
-        if (finalBarcodeHeightPt > availableHeight) {
-          finalBarcodeHeightPt = Math.max(availableHeight, mmToPt(6));
-          finalBarcodeWidthPt = finalBarcodeHeightPt * barcodeAspectRatio;
-          if (finalBarcodeWidthPt > targetBarcodeWidthPt) {
-            finalBarcodeWidthPt = targetBarcodeWidthPt;
-            finalBarcodeHeightPt = finalBarcodeWidthPt / barcodeAspectRatio;
-          }
-        }
-
-        const barcodeX = leftMargin + (contentWidth - finalBarcodeWidthPt) / 2;
-        const barcodeY = barcodeStartY;
-
-        doc.addImage(
-          barcodeDataURL,
-          'PNG',
-          barcodeX,
-          barcodeY,
-          finalBarcodeWidthPt,
-          finalBarcodeHeightPt,
-        );
-
-        // Barcode number — centered under the bars, clear gap, doesn't run
-        // past the bottom margin.
-        const barcodeTextY = barcodeY + finalBarcodeHeightPt + textTopGap + textFontSize;
-        doc.setFont('helvetica', 'bold');
-        doc.setFontSize(textFontSize);
-        doc.setTextColor(0, 0, 0);
-        const barcodeTextWidth = doc.getTextWidth(barcodeValue);
-        const barcodeTextX = leftMargin + (contentWidth - barcodeTextWidth) / 2;
-        doc.text(barcodeValue, barcodeTextX, barcodeTextY);
-      } catch (err) {
-        console.error('Barcode generation error:', err);
-      }
-    }
-    
-    // Generate PDF blob and open in new window for printing
-    const pdfBlob = doc.output('blob');
-    const pdfUrl = URL.createObjectURL(pdfBlob);
-    
-    // Open PDF in new window and trigger print
-    const printWindow = window.open(pdfUrl, '_blank');
-    if (printWindow) {
-      printWindow.onload = () => {
-        setTimeout(() => {
-          printWindow.print();
-        }, 250);
-      };
-    } else {
-      throw new Error('Could not open print window. Please allow pop-ups.');
-    }
-    
-    // Clean up URL after a delay
-    setTimeout(() => {
-      URL.revokeObjectURL(pdfUrl);
-    }, 10000);
-  };
-
-  // Browser-based printing - optimized for kiosk mode
-  const printWithBrowser = async () => {
-    // In kiosk mode: Create minimal print window that closes automatically
-    if (kioskMode) {
-      const printWindow = window.open('', '_blank', 'width=800,height=600');
-      if (!printWindow) {
-        throw new Error('Could not open print window');
-      }
-      
-      const htmlContent = `
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <title>Print Barcode Labels</title>
-          <style>
-            @media print {
-              @page {
-                size: ${selectedPaperSize === '3x2inch' ? '3in 2in' : selectedPaperSize === '50x30mm' ? '50mm 30mm' : selectedPaperSize === '60x40mm' ? '60mm 40mm' : '76mm 51mm'};
-                margin: 0;
-              }
-              body { margin: 0; padding: 0; }
-              .label { 
-                page-break-inside: avoid;
-                page-break-after: always;
-                padding: 5mm;
-              }
-            }
-            body {
-              font-family: Arial, sans-serif;
-              margin: 0;
-              padding: 10mm;
-            }
-            .label {
-              border: 1px dashed #ddd;
-              padding: 5mm;
-              margin-bottom: 10mm;
-              text-align: center;
-            }
-            .title {
-              font-weight: bold;
-              font-size: 13pt;
-              margin-bottom: 2mm;
-              text-transform: uppercase;
-            }
-            .meta {
-              font-size: 9pt;
-              margin-bottom: 2mm;
-            }
-            .barcode-container {
-              margin: 5mm 0;
-            }
-            .barcode {
-              max-width: 100%;
-              height: auto;
-            }
-            .dates {
-              font-size: 9pt;
-              border-top: 1px solid #ccc;
-              padding-top: 2mm;
-              margin-top: 5mm;
-            }
-          </style>
-        </head>
-        <body>
-          ${selectedProducts.map(withPrintDefaults).map((sp) => {
-            const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
-            const barcodeValue = encodeLabelBarcodeValue(sp.product.sku, sp.product.code, price);
-            const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
-            
-            return `
-              <div class="label">
-                <div class="title">${sp.product.name}</div>
-                <div class="meta">NET WT: ${formatWeightDisplay(sp.netWeight)} | RS ${price}</div>
-                <div class="barcode-container">
-                  <img src="${barcodeDataURL}" alt="Barcode" class="barcode" />
-                </div>
-                <div class="dates">PKG: ${formatDate(sp.packageDate)} | EXP: ${formatDate(sp.expiryDate)}</div>
-              </div>
-            `;
-          }).join('')}
-        </body>
-        <script>
-          window.onload = function() {
-            setTimeout(() => {
-              window.print();
-              // In kiosk mode, close automatically after print
-              setTimeout(() => window.close(), 500);
-            }, 100);
-          };
-        </script>
-        </html>
-      `;
-
-      printWindow.document.write(htmlContent);
-      printWindow.document.close();
-      setIsPrinting(false);
-      return;
-    }
-
-    // Normal mode: Standard print window
-    const printWindow = window.open('', '_blank');
-    if (!printWindow) {
-      throw new Error('Could not open print window');
-    }
-
-    const htmlContent = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <title>Print Barcode Labels</title>
-        <style>
-          @media print {
-            @page {
-              size: ${selectedPaperSize === '3x2inch' ? '3in 2in' : selectedPaperSize === '50x30mm' ? '50mm 30mm' : selectedPaperSize === '60x40mm' ? '60mm 40mm' : '76mm 51mm'};
-              margin: 0;
-            }
-            body { margin: 0; padding: 0; }
-            .label { 
-              page-break-inside: avoid;
-              page-break-after: always;
-              padding: 5mm;
-            }
-          }
-          body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 10mm;
-          }
-          .label {
-            border: 1px dashed #ddd;
-            padding: 5mm;
-            margin-bottom: 10mm;
-            text-align: center;
-          }
-          .title {
-            font-weight: bold;
-            font-size: 13pt;
-            margin-bottom: 2mm;
-            text-transform: uppercase;
-          }
-          .meta {
-            font-size: 9pt;
-            margin-bottom: 2mm;
-          }
-          .barcode-container {
-            margin: 5mm 0;
-          }
-          .barcode {
-            max-width: 100%;
-            height: auto;
-          }
-          .dates {
-            font-size: 9pt;
-            border-top: 1px solid #ccc;
-            padding-top: 2mm;
-            margin-top: 5mm;
-          }
-        </style>
-      </head>
-      <body>
-        ${selectedProducts.map(withPrintDefaults).map((sp) => {
-          const price = Math.round(Number(calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax)));
-          const barcodeValue = encodeLabelBarcodeValue(sp.product.sku, sp.product.code, price);
-          const barcodeDataURL = generateBarcodeDataURL(barcodeValue);
-          
-          return `
-            <div class="label">
-              <div class="title">${sp.product.name}</div>
-              <div class="meta">NET WT: ${formatWeightDisplay(sp.netWeight)} | RS ${price}</div>
-              <div class="barcode-container">
-                <img src="${barcodeDataURL}" alt="Barcode" class="barcode" />
-              </div>
-              <div class="dates">PKG: ${formatDate(sp.packageDate)} | EXP: ${formatDate(sp.expiryDate)}</div>
-            </div>
-          `;
-        }).join('')}
-      </body>
-      </html>
-    `;
-
-    printWindow.document.write(htmlContent);
-    printWindow.document.close();
-
-    setTimeout(() => {
-      printWindow.print();
-      
-      setTimeout(() => {
-        printWindow.close();
-        setIsPrinting(false);
-        toast({
-          title: "Print Dialog Opened",
-          description: barcodePrinter ? `Printer: ${barcodePrinter}` : "Select your printer from the dialog",
-        });
-      }, 100);
-    }, 250);
   };
 
   const formatDate = (date: Date | undefined) => {
@@ -1239,170 +1123,364 @@ export default function BarcodeGenerator() {
     0,
   );
 
-  const previewItem = selectedProducts[0];
-  const previewPrice = previewItem
-    ? Math.round(
-        Number(
-          calculatePriceByWeight(
-            previewItem.netWeight,
-            previewItem.product.sales_rate_exc_dis_and_tax,
-          ),
-        ),
-      )
-    : 0;
+  const safePreviewIndex = Math.min(previewIndex, Math.max(0, selectedProducts.length - 1));
+  const previewItem = selectedProducts[safePreviewIndex];
+  const previewPrice = previewItem ? labelPriceForItem(previewItem) : 0;
   const previewBarcodeValue = previewItem
-    ? encodeLabelBarcodeValue(
+    ? labelBarcodeForItem(previewItem)
+    : "000000000";
+  const previewAutoBarcode = previewItem
+    ? previewAutoBarcodeValue(
         previewItem.product.sku,
         previewItem.product.code,
         previewPrice,
       )
-    : "000000000";
+    : "";
+  const previewBarcodeSrc = useMemo(
+    () => (typeof document === "undefined" ? "" : generateBarcodeDataURL(previewBarcodeValue)),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [previewBarcodeValue],
+  );
   const copiesForProduct = (productId: string) =>
     selectedProducts.find((sp) => sp.product.id === productId)?.copies;
+
+  const stockOf = (product: Product) => Number(product.current_stock ?? product.stock ?? 0);
+  const activeCatalog = products.filter((p) => p.is_active !== false);
+  const inStockCount = activeCatalog.filter((p) => stockOf(p) > 0).length;
+  const labelSize = LABEL_SIZES[selectedPaperSize] || LABEL_SIZES[DEFAULT_LABEL_SIZE];
+  const activeFilterCount = (searchTerm.trim() ? 1 : 0) + (hasCatalogFilters(catalog) ? 1 : 0) + (inStockOnly ? 1 : 0);
+
+  const clearFilters = () => {
+    setSearchTerm("");
+    setCatalog(EMPTY_CATALOG_FILTERS);
+    setInStockOnly(false);
+    productSearchInputRef.current?.focus();
+  };
+
+  // One label per unit in stock — the usual "label everything on the shelf" job.
+  const setCopiesToStock = (itemId: string) => {
+    const item = selectedProducts.find((sp) => sp.id === itemId);
+    if (!item) return;
+    const stock = Math.floor(stockOf(item.product));
+    if (stock < 1) {
+      sonnerToast.error("No stock to match", { description: `${item.product.name} has 0 in stock.`, position: "top-right" });
+      return;
+    }
+    updateProductData(itemId, "copies", stock);
+  };
+
+  const allCopiesToStock = () => {
+    let skipped = 0;
+    setSelectedProducts((prev) =>
+      prev.map((sp) => {
+        const stock = Math.floor(stockOf(sp.product));
+        if (stock < 1) {
+          skipped += 1;
+          return sp;
+        }
+        return { ...sp, copies: stock };
+      }),
+    );
+    sonnerToast.success("Copies set to stock quantity", {
+      description: skipped ? `${skipped} item${skipped === 1 ? "" : "s"} with no stock kept their copies.` : undefined,
+      position: "top-right",
+    });
+  };
+
+  const applyDefaultsToAll = () => {
+    const copies = Math.max(1, parseInt(globalCopies, 10) || 1);
+    setSelectedProducts((prev) =>
+      prev.map((sp) => ({
+        ...sp,
+        netWeight: globalNetWeight,
+        expiryDuration: globalExpiryDuration,
+        expiryDate: calculateExpiryDate(
+          sp.packageDate || new Date(),
+          globalExpiryDuration,
+        ),
+        copies,
+      })),
+    );
+    sonnerToast.success("Defaults applied to every item in the queue", { position: "top-right" });
+  };
+
+  const queueBarcodeModeSummary = useMemo(() => {
+    if (selectedProducts.length === 0) return "auto" as const;
+    const modes = new Set(selectedProducts.map((sp) => sp.barcodeMode ?? "auto"));
+    if (modes.size === 1) return [...modes][0];
+    return "mixed" as const;
+  }, [selectedProducts]);
+
+  const printLabelText = isPrinting
+    ? "Preparing labels…"
+    : `Print ${totalLabels} label${totalLabels === 1 ? "" : "s"}`;
 
   if (isFirstLoad) {
     return <PageLoader message="Loading Barcode Generator..." />;
   }
 
+  const statCards = [
+    {
+      label: "Catalog items",
+      value: activeCatalog.length.toLocaleString("en-US"),
+      hint: `${inStockCount.toLocaleString("en-US")} in stock`,
+      icon: Boxes,
+      tone: "bg-blue-50 text-blue-600",
+      accent: "bg-blue-500",
+    },
+    {
+      label: "In print queue",
+      value: selectedProducts.length.toLocaleString("en-US"),
+      hint: selectedProducts.length ? "Products selected" : "Tap a product to add it",
+      icon: ListChecks,
+      tone: "bg-violet-50 text-violet-600",
+      accent: "bg-violet-500",
+    },
+    {
+      label: "Labels to print",
+      value: totalLabels.toLocaleString("en-US"),
+      hint: selectedProducts.length ? "Across all copies" : "Nothing queued yet",
+      icon: Tags,
+      tone: "bg-emerald-50 text-emerald-600",
+      accent: "bg-emerald-500",
+    },
+    {
+      label: "Label size",
+      value: `${labelSize.w} × ${labelSize.h}`,
+      hint: barcodePrinter ? `Printer: ${barcodePrinter}` : "No barcode printer set",
+      icon: Ruler,
+      tone: barcodePrinter ? "bg-slate-100 text-slate-700" : "bg-amber-50 text-amber-600",
+      accent: barcodePrinter ? "bg-slate-400" : "bg-amber-500",
+    },
+  ];
+
+  const filterLabel = "text-xs font-semibold text-indigo-900/80";
+  const filterControl = "h-10 border-indigo-200/80 bg-white shadow-sm";
+  const th = "h-10 whitespace-nowrap bg-slate-50 text-[11px] font-semibold uppercase tracking-wider text-slate-500";
+
   return (
-    <div className="p-3 sm:p-4 md:p-6 space-y-4 min-w-0 overflow-x-hidden pb-24 md:pb-6">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3 min-w-0">
-        <div className="min-w-0">
-          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-gray-900 flex items-center gap-2">
-            <BarcodeScanIcon className="h-5 w-5 sm:h-6 sm:w-6 text-blue-600 shrink-0" />
-            <span className="truncate">Barcode Generator</span>
-          </h1>
-          <p className="text-xs sm:text-sm text-gray-600 mt-1">
-            Search a product, then print. Weight and expiry are optional.
-          </p>
+    <div className="mx-auto w-full min-w-0 max-w-[1600px] space-y-5 overflow-x-hidden p-4 pb-28 md:p-6 md:pb-6 lg:p-8">
+      {/* Header */}
+      <div className="flex min-w-0 flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 items-center gap-3.5">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-slate-900 text-white shadow-sm">
+            <BarcodeScanIcon className="h-5 w-5" />
+          </div>
+          <div className="min-w-0">
+            <h1 className="truncate text-xl font-semibold tracking-tight text-slate-900 md:text-2xl">Barcode Generator</h1>
+            <p className="text-sm text-slate-500">Scan or pick products, set copies, then print labels in one go.</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex shrink-0 items-center gap-2">
           <Button
             variant="outline"
             onClick={clearAll}
             disabled={!canPrint}
-            className="hidden sm:inline-flex"
+            className="hidden h-9 border-rose-200 bg-white text-rose-600 shadow-sm hover:bg-rose-50 hover:text-rose-700 sm:inline-flex"
           >
-            <Trash2 className="h-4 w-4 mr-2" />
-            Clear
+            <Trash2 className="mr-2 h-4 w-4" />
+            Clear queue
           </Button>
-          <Button onClick={handlePrintAll} disabled={!canPrint || isPrinting}>
-            {isPrinting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Printer className="h-4 w-4 mr-2" />
-            )}
-            {isPrinting
-              ? "Printing..."
-              : `Print ${totalLabels} Label${totalLabels === 1 ? "" : "s"}`}
+          <Button onClick={handlePrintAll} disabled={!canPrint || isPrinting} className="h-9 shadow-sm">
+            {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+            {printLabelText}
           </Button>
         </div>
       </div>
 
-      <Card className="min-w-0 overflow-hidden">
-        <CardContent className="p-3 sm:p-4 space-y-4">
-          <div className="flex flex-col sm:flex-row gap-3 min-w-0">
-            <div className="relative flex-1 min-w-0">
-              <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-              {isRefreshing && (
-                <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-blue-500" />
-              )}
-              <Input
-                ref={productSearchInputRef}
-                placeholder="Scan or search by name, SKU, or code"
-                value={searchTerm}
-                autoComplete="off"
-                onChange={(e) => setSearchTerm(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                className={`pl-9 w-full h-11 ${isRefreshing ? "pr-9" : ""}`}
-              />
+      {/* Stat cards */}
+      <div className="grid grid-cols-2 gap-3 md:gap-4 xl:grid-cols-4">
+        {statCards.map((card) => {
+          const Icon = card.icon;
+          return (
+            <div key={card.label} className="relative min-w-0 overflow-hidden rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+              <span className={cn("absolute inset-x-0 top-0 h-1", card.accent)} aria-hidden />
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium uppercase tracking-wider text-slate-500">{card.label}</p>
+                  <p className="mt-2 truncate text-xl font-semibold tracking-tight tabular-nums text-slate-900 sm:text-2xl">{card.value}</p>
+                  <p className="mt-1 truncate text-xs text-slate-500">{card.hint}</p>
+                </div>
+                <div className={cn("hidden h-10 w-10 shrink-0 items-center justify-center rounded-lg sm:flex", card.tone)}>
+                  <Icon className="h-5 w-5" />
+                </div>
+              </div>
             </div>
-            <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-              <SelectTrigger className="w-full sm:w-48 shrink-0 h-11">
-                <SelectValue placeholder="All Categories" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Categories</SelectItem>
-                {categoryOptions.map((c) => (
-                  <SelectItem key={c} value={c}>
-                    {c}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+          );
+        })}
+      </div>
+
+      {/* Filters */}
+      <Card className="overflow-hidden rounded-xl border-indigo-100 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-indigo-100 text-indigo-600">
+              <SlidersHorizontal className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <p className="flex items-center gap-2 text-sm font-semibold text-slate-900">
+                Find products
+                {activeFilterCount > 0 ? (
+                  <span className="rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+                    {activeFilterCount} active
+                  </span>
+                ) : null}
+              </p>
+              <p className="truncate text-xs text-slate-500">Scan a barcode and press Enter to add it instantly</p>
+            </div>
+          </div>
+          {isRefreshing ? (
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-indigo-100 px-2.5 py-1 text-xs font-medium text-indigo-700">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Syncing catalog…
+            </span>
+          ) : null}
+          {activeFilterCount > 0 ? (
+            <Button
+              variant="outline"
+              size="sm"
+              className="ml-auto h-8 border-rose-200 bg-rose-50 text-rose-700 shadow-sm hover:border-rose-300 hover:bg-rose-100 hover:text-rose-800"
+              onClick={clearFilters}
+            >
+              <X className="mr-1 h-3.5 w-3.5" />
+              Clear filters
+            </Button>
+          ) : null}
+        </div>
+        <div className="border-t border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-indigo-50/30 px-4 py-4 sm:px-5">
+          <div className="grid gap-x-3 gap-y-4 md:grid-cols-[minmax(0,1fr)_220px_auto] md:items-end">
+            <div className="min-w-0 space-y-1.5">
+              <Label className={filterLabel}>Scan or search</Label>
+              <div className="relative">
+                <ScanLine className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-indigo-400" />
+                <Input
+                  ref={productSearchInputRef}
+                  placeholder="Scan barcode, or type name / SKU / code"
+                  value={searchTerm}
+                  autoComplete="off"
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  className={cn(filterControl, "pl-9 pr-9 text-base md:text-sm")}
+                />
+                {searchTerm ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setSearchTerm("");
+                      productSearchInputRef.current?.focus();
+                    }}
+                    className="absolute right-2 top-1/2 flex h-6 w-6 -translate-y-1/2 items-center justify-center rounded-md text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                    title="Clear search"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <label className="flex h-10 cursor-pointer items-center gap-2.5 rounded-lg border border-indigo-200/80 bg-white px-3 shadow-sm">
+              <Switch checked={inStockOnly} onCheckedChange={setInStockOnly} />
+              <span className="whitespace-nowrap text-sm font-medium text-slate-700">In stock only</span>
+            </label>
+          </div>
+          <CatalogFilterBar
+            value={catalog}
+            onChange={setCatalog}
+            className="border-t border-dashed border-indigo-200 pt-4 [&_label]:text-xs [&_label]:font-semibold [&_label]:text-indigo-900/80"
+          />
+        </div>
+      </Card>
+
+      {/* Workspace */}
+      <div className="grid min-w-0 grid-cols-1 gap-4 md:gap-6 xl:grid-cols-[minmax(0,1fr)_400px]">
+        {/* Product picker */}
+        <Card className="min-w-0 overflow-hidden rounded-xl border-slate-200 shadow-sm">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+            <div className="flex min-w-0 items-center gap-3">
+              <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                <Package className="h-4 w-4" />
+              </span>
+              <div className="min-w-0">
+                <h2 className="text-base font-semibold tracking-tight text-slate-900">Products</h2>
+                <p className="truncate text-xs text-slate-500">
+                  {filteredProducts.length.toLocaleString("en-US")} {filteredProducts.length === 1 ? "match" : "matches"} · click a row to add, click again for another copy
+                </p>
+              </div>
+            </div>
+            {pagedProducts.length > 0 ? (
+              <Button variant="outline" size="sm" className="h-8" onClick={toggleSelectAllOnPage}>
+                {allOnPageSelected ? <MinusSquare className="mr-1.5 h-3.5 w-3.5" /> : <CheckSquare className="mr-1.5 h-3.5 w-3.5" />}
+                {allOnPageSelected ? "Remove page" : "Add whole page"}
+              </Button>
+            ) : null}
           </div>
 
-          {canPrint && (
-            <p className="text-sm text-green-700">
-              {selectedProducts.length} product{selectedProducts.length === 1 ? "" : "s"} selected
-              {" · "}
-              {totalLabels} label{totalLabels === 1 ? "" : "s"}
-            </p>
-          )}
-
-          {isRefreshing && pagedProducts.length === 0 ? (
-            <div className="rounded-lg border py-10 text-center text-gray-500">
-              <Loader2 className="h-5 w-5 animate-spin mx-auto mb-2" />
-              Loading products...
-            </div>
-          ) : pagedProducts.length === 0 ? (
-            <div className="rounded-lg border border-dashed py-10 text-center text-gray-500 text-sm">
-              {searchTerm || categoryFilter !== "all"
-                ? "No matching products found."
-                : "No products available."}
+          {pagedProducts.length === 0 ? (
+            <div className="flex flex-col items-center px-6 py-16 text-center">
+              <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                <Search className="h-5 w-5" />
+              </div>
+              <p className="text-sm font-medium text-slate-900">
+                {activeFilterCount ? "No matching products" : "No products in the catalog"}
+              </p>
+              <p className="mt-1 max-w-xs text-xs text-slate-500">
+                {activeFilterCount ? "Check the spelling or scan again, or clear the filters." : "Add products in Inventory first."}
+              </p>
+              {activeFilterCount ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="mt-4 h-8 border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100 hover:text-rose-800"
+                  onClick={clearFilters}
+                >
+                  <X className="mr-1 h-3.5 w-3.5" /> Clear filters
+                </Button>
+              ) : null}
             </div>
           ) : (
             <>
-              <div className="space-y-3 md:hidden">
-                <div className="flex items-center gap-2 px-1">
-                  <Checkbox
-                    checked={allOnPageSelected}
-                    onCheckedChange={toggleSelectAllOnPage}
-                    id="select-all-mobile"
-                  />
-                  <Label htmlFor="select-all-mobile" className="text-sm font-normal cursor-pointer">
-                    Select all on this page
-                  </Label>
-                </div>
-                {pagedProducts.map((product, idx) => {
+              {/* Mobile cards */}
+              <div className="space-y-2 p-3 md:hidden">
+                {pagedProducts.map((product) => {
                   const selected = isProductSelected(product.id);
                   const copies = copiesForProduct(product.id);
-                  const stock = product.current_stock ?? product.stock ?? 0;
+                  const stock = stockOf(product);
                   return (
                     <button
                       type="button"
                       key={product.id}
                       onClick={() => handleProductSelect(product.id, { keepSearch: true })}
-                      className={`w-full text-left rounded-lg border p-3 space-y-1 transition ${
-                        selected
-                          ? "border-blue-300 bg-blue-50/60"
-                          : "border-gray-200 bg-white"
-                      }`}
+                      className={cn(
+                        "w-full space-y-1.5 rounded-xl border p-3 text-left transition",
+                        selected ? "border-indigo-300 bg-indigo-50/60 ring-1 ring-indigo-200" : "border-slate-200 bg-white active:bg-slate-50",
+                      )}
                     >
                       <div className="flex items-start justify-between gap-2">
-                        <p className="font-semibold text-sm leading-snug">
-                          {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}. {product.name}
-                        </p>
-                        <span className="text-sm font-bold text-green-700 shrink-0">
-                          Rs {product.sales_rate_exc_dis_and_tax || 0}
+                        <p className="text-sm font-semibold leading-snug text-slate-900">{product.name}</p>
+                        <span className="shrink-0 text-sm font-semibold tabular-nums text-slate-900">
+                          Rs {Number(product.sales_rate_exc_dis_and_tax || 0).toLocaleString("en-US")}
                         </span>
                       </div>
-                      <p className="text-xs text-gray-500 truncate">
-                        SKU: {product.sku || product.code || "—"}
-                      </p>
-                      <div className="flex flex-wrap items-center gap-2 pt-1">
+                      <div className="flex flex-wrap items-center gap-1.5 text-xs text-slate-500">
+                        <span className="font-mono">{product.sku || product.code || "—"}</span>
                         {product.category ? (
-                          <Badge variant="secondary" className="text-[10px]">
-                            {product.category}
-                          </Badge>
+                          <>
+                            <span className="text-slate-300">•</span>
+                            <span>{product.category}</span>
+                          </>
                         ) : null}
-                        <span className="text-xs text-gray-600">Stock: {stock}</span>
+                        <span className="text-slate-300">•</span>
+                        <StockBadge stock={stock} />
+                      </div>
+                      <div className="pt-0.5">
                         {selected ? (
-                          <Badge className="text-[10px] bg-blue-600">
-                            {copies} label{copies === 1 ? "" : "s"}
-                          </Badge>
+                          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-semibold text-white">
+                            <Check className="h-3 w-3" />
+                            {copies} label{copies === 1 ? "" : "s"} · tap for +1
+                          </span>
                         ) : (
-                          <span className="text-xs text-blue-600">Tap to add</span>
+                          <span className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600">
+                            <Plus className="h-3 w-3" /> Tap to add
+                          </span>
                         )}
                       </div>
                     </button>
@@ -1410,61 +1488,68 @@ export default function BarcodeGenerator() {
                 })}
               </div>
 
-              <div className="hidden md:block border rounded-lg overflow-x-auto">
+              {/* Desktop table */}
+              <div className="hidden overflow-x-auto md:block">
                 <Table>
                   <TableHeader>
-                    <TableRow>
-                      <TableHead className="w-10">
-                        <Checkbox checked={allOnPageSelected} onCheckedChange={toggleSelectAllOnPage} />
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className={cn(th, "w-12 pl-5")}>
+                        <Checkbox checked={allOnPageSelected} onCheckedChange={toggleSelectAllOnPage} aria-label="Select all on page" />
                       </TableHead>
-                      <TableHead className="w-10">#</TableHead>
-                      <TableHead>Product</TableHead>
-                      <TableHead>SKU</TableHead>
-                      <TableHead>Category</TableHead>
-                      <TableHead>Price</TableHead>
-                      <TableHead>Stock</TableHead>
+                      <TableHead className={th}>Product</TableHead>
+                      <TableHead className={th}>Category</TableHead>
+                      <TableHead className={cn(th, "text-right")}>Price</TableHead>
+                      <TableHead className={cn(th, "text-right")}>Stock</TableHead>
+                      <TableHead className={cn(th, "pr-5 text-right")}>In queue</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
-                    {pagedProducts.map((product, idx) => {
+                    {pagedProducts.map((product) => {
                       const selected = isProductSelected(product.id);
                       const copies = copiesForProduct(product.id);
-                      const stock = product.current_stock ?? product.stock ?? 0;
+                      const stock = stockOf(product);
                       return (
                         <TableRow
                           key={product.id}
-                          className={`cursor-pointer ${selected ? "bg-blue-50/50" : ""}`}
-                          onClick={() => {
-                            if (!selected) handleProductSelect(product.id, { keepSearch: true });
-                          }}
+                          className={cn(
+                            "cursor-pointer border-slate-100 transition-colors",
+                            selected ? "bg-indigo-50/60 hover:bg-indigo-50" : "hover:bg-slate-50/70",
+                          )}
+                          onClick={() => handleProductSelect(product.id, { keepSearch: true })}
+                          title={selected ? "Click to add another copy" : "Click to add to the print queue"}
                         >
-                          <TableCell onClick={(e) => e.stopPropagation()}>
-                            <Checkbox
-                              checked={selected}
-                              onCheckedChange={() => toggleProductRow(product)}
-                            />
+                          <TableCell className="py-3 pl-5" onClick={(e) => e.stopPropagation()}>
+                            <Checkbox checked={selected} onCheckedChange={() => toggleProductRow(product)} aria-label={`Select ${product.name}`} />
                           </TableCell>
-                          <TableCell className="text-gray-500">
-                            {(tablePage - 1) * TABLE_PAGE_SIZE + idx + 1}
+                          <TableCell className="py-3">
+                            <p className="max-w-[320px] truncate font-medium text-slate-900">{product.name}</p>
+                            <p className="font-mono text-[11px] text-slate-400">{product.sku || product.code || "—"}</p>
                           </TableCell>
-                          <TableCell className="font-medium">
-                            <span>{product.name}</span>
-                            {selected ? (
-                              <Badge className="ml-2 text-[10px] bg-blue-600">
-                                {copies} label{copies === 1 ? "" : "s"}
-                              </Badge>
-                            ) : null}
-                          </TableCell>
-                          <TableCell className="text-gray-600">{product.sku || product.code || "—"}</TableCell>
-                          <TableCell>
+                          <TableCell className="py-3">
                             {product.category ? (
-                              <Badge variant="secondary">{product.category}</Badge>
+                              <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">{product.category}</span>
                             ) : (
-                              <span className="text-gray-400">—</span>
+                              <span className="text-slate-300">—</span>
                             )}
                           </TableCell>
-                          <TableCell>Rs {product.sales_rate_exc_dis_and_tax || 0}</TableCell>
-                          <TableCell>{stock}</TableCell>
+                          <TableCell className="whitespace-nowrap py-3 text-right font-medium tabular-nums text-slate-900">
+                            Rs {Number(product.sales_rate_exc_dis_and_tax || 0).toLocaleString("en-US")}
+                          </TableCell>
+                          <TableCell className="py-3 text-right">
+                            <StockBadge stock={stock} />
+                          </TableCell>
+                          <TableCell className="py-3 pr-5 text-right">
+                            {selected ? (
+                              <span className="inline-flex items-center gap-1 rounded-full bg-indigo-600 px-2 py-0.5 text-[11px] font-semibold tabular-nums text-white">
+                                <Check className="h-3 w-3" />
+                                {copies}
+                              </span>
+                            ) : (
+                              <span className="inline-flex items-center gap-1 text-xs font-medium text-slate-400">
+                                <Plus className="h-3 w-3" /> Add
+                              </span>
+                            )}
+                          </TableCell>
                         </TableRow>
                       );
                     })}
@@ -1474,239 +1559,434 @@ export default function BarcodeGenerator() {
             </>
           )}
 
-          {filteredProducts.length > 0 && (
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2 text-sm text-gray-600">
-              <span className="text-xs sm:text-sm text-center sm:text-left">
-                Showing {(tablePage - 1) * TABLE_PAGE_SIZE + 1} to{" "}
-                {Math.min(tablePage * TABLE_PAGE_SIZE, filteredProducts.length)} of{" "}
-                {filteredProducts.length} products
+          {filteredProducts.length > TABLE_PAGE_SIZE ? (
+            <div className="flex flex-col gap-2 border-t border-slate-100 bg-slate-50/50 px-5 py-3 text-sm text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+              <span className="text-center tabular-nums sm:text-left">
+                Showing {(tablePage - 1) * TABLE_PAGE_SIZE + 1}–{Math.min(tablePage * TABLE_PAGE_SIZE, filteredProducts.length)} of{" "}
+                {filteredProducts.length.toLocaleString("en-US")}
               </span>
               <div className="flex items-center justify-center gap-1">
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 w-8 p-0"
+                  className="h-8 bg-white px-2.5"
                   onClick={() => setTablePage((p) => Math.max(1, p - 1))}
                   disabled={tablePage === 1}
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  <ChevronLeft className="mr-1 h-4 w-4" />
+                  Previous
                 </Button>
-                <span className="px-2 text-xs font-medium">
+                <span className="px-2 text-xs font-medium tabular-nums">
                   {tablePage} / {totalTablePages}
                 </span>
                 <Button
                   variant="outline"
                   size="sm"
-                  className="h-8 w-8 p-0"
+                  className="h-8 bg-white px-2.5"
                   onClick={() => setTablePage((p) => Math.min(totalTablePages, p + 1))}
                   disabled={tablePage === totalTablePages}
                 >
-                  <ChevronRight className="h-4 w-4" />
+                  Next
+                  <ChevronRight className="ml-1 h-4 w-4" />
                 </Button>
               </div>
             </div>
-          )}
-        </CardContent>
-      </Card>
+          ) : null}
+        </Card>
 
-      {canPrint && (
-        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 min-w-0">
-          <Card className="xl:col-span-2 min-w-0 overflow-hidden">
-            <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
-              <CardTitle className="flex items-center justify-between gap-2 text-base">
-                <span>Print queue</span>
-                <Button variant="ghost" size="sm" onClick={clearAll} className="text-red-600 hover:text-red-700">
-                  <Trash2 className="h-4 w-4 mr-1.5" />
-                  Clear
-                </Button>
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-3 sm:px-6 pb-4 space-y-2 max-h-[60vh] overflow-y-auto">
-              {selectedProducts.map((item) => (
-                <div
-                  key={item.id}
-                  className="rounded-lg border border-gray-200 p-3 space-y-2 min-w-0"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="font-medium text-sm truncate">{item.product.name}</p>
-                      <p className="text-xs text-gray-500 truncate">
-                        {item.product.sku || item.product.code || "—"} · Rs{" "}
-                        {item.product.sales_rate_exc_dis_and_tax || 0}
-                      </p>
-                    </div>
-                    <Button
-                      onClick={() => removeProduct(item.id)}
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 w-7 p-0 text-gray-400 hover:text-red-600 shrink-0"
-                    >
-                      <X className="h-4 w-4" />
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
-                    <div>
-                      <Label className="text-[11px] text-gray-500">Copies</Label>
-                      <div className="flex items-center gap-1">
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() =>
-                            updateProductData(item.id, "copies", Math.max(1, (item.copies || 1) - 1))
-                          }
-                          disabled={(item.copies || 1) <= 1}
-                        >
-                          -
-                        </Button>
-                        <Input
-                          type="number"
-                          inputMode="numeric"
-                          min={1}
-                          value={item.copies}
-                          onChange={(e) => {
-                            const n = parseInt(e.target.value, 10);
-                            updateProductData(
-                              item.id,
-                              "copies",
-                              Number.isFinite(n) && n > 0 ? n : 1,
-                            );
-                          }}
-                          className="h-8 text-center [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                        />
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8 p-0"
-                          onClick={() => updateProductData(item.id, "copies", (item.copies || 1) + 1)}
-                        >
-                          +
-                        </Button>
-                      </div>
-                    </div>
-                    <div>
-                      <Label className="text-[11px] text-gray-500">Weight</Label>
-                      <Input
-                        value={item.netWeight}
-                        list={`weights-${item.id}`}
-                        onChange={(e) => updateProductData(item.id, "netWeight", e.target.value)}
-                        placeholder="Optional"
-                        className="h-8"
-                      />
-                      <datalist id={`weights-${item.id}`}>
-                        {getNetWeightOptions(item.product.unitName)
-                          .filter((opt) => opt.value !== "custom")
-                          .map((opt) => (
-                            <option key={opt.value} value={opt.value} />
-                          ))}
-                      </datalist>
-                    </div>
-                    <div className="col-span-2 sm:col-span-1">
-                      <Label className="text-[11px] text-gray-500">Expiry</Label>
-                      <Select
-                        value={item.expiryDuration || "12"}
-                        onValueChange={(value) => updateProductData(item.id, "expiryDuration", value)}
-                      >
-                        <SelectTrigger className="h-8">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {expiryOptions.map((opt) => (
-                            <SelectItem key={opt.value} value={opt.value}>
-                              {opt.label}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
+        {/* Queue + preview (sticky on desktop) */}
+        <div className="min-w-0 space-y-4 xl:sticky xl:top-4 xl:self-start">
+          {/* Preview */}
+          <Card className="overflow-hidden rounded-xl border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                  <Eye className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold tracking-tight text-slate-900">Label preview</h2>
+                  <p className="truncate text-xs text-slate-500">{labelSize.label}</p>
                 </div>
-              ))}
-            </CardContent>
-          </Card>
-
-          <Card className="min-w-0 overflow-hidden">
-            <CardHeader className="px-4 py-3 sm:px-6 sm:py-4">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <BarcodeScanIcon className="h-5 w-5 shrink-0 text-blue-600" />
-                Preview
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="px-4 pb-4 sm:px-6 space-y-3">
-              <div className="rounded-xl border-2 border-dashed border-gray-200 bg-white p-3 flex flex-col items-center justify-center gap-1.5 min-w-0">
+              </div>
+              {selectedProducts.length > 1 ? (
+                <div className="flex items-center gap-1">
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={safePreviewIndex === 0}
+                    onClick={() => setPreviewIndex(Math.max(0, safePreviewIndex - 1))}
+                    title="Previous item"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </Button>
+                  <span className="px-1 text-xs tabular-nums text-slate-500">
+                    {safePreviewIndex + 1}/{selectedProducts.length}
+                  </span>
+                  <Button
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={safePreviewIndex >= selectedProducts.length - 1}
+                    onClick={() => setPreviewIndex(Math.min(selectedProducts.length - 1, safePreviewIndex + 1))}
+                    title="Next item"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </Button>
+                </div>
+              ) : null}
+            </div>
+            <div className="bg-[radial-gradient(circle_at_1px_1px,#e2e8f0_1px,transparent_0)] bg-[length:14px_14px] p-5">
+              <div
+                className={cn(
+                  "mx-auto flex w-full max-w-[300px] flex-col items-center justify-center gap-1 rounded-lg border border-slate-300 bg-white p-3 shadow-md",
+                  !previewItem && "opacity-60",
+                )}
+                style={{ aspectRatio: `${labelSize.w} / ${labelSize.h}` }}
+              >
                 {includeProductName && (
-                  <p className="text-xs font-bold uppercase text-center truncate w-full">
-                    {previewItem ? previewItem.product.name : "Sample Product"}
+                  <p className="w-full truncate text-center text-[11px] font-bold uppercase text-slate-900">
+                    {previewItem
+                      ? formatBarcodeLabelTitle(previewItem.product.name)
+                      : formatBarcodeLabelTitle("Sample product")}
                   </p>
                 )}
                 {includeSku && (
-                  <p className="text-[10px] text-gray-500 truncate max-w-full">
+                  <p className="max-w-full truncate text-[10px] text-slate-500">
                     SKU: {previewItem ? previewItem.product.sku || previewItem.product.code || "—" : "SAMPLE"}
                   </p>
                 )}
-                <img
-                  src={generateBarcodeDataURL(previewBarcodeValue)}
-                  alt="Barcode preview"
-                  className="h-14 max-w-full object-contain"
-                />
-                <p className="text-xs font-mono text-gray-600 break-all text-center">{previewBarcodeValue}</p>
+                {previewBarcodeSrc ? (
+                  <img src={previewBarcodeSrc} alt="Barcode preview" className="h-12 max-w-full object-contain" />
+                ) : null}
+                <p className="break-all text-center font-mono text-[10px] text-slate-600">{previewBarcodeValue}</p>
+                {previewItem && itemBarcodeMode(previewItem) === "manual" && !previewItem.customBarcode?.trim() ? (
+                  <p className="text-center text-[9px] text-amber-700">Enter manual barcode in queue</p>
+                ) : null}
+                {previewItem && itemBarcodeMode(previewItem) === "auto" && previewAutoBarcode ? (
+                  <p className="text-center text-[9px] text-slate-400">Auto: {previewAutoBarcode}</p>
+                ) : null}
+                {previewItem?.netWeight ? (
+                  <p className="text-[10px] font-semibold text-slate-800">
+                    NET {formatWeightDisplay(previewItem.netWeight)}
+                  </p>
+                ) : null}
                 {includePrice && (
-                  <p className="text-sm font-bold text-blue-600">Rs {previewItem ? previewPrice : 0}</p>
+                  <p className="text-sm font-bold text-slate-900">
+                    PRICE {previewItem ? previewPrice.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }) : "0.00"}
+                  </p>
                 )}
               </div>
-              <Button onClick={handlePrintAll} className="w-full" disabled={!canPrint || isPrinting}>
-                {isPrinting ? (
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                ) : (
-                  <Printer className="h-4 w-4 mr-2" />
-                )}
-                {isPrinting
-                  ? "Printing..."
-                  : `Print ${totalLabels} Label${totalLabels === 1 ? "" : "s"}`}
+              {!previewItem ? (
+                <p className="mt-3 text-center text-xs text-slate-500">Add a product to see its real label.</p>
+              ) : null}
+            </div>
+          </Card>
+
+          {/* Queue */}
+          <Card className="overflow-hidden rounded-xl border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between gap-3 border-b border-slate-100 px-5 py-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+                  <ListChecks className="h-4 w-4" />
+                </span>
+                <div className="min-w-0">
+                  <h2 className="text-base font-semibold tracking-tight text-slate-900">Print queue</h2>
+                  <p className="truncate text-xs text-slate-500">
+                    {selectedProducts.length
+                      ? `${selectedProducts.length} product${selectedProducts.length === 1 ? "" : "s"} · ${totalLabels} label${totalLabels === 1 ? "" : "s"}`
+                      : "Empty"}
+                  </p>
+                </div>
+              </div>
+              {canPrint ? (
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="outline" size="sm" className="h-8">
+                      <MoreHorizontal className="h-4 w-4" />
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem onSelect={allCopiesToStock}>
+                      <Boxes className="mr-2 h-4 w-4" />
+                      Copies = stock for all
+                    </DropdownMenuItem>
+                    <DropdownMenuItem onSelect={applyDefaultsToAll}>
+                      <Wand2 className="mr-2 h-4 w-4" />
+                      Apply default settings to all
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem onSelect={clearAll} className="text-rose-600 focus:text-rose-700">
+                      <Trash2 className="mr-2 h-4 w-4" />
+                      Clear queue
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              ) : null}
+            </div>
+
+            {!canPrint ? (
+              <div className="flex flex-col items-center px-6 py-10 text-center">
+                <div className="mb-3 flex h-12 w-12 items-center justify-center rounded-full bg-indigo-50 text-indigo-500">
+                  <ScanLine className="h-5 w-5" />
+                </div>
+                <p className="text-sm font-medium text-slate-900">Your queue is empty</p>
+                <p className="mt-1 max-w-[260px] text-xs text-slate-500">
+                  Scan a barcode, click products in the list, or use bulk upload below.
+                </p>
+              </div>
+            ) : (
+              <ul className="max-h-[50vh] divide-y divide-slate-100 overflow-y-auto">
+                {selectedProducts.map((item, index) => {
+                  const stock = Math.floor(stockOf(item.product));
+                  return (
+                    <li
+                      key={item.id}
+                      className={cn("space-y-2.5 px-4 py-3", index === safePreviewIndex && selectedProducts.length > 1 && "bg-indigo-50/40")}
+                      onMouseEnter={() => setPreviewIndex(index)}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-slate-900">{item.product.name}</p>
+                          <p className="truncate text-xs text-slate-500">
+                            <span className="font-mono">{item.product.sku || item.product.code || "—"}</span> · Rs{" "}
+                            {Number(item.product.sales_rate_exc_dis_and_tax || 0).toLocaleString("en-US")} · {stock} in stock
+                          </p>
+                        </div>
+                        <Button
+                          onClick={() => removeProduct(item.id)}
+                          variant="ghost"
+                          size="icon"
+                          className="h-7 w-7 shrink-0 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
+                          title="Remove from queue"
+                        >
+                          <X className="h-4 w-4" />
+                        </Button>
+                      </div>
+                      <div className="grid grid-cols-[auto_minmax(0,1fr)_minmax(0,1fr)] items-end gap-2">
+                        <div>
+                          <Label className="text-[11px] text-slate-500">Copies</Label>
+                          <div className="flex items-center rounded-md border border-slate-200">
+                            <button
+                              type="button"
+                              className="flex h-8 w-7 items-center justify-center text-slate-500 hover:bg-slate-50 disabled:opacity-40"
+                              onClick={() => updateProductData(item.id, "copies", Math.max(1, (item.copies || 1) - 1))}
+                              disabled={(item.copies || 1) <= 1}
+                              aria-label="Fewer copies"
+                            >
+                              <Minus className="h-3.5 w-3.5" />
+                            </button>
+                            <input
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              value={item.copies}
+                              onChange={(e) => {
+                                const n = parseInt(e.target.value, 10);
+                                updateProductData(item.id, "copies", Number.isFinite(n) && n > 0 ? n : 1);
+                              }}
+                              className="h-8 w-10 border-x border-slate-200 bg-white text-center text-sm font-semibold tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                            />
+                            <button
+                              type="button"
+                              className="flex h-8 w-7 items-center justify-center text-slate-500 hover:bg-slate-50"
+                              onClick={() => updateProductData(item.id, "copies", (item.copies || 1) + 1)}
+                              aria-label="More copies"
+                            >
+                              <Plus className="h-3.5 w-3.5" />
+                            </button>
+                          </div>
+                        </div>
+                        <div className="min-w-0">
+                          <Label className="text-[11px] text-slate-500">Weight</Label>
+                          <Input
+                            value={item.netWeight}
+                            list={`weights-${item.id}`}
+                            onChange={(e) => updateProductData(item.id, "netWeight", e.target.value)}
+                            placeholder="Optional"
+                            className="h-8 text-sm"
+                          />
+                          <datalist id={`weights-${item.id}`}>
+                            {getNetWeightOptions(item.product.unitName)
+                              .filter((opt) => opt.value !== "custom")
+                              .map((opt) => (
+                                <option key={opt.value} value={opt.value} />
+                              ))}
+                          </datalist>
+                        </div>
+                        <div className="min-w-0">
+                          <Label className="text-[11px] text-slate-500">Expiry</Label>
+                          <Select
+                            value={item.expiryDuration || "12"}
+                            onValueChange={(value) => updateProductData(item.id, "expiryDuration", value)}
+                          >
+                            <SelectTrigger className="h-8 text-sm">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {expiryOptions.map((opt) => (
+                                <SelectItem key={opt.value} value={opt.value}>
+                                  {opt.label}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label className="text-[11px] text-slate-500">Barcode source</Label>
+                        <BarcodeSourceToggle
+                          compact
+                          value={itemBarcodeMode(item)}
+                          onChange={(mode) => setItemBarcodeMode(item.id, mode)}
+                        />
+                      </div>
+                      {itemBarcodeMode(item) === "auto" ? (
+                        <p className="text-[10px] text-slate-500">
+                          Will print:{" "}
+                          <span className="font-mono">
+                            {previewAutoBarcodeValue(
+                              item.product.sku,
+                              item.product.code,
+                              labelPriceForItem(item),
+                            )}
+                          </span>
+                        </p>
+                      ) : null}
+                      {itemBarcodeMode(item) === "manual" ? (
+                        <div className="space-y-1">
+                          <Label className="text-[11px] text-slate-500">Barcode to print & scan (editable)</Label>
+                          <Input
+                            value={item.customBarcode ?? ""}
+                            onChange={(e) => updateProductData(item.id, "customBarcode", e.target.value)}
+                            placeholder={
+                              previewAutoBarcodeValue(
+                                item.product.sku,
+                                item.product.code,
+                                labelPriceForItem(item),
+                              ) || "e.g. 123456789 or CODE-16800"
+                            }
+                            className="h-8 font-mono text-sm"
+                          />
+                          <p className="text-[10px] text-slate-500">
+                            Auto would be:{" "}
+                            <span className="font-mono">
+                              {previewAutoBarcodeValue(
+                                item.product.sku,
+                                item.product.code,
+                                labelPriceForItem(item),
+                              )}
+                            </span>
+                          </p>
+                          {item.customBarcode?.trim() &&
+                          sanitizeManualBarcodeValue(item.customBarcode) ===
+                            item.product.label_barcode ? (
+                            <p className="text-[10px] text-emerald-700">
+                              On product (POS):{" "}
+                              <span className="font-mono">{item.product.label_barcode}</span>
+                            </p>
+                          ) : item.customBarcode?.trim() ? (
+                            <p className="text-[10px] text-slate-500">
+                              Saves to product when you print labels
+                            </p>
+                          ) : null}
+                        </div>
+                      ) : null}
+                      {stock > 0 && item.copies !== stock ? (
+                        <button
+                          type="button"
+                          onClick={() => setCopiesToStock(item.id)}
+                          className="text-[11px] font-medium text-indigo-600 hover:text-indigo-800"
+                        >
+                          Match stock ({stock} labels)
+                        </button>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+
+            <div className="border-t border-slate-100 bg-slate-50/60 p-4">
+              <Button onClick={handlePrintAll} className="h-11 w-full text-base shadow-sm" disabled={!canPrint || isPrinting}>
+                {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+                {printLabelText}
               </Button>
-            </CardContent>
+              {!barcodePrinter ? (
+                <p className="mt-2 flex items-center justify-center gap-1 text-center text-[11px] text-amber-700">
+                  <AlertTriangle className="h-3 w-3" /> No barcode printer set — printing is disabled until you choose one in Printer Settings.
+                </p>
+              ) : null}
+            </div>
           </Card>
         </div>
-      )}
+      </div>
 
-      <div>
+      {/* Settings + bulk upload */}
+      <Card className="overflow-hidden rounded-xl border-slate-200 shadow-sm">
         <button
           type="button"
           onClick={() => setShowMoreOptions((open) => !open)}
-          className="inline-flex items-center gap-1 text-sm text-gray-600 hover:text-gray-900"
+          aria-expanded={showMoreOptions}
+          className="flex w-full items-center justify-between gap-3 px-5 py-4 text-left transition-colors hover:bg-slate-50/70"
         >
-          {showMoreOptions ? (
-            <ChevronUp className="h-4 w-4" />
-          ) : (
-            <ChevronDown className="h-4 w-4" />
-          )}
-          More options
+          <div className="flex min-w-0 items-center gap-3">
+            <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
+              <Settings2 className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <h2 className="text-base font-semibold tracking-tight text-slate-900">Label settings & bulk upload</h2>
+              <p className="truncate text-xs text-slate-500">
+                {labelSize.label} · barcode{" "}
+                {queueBarcodeModeSummary === "mixed"
+                  ? "mixed per product"
+                  : queueBarcodeModeSummary === "auto"
+                    ? "auto"
+                    : "custom"}{" "}
+                · expiry{" "}
+                {globalExpiryDuration} months ·{" "}
+                {globalCopies || 1} cop{(globalCopies || "1") === "1" ? "y" : "ies"} by default · shows{" "}
+                {[includeProductName && "name", includeSku && "SKU", includePrice && "price"].filter(Boolean).join(", ") || "barcode only"}
+              </p>
+            </div>
+          </div>
+          <ChevronDown className={cn("h-4 w-4 shrink-0 text-slate-400 transition-transform", showMoreOptions && "rotate-180")} />
         </button>
 
         {showMoreOptions && (
-          <Card className="mt-3 min-w-0 overflow-hidden">
-            <CardContent className="p-4 space-y-4">
+          <div className="grid gap-6 border-t border-slate-100 p-5 lg:grid-cols-2">
+            <div className="space-y-5">
               <div className="space-y-2">
-                <Label>Barcode printer</Label>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Barcode printer</Label>
                 {barcodePrinter ? (
-                  <div className="px-3 py-2 rounded-lg border border-purple-100 bg-purple-50/60 flex flex-wrap items-center gap-2 text-sm text-purple-800">
-                    <span className="font-medium break-all">{barcodePrinter}</span>
-                    <span className="text-purple-600 text-xs">(change in Printer Settings)</span>
+                  <div className="flex flex-wrap items-center gap-2 rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-800">
+                    <Printer className="h-4 w-4 text-slate-500" />
+                    <span className="break-all font-medium">{barcodePrinter}</span>
+                    <span className="text-xs text-slate-500">· change in Printer Settings</span>
                   </div>
                 ) : (
-                  <div className="px-3 py-2 rounded-lg border border-amber-100 bg-amber-50 text-sm text-amber-800">
-                    No barcode printer configured. Set one in <strong>Printer Settings</strong>.
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <span>
+                      No barcode printer configured. Set one in <strong>Printer Settings</strong>.
+                    </span>
                   </div>
                 )}
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
-                <div>
-                  <Label className="text-xs text-gray-600">Label size</Label>
+              <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-700">
+                <Checkbox
+                  checked={saveCustomBarcodeToProduct}
+                  onCheckedChange={(v) => setSaveCustomBarcodeToProduct(v === true)}
+                />
+                Save Custom barcodes on product when printing (for POS scan)
+              </label>
+
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-600">Label size</Label>
                   <Select value={selectedPaperSize} onValueChange={setSelectedPaperSize}>
-                    <SelectTrigger>
+                    <SelectTrigger className="h-9">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1717,11 +1997,14 @@ export default function BarcodeGenerator() {
                       ))}
                     </SelectContent>
                   </Select>
+                  <p className="text-[11px] leading-snug text-slate-500">
+                    LP 2844 roll: <strong>50×25 mm</strong>, gap <strong>3 mm</strong>. Wrong size clips text.
+                  </p>
                 </div>
-                <div>
-                  <Label className="text-xs text-gray-600">Default expiry</Label>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-600">Default expiry</Label>
                   <Select value={globalExpiryDuration} onValueChange={setGlobalExpiryDuration}>
-                    <SelectTrigger>
+                    <SelectTrigger className="h-9">
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
@@ -1733,23 +2016,25 @@ export default function BarcodeGenerator() {
                     </SelectContent>
                   </Select>
                 </div>
-                <div>
-                  <Label htmlFor="global-net-weight" className="text-xs text-gray-600">
+                <div className="space-y-1.5">
+                  <Label htmlFor="global-net-weight" className="text-xs text-slate-600">
                     Default weight
                   </Label>
                   <Input
                     id="global-net-weight"
+                    className="h-9"
                     value={globalNetWeight}
                     onChange={(e) => setGlobalNetWeight(e.target.value)}
                     placeholder="e.g. 500g"
                   />
                 </div>
-                <div>
-                  <Label htmlFor="global-copies" className="text-xs text-gray-600">
+                <div className="space-y-1.5">
+                  <Label htmlFor="global-copies" className="text-xs text-slate-600">
                     Default copies
                   </Label>
                   <Input
                     id="global-copies"
+                    className="h-9"
                     type="number"
                     inputMode="numeric"
                     min={1}
@@ -1759,84 +2044,88 @@ export default function BarcodeGenerator() {
                   />
                 </div>
               </div>
+              {canPrint ? (
+                <Button variant="outline" size="sm" className="h-8" onClick={applyDefaultsToAll}>
+                  <Wand2 className="mr-1.5 h-3.5 w-3.5" />
+                  Apply these defaults to the whole queue
+                </Button>
+              ) : null}
 
               <div className="space-y-2">
-                <Label className="text-sm font-semibold text-gray-900">Show on label</Label>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-                  <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
-                    <Label htmlFor="include-name" className="text-sm font-normal cursor-pointer">
-                      Product name
-                    </Label>
-                    <Switch id="include-name" checked={includeProductName} onCheckedChange={setIncludeProductName} />
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
-                    <Label htmlFor="include-price" className="text-sm font-normal cursor-pointer">
-                      Price
-                    </Label>
-                    <Switch id="include-price" checked={includePrice} onCheckedChange={setIncludePrice} />
-                  </div>
-                  <div className="flex items-center justify-between rounded-lg border border-gray-200 p-3">
-                    <Label htmlFor="include-sku" className="text-sm font-normal cursor-pointer">
-                      SKU
-                    </Label>
-                    <Switch id="include-sku" checked={includeSku} onCheckedChange={setIncludeSku} />
-                  </div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Show on label</Label>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+                  {[
+                    { id: "include-name", label: "Product name", checked: includeProductName, set: setIncludeProductName },
+                    { id: "include-price", label: "Price", checked: includePrice, set: setIncludePrice },
+                    { id: "include-sku", label: "SKU", checked: includeSku, set: setIncludeSku },
+                  ].map((opt) => (
+                    <label
+                      key={opt.id}
+                      htmlFor={opt.id}
+                      className="flex cursor-pointer items-center justify-between rounded-lg border border-slate-200 px-3 py-2.5 hover:bg-slate-50"
+                    >
+                      <span className="text-sm text-slate-700">{opt.label}</span>
+                      <Switch id={opt.id} checked={opt.checked} onCheckedChange={opt.set} />
+                    </label>
+                  ))}
                 </div>
               </div>
+              <p className="text-[11px] text-slate-400">Settings are remembered on this device.</p>
+            </div>
 
-              <div className="rounded-lg border border-dashed border-gray-300 bg-gray-50/50 p-4 space-y-3">
+            <div className="flex flex-col justify-between gap-4 rounded-xl border-2 border-dashed border-slate-200 bg-slate-50/50 p-5">
+              <div className="flex items-start gap-3">
+                <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-emerald-50 text-emerald-600">
+                  <FileSpreadsheet className="h-5 w-5" />
+                </span>
                 <div>
-                  <p className="text-sm font-medium text-gray-700">Bulk upload</p>
-                  <p className="text-xs text-gray-500 mt-1">
-                    CSV or Excel with SKU, plus optional Net Weight, Expiry Months, and Copies.
+                  <p className="text-sm font-semibold text-slate-900">Bulk upload</p>
+                  <p className="mt-1 text-xs leading-relaxed text-slate-500">
+                    Upload a CSV or Excel file with a <span className="font-mono font-medium text-slate-700">SKU</span> column, plus optional{" "}
+                    <span className="font-mono">Net Weight</span>, <span className="font-mono">Expiry Months</span> and{" "}
+                    <span className="font-mono">Copies</span>. Every matching product is added to the queue at once.
                   </p>
                 </div>
-                <div className="flex flex-col sm:flex-row gap-2">
-                  <Button variant="outline" size="sm" className="w-full sm:w-auto" onClick={downloadBulkTemplate}>
-                    <Download className="h-3.5 w-3.5 mr-1.5" />
-                    Download template
-                  </Button>
-                  <Button
-                    size="sm"
-                    className="w-full sm:w-auto"
-                    onClick={() => bulkFileInputRef.current?.click()}
-                    disabled={bulkParsing}
-                  >
-                    {bulkParsing ? (
-                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                    ) : (
-                      <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
-                    )}
-                    {bulkParsing ? "Processing..." : "Choose file"}
-                  </Button>
-                </div>
-                <input
-                  ref={bulkFileInputRef}
-                  type="file"
-                  accept=".csv,.xlsx,.xls"
-                  className="hidden"
-                  onChange={handleBulkFileChange}
-                />
               </div>
-            </CardContent>
-          </Card>
+              <div className="flex flex-col gap-2 sm:flex-row">
+                <Button variant="outline" size="sm" className="h-9 w-full bg-white sm:w-auto" onClick={downloadBulkTemplate}>
+                  <Download className="mr-1.5 h-3.5 w-3.5" />
+                  Download template
+                </Button>
+                <Button size="sm" className="h-9 w-full sm:w-auto" onClick={() => bulkFileInputRef.current?.click()} disabled={bulkParsing}>
+                  {bulkParsing ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Upload className="mr-1.5 h-3.5 w-3.5" />}
+                  {bulkParsing ? "Processing…" : "Choose file"}
+                </Button>
+              </div>
+              <input ref={bulkFileInputRef} type="file" accept=".csv,.xlsx,.xls" className="hidden" onChange={handleBulkFileChange} />
+            </div>
+          </div>
         )}
-      </div>
+      </Card>
 
+      {/* Mobile print bar */}
       {canPrint && (
-        <div className="fixed bottom-0 inset-x-0 z-30 md:hidden border-t bg-white/95 backdrop-blur p-3">
-          <Button onClick={handlePrintAll} className="w-full h-11" disabled={isPrinting}>
-            {isPrinting ? (
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-            ) : (
-              <Printer className="h-4 w-4 mr-2" />
-            )}
-            {isPrinting
-              ? "Printing..."
-              : `Print ${totalLabels} Label${totalLabels === 1 ? "" : "s"}`}
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t bg-white/95 p-3 backdrop-blur md:hidden">
+          <Button onClick={handlePrintAll} className="h-11 w-full" disabled={isPrinting}>
+            {isPrinting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Printer className="mr-2 h-4 w-4" />}
+            {printLabelText}
           </Button>
         </div>
       )}
     </div>
+  );
+}
+
+function StockBadge({ stock }: { stock: number }) {
+  const tone =
+    stock <= 0
+      ? "bg-rose-50 text-rose-700 ring-rose-600/20"
+      : stock < 5
+        ? "bg-amber-50 text-amber-700 ring-amber-600/20"
+        : "bg-emerald-50 text-emerald-700 ring-emerald-600/20";
+  return (
+    <span className={cn("inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold tabular-nums ring-1 ring-inset", tone)}>
+      {stock <= 0 ? "Out" : stock.toLocaleString("en-US")}
+    </span>
   );
 }

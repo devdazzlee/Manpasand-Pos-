@@ -11,7 +11,9 @@ interface Product {
   category: string
   stock: number
   categoryId: string
-  barcode?: string //TODO
+  barcode?: string
+  label_barcode?: string
+  custom_code?: string
   code?: string // Product code for barcode matching
   current_stock?: number
   available_stock?: number
@@ -26,6 +28,7 @@ interface Product {
   taxId?: string
   taxName?: string
   supplierId?: string
+  stitch_type?: "STITCHED" | "UNSTITCHED" | null
   supplierName?: string
   brandId?: string
   brandName?: string
@@ -122,6 +125,8 @@ interface StoreState {
     isFeatured?: boolean
     displayOnWebsite?: boolean
     stockStatus?: "out" | "low"
+    /** Multi-select vendor / category / subcategory / stitch params. */
+    catalogParams?: Record<string, string>
   }) => Promise<void>
   fetchCategories: (force?: boolean) => Promise<void>
   fetchCustomers: (options?: {
@@ -191,7 +196,9 @@ export const mapApiProductToStoreProduct = (item: any): Product => {
     price: Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? item.purchase_rate ?? 0),
     category: item.category?.name,
     categoryId: item.category?.id,
-    barcode: item.barcode || item.sku || item.code,
+    label_barcode: item.label_barcode || undefined,
+    custom_code: item.custom_code?.trim() || undefined,
+    barcode: item.label_barcode || item.barcode || item.sku || item.code,
     code: item.code,
     ...stockFields,
     sku: item.sku,
@@ -201,7 +208,8 @@ export const mapApiProductToStoreProduct = (item: any): Product => {
     unitName: item.unit?.name,
     taxId: item.tax?.id,
     taxName: item.tax?.name,
-    supplierId: item.supplier?.id,
+    supplierId: item.supplier?.id ?? item.supplier_id ?? undefined,
+    stitch_type: item.stitch_type ?? null,
     supplierName: item.supplier?.name,
     brandId: item.brand?.id,
     brandName: item.brand?.name,
@@ -269,6 +277,7 @@ export const useStore = create<StoreState>()(
         isFeatured?: boolean
         displayOnWebsite?: boolean
         stockStatus?: "out" | "low"
+        catalogParams?: Record<string, string>
       }) => {
         const {
           force = false,
@@ -282,6 +291,7 @@ export const useStore = create<StoreState>()(
           isFeatured,
           displayOnWebsite,
           stockStatus,
+          catalogParams,
         } = options ?? {}
         const state = get()
         const now = Date.now()
@@ -294,7 +304,8 @@ export const useStore = create<StoreState>()(
           displayOnPos !== undefined ||
           isFeatured !== undefined ||
           displayOnWebsite !== undefined ||
-          Boolean(stockStatus)
+          Boolean(stockStatus) ||
+          Boolean(catalogParams && Object.keys(catalogParams).length)
 
         if (!hasFilters && !force) {
           if (
@@ -364,6 +375,7 @@ export const useStore = create<StoreState>()(
           if (isFeatured !== undefined) params.is_featured = isFeatured
           if (displayOnWebsite !== undefined) params.display_on_website = displayOnWebsite
           if (stockStatus) params.stock_status = stockStatus
+          if (catalogParams) Object.assign(params, catalogParams)
 
           const res = await apiClient.get("/products", { params })
           const rawProducts = Array.isArray(res.data?.data) ? res.data.data : []
@@ -430,8 +442,16 @@ export const useStore = create<StoreState>()(
           set({ categoriesLoading: true })
           
           try {
-            const res = await apiClient.get("/categories", { params: { page: 1, limit: 50 } })
-            const categories = [{ id: "all", name: "All" }, ...res.data.data]
+            // Walk every page (server max is 100 per page) so no category is left out.
+            const rows: any[] = []
+            for (let page = 1; page <= 100; page++) {
+              const res = await apiClient.get("/categories", { params: { page, limit: 100 } })
+              const batch = res.data?.data ?? []
+              rows.push(...batch)
+              const totalPages = Number(res.data?.meta?.totalPages ?? 1)
+              if (page >= totalPages || batch.length === 0) break
+            }
+            const categories = [{ id: "all", name: "All" }, ...rows]
             
             set({ 
               categories, 

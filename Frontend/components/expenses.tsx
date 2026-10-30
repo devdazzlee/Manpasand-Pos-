@@ -15,7 +15,12 @@ import {
   Landmark,
   Clock,
   FileText,
+  Paperclip,
+  Download,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import { ExpenseAttachments, ExpenseAttachmentsDialog } from "@/components/expense-attachments";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -24,6 +29,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
+import apiClient from "@/lib/apiClient";
 import {
   Table,
   TableBody,
@@ -68,6 +74,16 @@ import { formatMoney } from "@/components/inventory/stock-ops/export-utils";
 import { cn } from "@/lib/utils";
 import { useToast } from "@/hooks/use-toast";
 import { extractApiError } from "@/lib/api/errors";
+import {
+  ExpenseAccountPicker,
+  PaidFromSelect,
+  defaultPaidFrom,
+  useExpenseAccounts,
+  useMoneyAccounts,
+} from "@/components/expense-account-select";
+import { DateField, YmdDatePicker } from "@/components/ui/date-picker";
+import { useQueryClient } from "@tanstack/react-query";
+import { qk } from "@/lib/query/query-keys";
 
 import {
   useExpenses,
@@ -86,14 +102,18 @@ import {
   type ExpenseStatus,
   type ExpensePaymentMethod,
   type RecurringExpense,
+  fetchExpenses,
 } from "@/lib/api/expenses";
+import { formatBusinessDate, formatLegacyPosDateTime } from "@/lib/business-timezone";
 
 const today = () => new Date().toISOString().slice(0, 10);
 const monthStart = () => {
   const d = new Date();
   return new Date(d.getFullYear(), d.getMonth(), 1).toISOString().slice(0, 10);
 };
-const fmtDate = (v?: string | null) => (v ? new Date(v).toLocaleDateString() : "—");
+
+const fmtDate = (v?: string | null) => (v ? formatBusinessDate(v) : "—");
+const fmtDateTime = (v?: string | null) => (v ? formatLegacyPosDateTime(v) : "—");
 const titleCase = (s: string) =>
   s.replace(/_/g, " ").toLowerCase().replace(/\b\w/g, (c) => c.toUpperCase());
 
@@ -164,17 +184,24 @@ function ExpensesTab({ toast }: { toast: Toast }) {
   const [from, setFrom] = useState("");
   const [to, setTo] = useState("");
   const [page, setPage] = useState(1);
-
+  const [pageSize, setPageSize] = useState<string>("20");
+  const [exporting, setExporting] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 250);
     return () => clearTimeout(t);
   }, [search]);
-  useEffect(() => setPage(1), [debounced, categoryId, method, status, from, to]);
+  useEffect(() => setPage(1), [debounced, categoryId, method, status, from, to, pageSize]);
+
+  const listLimit = useMemo(() => {
+    const n = Number(pageSize);
+    return Number.isFinite(n) && n > 0 ? n : 20;
+  }, [pageSize]);
 
   const { categories } = useExpenseCategories({ isActive: true });
   const { expenses, meta, isFirstLoad, isRefreshing, refetch } = useExpenses({
-    page,
-    limit: 20,
+    page: pageSize === "all" ? 1 : page,
+    limit: pageSize === "all" ? undefined : listLimit,
+    fetchAll: pageSize === "all",
     search: debounced || undefined,
     categoryId: categoryId === "all" ? undefined : categoryId,
     paymentMethod: method === "all" ? undefined : (method as ExpensePaymentMethod),
@@ -184,16 +211,68 @@ function ExpensesTab({ toast }: { toast: Toast }) {
   });
   const mutations = useExpenseMutations();
 
+  const err = (e: unknown, title: string) =>
+    toast({ variant: "destructive", title, description: extractApiError(e, title) });
+
+  const exportExpensesExcel = async () => {
+    setExporting(true);
+    try {
+      const result = await fetchExpenses({
+        fetchAll: true,
+        search: debounced || undefined,
+        categoryId: categoryId === "all" ? undefined : categoryId,
+        paymentMethod: method === "all" ? undefined : (method as ExpensePaymentMethod),
+        status: status === "all" ? undefined : (status as ExpenseStatus),
+        from: from || undefined,
+        to: to || undefined,
+      });
+      const rows = result.data || [];
+      const XLSX = await import("xlsx");
+      const header = [
+        "Date",
+        "Particular",
+        "Vendor",
+        "Category",
+        "Account",
+        "Method",
+        "Status",
+        "Amount (Rs)",
+        "Notes",
+      ];
+      const data = rows.map((e) => [
+        e.expense_date ? new Date(e.expense_date).toLocaleDateString() : "",
+        e.particular,
+        e.vendor || "",
+        e.category?.name || "",
+        e.account ? `${e.account.code} ${e.account.name}` : "",
+        titleCase(e.payment_method),
+        titleCase(e.status),
+        e.amount,
+        e.notes || "",
+      ]);
+      const ws = XLSX.utils.aoa_to_sheet([header, ...data]);
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Expenses");
+      const stamp = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      XLSX.writeFile(wb, `expenses_${stamp}.xlsx`);
+      toast({ title: `Exported ${rows.length} expense${rows.length === 1 ? "" : "s"}` });
+    } catch (e) {
+      err(e, "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const [formOpen, setFormOpen] = useState(false);
   const [editing, setEditing] = useState<Expense | null>(null);
   const [approveTarget, setApproveTarget] = useState<Expense | null>(null);
   const [rejectTarget, setRejectTarget] = useState<Expense | null>(null);
   const [rejectReason, setRejectReason] = useState("");
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null);
+  const [receiptsFor, setReceiptsFor] = useState<Expense | null>(null);
+  const qc = useQueryClient();
 
   const summary = meta?.summary;
-  const err = (e: unknown, title: string) =>
-    toast({ variant: "destructive", title, description: extractApiError(e, title) });
 
   return (
     <div className="space-y-4">
@@ -251,10 +330,30 @@ function ExpensesTab({ toast }: { toast: Toast }) {
             ))}
           </SelectContent>
         </Select>
-        <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="h-9 w-[140px]" />
-        <Input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="h-9 w-[140px]" />
+        <div className="flex min-w-[140px] flex-col gap-1">
+          <Label className="text-xs text-muted-foreground">From</Label>
+          <YmdDatePicker value={from} onChange={setFrom} className="h-9" />
+        </div>
+        <div className="flex min-w-[140px] flex-col gap-1">
+          <Label className="text-xs text-muted-foreground">To</Label>
+          <YmdDatePicker value={to} onChange={setTo} className="h-9" />
+        </div>
         <Button variant="outline" size="sm" className="h-9" onClick={() => refetch()} disabled={isRefreshing}>
           <RefreshCcw className={cn("h-4 w-4", isRefreshing && "animate-spin")} />
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="h-9"
+          disabled={exporting || isFirstLoad}
+          onClick={() => void exportExpensesExcel()}
+        >
+          {exporting ? (
+            <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+          ) : (
+            <Download className="mr-1.5 h-4 w-4" />
+          )}
+          Export
         </Button>
         <Button size="sm" className="h-9" onClick={() => { setEditing(null); setFormOpen(true); }}>
           <Plus className="mr-1.5 h-4 w-4" />
@@ -291,11 +390,10 @@ function ExpensesTab({ toast }: { toast: Toast }) {
                 </TableHeader>
                 <TableBody>
                   {expenses.map((e) => {
-                    const locked = Boolean(e.cashflow_id);
                     return (
                       <TableRow key={e.id} className="h-11 hover:bg-muted/50">
                         <TableCell className="whitespace-nowrap text-sm text-muted-foreground nums">
-                          {fmtDate(e.expense_date)}
+                          {fmtDateTime(e.expense_date)}
                         </TableCell>
                         <TableCell className="max-w-[240px]">
                           <p className="truncate font-medium text-foreground">{e.particular}</p>
@@ -303,7 +401,14 @@ function ExpensesTab({ toast }: { toast: Toast }) {
                             <p className="truncate text-xs text-muted-foreground">{e.vendor}</p>
                           )}
                         </TableCell>
-                        <TableCell className="text-sm">{e.category?.name ?? "—"}</TableCell>
+                        <TableCell className="text-sm">
+                          <div>{e.category?.name ?? "—"}</div>
+                          {e.account ? (
+                            <div className="text-[11px] text-muted-foreground">
+                              <span className="font-mono">{e.account.code}</span> {e.account.name}
+                            </div>
+                          ) : null}
+                        </TableCell>
                         <TableCell>
                           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
                             {BANKISH.includes(e.payment_method) ? (
@@ -324,6 +429,20 @@ function ExpensesTab({ toast }: { toast: Toast }) {
                         </TableCell>
                         <TableCell>
                           <div className="flex justify-end gap-1">
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className={cn("relative h-8 w-8", e._count?.attachments ? "text-[#a67c2e]" : "text-muted-foreground")}
+                              title={e._count?.attachments ? `${e._count.attachments} receipt(s)` : "Attach receipt"}
+                              onClick={() => setReceiptsFor(e)}
+                            >
+                              <Paperclip className="h-4 w-4" />
+                              {!!e._count?.attachments && (
+                                <span className="absolute -right-0.5 -top-0.5 rounded-full bg-[#a67c2e] px-1 text-[9px] font-semibold leading-4 text-white">
+                                  {e._count.attachments}
+                                </span>
+                              )}
+                            </Button>
                             {e.status === "PENDING" && (
                               <>
                                 <Button
@@ -344,30 +463,28 @@ function ExpensesTab({ toast }: { toast: Toast }) {
                                 >
                                   <X className="h-4 w-4" />
                                 </Button>
-                                {!locked && (
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    className="h-8 w-8"
-                                    title="Edit"
-                                    onClick={() => { setEditing(e); setFormOpen(true); }}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                )}
                               </>
                             )}
-                            {!locked && (
+                            {e.status !== "REJECTED" && (
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                className="h-8 w-8 text-destructive hover:text-destructive"
-                                title="Delete"
-                                onClick={() => setDeleteTarget(e)}
+                                className="h-8 w-8"
+                                title="Edit"
+                                onClick={() => { setEditing(e); setFormOpen(true); }}
                               >
-                                <Trash2 className="h-4 w-4" />
+                                <Pencil className="h-4 w-4" />
                               </Button>
                             )}
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8 text-destructive hover:text-destructive"
+                              title="Delete"
+                              onClick={() => setDeleteTarget(e)}
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
                           </div>
                         </TableCell>
                       </TableRow>
@@ -378,21 +495,76 @@ function ExpensesTab({ toast }: { toast: Toast }) {
             </div>
           )}
 
-          {meta && meta.totalPages > 1 && (
-            <div className="flex items-center justify-between gap-3 border-t border-border px-4 py-3">
+          {meta && meta.total > 0 && (
+            <div className="flex flex-col gap-3 border-t border-border px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-xs text-muted-foreground">
-                Page {meta.page} of {meta.totalPages} · {meta.total} total
+                {pageSize === "all" ? (
+                  <>
+                    Showing all{" "}
+                    <span className="font-medium text-foreground">{meta.total}</span>{" "}
+                    {meta.total === 1 ? "entry" : "entries"}
+                  </>
+                ) : (
+                  <>
+                    Page {meta.page} of {meta.totalPages}
+                    <span className="mx-1.5 text-muted-foreground/50">•</span>
+                    {meta.total} {meta.total === 1 ? "entry" : "entries"}
+                  </>
+                )}
               </p>
-              <div className="flex gap-2">
-                <Button size="sm" variant="outline" className="h-8" disabled={page <= 1}
-                  onClick={() => setPage((p) => Math.max(1, p - 1))}>Previous</Button>
-                <Button size="sm" variant="outline" className="h-8" disabled={page >= meta.totalPages}
-                  onClick={() => setPage((p) => p + 1)}>Next</Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="hidden text-xs text-muted-foreground sm:inline">Rows per page</span>
+                <Select
+                  value={pageSize}
+                  onValueChange={(value) => {
+                    setPageSize(value);
+                    setPage(1);
+                    if (value === "all") void refetch();
+                  }}
+                >
+                  <SelectTrigger className="h-8 w-[88px]">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {[10, 20, 50].map((size) => (
+                      <SelectItem key={size} value={String(size)}>
+                        {size}
+                      </SelectItem>
+                    ))}
+                    <SelectItem value="all">All</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8"
+                  disabled={pageSize === "all" || page <= 1}
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" />
+                  Previous
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-8"
+                  disabled={pageSize === "all" || page >= meta.totalPages}
+                  onClick={() => setPage((p) => p + 1)}
+                >
+                  Next
+                  <ChevronRight className="ml-1 h-4 w-4" />
+                </Button>
               </div>
             </div>
           )}
         </CardContent>
       </Card>
+
+      <ExpenseAttachmentsDialog
+        expense={receiptsFor}
+        onOpenChange={(o) => !o && setReceiptsFor(null)}
+        onChange={() => qc.invalidateQueries({ queryKey: qk.expenses.all })}
+      />
 
       <ExpenseFormSheet
         open={formOpen}
@@ -518,7 +690,23 @@ function ExpenseFormSheet({
   onSave: (body: any) => void;
   saving: boolean;
 }) {
+  const qc = useQueryClient();
   const [f, setF] = useState(() => blankExpense());
+  const { accounts, setAccounts, loading: accountsLoading } = useExpenseAccounts(open);
+  const moneyAccounts = useMoneyAccounts(open);
+  // Open cash register (if any): cash expenses can be taken straight from the drawer.
+  const [drawer, setDrawer] = useState<{ branch: string } | null>(null);
+  useEffect(() => {
+    if (!open || editing) return;
+    apiClient
+      .get("/cash-register/status")
+      .then((r) => {
+        const rows: { branch: { name: string }; state: string }[] = r.data?.data?.branches ?? [];
+        const live = rows.filter((b) => b.state === "OPEN" || b.state === "LOCKED");
+        setDrawer(live.length === 1 ? { branch: live[0].branch.name } : null);
+      })
+      .catch(() => setDrawer(null));
+  }, [open, editing]);
   useEffect(() => {
     if (!open) return;
     setF(
@@ -527,6 +715,8 @@ function ExpenseFormSheet({
             particular: editing.particular,
             amount: String(editing.amount),
             category_id: editing.category?.id ?? "",
+            account_id: editing.account?.id ?? "",
+            paid_from_account_id: editing.paid_from?.id ?? "",
             payment_method: editing.payment_method,
             bank_account: editing.bank_account ?? "",
             reference: editing.reference ?? "",
@@ -536,10 +726,16 @@ function ExpenseFormSheet({
           }
         : blankExpense(),
     );
-  }, [open, editing]);
+  }, [open, editing, categories]);
+
+  useEffect(() => {
+    if (open && !f.paid_from_account_id && moneyAccounts.length) {
+      setF((prev) => ({ ...prev, paid_from_account_id: defaultPaidFrom(moneyAccounts, prev.payment_method) }));
+    }
+  }, [open, moneyAccounts, f.paid_from_account_id]);
 
   const showBank = BANKISH.includes(f.payment_method);
-  const valid = f.particular.trim().length > 0 && Number(f.amount) > 0;
+  const valid = f.particular.trim().length > 0 && Number(f.amount) > 0 && !!f.account_id;
 
   return (
     <DetailSheet open={open} onOpenChange={onOpenChange} size="lg">
@@ -558,39 +754,62 @@ function ExpenseFormSheet({
               onChange={(e) => setF({ ...f, amount: e.target.value })} className="h-9 nums" />
           </Field>
           <Field label="Date">
-            <Input type="date" value={f.expense_date}
-              onChange={(e) => setF({ ...f, expense_date: e.target.value })} className="h-9" />
+            <YmdDatePicker value={f.expense_date} onChange={(value) => setF({ ...f, expense_date: value })} className="h-9" />
           </Field>
         </div>
-        <div className="grid grid-cols-2 gap-3">
-          <Field label="Category">
-            <Select value={f.category_id || "none"} onValueChange={(v) => setF({ ...f, category_id: v === "none" ? "" : v })}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Uncategorised" /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">Uncategorised</SelectItem>
-                {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-          <Field label="Payment method">
-            <Select value={f.payment_method} onValueChange={(v) => setF({ ...f, payment_method: v as ExpensePaymentMethod })}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {EXPENSE_PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
-        </div>
+        <Field
+          label="Expense account"
+          hint="From your Chart of Accounts. Pick one, or add a new one here — it appears in Chart of Accounts straight away."
+        >
+          <ExpenseAccountPicker
+            value={f.account_id}
+            accounts={accounts}
+            onAccountsChange={(next) => {
+              setAccounts(next);
+              qc.invalidateQueries({ queryKey: qk.expenses.categories });
+            }}
+            loading={accountsLoading}
+            onChange={(account) =>
+              setF({ ...f, account_id: account?.id ?? "", category_id: account?.expense_category_id ?? "" })
+            }
+            triggerClassName="h-9"
+          />
+        </Field>
+        <Field label="Payment method">
+          <Select
+            value={f.payment_method}
+            onValueChange={(v) => setF({ ...f, payment_method: v as ExpensePaymentMethod, paid_from_account_id: defaultPaidFrom(moneyAccounts, v) })}
+          >
+            <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {EXPENSE_PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>)}
+            </SelectContent>
+          </Select>
+        </Field>
+        <Field label="Paid from" hint="The cash or bank account this money came out of — it is reduced in Chart of Accounts.">
+          <PaidFromSelect
+            value={f.paid_from_account_id}
+            accounts={moneyAccounts}
+            onChange={(id) => setF({ ...f, paid_from_account_id: id })}
+            triggerClassName="h-9"
+          />
+        </Field>
+        {!editing && drawer && f.expense_date === new Date().toLocaleDateString("en-CA", { timeZone: "Asia/Karachi" }) && (
+          <p className="rounded-lg bg-[#fcf8f2] px-3 py-2 text-xs text-gray-700">
+            {f.payment_method === "CASH"
+              ? `This will also show in today's ${drawer.branch} cash register and be taken from the drawer.`
+              : `This will also show in today's ${drawer.branch} cash register under ${titleCase(f.payment_method)} (drawer cash stays the same).`}
+          </p>
+        )}
+        {editing?.cashflow_id && (
+          <p className="rounded-lg bg-[#fcf8f2] px-3 py-2 text-xs text-gray-600">
+            This expense is in a cash register session — saving updates that day&apos;s register and accounts.
+          </p>
+        )}
         {showBank && (
-          <div className="grid grid-cols-2 gap-3">
-            <Field label="Bank account">
-              <Input value={f.bank_account} onChange={(e) => setF({ ...f, bank_account: e.target.value })}
-                placeholder="Account / bank name" className="h-9" />
-            </Field>
-            <Field label="Reference / cheque no.">
-              <Input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} className="h-9" />
-            </Field>
-          </div>
+          <Field label="Reference / cheque no.">
+            <Input value={f.reference} onChange={(e) => setF({ ...f, reference: e.target.value })} className="h-9" />
+          </Field>
         )}
         <Field label="Vendor / paid to">
           <Input value={f.vendor} onChange={(e) => setF({ ...f, vendor: e.target.value })} className="h-9" />
@@ -599,6 +818,15 @@ function ExpenseFormSheet({
           <Textarea value={f.notes} onChange={(e) => setF({ ...f, notes: e.target.value })}
             className="min-h-[70px] text-sm" />
         </Field>
+        {editing ? (
+          <Field label="Receipts">
+            <ExpenseAttachments expenseId={editing.id} compact />
+          </Field>
+        ) : (
+          <p className="rounded-md bg-muted/60 px-3 py-2 text-xs text-muted-foreground">
+            You can attach the receipt photo or PDF after saving — use the paperclip on the expense row.
+          </p>
+        )}
       </DetailSheetBody>
       <DetailSheetFooter>
         <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
@@ -609,8 +837,9 @@ function ExpenseFormSheet({
               particular: f.particular.trim(),
               amount: Number(f.amount),
               category_id: f.category_id || null,
+              account_id: f.account_id || null,
+              paid_from_account_id: f.paid_from_account_id || null,
               payment_method: f.payment_method,
-              bank_account: showBank ? f.bank_account.trim() || null : null,
               reference: f.reference.trim() || null,
               vendor: f.vendor.trim() || null,
               notes: f.notes.trim() || null,
@@ -631,6 +860,8 @@ function blankExpense() {
     particular: "",
     amount: "",
     category_id: "",
+    account_id: "",
+    paid_from_account_id: "",
     payment_method: "CASH" as ExpensePaymentMethod,
     bank_account: "",
     reference: "",
@@ -640,10 +871,19 @@ function blankExpense() {
   };
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="space-y-1">
       <Label className="text-xs text-muted-foreground">{label}</Label>
+      {hint ? <p className="text-[11px] leading-snug text-muted-foreground/90">{hint}</p> : null}
       {children}
     </div>
   );
@@ -824,7 +1064,10 @@ function RecurringFormSheet({
   onSave: (body: any) => void;
   saving: boolean;
 }) {
+  const qc = useQueryClient();
   const [f, setF] = useState(() => blankRecurring());
+  const { accounts, setAccounts, loading: accountsLoading } = useExpenseAccounts(open);
+  const moneyAccounts = useMoneyAccounts(open);
   useEffect(() => {
     if (!open) return;
     setF(
@@ -833,6 +1076,8 @@ function RecurringFormSheet({
             particular: editing.particular,
             amount: String(editing.amount),
             category_id: editing.category?.id ?? "",
+            account_id: editing.account?.id ?? "",
+            paid_from_account_id: editing.paid_from?.id ?? "",
             payment_method: editing.payment_method,
             bank_account: editing.bank_account ?? "",
             vendor: editing.vendor ?? "",
@@ -845,10 +1090,16 @@ function RecurringFormSheet({
           }
         : blankRecurring(),
     );
-  }, [open, editing]);
+  }, [open, editing, categories]);
+
+  useEffect(() => {
+    if (open && !f.paid_from_account_id && moneyAccounts.length) {
+      setF((prev) => ({ ...prev, paid_from_account_id: defaultPaidFrom(moneyAccounts, prev.payment_method) }));
+    }
+  }, [open, moneyAccounts, f.paid_from_account_id]);
 
   const showBank = BANKISH.includes(f.payment_method);
-  const valid = f.particular.trim().length > 0 && Number(f.amount) > 0;
+  const valid = f.particular.trim().length > 0 && Number(f.amount) > 0 && !!f.account_id;
 
   return (
     <DetailSheet open={open} onOpenChange={onOpenChange} size="lg">
@@ -865,17 +1116,45 @@ function RecurringFormSheet({
             <Input type="number" min="0" step="0.01" value={f.amount}
               onChange={(e) => setF({ ...f, amount: e.target.value })} className="h-9 nums" />
           </Field>
-          <Field label="Category">
-            <Select value={f.category_id || "none"} onValueChange={(v) => setF({ ...f, category_id: v === "none" ? "" : v })}>
-              <SelectTrigger className="h-9"><SelectValue placeholder="Uncategorised" /></SelectTrigger>
+          <Field label="Payment method">
+            <Select
+              value={f.payment_method}
+              onValueChange={(v) => setF({ ...f, payment_method: v as ExpensePaymentMethod, paid_from_account_id: defaultPaidFrom(moneyAccounts, v) })}
+            >
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="none">Uncategorised</SelectItem>
-                {categories.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>)}
+                {EXPENSE_PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>)}
               </SelectContent>
             </Select>
           </Field>
         </div>
-        <div className="grid grid-cols-3 gap-3">
+        <Field label="Paid from" hint="The cash or bank account this money came out of — it is reduced in Chart of Accounts.">
+          <PaidFromSelect
+            value={f.paid_from_account_id}
+            accounts={moneyAccounts}
+            onChange={(id) => setF({ ...f, paid_from_account_id: id })}
+            triggerClassName="h-9"
+          />
+        </Field>
+        <Field
+          label="Expense account"
+          hint="From your Chart of Accounts. Pick one, or add a new one here — it appears in Chart of Accounts straight away."
+        >
+          <ExpenseAccountPicker
+            value={f.account_id}
+            accounts={accounts}
+            onAccountsChange={(next) => {
+              setAccounts(next);
+              qc.invalidateQueries({ queryKey: qk.expenses.categories });
+            }}
+            loading={accountsLoading}
+            onChange={(account) =>
+              setF({ ...f, account_id: account?.id ?? "", category_id: account?.expense_category_id ?? "" })
+            }
+            triggerClassName="h-9"
+          />
+        </Field>
+        <div className="grid grid-cols-2 gap-3">
           <Field label="Frequency">
             <Select value={f.frequency} onValueChange={(v) => setF({ ...f, frequency: v as typeof f.frequency })}>
               <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
@@ -888,28 +1167,13 @@ function RecurringFormSheet({
             <Input type="number" min="1" value={f.interval}
               onChange={(e) => setF({ ...f, interval: e.target.value })} className="h-9 nums" />
           </Field>
-          <Field label="Payment method">
-            <Select value={f.payment_method} onValueChange={(v) => setF({ ...f, payment_method: v as ExpensePaymentMethod })}>
-              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {EXPENSE_PAYMENT_METHODS.map((m) => <SelectItem key={m} value={m}>{titleCase(m)}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          </Field>
         </div>
-        {showBank && (
-          <Field label="Bank account">
-            <Input value={f.bank_account} onChange={(e) => setF({ ...f, bank_account: e.target.value })} className="h-9" />
-          </Field>
-        )}
         <div className="grid grid-cols-2 gap-3">
           <Field label="Starts">
-            <Input type="date" value={f.start_date}
-              onChange={(e) => setF({ ...f, start_date: e.target.value })} className="h-9" />
+            <YmdDatePicker value={f.start_date} onChange={(value) => setF({ ...f, start_date: value })} className="h-9" />
           </Field>
           <Field label="Ends (optional)">
-            <Input type="date" value={f.end_date} min={f.start_date || undefined}
-              onChange={(e) => setF({ ...f, end_date: e.target.value })} className="h-9" />
+            <YmdDatePicker value={f.end_date} onChange={(value) => setF({ ...f, end_date: value })} className="h-9" />
           </Field>
         </div>
         <Field label="Vendor / paid to">
@@ -929,8 +1193,9 @@ function RecurringFormSheet({
               particular: f.particular.trim(),
               amount: Number(f.amount),
               category_id: f.category_id || null,
+              account_id: f.account_id || null,
+              paid_from_account_id: f.paid_from_account_id || null,
               payment_method: f.payment_method,
-              bank_account: showBank ? f.bank_account.trim() || null : null,
               vendor: f.vendor.trim() || null,
               notes: f.notes.trim() || null,
               frequency: f.frequency,
@@ -954,6 +1219,8 @@ function blankRecurring() {
     particular: "",
     amount: "",
     category_id: "",
+    account_id: "",
+    paid_from_account_id: "",
     payment_method: "CASH" as ExpensePaymentMethod,
     bank_account: "",
     vendor: "",
@@ -1129,10 +1396,10 @@ function ReportsTab() {
     <div className="space-y-4">
       <div className="flex flex-wrap items-end gap-2">
         <Field label="From">
-          <Input type="date" value={from} max={to || undefined} onChange={(e) => setFrom(e.target.value)} className="h-9 w-[150px]" />
+          <YmdDatePicker value={from} onChange={setFrom} className="h-9" />
         </Field>
         <Field label="To">
-          <Input type="date" value={to} min={from || undefined} onChange={(e) => setTo(e.target.value)} className="h-9 w-[150px]" />
+          <YmdDatePicker value={to} onChange={setTo} className="h-9" />
         </Field>
       </div>
 

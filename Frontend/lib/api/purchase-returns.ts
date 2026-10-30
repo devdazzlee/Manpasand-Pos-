@@ -46,8 +46,68 @@ export interface PurchaseReturnPayload {
     product_id: string;
     quantity: number;
     unit_cost: number;
+    /** Empty for a direct return (stock added without a bill) */
     purchase_id?: string | null;
   }[];
+}
+
+/** A product that can be returned without a bill (has stock at the branch). */
+export interface DirectReturnProduct {
+  product_id: string;
+  product_name: string;
+  sku: string | null;
+  on_hand: number;
+  unit_cost: number;
+  cost_source: "last_purchase" | "product_rate";
+  last_purchase_date: string | null;
+  from_supplier: boolean;
+}
+
+export async function fetchDirectReturnProducts(
+  supplierId: string,
+  branchId: string,
+  search: string,
+  signal?: AbortSignal,
+): Promise<DirectReturnProduct[]> {
+  const res = await apiClient.get("/purchase-returns/direct-products", {
+    params: cleanParams({ supplier_id: supplierId, branch_id: branchId, search: search.trim() || undefined }),
+    signal,
+  });
+  return Array.isArray(res.data?.data) ? res.data.data : [];
+}
+
+export interface ReturnableBillLine {
+  purchase_id: string;
+  product_id: string;
+  product_name: string;
+  sku: string | null;
+  purchased_qty: number;
+  already_returned: number;
+  returnable_qty: number;
+  on_hand: number;
+  unit_cost: number;
+}
+
+export interface ReturnableBill {
+  bill_group_id: string;
+  purchase_date: string;
+  invoice_ref: string | null;
+  line_count: number;
+  returnable_qty: number;
+  returnable_value: number;
+  lines: ReturnableBillLine[];
+}
+
+export async function fetchReturnableBills(
+  supplierId: string,
+  branchId: string,
+  signal?: AbortSignal,
+): Promise<ReturnableBill[]> {
+  const res = await apiClient.get("/purchase-returns/returnable-bills", {
+    params: cleanParams({ supplier_id: supplierId, branch_id: branchId }),
+    signal,
+  });
+  return Array.isArray(res.data?.data) ? res.data.data : [];
 }
 
 export async function fetchPurchaseReturns(

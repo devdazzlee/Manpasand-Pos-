@@ -17,7 +17,7 @@ const inter = Inter({
 })
 
 export const metadata: Metadata = {
-  title: "MANPASAND POS System",
+  title: "MANPASAND POS",
   description: "Professional Point of Sale System",
   generator: 'v0.dev',
   manifest: '/manifest.json',

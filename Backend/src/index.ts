@@ -27,11 +27,32 @@ import purchaseInvoiceRoutes from './routes/purchaseInvoice.routes';
 import transferRoutes from './routes/transfer.routes';
 import stockOutRoutes from './routes/stock-out.routes';
 import stockAdjustmentRoutes from './routes/stock-adjustment.routes';
+import stockImportRoutes from './routes/stock-import.routes';
 import inventoryRoutes from './routes/inventory.routes';
 import saleRoutes  from './routes/sale.routes';
 import appRoutes  from './routes/app.routes';
 import expenseRoutes  from './routes/expense.routes';
 import cashflowRoutes  from './routes/cashflow.routes';
+import registerReportRoutes from './routes/register-report.routes';
+import purchaseReportRoutes from './routes/purchase-report.routes';
+import salesReportRoutes from './routes/sales-report.routes';
+import tillRoutes from './routes/till.routes';
+import cashRegisterRoutes from './routes/cash-register.routes';
+import analyticsRoutes from './routes/analytics.routes';
+import financeControlsRoutes from './routes/finance-controls.routes';
+import { loyaltyRouter, giftCardRouter, promotionRouter, taxToolsRouter } from './routes/commerce.routes';
+import financialStatementRoutes from './routes/financial-statement.routes';
+import profitLossRoutes from './routes/profit-loss.routes';
+import balanceSheetRoutes from './routes/balance-sheet.routes';
+import trialBalanceRoutes from './routes/trial-balance.routes';
+import chartOfAccountsRoutes from './routes/chart-of-accounts.routes';
+import moneyCheckRoutes from './routes/money-check.routes';
+import payrollRoutes from './routes/payroll.routes';
+import { usersRouter, permissionsRouter, auditRouter } from './routes/security.routes';
+import { auditTrail } from './middleware/audit.middleware';
+import stockQuantityReportRoutes from './routes/stock-quantity-report.routes';
+import productSalesProfitRoutes from './routes/product-sales-profit.routes';
+import commissionRoutes from './routes/commission.routes';
 import customerRoutes  from './routes/customer.routes';
 import customerOrderRoutes  from './routes/customerOrder.routes';
 import deviceIdentityRoutes  from './routes/device_identity.routes';
@@ -109,6 +130,8 @@ app.use(cors({
     'Accept',
     'Cache-Control',
     'Pragma',
+    'X-Approver-Email',
+    'X-Approver-Password',
   ],
   exposedHeaders: ['Content-Range', 'X-Content-Range'],
 }));
@@ -129,6 +152,8 @@ app.use(helmet({
 app.use(morgan('dev'));
 app.use(express.json({ limit: '50mb' }));  // Allow large base64 image payloads
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+// Audit trail for every successful create / update / delete call
+app.use(auditTrail(vAPI));
 
 // Routes
 app.use(`${vAPI}/auth`, authRoutes);
@@ -152,13 +177,38 @@ app.use(`${vAPI}/purchase-invoices`, purchaseInvoiceRoutes);
 app.use(`${vAPI}/transfers`, transferRoutes);
 app.use(`${vAPI}/stock-out`, stockOutRoutes);
 app.use(`${vAPI}/stock-adjustments`, stockAdjustmentRoutes);
+app.use(`${vAPI}/stock-imports`, stockImportRoutes);
 app.use(`${vAPI}/inventory`, inventoryRoutes);
 app.use(`${vAPI}/expenses`, expenseRoutes);
 app.use(`${vAPI}/cashflows`, cashflowRoutes);
+app.use(`${vAPI}/register-report`, registerReportRoutes);
+app.use(`${vAPI}/purchase-report`, purchaseReportRoutes);
+app.use(`${vAPI}/sales-report`, salesReportRoutes);
+app.use(`${vAPI}/till`, tillRoutes);
+app.use(`${vAPI}/cash-register`, cashRegisterRoutes);
+app.use(`${vAPI}/analytics`, analyticsRoutes);
+app.use(`${vAPI}/finance`, financeControlsRoutes);
+app.use(`${vAPI}/loyalty`, loyaltyRouter);
+app.use(`${vAPI}/gift-cards`, giftCardRouter);
+app.use(`${vAPI}/promotions`, promotionRouter);
+app.use(`${vAPI}/tax-tools`, taxToolsRouter);
+app.use(`${vAPI}/financial-statement`, financialStatementRoutes);
+app.use(`${vAPI}/profit-loss`, profitLossRoutes);
+app.use(`${vAPI}/balance-sheet`, balanceSheetRoutes);
+app.use(`${vAPI}/trial-balance`, trialBalanceRoutes);
+app.use(`${vAPI}/chart-of-accounts`, chartOfAccountsRoutes);
+app.use(`${vAPI}/money-check`, moneyCheckRoutes);
+app.use(`${vAPI}/payroll`, payrollRoutes);
+app.use(`${vAPI}/users`, usersRouter);
+app.use(`${vAPI}/permissions`, permissionsRouter);
+app.use(`${vAPI}/audit`, auditRouter);
+app.use(`${vAPI}/stock-quantity-report`, stockQuantityReportRoutes);
+app.use(`${vAPI}/product-sales-profit`, productSalesProfitRoutes);
 app.use(`${vAPI}/dashboard`, dashboardRoutes);
 app.use(`${vAPI}/reports`, reportsRoutes);
 app.use(`${vAPI}/employee`, employeeRoutes);
 app.use(`${vAPI}/salaries`, salaryRoutes);
+app.use(`${vAPI}/commissions`, commissionRoutes);
 app.use(`${vAPI}/shifts`, shiftRoutes);
 app.use(`${vAPI}/shift-assignment`, shiftAssignmentRoutes);
 app.use(`${vAPI}/barcode-generator`, barcodeRoutes);
@@ -179,52 +229,46 @@ app.get('/health', (req, res) => {
   res.status(200).json({ status: 'OK - Server is working fine' });
 });
 
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'OK',
+    service: 'Manpasand POS API',
+    health: '/health',
+    api: vAPI,
+  });
+});
+
 // Error handling
 app.use(errorHandler);
 app.use(notFoundHandler);
 
-// Cron job to close drawers after 24 hours
-cron.schedule('0 * * * *', async () => {
-  const now = new Date();
-  console.log("🕐 Cron job running at:", now.toISOString());
-  
-  const cutoff = new Date(now.getTime() - 24 * 60 * 60 * 1000);
-  console.log("📅 Looking for drawers opened before:", cutoff.toISOString());
-  
-  const openDrawers = await prisma.cashFlow.findMany({
-    where: {
-      status: 'OPEN',
-      opened_at: { lte: cutoff },
-    },
-    include: {
-      branch: {
-        select: { name: true }
-      }
+// Remind about long-open registers — never auto-close (cashiers must close with a count).
+if (!process.env.VERCEL) {
+  cron.schedule('0 * * * *', async () => {
+    const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
+    const stale = await prisma.cashFlow.findMany({
+      where: { status: 'OPEN', opened_at: { lte: cutoff } },
+      include: { branch: { select: { name: true } } },
+    });
+    if (stale.length) {
+      console.warn(
+        `⚠️ ${stale.length} register(s) still open after 24h (not auto-closed):`,
+        stale.map((d) => `${d.branch?.name ?? d.branch_id} ${d.id}`).join(', '),
+      );
     }
   });
-  
-  console.log(`🔍 Found ${openDrawers.length} drawers to auto-close`);
-  
-  for (const drawer of openDrawers) {
-    await prisma.cashFlow.update({
-      where: { id: drawer.id },
-      data: { status: 'CLOSED', closed_at: new Date() },
-    });
-    console.log(`✅ Auto-closed drawer ${drawer.id} for branch: ${drawer.branch?.name || 'Unknown'}`);
-  }
-  
-  if (openDrawers.length === 0) {
-    console.log("✅ No drawers needed auto-closing");
-  }
-});
+}
 
-// Start server
-app.listen(config.port, () => {
-  console.log(`Server running on port ${config.port}`);
-});
+// Start server only when not running on Vercel serverless
+if (!process.env.VERCEL) {
+  app.listen(config.port, () => {
+    console.log(`Server running on port ${config.port}`);
+  });
+}
 
 process.on('SIGINT', async () => {
   await prisma.$disconnect();
   process.exit(0);
 });
 
+export default app;

@@ -1,0 +1,209 @@
+import { Prisma, SaleItemType, SaleStatus } from '@prisma/client';
+import { prisma } from '../prisma/client';
+import { localRange } from './purchase-report.service';
+import { ProductFilters, hasProductFilters, productFilterWhere } from '../utils/product-filters';
+
+const ADMIN_ROLES = new Set(['SUPER_ADMIN', 'ADMIN']);
+const INCLUDED_STATUSES: SaleStatus[] = ['COMPLETED', 'REFUNDED', 'EXCHANGED'];
+
+const num = (value: unknown) => {
+  const parsed = Number(value ?? 0);
+  return Number.isFinite(parsed) ? parsed : 0;
+};
+
+const round2 = (value: number) => Math.round((value + Number.EPSILON) * 100) / 100;
+
+const itemLabel = (product: {
+  name: string;
+  size?: { name: string } | null;
+  color?: { name: string } | null;
+}) => [product.name, product.size?.name, product.color?.name].filter(Boolean).join(' · ');
+
+const isRegenerated = (notes?: string | null) => {
+  const text = (notes || '').toLowerCase();
+  return text.includes('[regenerated]') || text.includes('regenerated bill');
+};
+
+const typeFor = (itemType: SaleItemType) => {
+  if (itemType === 'RETURN') return { type: 'SR', typeLabel: 'Sale return' };
+  if (itemType === 'EXCHANGE') return { type: 'EX', typeLabel: 'Exchange' };
+  return { type: 'SL', typeLabel: 'Sale' };
+};
+
+export class SalesReportService {
+  async itemwise(params: {
+    from: string;
+    to: string;
+    mode?: 'customer' | 'item';
+    customerId?: string;
+    productId?: string;
+    search?: string;
+    branchId?: string;
+    filters?: ProductFilters;
+    userRole?: string;
+    userBranchId?: string | null;
+  }) {
+    const isAdmin = ADMIN_ROLES.has(params.userRole || '');
+    // Admins may narrow to one branch; everyone else is locked to their own.
+    const branchId = isAdmin ? params.branchId || undefined : params.userBranchId || undefined;
+    const { start, end } = localRange(params.from, params.to);
+    const mode = params.mode === 'item' ? 'item' : 'customer';
+    const customerId = mode === 'customer' ? params.customerId : undefined;
+    const productId = mode === 'item' ? params.productId : undefined;
+    const search = params.search?.trim();
+    const productSearchFilter = search
+      ? {
+          OR: [
+            { name: { contains: search, mode: 'insensitive' as const } },
+            { sku: { contains: search, mode: 'insensitive' as const } },
+            { code: { contains: search, mode: 'insensitive' as const } },
+          ],
+        }
+      : undefined;
+    // Vendor / category / subcategory / stitch narrow the lines in both modes.
+    const catalogFilter = hasProductFilters(params.filters) ? productFilterWhere(params.filters) : undefined;
+    const itemFilter: Prisma.SaleItemWhereInput | undefined = (() => {
+      const parts: Prisma.SaleItemWhereInput[] = [];
+      if (productId) parts.push({ product_id: productId });
+      else if (mode === 'item' && productSearchFilter) parts.push({ product: productSearchFilter });
+      if (catalogFilter) parts.push({ product: catalogFilter });
+      if (!parts.length) return undefined;
+      return parts.length === 1 ? parts[0] : { AND: parts };
+    })();
+
+    const saleWhere: Prisma.SaleWhereInput = {
+      sale_date: { gte: start, lte: end },
+      status: { in: INCLUDED_STATUSES },
+      ...(branchId ? { branch_id: branchId } : {}),
+      ...(customerId ? { customer_id: customerId } : {}),
+      ...(itemFilter ? { sale_items: { some: itemFilter } } : {}),
+    };
+
+    const [sales, customers, products, branches] = await Promise.all([
+      prisma.sale.findMany({
+        where: saleWhere,
+        include: {
+          customer: { select: { id: true, name: true, phone_number: true, mobile_number: true } },
+          branch: { select: { id: true, name: true } },
+          sale_items: {
+            where: itemFilter,
+            include: {
+              product: {
+                include: {
+                  unit: true,
+                  size: true,
+                  color: true,
+                  category: { select: { name: true } },
+                  subcategory: { select: { name: true } },
+                  supplier: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
+        orderBy: { sale_date: 'asc' },
+      }),
+      prisma.customer.findMany({
+        where: { is_active: true },
+        select: { id: true, name: true, phone_number: true, mobile_number: true },
+        orderBy: { name: 'asc' },
+      }),
+      // Lean select (no 500 cap) so every active item is pickable in the filter.
+      prisma.product.findMany({
+        where: { is_active: true, ...(catalogFilter || {}) },
+        select: {
+          id: true,
+          name: true,
+          sku: true,
+          code: true,
+          size: { select: { name: true } },
+          color: { select: { name: true } },
+        },
+        orderBy: { name: 'asc' },
+      }),
+      isAdmin
+        ? prisma.branch.findMany({
+            where: { is_active: true },
+            select: { id: true, name: true, code: true },
+            orderBy: { name: 'asc' },
+          })
+        : Promise.resolve([] as { id: string; name: string; code: string }[]),
+    ]);
+
+    const lines = sales
+      .filter((sale) => !isRegenerated(sale.notes))
+      .flatMap((sale) =>
+        sale.sale_items.map((item) => {
+          const quantity = num(item.quantity);
+          const rate = num(item.unit_price);
+          const kind = typeFor(item.item_type);
+          const phone = sale.customer?.mobile_number || sale.customer?.phone_number;
+          return {
+            id: item.id,
+            date: sale.sale_date.toISOString(),
+            voucher: sale.invoice_number || sale.sale_number,
+            type: kind.type,
+            typeLabel: kind.typeLabel,
+            customerId: sale.customer_id,
+            customer: sale.customer?.name?.trim() || 'Walk-in',
+            customerPhone: phone || '',
+            branch: sale.branch?.name || '',
+            saleId: sale.id,
+            productId: item.product_id,
+            sku: item.product.sku || item.product.code,
+            item: itemLabel(item.product),
+            unit: item.product.unit?.name || 'Pcs',
+            category: item.product.category?.name || '',
+            subcategory: item.product.subcategory?.name || '',
+            vendor: item.product.supplier?.name || '',
+            stitchType: item.product.stitch_type || null,
+            quantity: round2(quantity),
+            rate: round2(rate),
+            discount: round2(num(item.discount_amount)),
+            amount: round2(num(item.line_total)),
+          };
+        }),
+      )
+      .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+    // Split totals by line type so the UI can show sales vs returns vs exchanges.
+    const sumBy = (type: string, field: 'amount' | 'quantity') =>
+      round2(lines.filter((line) => line.type === type).reduce((sum, line) => sum + line[field], 0));
+    const breakdown = {
+      salesAmount: sumBy('SL', 'amount'),
+      salesQuantity: sumBy('SL', 'quantity'),
+      returnsAmount: sumBy('SR', 'amount'),
+      returnsQuantity: sumBy('SR', 'quantity'),
+      exchangeAmount: sumBy('EX', 'amount'),
+      exchangeQuantity: sumBy('EX', 'quantity'),
+      discount: round2(lines.reduce((sum, line) => sum + line.discount, 0)),
+      billCount: new Set(lines.map((line) => line.saleId)).size,
+      customerCount: new Set(lines.filter((line) => line.customerId).map((line) => line.customerId)).size,
+      itemCount: new Set(lines.map((line) => line.productId)).size,
+    };
+
+    return {
+      period: { from: params.from, to: params.to },
+      mode,
+      customers: customers.map((customer) => ({
+        id: customer.id,
+        name: customer.name?.trim() || 'Unnamed customer',
+        phone: customer.mobile_number || customer.phone_number || '',
+      })),
+      products: products.map((product) => ({
+        id: product.id,
+        name: itemLabel(product),
+        sku: product.sku || product.code,
+      })),
+      branches,
+      branchId: branchId || null,
+      lines,
+      totals: {
+        quantity: round2(lines.reduce((sum, line) => sum + line.quantity, 0)),
+        amount: round2(lines.reduce((sum, line) => sum + line.amount, 0)),
+        count: lines.length,
+        ...breakdown,
+      },
+    };
+  }
+}

@@ -10,12 +10,17 @@ generator client {
 model User {
   id         String    @id @default(uuid())
   email      String    @unique
+  name       String?
   password   String
   role       Role      @default(ADMIN)
+  /// Inactive users cannot sign in or use existing sessions
+  is_active  Boolean   @default(true)
+  last_login_at DateTime?
   created_at DateTime  @default(now())
   updated_at DateTime  @default(now()) @updatedAt
   sessions   Session[]
   cashflows  CashFlow[]
+  closed_cashflows CashFlow[] @relation("CashFlowCloser")
 
   branch_id String?
   branch    Branch? @relation(fields: [branch_id], references: [id])
@@ -23,6 +28,7 @@ model User {
   // Relations for tracking user actions
   sales            Sale[]
   hold_sales       HoldSale[]
+  hold_purchases   HoldPurchase[]
   purchase_orders  PurchaseOrder[]
   stock_movements  StockMovement[]
   purchases        Purchase[]
@@ -35,6 +41,9 @@ model User {
   recurring_expenses RecurringExpense[] @relation("RecurringExpenseCreator")
   purchase_returns  PurchaseReturn[]  @relation("PurchaseReturnCreator")
   purchase_invoices PurchaseInvoice[] @relation("PurchaseInvoiceCreator")
+  stock_imports     StockImportBatch[] @relation("StockImportCreator")
+  stock_import_reversals StockImportBatch[] @relation("StockImportReverser")
+  employee          Employee?
 
   @@index([email])
 }
@@ -79,6 +88,7 @@ model Branch {
   stock              Stock[]
   sales              Sale[]
   hold_sales         HoldSale[]
+  hold_purchases     HoldPurchase[]
   purchase_orders     PurchaseOrder[]
   stock_movements     StockMovement[]
   Order              Order[]
@@ -89,6 +99,7 @@ model Branch {
   transfers_to       Transfer[]    @relation("TransferTo")
   stock_adjustments  StockAdjustment[]
   loyalty_customers  Customer[] @relation("CustomerLoyaltyBranch")
+  stock_import_lines StockImportLine[]
 
   @@index([code])
   @@index([is_active])
@@ -211,12 +222,29 @@ model Supplier {
   address         String?
   is_active       Boolean         @default(true)
   display_on_pos  Boolean         @default(true)
+  // Contact, terms and bank details
+  contact_person       String?
+  whatsapp_number      String?
+  category             String?
+  payment_terms        String?
+  credit_days          Int?
+  credit_limit         Decimal?
+  opening_balance      Decimal   @default(0) // + we owe them, - they owe us (advance)
+  opening_balance_date DateTime?
+  bank_name            String?
+  bank_account_title   String?
+  bank_account_number  String?
+  bank_iban            String?
+  rating               Int?
+  notes                String?
   products        Product[]
   purchase_orders PurchaseOrder[]
   purchases       Purchase[]
   purchase_returns PurchaseReturn[]
   purchase_invoices PurchaseInvoice[]
   payments        SupplierPayment[]
+  hold_purchases  HoldPurchase[]
+  chart_account   TransactionalAccount?
   created_at      DateTime        @default(now())
   updated_at      DateTime        @default(now()) @updatedAt
 
@@ -230,12 +258,19 @@ model SupplierPayment {
   supplier_id  String
   supplier     Supplier @relation(fields: [supplier_id], references: [id], onDelete: Cascade)
   amount       Decimal
+  // PAYMENT | ADVANCE | REFUND | DEBIT_NOTE | CREDIT_NOTE | DISCOUNT (amount is always positive)
+  type         String   @default("PAYMENT")
   payment_date DateTime @default(now())
   method       String   @default("CASH")
+  /// Cash / bank account the money left from (or came into, for refunds)
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("SupplierPaymentPaidFrom", fields: [paid_from_account_id], references: [id], onDelete: SetNull)
   reference    String?
   notes        String?
   purchase_invoice_id String?
   purchase_invoice    PurchaseInvoice? @relation(fields: [purchase_invoice_id], references: [id])
+  /// Stock In save that created this payment (for ledger sync when the bill is edited).
+  bill_group_id  String?
   created_by   String
   user         User     @relation(fields: [created_by], references: [id])
   created_at   DateTime @default(now())
@@ -243,7 +278,9 @@ model SupplierPayment {
   @@index([supplier_id])
   @@index([payment_date])
   @@index([purchase_invoice_id])
+  @@index([bill_group_id])
   @@index([created_by])
+  @@index([paid_from_account_id])
 }
 
 enum PurchaseInvoiceStatus {
@@ -324,6 +361,10 @@ model Product {
   pct_or_hs_code             String?
   description                String?
   sku                        String       @unique
+  /// Merchant-facing code for POS search & labels (e.g. ATS-24000)
+  custom_code                String?
+  /// Optional custom barcode for labels & POS scan (when not using auto SKU/CODE-PRICE)
+  label_barcode              String?      @unique
   purchase_rate              Decimal      @default(0)
   sales_rate_exc_dis_and_tax Decimal      @default(0)
   sales_rate_inc_dis_and_tax Decimal      @default(0)
@@ -355,6 +396,11 @@ model Product {
   has_images                 Boolean      @default(false)
   is_finished_good           Boolean      @default(true)
   is_loose_item              Boolean      @default(false)
+  /// Season / collection label, e.g. "Eid 2026", "Winter Luxe"
+  collection                 String?
+  /// Stitched vs unstitched, kept apart from category so every report can split on it.
+  stitch_type                StitchType?
+  price_history              ProductPriceHistory[]
 
   // Relations
   order_items          OrderItem[]
@@ -366,6 +412,7 @@ model Product {
   purchases            Purchase[]
   purchase_return_items PurchaseReturnItem[]
   stock_adjustments    StockAdjustment[]
+  stock_import_lines   StockImportLine[]
   transfers            Transfer[]
   created_at           DateTime            @default(now())
   updated_at           DateTime            @default(now()) @updatedAt
@@ -374,14 +421,21 @@ model Product {
   @@index([category_id])
   @@index([subcategory_id])
   @@index([sku])
+  @@index([custom_code])
   @@index([supplier_id])
   @@index([brand_id])
   @@index([color_id])
   @@index([size_id])
+  @@index([stitch_type])
   @@index([is_featured])
   @@index([is_active])
   @@index([display_on_pos])
   @@index([display_on_website])
+}
+
+enum StitchType {
+  STITCHED
+  UNSTITCHED
 }
 
 enum ImageStatus {
@@ -474,6 +528,8 @@ model Purchase {
   // them in an arbitrary order instead of entry order.
   line_no            Int                     @default(0)
   invoice_ref        String?
+  /// Shared id for all lines from one Stock In save (one supplier bill / GRN).
+  bill_group_id      String?
   notes              String?
   delivery_status    PurchaseDeliveryStatus  @default(COMPLETE)
   purchase_order_id  String?
@@ -491,6 +547,7 @@ model Purchase {
   @@index([purchase_date])
   @@index([purchase_order_id])
   @@index([purchase_invoice_id])
+  @@index([bill_group_id])
   @@index([created_by])
 }
 
@@ -498,6 +555,7 @@ enum TransferStatus {
   PENDING
   DISPATCHED
   RECEIVED
+  CANCELLED
 }
 
 model Transfer {
@@ -573,6 +631,101 @@ model StockAdjustment {
 }
 
 // NEW: Sales/Sell Table
+/// How an opening-stock import treats quantities: ADD to on-hand, or SET on-hand to the file's figure.
+enum StockImportMode {
+  ADD
+  SET
+}
+
+enum StockImportStatus {
+  /// Lines saved, still being applied in chunks
+  PROCESSING
+  COMMITTED
+  REVERSED
+}
+
+enum StockImportLineStatus {
+  PENDING
+  APPLIED
+  SKIPPED
+  ERROR
+  REVERSED
+}
+
+/// One opening-stock import (e.g. migration from a previous POS). Undo reverses every applied line.
+model StockImportBatch {
+  id                  String            @id @default(uuid())
+  reference           String            @unique
+  file_name           String?
+  /// SHA-256 of the uploaded file — warns before the same file is imported twice
+  file_checksum       String?
+  /// Free-text reference typed by the user, e.g. "Old POS closing 30-Sep"
+  source_reference    String?
+  notes               String?
+  mode                StockImportMode   @default(SET)
+  status              StockImportStatus @default(PROCESSING)
+  update_cost         Boolean           @default(false)
+  create_missing      Boolean           @default(true)
+  stock_date          DateTime          @default(now())
+  total_lines         Int               @default(0)
+  applied_lines       Int               @default(0)
+  error_lines         Int               @default(0)
+  created_products    Int               @default(0)
+  total_qty           Decimal           @default(0)
+  total_value         Decimal           @default(0)
+  journal_voucher_id  String?
+  reversal_voucher_id String?
+  created_by          String?
+  creator             User?             @relation("StockImportCreator", fields: [created_by], references: [id])
+  reversed_by         String?
+  reverser            User?             @relation("StockImportReverser", fields: [reversed_by], references: [id])
+  reversed_at         DateTime?
+  committed_at        DateTime?
+  created_at          DateTime          @default(now())
+  updated_at          DateTime          @default(now()) @updatedAt
+  lines               StockImportLine[]
+
+  @@index([file_checksum])
+  @@index([source_reference])
+  @@index([status])
+  @@index([created_at])
+}
+
+model StockImportLine {
+  id              String                @id @default(uuid())
+  batch_id        String
+  batch           StockImportBatch      @relation(fields: [batch_id], references: [id], onDelete: Cascade)
+  row_no          Int
+  branch_id       String
+  branch          Branch                @relation(fields: [branch_id], references: [id])
+  /// Null until the product is matched or created
+  product_id      String?
+  product         Product?              @relation(fields: [product_id], references: [id])
+  /// Raw values from the file, kept for the audit trail and for creating missing products
+  sku             String?
+  name            String?
+  category_name   String?
+  brand_name      String?
+  size_name       String?
+  color_name      String?
+  quantity        Decimal
+  unit_cost       Decimal?
+  sale_price      Decimal?
+  /// Product purchase rate before this line changed it — restored on undo
+  previous_cost   Decimal?
+  create_product  Boolean               @default(false)
+  created_product Boolean               @default(false)
+  status          StockImportLineStatus @default(PENDING)
+  previous_qty    Decimal?
+  new_qty         Decimal?
+  applied_change  Decimal?
+  applied_value   Decimal?
+  error           String?
+
+  @@index([batch_id, status])
+  @@index([product_id])
+}
+
 model Sale {
   id               String        @id @default(uuid())
   sale_number      String        @unique
@@ -601,6 +754,24 @@ model Sale {
   original_sale_id String?
   original_sale    Sale?         @relation("SaleReturnLink", fields: [original_sale_id], references: [id])
   return_sales     Sale[]        @relation("SaleReturnLink")
+  customer_payments CustomerPayment[] @relation("CustomerPaymentSale")
+  // Promotions, loyalty and gift cards applied at checkout (discount_amount includes promotion + loyalty)
+  promotion_discount      Decimal               @default(0)
+  applied_promotions      Json?
+  loyalty_points_redeemed Int                   @default(0)
+  loyalty_discount        Decimal               @default(0)
+  loyalty_points_earned   Int                   @default(0)
+  loyalty_transactions    LoyaltyTransaction[]
+  gift_card_transactions  GiftCardTransaction[]
+  // Split tenders (cash + card + bank + wallet). Empty for older single-method sales.
+  payments         SalePayment[]
+  // Void / cancellation audit
+  void_reason      String?
+  voided_by        String?
+  voided_at        DateTime?
+  // Employee credited with this sale for commission (null = cashier's linked employee)
+  salesperson_id   String?
+  salesperson      Employee?     @relation("SaleSalesperson", fields: [salesperson_id], references: [id], onDelete: SetNull)
   created_at       DateTime      @default(now())
   updated_at       DateTime      @default(now()) @updatedAt
 
@@ -611,6 +782,7 @@ model Sale {
   @@index([sale_date])
   @@index([status])
   @@index([created_by])
+  @@index([salesperson_id])
 }
 
 enum SaleItemType {
@@ -628,6 +800,8 @@ model SaleItem {
   product          Product      @relation(fields: [product_id], references: [id])
   quantity         Decimal
   unit_price       Decimal
+  /// Cost frozen at sale/return time (WAC / purchase_rate). COGS uses this, not live product cost.
+  unit_cost        Decimal?
   tax_rate         Decimal      @default(0)
   tax_amount       Decimal      @default(0)
   discount_rate    Decimal      @default(0)
@@ -784,10 +958,15 @@ model Customer {
   loyalty_discount_cap      Decimal?        @default(3000)
   loyalty_monthly_limit     Int?            @default(4)
   loyalty_registered_at     DateTime?
+  /// Payment terms: credit sales fall due this many days after the sale (null = due immediately)
+  credit_days        Int?
+  notes              String?
   orders             Order[]
   sales              Sale[] // NEW: Link to sales
   hold_sales         HoldSale[]
   payments           CustomerPayment[]
+  loyalty_transactions LoyaltyTransaction[]
+  gift_cards         GiftCard[]
   device             DeviceIdentity?
   created_at         DateTime        @default(now())
   updated_at         DateTime        @default(now()) @updatedAt
@@ -797,10 +976,25 @@ model Customer {
   @@index([loyalty_branch_id])
 }
 
+enum CustomerTxnType {
+  PAYMENT
+  ADVANCE
+  REFUND
+  CREDIT_NOTE
+  DEBIT_NOTE
+  WRITE_OFF
+}
+
+/// Customer account transactions. PAYMENT / ADVANCE / CREDIT_NOTE / WRITE_OFF reduce
+/// what the customer owes (credit); REFUND / DEBIT_NOTE increase it (debit).
 model CustomerPayment {
   id           String   @id @default(uuid())
   customer_id  String
   customer     Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  type         CustomerTxnType @default(PAYMENT)
+  /// Optional invoice this transaction settles / adjusts
+  sale_id      String?
+  sale         Sale?    @relation("CustomerPaymentSale", fields: [sale_id], references: [id], onDelete: SetNull)
   amount       Decimal
   payment_date DateTime @default(now())
   method       String   @default("CASH")
@@ -813,6 +1007,8 @@ model CustomerPayment {
   @@index([customer_id])
   @@index([payment_date])
   @@index([created_by])
+  @@index([type])
+  @@index([sale_id])
 }
 
 model Discount {
@@ -842,6 +1038,28 @@ model HoldSale {
 
   @@index([branch_id])
   @@index([customer_id])
+  @@index([created_by])
+  @@index([created_at])
+}
+
+/// Unposted Stock In draft (pause when a customer arrives; resume later).
+model HoldPurchase {
+  id          String    @id @default(uuid())
+  branch_id   String
+  branch      Branch    @relation(fields: [branch_id], references: [id], onDelete: Cascade)
+  supplier_id String?
+  supplier    Supplier? @relation(fields: [supplier_id], references: [id], onDelete: SetNull)
+  created_by  String?
+  user        User?     @relation(fields: [created_by], references: [id])
+  label       String?
+  /// Full Stock In form state (bills, payment, notes, …)
+  payload     Json
+  line_count  Int       @default(0)
+  created_at  DateTime  @default(now())
+  updated_at  DateTime  @default(now()) @updatedAt
+
+  @@index([branch_id])
+  @@index([supplier_id])
   @@index([created_by])
   @@index([created_at])
 }
@@ -914,6 +1132,10 @@ enum Role {
   PURCHASE_MANAGER
   WAREHOUSE_MANAGER
   BRANCH_MANAGER
+  SUPERVISOR
+  CASHIER
+  /// Read-only: can only view products and stock
+  INVENTORY_VIEWER
 }
 
 enum OrderStatus {
@@ -929,6 +1151,7 @@ enum PaymentMethod {
   MOBILE_MONEY
   BANK_TRANSFER
   CREDIT
+  GIFT_CARD
 }
 
 enum DiscountType {
@@ -1008,6 +1231,7 @@ model ExpenseCategory {
 
   expenses  Expense[]
   recurring RecurringExpense[]
+  chart_account TransactionalAccount?
 }
 
 model Expense {
@@ -1045,7 +1269,19 @@ model Expense {
   recurring_id String?
   recurring    RecurringExpense? @relation(fields: [recurring_id], references: [id])
 
+  // Chart of Accounts expense head this expense posts to
+  account_id String?
+  account    TransactionalAccount? @relation("ExpenseAccount", fields: [account_id], references: [id])
+
+  /// Cash / bank account the money left from (Cr side). Null on old rows: derived from payment_method.
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("ExpensePaidFrom", fields: [paid_from_account_id], references: [id])
+
+  attachments ExpenseAttachment[]
+
   @@index([status])
+  @@index([account_id])
+  @@index([paid_from_account_id])
   @@index([expense_date])
   @@index([category_id])
   @@index([branch_id])
@@ -1062,6 +1298,12 @@ model RecurringExpense {
 
   category_id String?
   category    ExpenseCategory? @relation(fields: [category_id], references: [id])
+
+  account_id String?
+  account    TransactionalAccount? @relation("RecurringExpenseAccount", fields: [account_id], references: [id])
+
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("RecurringExpensePaidFrom", fields: [paid_from_account_id], references: [id])
 
   branch_id String?
   branch    Branch? @relation(fields: [branch_id], references: [id])
@@ -1095,11 +1337,98 @@ model CashFlow {
   opening    Decimal
   sales      Decimal
   closing    Decimal? // nullable until closing added
+  expected_cash Decimal?
+  variance      Decimal?
   status     CashFlowStatus @default(OPEN)
   opened_at  DateTime  @default(now())
   closed_at  DateTime?
+  closed_by  String?
+  closer     User?     @relation("CashFlowCloser", fields: [closed_by], references: [id])
   created_at DateTime  @default(now())
   expenses   Expense[]
+
+  // Opening count vs last closing
+  expected_opening    Decimal?
+  opening_variance    Decimal?
+  opening_note        String?
+  /// Denomination count, e.g. {"5000":2,"1000":5,"coins":120}
+  opening_count       Json?
+  closing_count       Json?
+  // Closing difference explanation / approval
+  variance_note       String?
+  variance_approved_by String?
+  /// NONE | PENDING | APPROVED — manager review after closing
+  review_status       String    @default("NONE")
+  reviewed_by         String?
+  reviewed_at         DateTime?
+  review_note         String?
+  /// Locked while the cashier is on a break with no cover
+  locked              Boolean   @default(false)
+  locked_reason       String?
+
+  cash_movements  CashMovement[]
+  shifts          RegisterShift[]
+  reconciliations RegisterReconciliation[]
+}
+
+/// Cash added to the drawer during a session (float top-up, change from bank…).
+model CashMovement {
+  id          String   @id @default(uuid())
+  cashflow_id String
+  cashflow    CashFlow @relation(fields: [cashflow_id], references: [id], onDelete: Cascade)
+  type        String   @default("IN")
+  amount      Decimal
+  reason      String
+  created_by  String?
+  approved_by String?
+  created_at  DateTime @default(now())
+
+  @@index([cashflow_id])
+}
+
+/// Who was responsible for the drawer and when. Every handover / break is a new row.
+model RegisterShift {
+  id                    String    @id @default(uuid())
+  cashflow_id           String
+  cashflow              CashFlow  @relation(fields: [cashflow_id], references: [id], onDelete: Cascade)
+  cashier_id            String
+  /// OPENING | HANDOVER | BREAK_COVER | RETURN | EMERGENCY
+  kind                  String
+  /// ACTIVE | ON_BREAK | ENDED
+  status                String    @default("ACTIVE")
+  started_at            DateTime  @default(now())
+  ended_at              DateTime?
+  start_count           Decimal
+  end_count             Decimal?
+  expected_end          Decimal?
+  variance              Decimal?
+  start_note            String?
+  end_note              String?
+  confirmed_by_incoming Boolean   @default(false)
+  approved_by           String?
+  ended_by              String?
+  created_at            DateTime  @default(now())
+
+  @@index([cashflow_id])
+  @@index([cashier_id])
+}
+
+/// Card / bank / wallet totals checked against terminal or bank statement at closing.
+model RegisterReconciliation {
+  id            String   @id @default(uuid())
+  cashflow_id   String
+  cashflow      CashFlow @relation(fields: [cashflow_id], references: [id], onDelete: Cascade)
+  /// CASH | CARD | BANK_TRANSFER | MOBILE_MONEY
+  method        String
+  expected      Decimal
+  actual        Decimal
+  variance      Decimal
+  reference     String?
+  notes         String?
+  reconciled_by String?
+  created_at    DateTime @default(now())
+
+  @@unique([cashflow_id, method])
 }
 
 enum CashFlowStatus {
@@ -1167,6 +1496,32 @@ model Employee {
 
   shift_assignments ShiftAssignment[]
   salaries          Salary[]
+  commissions       Commission[]
+  chart_account     TransactionalAccount?
+  advances          EmployeeAdvance[]
+
+  // Link POS login user so sales (Sale.created_by) map to this employee for commission
+  user_id String? @unique
+  user    User?   @relation(fields: [user_id], references: [id])
+
+  // Fixed monthly base salary; commission is earned separately as an addon
+  monthly_salary Decimal @default(0)
+
+  // How commission is earned: % of net sales, a fixed amount per bill, or per piece sold
+  commission_type  CommissionType @default(PERCENTAGE)
+  // Commission % of net sales (e.g. 2.5 = 2.5%) — used when commission_type = PERCENTAGE
+  commission_rate Decimal @default(0)
+  // Fixed Rs per bill / per piece — used for the FIXED_* commission types
+  commission_fixed Decimal @default(0)
+
+  // Sales where this employee was picked as the salesperson
+  attributed_sales Sale[] @relation("SaleSalesperson")
+
+  // Optional bank / payout account details
+  bank_name       String?
+  account_title   String?
+  account_number  String?
+  iban            String?
 
   created_at DateTime @default(now())
   updated_at DateTime @default(now()) @updatedAt
@@ -1176,6 +1531,12 @@ model Employee {
   @@index([department_id])
   @@index([status])
   @@index([employee_code])
+}
+
+enum CommissionType {
+  PERCENTAGE
+  FIXED_PER_SALE
+  FIXED_PER_PIECE
 }
 
 model EmployeeType {
@@ -1211,12 +1572,447 @@ model Salary {
   month       Int
   year        Int
   amount      Decimal
+  // Advance / loan taken against this pay period
+  loan_amount Decimal   @default(0)
+  // Payslip breakdown: net = amount + bonus + allowances - deductions - advance_deduction - loan_amount
+  bonus             Decimal @default(0)
+  allowances        Decimal @default(0)
+  deductions        Decimal @default(0)
+  // Recovery of an outstanding advance (creates a RECOVERY entry in EmployeeAdvance)
+  advance_deduction Decimal @default(0)
+  paid_amount       Decimal @default(0)
+  payment_method    String?
+  /// Cash / bank account the salary was paid from (Cr side in Chart of Accounts)
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("SalaryPaidFrom", fields: [paid_from_account_id], references: [id], onDelete: SetNull)
+  reference         String?
   is_paid     Boolean   @default(false)
   paid_date   DateTime?
   notes       String?
   employee Employee @relation(fields: [employee_id], references: [id])
+  advance_entries EmployeeAdvance[]
   created_at DateTime @default(now())
   @@unique([employee_id, month, year])
   @@index([employee_id])
+  @@index([paid_date])
+  @@index([is_paid])
+  @@index([paid_from_account_id])
 }
 
+model Commission {
+  id            String    @id @default(uuid())
+  employee_id   String
+  month         Int
+  year          Int
+  sales_amount  Decimal   @default(0)
+  pieces        Decimal   @default(0)
+  bills         Int       @default(0)
+  rate          Decimal   @default(0)
+  commission_type CommissionType @default(PERCENTAGE)
+  fixed_amount  Decimal   @default(0)
+  amount        Decimal   @default(0)
+  // amount = base_amount (from sales) + adjustment (bonus + / deduction −)
+  base_amount       Decimal   @default(0)
+  adjustment        Decimal   @default(0)
+  adjustment_note   String?
+  // Running total of payments (partial OK). is_paid = paid_amount >= amount
+  paid_amount       Decimal   @default(0)
+  is_paid       Boolean   @default(false)
+  paid_date     DateTime?
+  payment_method    String?
+  paid_from_account_id String?
+  paid_from            TransactionalAccount? @relation("CommissionPaidFrom", fields: [paid_from_account_id], references: [id], onDelete: SetNull)
+  payment_reference String?
+  paid_by           String?
+  notes         String?
+  employee      Employee  @relation(fields: [employee_id], references: [id])
+  created_at    DateTime  @default(now())
+  updated_at    DateTime  @default(now()) @updatedAt
+
+  @@unique([employee_id, month, year])
+  @@index([employee_id])
+  @@index([paid_date])
+  @@index([is_paid])
+  @@index([paid_from_account_id])
+}
+
+// ============================================================
+// Chart of Accounts
+// Level 1 Type (fixed: 1 Asset, 2 Liability, 3 Equity, 4 Income, 5 Expense)
+// Level 2 Sub Type (2 digits, e.g. 52)
+// Level 3 Control Account (3 digits, e.g. 522)
+// Level 4 Transactional Account (7 digits, e.g. 5220001)
+// ============================================================
+
+enum BalanceSide {
+  DEBIT
+  CREDIT
+}
+
+model AccountSubType {
+  id          String           @id @default(uuid())
+  code        String           @unique
+  name        String
+  type_code   Int
+  description String?
+  is_active   Boolean          @default(true)
+  is_system   Boolean          @default(false)
+  controls    ControlAccount[]
+  created_at  DateTime         @default(now())
+  updated_at  DateTime         @default(now()) @updatedAt
+
+  @@index([type_code])
+}
+
+model ControlAccount {
+  id          String                 @id @default(uuid())
+  code        String                 @unique
+  name        String
+  sub_type_id String
+  sub_type    AccountSubType         @relation(fields: [sub_type_id], references: [id])
+  description String?
+  /// Marks controls that auto-linked accounts are created under (PAYROLL, TRADE_PAYABLES, GENERAL_EXPENSES)
+  system_key  String?                @unique
+  is_active   Boolean                @default(true)
+  is_system   Boolean                @default(false)
+  accounts    TransactionalAccount[]
+  created_at  DateTime               @default(now())
+  updated_at  DateTime               @default(now()) @updatedAt
+
+  @@index([sub_type_id])
+}
+
+model TransactionalAccount {
+  id              String         @id @default(uuid())
+  code            String         @unique
+  name            String
+  control_id      String
+  control         ControlAccount @relation(fields: [control_id], references: [id])
+  contact_person  String?
+  mobile          String?
+  address         String?
+  nic             String?
+  ntn             String?
+  email           String?
+  notes           String?
+  opening_balance Decimal        @default(0)
+  opening_side    BalanceSide    @default(DEBIT)
+  is_active       Boolean        @default(true)
+  is_system       Boolean        @default(false)
+  /// Values computed from POS modules (CASH, INVENTORY, SALES, COGS, ...)
+  system_key      String?        @unique
+
+  employee_id String?   @unique
+  employee    Employee? @relation(fields: [employee_id], references: [id], onDelete: SetNull)
+
+  supplier_id String?   @unique
+  supplier    Supplier? @relation(fields: [supplier_id], references: [id], onDelete: SetNull)
+
+  expense_category_id String?          @unique
+  expense_category    ExpenseCategory? @relation(fields: [expense_category_id], references: [id], onDelete: SetNull)
+
+  expenses           Expense[]          @relation("ExpenseAccount")
+  recurring_expenses RecurringExpense[] @relation("RecurringExpenseAccount")
+  paid_expenses      Expense[]          @relation("ExpensePaidFrom")
+  paid_recurring     RecurringExpense[] @relation("RecurringExpensePaidFrom")
+  paid_salaries      Salary[]           @relation("SalaryPaidFrom")
+  paid_commissions   Commission[]       @relation("CommissionPaidFrom")
+  paid_supplier_payments SupplierPayment[] @relation("SupplierPaymentPaidFrom")
+  budgets            Budget[]
+  journal_lines      JournalVoucherLine[]
+
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@index([control_id])
+  @@index([is_active])
+}
+
+model JournalVoucher {
+  id           String               @id @default(uuid())
+  voucher_no   String               @unique
+  voucher_date DateTime             @default(now())
+  narration    String?
+  reference    String?
+  branch_id    String?
+  total        Decimal              @default(0)
+  created_by   String?
+  lines        JournalVoucherLine[]
+  created_at   DateTime             @default(now())
+  updated_at   DateTime             @default(now()) @updatedAt
+
+  @@index([voucher_date])
+  @@index([branch_id])
+}
+
+model JournalVoucherLine {
+  id          String               @id @default(uuid())
+  voucher_id  String
+  voucher     JournalVoucher       @relation(fields: [voucher_id], references: [id], onDelete: Cascade)
+  account_id  String
+  account     TransactionalAccount @relation(fields: [account_id], references: [id])
+  description String?
+  debit       Decimal              @default(0)
+  credit      Decimal              @default(0)
+
+  @@index([voucher_id])
+  @@index([account_id])
+}
+
+enum AdvanceTxnType {
+  ADVANCE
+  RECOVERY
+}
+
+/// Staff advances / loans. ADVANCE = money given to the employee; RECOVERY = repaid in cash or deducted from salary.
+model EmployeeAdvance {
+  id          String         @id @default(uuid())
+  employee_id String
+  employee    Employee       @relation(fields: [employee_id], references: [id], onDelete: Cascade)
+  type        AdvanceTxnType
+  amount      Decimal
+  txn_date    DateTime       @default(now())
+  method      String         @default("CASH")
+  reference   String?
+  notes       String?
+  /// Set when the recovery came out of a salary (payroll deduction)
+  salary_id   String?
+  salary      Salary?        @relation(fields: [salary_id], references: [id], onDelete: Cascade)
+  created_by  String?
+  created_at  DateTime       @default(now())
+
+  @@index([employee_id])
+  @@index([txn_date])
+  @@index([salary_id])
+}
+
+/// One tender on a sale. Amounts are what was applied to the bill (cash is net of change).
+model SalePayment {
+  id         String        @id @default(uuid())
+  sale_id    String
+  sale       Sale          @relation(fields: [sale_id], references: [id], onDelete: Cascade)
+  method     PaymentMethod
+  amount     Decimal
+  reference  String?
+  created_at DateTime      @default(now())
+
+  @@index([sale_id])
+  @@index([method])
+}
+
+/// Every change to a product's cost or selling price.
+model ProductPriceHistory {
+  id         String   @id @default(uuid())
+  product_id String
+  product    Product  @relation(fields: [product_id], references: [id], onDelete: Cascade)
+  /// purchase_rate | sales_rate_exc_dis_and_tax | sales_rate_inc_dis_and_tax | discount_amount
+  field      String
+  old_value  Decimal
+  new_value  Decimal
+  source     String   @default("MANUAL")
+  changed_by String?
+  created_at DateTime @default(now())
+
+  @@index([product_id])
+  @@index([created_at])
+}
+
+/// Per-role permission overrides. Missing rows fall back to the built-in defaults.
+model RolePermission {
+  role       Role
+  permission String
+  allowed    Boolean
+  updated_by String?
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@id([role, permission])
+}
+
+/// Who did what, when — logins, sales edits, voids, refunds, price changes, cash moves, approvals, exports…
+model AuditLog {
+  id                String   @id @default(uuid())
+  created_at        DateTime @default(now())
+  user_id           String?
+  user_email        String?
+  user_role         String?
+  branch_id         String?
+  /// Dotted action key, e.g. sale.void, product.price_change, auth.login
+  action            String
+  /// sales | inventory | cash | expenses | customers | suppliers | staff | security | reports | accounts | settings
+  category          String
+  entity            String?
+  entity_id         String?
+  summary           String
+  details           Json?
+  approved_by_id    String?
+  approved_by_email String?
+  ip                String?
+  user_agent        String?
+  status_code       Int?
+
+  @@index([created_at])
+  @@index([user_id])
+  @@index([action])
+  @@index([category])
+  @@index([entity_id])
+}
+
+// Receipt / bill photos and PDFs attached to an expense
+model ExpenseAttachment {
+  id          String   @id @default(uuid())
+  expense_id  String
+  expense     Expense  @relation(fields: [expense_id], references: [id], onDelete: Cascade)
+  url         String
+  name        String
+  mime_type   String?
+  size        Int?
+  uploaded_by String?
+  created_at  DateTime @default(now())
+
+  @@index([expense_id])
+}
+
+// Books are closed up to lock_until (inclusive, business date). Only the latest active lock applies.
+model PeriodLock {
+  id            String    @id @default(uuid())
+  lock_until    String // YYYY-MM-DD
+  note          String?
+  locked_by     String?
+  is_active     Boolean   @default(true)
+  reopened_by   String?
+  reopened_at   DateTime?
+  reopen_reason String?
+  created_at    DateTime  @default(now())
+
+  @@index([is_active])
+}
+
+// Monthly budget per expense account (branch optional = whole shop)
+model Budget {
+  id         String               @id @default(uuid())
+  account_id String
+  account    TransactionalAccount @relation(fields: [account_id], references: [id], onDelete: Cascade)
+  branch_id  String?
+  year       Int
+  month      Int
+  amount     Decimal              @default(0)
+  notes      String?
+  created_by String?
+  created_at DateTime             @default(now())
+  updated_at DateTime             @default(now()) @updatedAt
+
+  @@index([year, month])
+  @@index([account_id])
+}
+
+// A report view (report + filters) saved by a user, optionally shared with everyone
+model SavedReport {
+  id         String   @id @default(uuid())
+  user_id    String
+  name       String
+  report     String
+  params     Json
+  is_shared  Boolean  @default(false)
+  created_at DateTime @default(now())
+  updated_at DateTime @default(now()) @updatedAt
+
+  @@index([user_id])
+}
+
+// Key/value settings (loyalty programme rules etc.)
+model AppSetting {
+  key        String   @id
+  value      Json
+  updated_by String?
+  updated_at DateTime @default(now()) @updatedAt
+}
+
+// Loyalty points ledger: balance = sum(points)
+model LoyaltyTransaction {
+  id          String   @id @default(uuid())
+  customer_id String
+  customer    Customer @relation(fields: [customer_id], references: [id], onDelete: Cascade)
+  sale_id     String?
+  sale        Sale?    @relation(fields: [sale_id], references: [id], onDelete: SetNull)
+  type        String // EARN | REDEEM | ADJUST | REVERSE | EXPIRE
+  points      Int
+  value       Decimal  @default(0)
+  note        String?
+  created_by  String?
+  created_at  DateTime @default(now())
+
+  @@index([customer_id])
+  @@index([sale_id])
+  @@index([created_at])
+}
+
+model GiftCard {
+  id            String                @id @default(uuid())
+  code          String                @unique
+  initial_value Decimal
+  balance       Decimal
+  status        String                @default("ACTIVE") // ACTIVE | USED | EXPIRED | VOID
+  customer_id   String?
+  customer      Customer?             @relation(fields: [customer_id], references: [id], onDelete: SetNull)
+  holder_name   String?
+  holder_phone  String?
+  expires_at    DateTime?
+  notes         String?
+  branch_id     String?
+  created_by    String?
+  created_at    DateTime              @default(now())
+  updated_at    DateTime              @default(now()) @updatedAt
+  transactions  GiftCardTransaction[]
+
+  @@index([status])
+  @@index([customer_id])
+}
+
+model GiftCardTransaction {
+  id             String   @id @default(uuid())
+  card_id        String
+  card           GiftCard @relation(fields: [card_id], references: [id], onDelete: Cascade)
+  type           String // ISSUE | RELOAD | REDEEM | REFUND | VOID | ADJUST
+  amount         Decimal // + adds to balance, - spends
+  payment_method String?
+  sale_id        String?
+  sale           Sale?    @relation(fields: [sale_id], references: [id], onDelete: SetNull)
+  cashflow_id    String?
+  note           String?
+  created_by     String?
+  created_at     DateTime @default(now())
+
+  @@index([card_id])
+  @@index([sale_id])
+  @@index([created_at])
+}
+
+model Promotion {
+  id           String    @id @default(uuid())
+  name         String
+  description  String?
+  type         String // ITEM_PERCENT | ITEM_FIXED | BUY_X_GET_Y | BILL_PERCENT | BILL_FIXED
+  value        Decimal   @default(0)
+  buy_qty      Int?
+  get_qty      Int?
+  scope        String    @default("ALL") // ALL | CATEGORY | BRAND | PRODUCT | COLLECTION
+  scope_ids    Json?
+  min_bill     Decimal?
+  max_discount Decimal?
+  code         String? // coupon code; null = applies automatically
+  starts_at    DateTime  @default(now())
+  ends_at      DateTime?
+  days_of_week Json?
+  branch_ids   Json?
+  usage_limit  Int?
+  used_count   Int       @default(0)
+  priority     Int       @default(0)
+  stackable    Boolean   @default(false)
+  is_active    Boolean   @default(true)
+  created_by   String?
+  created_at   DateTime  @default(now())
+  updated_at   DateTime  @default(now()) @updatedAt
+
+  @@index([is_active])
+  @@index([code])
+}

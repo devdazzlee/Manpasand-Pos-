@@ -4,12 +4,18 @@ import { getDefaultDashboardTab } from "@/lib/role-utils";
 /** Every tab id handled by `Dashboard.renderContent`. */
 export const DASHBOARD_TAB_IDS = new Set([
   "dashboard",
+  "today-revenue",
+  "today-cash-sales",
+  "today-credit-sales",
+  "today-expenses",
   "barcode-generator",
   "new-sale",
   "orders",
-  "website-orders",
   "units",
   "sales-history",
+  "register-report",
+  "till",
+  "sales-report",
   "brand",
   "colors",
   "sizes",
@@ -26,6 +32,8 @@ export const DASHBOARD_TAB_IDS = new Set([
   "pricing",
   "customers",
   "loyalty",
+  "loyalty-winners",
+  "gift-cards",
   "stock-management",
   "inventory-dashboard",
   "purchases",
@@ -35,17 +43,36 @@ export const DASHBOARD_TAB_IDS = new Set([
   "stock-adjustment",
   "stock-view",
   "bulk-product-upload",
+  "opening-stock-import",
+  "scan-stock-count",
   "inventory-reports",
+  "purchase-report",
+  "stock-quantity-report",
   "inventory-audit",
   "designation",
   "employees",
   "shifts",
   "salaries",
+  "commissions",
   "promotions",
   "expenses",
   "tax-management",
   "reports",
+  "insights",
+  "financial-statement",
+  "profit-loss",
+  "balance-sheet",
+  "trial-balance",
+  "money-flow",
+  "money-check",
+  "chart-of-accounts",
+  "journal-vouchers",
+  "expense-breakdown",
+  "budgets",
+  "close-books",
+  "product-sales-profit",
   "audit",
+  "users",
   "multi-location",
   "integrations",
   "backup",
@@ -55,6 +82,177 @@ export const DASHBOARD_TAB_IDS = new Set([
 ]);
 
 export const DASHBOARD_TAB_PARAM = "tab";
+export const INSIGHTS_REPORT_PARAM = "report";
+export const INSIGHTS_DIMENSION_PARAM = "dimension";
+/** Deep-link: open Product Management with this product in the edit form. */
+export const INVENTORY_EDIT_PRODUCT_PARAM = "editProduct";
+/** Deep-link: open Product Management with Duplicate form for this product. */
+export const INVENTORY_DUPLICATE_PRODUCT_PARAM = "duplicateProduct";
+
+export const INSIGHTS_REPORT_IDS = new Set([
+  "sales-by",
+  "slow",
+  "customers",
+  "suppliers",
+  "prices",
+  "aging",
+  "cash-flow",
+  "cash-book",
+  "bank-book",
+  "tax",
+]);
+
+export const SALES_BY_DIMENSION_IDS = new Set([
+  "category",
+  "subcategory",
+  "stitch",
+  "brand",
+  "collection",
+  "size",
+  "color",
+  "supplier",
+  "product",
+]);
+
+export function buildDashboardTabHref(
+  tab: string,
+  extra?: {
+    report?: string;
+    dimension?: string;
+    editProduct?: string;
+    duplicateProduct?: string;
+  }
+): string {
+  const params = new URLSearchParams();
+  params.set(DASHBOARD_TAB_PARAM, tab);
+  if (
+    tab === "insights" &&
+    extra?.report &&
+    INSIGHTS_REPORT_IDS.has(extra.report)
+  ) {
+    params.set(INSIGHTS_REPORT_PARAM, extra.report);
+    if (
+      extra.report === "sales-by" &&
+      extra.dimension &&
+      SALES_BY_DIMENSION_IDS.has(extra.dimension)
+    ) {
+      params.set(INSIGHTS_DIMENSION_PARAM, extra.dimension);
+    }
+  }
+  if (tab === "inventory" && extra?.editProduct) {
+    params.set(INVENTORY_EDIT_PRODUCT_PARAM, extra.editProduct);
+  }
+  if (tab === "inventory" && extra?.duplicateProduct) {
+    params.set(INVENTORY_DUPLICATE_PRODUCT_PARAM, extra.duplicateProduct);
+  }
+  return `/?${params.toString()}`;
+}
+
+export function buildInventoryProductEditHref(productId: string): string {
+  return buildDashboardTabHref("inventory", { editProduct: productId });
+}
+
+export function buildInventoryProductDuplicateHref(productId: string): string {
+  return buildDashboardTabHref("inventory", { duplicateProduct: productId });
+}
+
+export function readInventoryEditProductFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const id = new URLSearchParams(window.location.search).get(
+    INVENTORY_EDIT_PRODUCT_PARAM
+  );
+  return id?.trim() || null;
+}
+
+export function readInventoryDuplicateProductFromUrl(): string | null {
+  if (typeof window === "undefined") return null;
+  const id = new URLSearchParams(window.location.search).get(
+    INVENTORY_DUPLICATE_PRODUCT_PARAM
+  );
+  return id?.trim() || null;
+}
+
+export function clearInventoryEditProductFromUrl(): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  let changed = false;
+  if (url.searchParams.has(INVENTORY_EDIT_PRODUCT_PARAM)) {
+    url.searchParams.delete(INVENTORY_EDIT_PRODUCT_PARAM);
+    changed = true;
+  }
+  if (url.searchParams.has(INVENTORY_DUPLICATE_PRODUCT_PARAM)) {
+    url.searchParams.delete(INVENTORY_DUPLICATE_PRODUCT_PARAM);
+    changed = true;
+  }
+  if (!changed) return;
+  window.history.replaceState(window.history.state, "", url.toString());
+}
+
+export function readInsightsReportFromUrl(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const id = new URLSearchParams(window.location.search).get(
+    INSIGHTS_REPORT_PARAM
+  );
+  return id && INSIGHTS_REPORT_IDS.has(id) ? id : null;
+}
+
+export function readSalesByDimensionFromUrl(): string | null {
+  if (typeof window === "undefined") {
+    return null;
+  }
+  const id = new URLSearchParams(window.location.search).get(
+    INSIGHTS_DIMENSION_PARAM
+  );
+  return id && SALES_BY_DIMENSION_IDS.has(id) ? id : null;
+}
+
+export function writeInsightsParamsToUrl(
+  report: string,
+  dimension?: string | null
+): void {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  const url = new URL(window.location.href);
+  url.searchParams.set(DASHBOARD_TAB_PARAM, "insights");
+  if (INSIGHTS_REPORT_IDS.has(report)) {
+    url.searchParams.set(INSIGHTS_REPORT_PARAM, report);
+  } else {
+    url.searchParams.delete(INSIGHTS_REPORT_PARAM);
+  }
+  if (
+    report === "sales-by" &&
+    dimension &&
+    SALES_BY_DIMENSION_IDS.has(dimension)
+  ) {
+    url.searchParams.set(INSIGHTS_DIMENSION_PARAM, dimension);
+  } else {
+    url.searchParams.delete(INSIGHTS_DIMENSION_PARAM);
+  }
+  window.history.replaceState(window.history.state, "", url.toString());
+}
+
+/** True for a normal left-click that should stay in-app (not new tab/window). */
+export function isInAppNavClick(event: {
+  defaultPrevented: boolean;
+  metaKey: boolean;
+  ctrlKey: boolean;
+  shiftKey: boolean;
+  altKey: boolean;
+  button: number;
+}): boolean {
+  return (
+    !event.defaultPrevented &&
+    !event.metaKey &&
+    !event.ctrlKey &&
+    !event.shiftKey &&
+    !event.altKey &&
+    event.button === 0
+  );
+}
 
 export function isDashboardTab(tab: string | null | undefined): tab is string {
   return !!tab && DASHBOARD_TAB_IDS.has(tab);
@@ -75,6 +273,14 @@ export function writeTabToUrl(tab: string): void {
 
   const url = new URL(window.location.href);
   url.searchParams.set(DASHBOARD_TAB_PARAM, tab);
+  if (tab !== "insights") {
+    url.searchParams.delete(INSIGHTS_REPORT_PARAM);
+    url.searchParams.delete(INSIGHTS_DIMENSION_PARAM);
+  }
+  if (tab !== "inventory") {
+    url.searchParams.delete(INVENTORY_EDIT_PRODUCT_PARAM);
+    url.searchParams.delete(INVENTORY_DUPLICATE_PRODUCT_PARAM);
+  }
   window.history.replaceState(window.history.state, "", url.toString());
 }
 
