@@ -56,13 +56,8 @@ import {
   X,
   Plus,
   Minus,
-  Landmark,
-  Smartphone,
-  Split,
 } from "lucide-react";
-import { SplitPaymentDialog, type CheckoutMethod, type TenderResult } from "@/components/pos/split-payment-dialog";
 import { toast } from "sonner";
-import { SaleExtrasPanel, useSaleExtras } from "@/components/pos/sale-extras";
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
 import {
   downloadReceiptPdf,
@@ -75,9 +70,8 @@ import { offlineDB } from "@/lib/offline-db";
 import { syncManager } from "@/lib/offline-sync";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAllPosProducts } from "@/hooks/queries/use-products";
-import { useBranchRegisterSaleGate } from "@/hooks/queries/use-register-status";
 import { useCategories } from "@/hooks/queries/use-categories";
-import { useCustomers, useCustomerMutations } from "@/hooks/queries/use-customers";
+import { useCustomers, useCustomerMutations, useCustomerLoyaltyStatus } from "@/hooks/queries/use-customers";
 import { printReceiptViaServer, type ReceiptData } from "@/lib/print-server";
 import {
   formatMoneyDisplay,
@@ -103,10 +97,6 @@ import {
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
 import {
-  formatProductSearchLabel,
-  previewAutoBarcodeValue,
-} from "@/lib/labelBarcode";
-import {
   Select,
   SelectContent,
   SelectItem,
@@ -114,7 +104,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useHoldSales } from "@/hooks/use-hold-sales";
-import { SalespersonPicker, useSalespeople, useStickySalesperson } from "@/components/salesperson-picker";
 import { usePosBranch } from "@/hooks/use-pos-branch";
 import {
   RepeatSaleCombobox,
@@ -125,8 +114,6 @@ interface CartItem {
   id: string; // Unique cart item ID (product.id + timestamp for separate entries)
   productId?: string; // Original product ID for reference (optional for backward compatibility)
   name: string;
-  /** Scannable code shown in cart (label barcode, SKU, or product code). */
-  barcodeDisplay?: string;
   price: number; // Display price (barcode price if scanned, otherwise original price)
   originalPrice: number; // Original product price (used for line total calculations)
   actualUnitPrice: number; // Actual unit price for calculations (always original product price)
@@ -169,8 +156,6 @@ interface Product {
   stock: number;
   categoryId: string;
   barcode?: string;
-  label_barcode?: string;
-  custom_code?: string;
   code?: string; // Product code for barcode matching
   sku?: string; // SKU for barcode matching
   available_stock?: number;
@@ -209,35 +194,6 @@ function getCustomerSearchValue(customer: PosCustomer): string {
   return [customer.name, customer.phone_number, customer.phone, email]
     .filter(Boolean)
     .join(" ");
-}
-
-const POS_PRODUCT_NAME_PREVIEW_LEN = 44;
-
-function truncatePosProductName(name: string, maxLen = POS_PRODUCT_NAME_PREVIEW_LEN): string {
-  const trimmed = name.trim();
-  if (trimmed.length <= maxLen) return trimmed;
-  return `${trimmed.slice(0, maxLen - 1).trimEnd()}…`;
-}
-
-/** Saved or auto barcode shown in POS (single scan field). */
-function getProductBarcodeDisplay(product: Product): string {
-  const label = product.label_barcode?.trim();
-  if (label) return label;
-  const sku = product.sku?.trim();
-  if (sku) return sku;
-  return previewAutoBarcodeValue(
-    product.sku,
-    product.code,
-    Math.round(Number(product.price ?? 0)),
-  );
-}
-
-function resolveCartItemBarcode(item: CartItem, catalog: Product[]): string {
-  const stored = item.barcodeDisplay?.trim();
-  if (stored) return stored;
-  if (!item.productId) return "";
-  const product = catalog.find((p) => p.id === item.productId);
-  return product ? getProductBarcodeDisplay(product) : "";
 }
 
 interface CustomerSearchComboboxProps {
@@ -704,10 +660,8 @@ export function NewSale() {
   const [quantityModes, setQuantityModes] = useState<Record<string, "preset" | "custom">>({});
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
-  const [cartSearchTerm, setCartSearchTerm] = useState("");
-  const [cartSearchOpen, setCartSearchOpen] = useState(false);
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [paymentMethodPending, setPaymentMethodPending] = useState<CheckoutMethod | null>(null);
+  const [paymentMethodPending, setPaymentMethodPending] = useState<"Cash" | "Card" | null>(null);
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
@@ -717,28 +671,14 @@ export function NewSale() {
     branchInfo,
     hasBranch,
   } = usePosBranch();
-  const {
-    canSell: registerOpenForSale,
-    blockMessage: registerBlockMessage,
-    registerStatusLoading,
-  } = useBranchRegisterSaleGate(selectedBranchId);
-  const salesAllowed = hasBranch && registerOpenForSale;
   const { holdSales, holdSale, retrieveHoldSale, deleteHoldSale, holdSalesLoading, refreshHoldSales } =
     useHoldSales(selectedBranchId);
-
-  const requireRegisterOpen = useCallback((): boolean => {
-    if (salesAllowed) return true;
-    toast.error(
-      registerBlockMessage ||
-        "Cash register is not open. Open it on Cash Register before selling.",
-    );
-    return false;
-  }, [salesAllowed, registerBlockMessage]);
   const searchInputRef = useRef<HTMLInputElement>(null);
-  const cartSearchInputRef = useRef<HTMLInputElement>(null);
   // Refs for price and quantity inputs for keyboard navigation
   const priceInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
   const quantityInputRefs = useRef<Record<string, HTMLElement | null>>({});
+  const quickQtyPlusRef = useRef<HTMLButtonElement | null>(null);
+  const quickQtyInputRef = useRef<HTMLInputElement | null>(null);
   const quantityEnterConfirmedRef = useRef<string | null>(null);
   const quantityFocusLineIdRef = useRef<string | null>(null);
   const activeCartLineIdRef = useRef<string | null>(null);
@@ -746,6 +686,7 @@ export function NewSale() {
   const quantityInputsRef = useRef(quantityInputs);
   const searchDropdownRef = useRef<HTMLDivElement | null>(null);
   const searchDropdownItemRefs = useRef<(HTMLButtonElement | null)[]>([]);
+  const [quickQtyFocusTick, setQuickQtyFocusTick] = useState(0);
   const [productSearchOpen, setProductSearchOpen] = useState(false);
   const [highlightedProductIndex, setHighlightedProductIndex] = useState(0);
   const lastAddedProductId = useRef<string | null>(null);
@@ -785,9 +726,6 @@ export function NewSale() {
   const [scanLoading, setScanLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
-  // Employee credited with the sale for commission; remembered between bills on this device.
-  const { people: salespeople, loading: salespeopleLoading } = useSalespeople();
-  const [salespersonId, setSalespersonId] = useStickySalesperson();
   const [pinnedCustomer, setPinnedCustomer] = useState<PosCustomer | null>(null);
   const [saleDraftReady, setSaleDraftReady] = useState(false);
   // Global printer settings (configured in Printer Settings page)
@@ -840,6 +778,18 @@ export function NewSale() {
     return [pinnedCustomer, ...customers];
   }, [customers, pinnedCustomer]);
 
+  const selectedCustomerObj = selectedCustomer
+    ? customersForPicker.find((c) => c.id === selectedCustomer) || null
+    : null;
+  const isLoyaltyWinnerCustomer = Boolean(selectedCustomerObj?.is_loyalty_winner);
+
+  // Real-time eligibility (branch + monthly usage) for the lifetime
+  // loyalty-winner discount — mirrors what the backend will actually charge.
+  const { data: loyaltyStatus, isLoading: loyaltyStatusLoading } = useCustomerLoyaltyStatus(
+    isLoyaltyWinnerCustomer ? selectedCustomer : null,
+    selectedBranchId,
+  );
+
   // Clear any pending scan timeout on unmount.
   useEffect(() => {
     return () => {
@@ -851,8 +801,10 @@ export function NewSale() {
   }, []);
 
   // Apply the selected customer's default discount automatically (overridable).
+  // Loyalty-winner customers are handled by a separate effect below instead,
+  // since their discount needs the Rs cap applied, not a plain percentage.
   useEffect(() => {
-    if (discountTouchedRef.current) return;
+    if (discountTouchedRef.current || isLoyaltyWinnerCustomer) return;
     const cust = selectedCustomer
       ? customers.find((c) => c.id === selectedCustomer)
       : null;
@@ -868,7 +820,7 @@ export function NewSale() {
       setShowDiscountRow(false);
       autoDiscountCustomerRef.current = null;
     }
-  }, [selectedCustomer, customers]);
+  }, [selectedCustomer, customers, isLoyaltyWinnerCustomer]);
 
   // Restore the in-progress sale after a refresh, then keep it saved.
   useEffect(() => {
@@ -1177,10 +1129,8 @@ export function NewSale() {
       products.map((product) => ({
         product,
         hay: `${product.name ?? ""}|${product.code ?? ""}|${
-          product.custom_code ?? ""
-        }|${product.barcode ?? ""}|${product.sku ?? ""}|${
-          product.label_barcode ?? ""
-        }`.toLowerCase(),
+          product.barcode ?? ""
+        }|${product.sku ?? ""}`.toLowerCase(),
       })),
     [products],
   );
@@ -1200,53 +1150,7 @@ export function NewSale() {
     return out;
   }, [productIndex, searchTerm, selectedCategory]);
 
-  const [serverSearchProducts, setServerSearchProducts] = useState<Product[]>([]);
-  const [serverSearchLoading, setServerSearchLoading] = useState(false);
-
-  useEffect(() => {
-    const q = searchTerm.trim();
-    if (q.length < 3) {
-      setServerSearchProducts([]);
-      return;
-    }
-    const needle = q.toLowerCase();
-    const hasLocalExactId = products.some((p) =>
-      [p.label_barcode, p.code, p.sku, p.barcode, p.custom_code].some(
-        (v) => v?.toLowerCase().trim() === needle,
-      ),
-    );
-    if (hasLocalExactId) {
-      setServerSearchProducts([]);
-      return;
-    }
-    const timer = setTimeout(async () => {
-      setServerSearchLoading(true);
-      try {
-        const res = await apiClient.get("/products", {
-          params: {
-            search: q,
-            limit: 40,
-            is_active: true,
-            display_on_pos: true,
-          },
-        });
-        const raw = Array.isArray(res.data?.data) ? res.data.data : [];
-        setServerSearchProducts(raw.map(mapApiProductToStoreProduct) as Product[]);
-      } catch {
-        setServerSearchProducts([]);
-      } finally {
-        setServerSearchLoading(false);
-      }
-    }, 400);
-    return () => clearTimeout(timer);
-  }, [searchTerm, productIndex]);
-
-  const gridProducts = useMemo(() => {
-    const base =
-      filteredProducts.length > 0 ? filteredProducts : serverSearchProducts;
-    if (selectedCategory === "all") return base;
-    return base.filter((p) => p.categoryId === selectedCategory);
-  }, [filteredProducts, serverSearchProducts, selectedCategory]);
+  const gridProducts = filteredProducts;
 
   // Only the first catalog load blocks the grid; background refreshes are silent.
   const isProductQueryPending = productsLoading;
@@ -1358,7 +1262,7 @@ export function NewSale() {
         )}
 
         <span className="break-words text-sm font-semibold leading-snug text-slate-900 sm:text-[13px] sm:font-medium">
-          {truncatePosProductName(formatProductSearchLabel(product), 72)}
+          {product.name}
         </span>
 
         <div className="mt-auto flex items-baseline justify-between gap-2 border-t border-slate-100 pt-1.5">
@@ -1382,33 +1286,13 @@ export function NewSale() {
 
   const searchDropdownProducts = useMemo(() => {
     if (!searchTerm.trim()) return [];
-    return gridProducts.slice(0, SEARCH_DROPDOWN_LIMIT);
-  }, [gridProducts, searchTerm]);
+    return filteredProducts.slice(0, SEARCH_DROPDOWN_LIMIT);
+  }, [filteredProducts, searchTerm]);
 
   const searchDropdownOverflowCount = useMemo(() => {
     if (!searchTerm.trim()) return 0;
-    return Math.max(0, gridProducts.length - SEARCH_DROPDOWN_LIMIT);
-  }, [gridProducts.length, searchTerm]);
-
-  const CART_SEARCH_LIMIT = 8;
-
-  const cartLookupProducts = useMemo(() => {
-    const needle = cartSearchTerm.toLowerCase().trim();
-    if (!needle) return [];
-    const normNeedle = needle.replace(/[^a-z0-9]/g, "");
-    const out: Product[] = [];
-    for (const { product, hay } of productIndex) {
-      if (product.is_active === false) continue;
-      const barcode = getProductBarcodeDisplay(product).toLowerCase();
-      const matches =
-        hay.includes(needle) ||
-        (normNeedle.length > 0 && barcode.replace(/[^a-z0-9]/g, "") === normNeedle);
-      if (!matches) continue;
-      out.push(product);
-      if (out.length >= CART_SEARCH_LIMIT) break;
-    }
-    return out;
-  }, [productIndex, cartSearchTerm]);
+    return Math.max(0, filteredProducts.length - SEARCH_DROPDOWN_LIMIT);
+  }, [filteredProducts.length, searchTerm]);
 
   useEffect(() => {
     if (!productSearchOpen) return;
@@ -1436,6 +1320,13 @@ export function NewSale() {
     if (options?.allowTouch) focusNow();
     requestAnimationFrame(focusNow);
   }, [paymentDialogOpen]);
+
+  const focusQuantityInput = useCallback(() => {
+    const el = quickQtyInputRef.current;
+    if (!el) return;
+    el.focus({ preventScroll: true });
+    el.select();
+  }, []);
 
   useEffect(() => {
     focusSearchInput();
@@ -1475,8 +1366,6 @@ export function NewSale() {
     "All categories";
 
   const addToCart = (product: Product, quantity: number = 1, customPrice?: number) => {
-    if (!requireRegisterOpen()) return;
-
     // For testing: Allow negative sales (stock can go below 0)
     // Comment out stock validation for testing purposes
     /*
@@ -1525,7 +1414,6 @@ export function NewSale() {
         id: affectedLineId,
         productId: product.id,
         name: product.name,
-        barcodeDisplay: getProductBarcodeDisplay(product),
         price: displayPrice,
         originalPrice: originalProductPrice,
         actualUnitPrice: actualUnitPrice,
@@ -1550,6 +1438,8 @@ export function NewSale() {
     activeCartLineIdRef.current = affectedLineId;
     quantityFocusLineIdRef.current = affectedLineId;
     setActiveCartLineId(affectedLineId);
+    setQuickQtyFocusTick((n) => n + 1);
+
     // Toast removed as per user request - no toast when selecting products
   };
 
@@ -1892,7 +1782,6 @@ export function NewSale() {
     if (cart.length === 0 || !hasBranch) {
       return;
     }
-    if (!requireRegisterOpen()) return;
 
     setIsHoldingSale(true);
     const held = await holdSale(cart, selectedCustomer || undefined);
@@ -1906,29 +1795,24 @@ export function NewSale() {
   };
 
   const buildCartFromRepeat = (payload: RepeatSalePayload): CartItem[] =>
-    payload.items.map((item, index) => {
-      const product = products.find((p) => p.id === item.productId);
-      return {
-        id: `repeat_${item.productId}_${Date.now()}_${index}`,
-        productId: item.productId,
-        name: item.name,
-        barcodeDisplay: product ? getProductBarcodeDisplay(product) : undefined,
-        price: item.price,
-        originalPrice: item.price,
-        actualUnitPrice: item.price,
-        quantity: item.quantity,
-        category: "all",
-        unitId: item.unitId,
-        unitName: item.unitName,
-        unit: item.unitName,
-      };
-    });
+    payload.items.map((item, index) => ({
+      id: `repeat_${item.productId}_${Date.now()}_${index}`,
+      productId: item.productId,
+      name: item.name,
+      price: item.price,
+      originalPrice: item.price,
+      actualUnitPrice: item.price,
+      quantity: item.quantity,
+      category: "all",
+      unitId: item.unitId,
+      unitName: item.unitName,
+      unit: item.unitName,
+    }));
 
   const applyRepeatSale = (
     payload: RepeatSalePayload,
     mode: "replace" | "merge",
   ) => {
-    if (!requireRegisterOpen()) return;
     const incoming = buildCartFromRepeat(payload);
     setCartSync((prev) => {
       if (mode === "replace") return incoming;
@@ -1965,7 +1849,6 @@ export function NewSale() {
   };
 
   const handleRetrieveHoldSale = async (index: number) => {
-    if (!requireRegisterOpen()) return;
     if (cart.length > 0) {
       const shouldReplace = window.confirm(
         "Current cart will be replaced. Continue?"
@@ -2058,25 +1941,34 @@ export function NewSale() {
       : parsedDiscount,
   );
 
-  // Promotions, loyalty points and gift cards (the server re-checks them at checkout).
-  const saleExtras = useSaleExtras({
-    lines: cart.map((item) => ({
-      productId: item.productId || item.id.split("_")[0],
-      quantity: item.quantity,
-      price: getSellingPrice(item),
-    })),
-    subtotal,
-    manualDiscount: globalDiscountAmount,
-    customerId: selectedCustomer,
-    branchId: selectedBranchId,
-  });
+  const total = Math.max(0, subtractMoney(subtotal, globalDiscountAmount));
 
-  // Amount still to collect after discounts, points and gift cards.
-  const total = Math.max(
-    0,
-    subtractMoney(subtotal, roundMoney(globalDiscountAmount + saleExtras.extraDiscount + saleExtras.giftCardTotal)),
-  );
-  
+  // Lifetime loyalty-winner discount: 25% of the subtotal, capped at a fixed
+  // Rs amount — recomputed as the cart changes so the preview always matches
+  // what the backend will actually charge (same cap/branch/monthly rules).
+  // Cash-only is enforced at the payment step below, since the method isn't
+  // chosen yet at this point in the flow.
+  useEffect(() => {
+    if (discountTouchedRef.current || !isLoyaltyWinnerCustomer) return;
+    if (loyaltyStatus?.eligible) {
+      const percent = Number(loyaltyStatus.discountPercent ?? 25);
+      const cap = Number(loyaltyStatus.discountCap ?? 3000);
+      const capped = roundMoney(Math.min((subtotal * percent) / 100, cap));
+      if (capped > 0) {
+        setGlobalDiscountType("fixed");
+        setGlobalDiscountValue(String(capped));
+        setShowDiscountRow(true);
+        autoDiscountCustomerRef.current = selectedCustomer;
+        return;
+      }
+    }
+    if (autoDiscountCustomerRef.current === selectedCustomer) {
+      setGlobalDiscountValue("");
+      setShowDiscountRow(false);
+      autoDiscountCustomerRef.current = null;
+    }
+  }, [selectedCustomer, isLoyaltyWinnerCustomer, loyaltyStatus, subtotal]);
+
   const totalQuantity = cart.reduce(
     (sum, item) => sum + item.quantity,
     0
@@ -2097,91 +1989,76 @@ export function NewSale() {
   }, [paymentDialogOpen, tenderedAmount, total]);
 
   const generateTransactionId = () => {
-    return `SALE-${Date.now().toString().slice(-4)}`;
+    return `TXN${Date.now().toString().slice(-6)}`;
   };
 
-  const currentCashierName = () => {
-    try {
-      const email = localStorage.getItem("userEmail") || localStorage.getItem("savedUsername") || "";
-      if (email) return email.includes("@") ? email.split("@")[0] : email;
-      const token = localStorage.getItem("token");
-      if (token) {
-        const payload = JSON.parse(atob(token.split(".")[1] || ""));
-        const fromJwt = payload?.email || payload?.username || "";
-        if (fromJwt) {
-          try {
-            localStorage.setItem("userEmail", String(fromJwt));
-          } catch {
-            /* ignore */
-          }
-          return String(fromJwt).includes("@") ? String(fromJwt).split("@")[0] : String(fromJwt);
-        }
-      }
-      return "Cashier";
-    } catch {
-      return "Cashier";
-    }
+  const generateReceiptData = (
+    transactionId: string,
+    paymentMethod: string,
+    cart: CartItem[],
+    subtotal: number,
+    total: number,
+    amountPaid: number,
+    changeAmount: number
+  ) => {
+    return {
+      transactionId,
+      timestamp: new Date().toISOString(),
+      items: cart,
+      subtotal,
+      total,
+      paymentMethod,
+      cashier: "Muhammad",
+      store: "MANPASAND Store #001",
+      amountPaid,
+      changeAmount,
+    };
   };
 
   const buildReceiptDataForServer = (
     transactionId: string,
-    method: string,
+    method: "Cash" | "Card",
     cartSnapshot: CartItem[],
     amountPaid: number,
     changeAmount: number,
     timestamp: string
-  ): ReceiptData => {
-    const customer = selectedCustomer
-      ? customers.find((c) => c.id === selectedCustomer)
-      : null;
-    const salesperson = salespersonId
-      ? salespeople.find((p) => p.id === salespersonId)
-      : null;
-    const customerName = customer?.name?.trim() || customer?.email || "Walk-in";
-    const customerPhone =
-      customer?.phone_number?.trim() ||
-      customer?.phone?.trim() ||
-      "";
-
-    return {
-      storeName: branchInfo.name,
-      tagline: "Elegance, crafted for every moment.",
-      address: branchInfo.address,
-      transactionId,
-      timestamp,
-      cashier: currentCashierName(),
-      salesperson: salesperson?.name || undefined,
-      customerType: customerName,
-      customerPhone: customerPhone || undefined,
-      items: cartSnapshot.map((item) => {
-        const unitLabel =
-          (item as any)?.unit?.name ||
-          (item as any)?.unitName ||
-          (item as any)?.unit_name ||
-          (typeof (item as any)?.unit === "string" ? (item as any).unit : undefined) ||
-          undefined;
-        const unitPrice = getSellingPrice(item);
-        const rawQty = Number(item.quantity) || 0;
-        const parts = formatReceiptQtyParts(rawQty, unitLabel);
-        return {
-          name: item.name,
-          quantity: parts.quantity,
-          price: unitPrice,
-          unit: parts.unit,
-          lineTotal: unitPrice * rawQty,
-        };
-      }),
-      subtotal,
-      discount: globalDiscountAmount + saleExtras.extraDiscount > 0 ? roundMoney(globalDiscountAmount + saleExtras.extraDiscount) : undefined,
-      // Bill total; any gift card part is shown as already paid.
-      total: roundMoney(total + saleExtras.giftCardTotal),
-      paymentMethod: saleExtras.giftCardTotal > 0 ? `GIFT CARD ${Math.round(saleExtras.giftCardTotal)} + ${method.toUpperCase()}` : method === "Cash" ? "CASH" : method === "Card" ? "CARD" : method.toUpperCase(),
-      amountPaid,
-      changeAmount: changeAmount > 0 ? changeAmount : undefined,
-      thankYouMessage: "Thank you for shopping!",
-      footerMessage: "Visit us again soon!",
-    };
-  };
+  ): ReceiptData => ({
+    storeName: branchInfo.name,
+    tagline: "Quality • Service • Value",
+    address: branchInfo.address,
+    transactionId,
+    timestamp,
+    cashier: "Walk-in",
+    customerType: selectedCustomer
+      ? customers.find((c) => c.id === selectedCustomer)?.name || "Walk-in"
+      : "Walk-in",
+    items: cartSnapshot.map((item) => {
+      const unitLabel =
+        (item as any)?.unit?.name ||
+        (item as any)?.unitName ||
+        (item as any)?.unit_name ||
+        (typeof (item as any)?.unit === "string" ? (item as any).unit : undefined) ||
+        undefined;
+      const unitPrice = getSellingPrice(item);
+      const rawQty = Number(item.quantity) || 0;
+      const parts = formatReceiptQtyParts(rawQty, unitLabel);
+      return {
+        name: item.name,
+        quantity: parts.quantity,
+        price: unitPrice,
+        unit: parts.unit,
+        lineTotal: unitPrice * rawQty,
+      };
+    }),
+    subtotal,
+    discount: globalDiscountAmount > 0 ? globalDiscountAmount : undefined,
+    total,
+    paymentMethod: method === "Cash" ? "CASH" : "CARD",
+    amountPaid,
+    changeAmount: changeAmount > 0 ? changeAmount : undefined,
+    thankYouMessage: "Thank you for shopping!",
+    footerMessage: "Visit us again soon!",
+  });
 
   const handleStartNewSale = () => {
     setSaleSuccessOpen(false);
@@ -2286,14 +2163,30 @@ export function NewSale() {
     resetPaymentState();
   };
 
-  const startPayment = (method: CheckoutMethod) => {
+  const startPayment = (method: "Cash" | "Card") => {
     if (!hasBranch) {
       return;
     }
-    if (!requireRegisterOpen()) return;
+
+    // Lifetime loyalty-winner discount is cash-only (T&C #6) — the backend
+    // would zero it out on a card sale anyway, but strip it here first so
+    // the cashier sees the real total before confirming payment.
+    const loyaltyDiscountActive =
+      isLoyaltyWinnerCustomer &&
+      !discountTouchedRef.current &&
+      autoDiscountCustomerRef.current === selectedCustomer &&
+      globalDiscountAmount > 0;
+    let effectiveTotal = total;
+    if (method === "Card" && loyaltyDiscountActive) {
+      setGlobalDiscountValue("");
+      setShowDiscountRow(false);
+      autoDiscountCustomerRef.current = null;
+      toast.warning("Lifetime discount is cash-only — removed for this card payment.");
+      effectiveTotal = subtotal; // state update above hasn't re-rendered yet
+    }
 
     setPaymentMethodPending(method);
-    setTenderedAmount(formatMoneyFixed(total));
+    setTenderedAmount(formatMoneyFixed(effectiveTotal));
     setPaymentError("");
     setCalculatedChange(0);
     setPaymentDialogOpen(true);
@@ -2332,18 +2225,14 @@ export function NewSale() {
   };
 
   const handlePayment = async (
-    method: string,
+    method: "Cash" | "Card",
     amountPaid: number,
-    changeAmount: number,
-    tender?: TenderResult
+    changeAmount: number
   ) => {
     // Block re-entry synchronously — a stuck Enter / scanner can call this
     // several times before `paymentLoading` re-renders the buttons disabled.
     if (saleInFlightRef.current) {
       console.warn("Sale submission already in progress — ignoring duplicate");
-      return false;
-    }
-    if (!requireRegisterOpen()) {
       return false;
     }
     saleInFlightRef.current = true;
@@ -2378,20 +2267,16 @@ export function NewSale() {
         // Prepare payload
         const payload: any = {
           items: saleItems,
-          paymentMethod: tender?.primary ?? (method === "Cash" ? "CASH" : "CARD"),
+          paymentMethod: method === "Cash" ? "CASH" : "CARD",
           branchId,
           discountAmount: globalDiscountAmount,
+          // This screen has no promotions UI, so the server must not add any:
+          // the bill must match what the cashier sees.
+          applyPromotions: false,
         };
         if (selectedCustomer) {
           payload.customerId = selectedCustomer;
         }
-        if (salespersonId) {
-          payload.salespersonId = salespersonId;
-        }
-        if (tender) {
-          payload.payments = tender.payments;
-        }
-        Object.assign(payload, saleExtras.payload);
 
         // Check if online
         const isOnline = syncManager.canMakeRequest();
@@ -2406,15 +2291,6 @@ export function NewSale() {
             saleData = saleResponse.data.data;
             transactionId = saleData.sale_number || generateTransactionId();
           } catch (error: any) {
-            const status = error?.response?.status;
-            if (status && status < 500) {
-              toast.error(error?.response?.data?.message || "The sale was not accepted");
-              throw error;
-            }
-            if (saleExtras.active) {
-              toast.error("Can't reach the server — remove promotions, points or gift cards to save this sale offline.");
-              throw error;
-            }
             // If API call fails, fall back to offline mode
             console.warn("API call failed, saving offline:", error);
             transactionId = generateTransactionId();
@@ -2432,8 +2308,7 @@ export function NewSale() {
               total: total,
               customer: selectedCustomer ? { id: selectedCustomer } : null,
               payment: {
-                method: tender?.primary ?? (method === "Cash" ? "CASH" : "CARD"),
-                payments: tender?.payments,
+                method: method === "Cash" ? "CASH" : "CARD",
                 amountPaid,
                 changeAmount
               },
@@ -2442,7 +2317,6 @@ export function NewSale() {
               timestamp: Date.now(),
               synced: false,
               discountAmount: globalDiscountAmount,
-              salespersonId: salespersonId || undefined,
             });
             // Synced later by syncManager.syncSales() — do NOT also queue via
             // offlineAPIClient.post, that made every offline sale post twice.
@@ -2464,8 +2338,7 @@ export function NewSale() {
             total: total,
             customer: selectedCustomer ? { id: selectedCustomer } : null,
             payment: {
-              method: tender?.primary ?? (method === "Cash" ? "CASH" : "CARD"),
-              payments: tender?.payments,
+              method: method === "Cash" ? "CASH" : "CARD",
               amountPaid,
               changeAmount
             },
@@ -2474,33 +2347,41 @@ export function NewSale() {
             timestamp: Date.now(),
             synced: false,
             discountAmount: globalDiscountAmount,
-            salespersonId: salespersonId || undefined,
           });
           // Synced later by syncManager.syncSales() — do NOT also queue via
           // offlineAPIClient.post, that made every offline sale post twice.
 
           console.log("💾 Sale saved offline, will sync when connection restored");
         }
+        const receiptData = generateReceiptData(
+          transactionId,
+          method,
+          cartSnapshot,
+          subtotal,
+          total,
+          amountPaid,
+          changeAmount
+        );
+
         const receiptDataForServer = buildReceiptDataForServer(
           transactionId,
           method,
           cartSnapshot,
           amountPaid,
           changeAmount,
-          new Date().toISOString()
+          new Date(receiptData.timestamp).toISOString()
         );
 
         const customerAtSale = selectedCustomer
           ? customers.find((c) => c.id === selectedCustomer)
           : null;
 
-        saleExtras.reset();
         setCompletedReceiptData(receiptDataForServer);
         setCompletedSaleNumber(transactionId);
         setCompletedTotalReceived(amountPaid);
         setCompletedCustomerPhone(
           customerAtSale?.phone ||
-            customerAtSale?.phone_number ||
+            (customerAtSale as PosCustomer)?.phone_number ||
             ""
         );
         setCompletedCustomerEmail(customerAtSale?.email || "");
@@ -2575,14 +2456,7 @@ export function NewSale() {
     const exactMatches = new Map<string, Product>(); // Track exact matches separately
     
     products.forEach(product => {
-      // Index by label barcode, barcode, code, SKU
-      if (product.label_barcode) {
-        const lb = product.label_barcode.toLowerCase().trim();
-        if (lb) {
-          exactMatches.set(lb, product);
-          map.set(lb, product);
-        }
-      }
+      // Index by barcode (if exists)
       if (product.barcode) {
         const barcodeLower = product.barcode.toLowerCase().trim();
         if (barcodeLower) {
@@ -2606,14 +2480,6 @@ export function NewSale() {
         if (skuLower) {
           exactMatches.set(skuLower, product);
           map.set(skuLower, product);
-        }
-      }
-
-      if (product.custom_code) {
-        const customLower = product.custom_code.toLowerCase().trim();
-        if (customLower) {
-          exactMatches.set(customLower, product);
-          map.set(customLower, product);
         }
       }
     });
@@ -2695,15 +2561,6 @@ export function NewSale() {
           bestMatchLength = skuLower.length;
         }
       }
-
-      if (product.label_barcode) {
-        const lb = product.label_barcode.toLowerCase().trim();
-        if (lb === searchKey) return product;
-        if (lb.startsWith(searchKey) && lb.length > bestMatchLength) {
-          bestMatch = product;
-          bestMatchLength = lb.length;
-        }
-      }
     }
     
     if (bestMatch) {
@@ -2746,7 +2603,7 @@ export function NewSale() {
       const mapped = raw.map(mapApiProductToStoreProduct) as Product[];
       const key = code.toLowerCase().trim();
       const exact = mapped.find((item) =>
-        [item.code, item.sku, item.barcode, item.label_barcode].some(
+        [item.code, item.sku, item.barcode].some(
           (value) => value?.toLowerCase().trim() === key,
         ),
       );
@@ -2775,39 +2632,6 @@ export function NewSale() {
     
     // Process immediately - zero delays, zero async operations
     
-    const searchKey = trimmedValue.toLowerCase();
-
-    // Full-string match first (custom label_barcode, 9-digit SKU, or exact code)
-    let product = findProductByBarcode(searchKey);
-    if (!product) {
-      product = await lookupProductFromApi(trimmedValue);
-    }
-    if (product) {
-      let scanPrice: number | undefined;
-      const dash = trimmedValue.indexOf("-");
-      if (dash > 0) {
-        const tail = trimmedValue.substring(dash + 1).replace(/[^\d.]/g, "");
-        const p = parseFloat(tail);
-        if (!Number.isNaN(p) && p >= 0 && Number.isFinite(p)) scanPrice = p;
-      }
-      addToCart(product, 1, scanPrice);
-      isProcessingScanRef.current = false;
-      lastProcessedScanRef.current = "";
-      const input = searchInputRef.current;
-      if (input) {
-        input.value = "";
-        isUserInteractingRef.current = false;
-        setTimeout(() => {
-          if (input && !paymentDialogOpen) {
-            input.focus();
-            input.select();
-          }
-        }, 10);
-        startTransition(() => setSearchTerm(""));
-      }
-      return;
-    }
-
     // Ultra-fast parsing - single pass extraction
     const dashIndex = trimmedValue.indexOf('-');
     let productCode: string;
@@ -2833,7 +2657,7 @@ export function NewSale() {
 
     // Product lookup - use exact code first, then fallback to best match
     const codeLower = productCode.toLowerCase().trim();
-    product = null;
+    let product: Product | null = null;
     
     // CRITICAL: Try multiple matching strategies to find the correct product
     // 1. First try exact match on the full code (highest priority)
@@ -2891,17 +2715,11 @@ export function NewSale() {
     console.log('FINAL RESULT - Code:', codeLower, 'Price:', customPrice, 'Found Product:', product?.name || 'NOT FOUND', 'ID:', product?.id);
     
     if (!product) {
-      product = await lookupProductFromApi(trimmedValue);
-    }
-
-    if (!product) {
       console.error('Product not found for scanned code:', productCode, 'Price:', customPrice);
-      toast.error(
-        "No product for this barcode. Print the label again from Barcode Generator (save to product), or refresh the sale page.",
-      );
+      // Reset processing flag to allow next scan
       isProcessingScanRef.current = false;
       lastProcessedScanRef.current = '';
-      return;
+      return; // Exit early - don't add to cart
     }
     // Add to cart immediately if found (synchronous, no delays)
     if (product) {
@@ -2956,8 +2774,6 @@ export function NewSale() {
     addToCart(product, 1);
     setProductSearchOpen(false);
     setSearchTerm("");
-    setCartSearchTerm("");
-    setCartSearchOpen(false);
     setHighlightedProductIndex(0);
   };
 
@@ -2980,13 +2796,9 @@ export function NewSale() {
     const isCodePriceFormat = trimmed.includes("-") && trimmed.length > 3;
 
     const added =
-      isNumericBarcode ||
-      isCodePriceFormat ||
-      searchDropdownProducts.length > 0;
+      isNumericBarcode || isCodePriceFormat || searchDropdownProducts.length > 0;
 
-    if (searchDropdownProducts.length === 1 && searchDropdownProducts[0]) {
-      selectProductForSale(searchDropdownProducts[0]);
-    } else if (isNumericBarcode || isCodePriceFormat) {
+    if (isNumericBarcode || isCodePriceFormat) {
       handleScannerInput(trimmed);
     } else if (searchDropdownProducts.length > 0) {
       const product =
@@ -2995,8 +2807,13 @@ export function NewSale() {
       selectProductForSale(product);
     }
 
+    // Move to quantity in this same tap so the phone keyboard stays up.
     if (added) {
-      focusSearchInput({ clear: true, allowTouch: true });
+      const qtyEl = quickQtyInputRef.current;
+      if (qtyEl) {
+        qtyEl.disabled = false;
+        qtyEl.focus({ preventScroll: true });
+      }
     }
 
     setTimeout(() => {
@@ -3004,36 +2821,34 @@ export function NewSale() {
     }, 100);
   };
 
-  const commitCartSearchEntry = () => {
-    const trimmed = cartSearchTerm.trim();
-    if (!trimmed) return;
-
-    const isNumericBarcode =
-      /^\d{8,}$/.test(trimmed) ||
-      /^\d{12,13}$/.test(trimmed) ||
-      /^\d{8}$/.test(trimmed);
-    const isCodePriceFormat = trimmed.includes("-") && trimmed.length > 3;
-
-    if (cartLookupProducts.length === 1 && cartLookupProducts[0]) {
-      selectProductForSale(cartLookupProducts[0]);
-      cartSearchInputRef.current?.focus();
-      return;
+  const quickAdjustLine = useMemo(() => {
+    if (cart.length === 0) return null;
+    // Prefer the line just activated (new product), never fall back to an
+    // older line while the cart already contains the new id.
+    const preferredId =
+      activeCartLineId ?? lastAddedProductId.current ?? null;
+    if (preferredId) {
+      const match = cart.find((line) => line.id === preferredId);
+      if (match) return match;
     }
+    return cart[cart.length - 1];
+  }, [cart, activeCartLineId]);
 
-    if (isNumericBarcode || isCodePriceFormat || cartLookupProducts.length === 0) {
-      void processScannerInput(trimmed).finally(() => {
-        setCartSearchTerm("");
-        setCartSearchOpen(false);
-        setTimeout(() => cartSearchInputRef.current?.focus(), 20);
-      });
-      return;
+  const confirmQuantityAndReturnToSearch = useCallback((lineId?: string) => {
+    const id = lineId ?? quantityFocusLineIdRef.current ?? activeCartLineIdRef.current;
+    if (id) {
+      quantityEnterConfirmedRef.current = id;
+      applyTypedOverlayToCart(id);
+      clearQuantityOverlay(id);
     }
+    quantityFocusLineIdRef.current = null;
+    focusSearchInput({ clear: true, allowTouch: true });
+  }, [focusSearchInput]);
 
-    if (cartLookupProducts.length > 0) {
-      selectProductForSale(cartLookupProducts[0]);
-      cartSearchInputRef.current?.focus();
-    }
-  };
+  useLayoutEffect(() => {
+    if (quickQtyFocusTick === 0) return;
+    focusQuantityInput();
+  }, [quickQtyFocusTick, focusQuantityInput]);
 
   const handleCategoryChange = async (categoryId: string) => {
     setSelectedCategory(categoryId);
@@ -3154,26 +2969,6 @@ export function NewSale() {
         )}
       >
         <div className="mb-2 sm:mb-4 md:mb-6">
-          {hasBranch && registerStatusLoading ? (
-            <div
-              className="mb-3 flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2.5 text-stone-700 sm:mb-4"
-              role="status"
-            >
-              <Loader2 className="h-4 w-4 shrink-0 animate-spin text-[#a67c2e]" />
-              <p className="text-sm">Checking cash register status…</p>
-            </div>
-          ) : hasBranch && registerBlockMessage ? (
-            <div
-              className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-amber-950 sm:mb-4"
-              role="status"
-            >
-              <Landmark className="mt-0.5 h-4 w-4 shrink-0 text-amber-700" />
-              <div className="min-w-0">
-                <p className="text-sm font-semibold">Sales paused — cash register not ready</p>
-                <p className="text-xs text-amber-800">{registerBlockMessage}</p>
-              </div>
-            </div>
-          ) : null}
           <div className="mb-2 hidden flex-col gap-3 sm:mb-4 sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-4">
             <div className="min-w-0 pl-10 lg:pl-0">
               <h1 className="text-lg font-bold text-gray-900 sm:text-xl">New Sale</h1>
@@ -3186,14 +2981,14 @@ export function NewSale() {
             <div className="hidden flex-wrap items-center gap-2 sm:flex">
               <RepeatSaleCombobox
                 branchId={selectedBranchId}
-                disabled={paymentLoading || branchLoading || !salesAllowed}
+                disabled={paymentLoading || branchLoading || !hasBranch}
                 onRepeat={handleRepeatSale}
               />
               {cart.length > 0 && (
                 <Button
                   variant="outline"
                   onClick={holdCurrentSale}
-                  disabled={isHoldingSale || branchLoading || !salesAllowed}
+                  disabled={isHoldingSale || branchLoading || !hasBranch}
                 >
                   {isHoldingSale ? "Saving..." : "Hold Sale"}
                 </Button>
@@ -3209,7 +3004,7 @@ export function NewSale() {
                   <Button
                     variant="outline"
                     onClick={handleViewHeldSales}
-                    disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !salesAllowed}
+                    disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !hasBranch}
                   >
                     {isViewingHeldSales || holdSalesLoading ? "Loading..." : "View Held Sales"}
                   </Button>
@@ -3217,7 +3012,7 @@ export function NewSale() {
               )}
             </div>
           </div>
-          <div className="mb-3 grid grid-cols-1 gap-2.5 sm:mb-4 sm:grid-cols-2 sm:gap-4 xl:grid-cols-3">
+          <div className="mb-3 grid grid-cols-1 gap-2.5 sm:mb-4 sm:grid-cols-2 sm:gap-4">
             <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
                 Customer
@@ -3251,18 +3046,6 @@ export function NewSale() {
             </div>
             <div className="min-w-0">
               <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
-                Salesperson
-              </label>
-              <SalespersonPicker
-                value={salespersonId}
-                onChange={setSalespersonId}
-                people={salespeople}
-                loading={salespeopleLoading}
-                disabled={paymentLoading}
-              />
-            </div>
-            <div className="min-w-0 sm:col-span-2 xl:col-span-1">
-              <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
                 Category
               </label>
               <CategoryFilterCombobox
@@ -3282,7 +3065,7 @@ export function NewSale() {
           <div className="mb-2 sm:hidden">
             <RepeatSaleCombobox
               branchId={selectedBranchId}
-              disabled={paymentLoading || branchLoading || !salesAllowed}
+              disabled={paymentLoading || branchLoading || !hasBranch}
               className="h-9 w-full bg-white text-sm font-normal"
               onRepeat={handleRepeatSale}
             />
@@ -3291,8 +3074,8 @@ export function NewSale() {
             <label className="mb-1 block text-[10px] font-semibold uppercase tracking-wide text-gray-500 sm:mb-2 sm:text-xs">
               Product search
             </label>
-            <div className="relative w-full">
-              <div className="relative w-full">
+            <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-2">
+              <div className="relative min-w-0 flex-1">
                 <Search className={`pointer-events-none absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
                 {isScanning && (
                   <LoadingSpinner size="sm" className="absolute right-3 top-1/2 transform -translate-y-1/2" />
@@ -3416,21 +3199,9 @@ export function NewSale() {
                     ref={searchDropdownRef}
                     data-product-search-dropdown
                     role="listbox"
-                    className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[min(50dvh,20rem)] w-full overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white py-1 shadow-lg sm:max-h-72"
+                    className="absolute left-0 right-0 top-full z-50 mt-1 max-h-[min(40dvh,16rem)] overflow-y-auto overscroll-contain rounded-md border border-gray-200 bg-white py-1 shadow-lg sm:max-h-64"
                   >
-                    <div
-                      className="hidden border-b border-gray-100 px-3 py-1.5 text-[10px] font-medium uppercase tracking-wide text-slate-400 sm:grid sm:grid-cols-[minmax(0,1fr)_5.5rem] sm:gap-x-3"
-                      aria-hidden
-                    >
-                      <span>Product (barcode)</span>
-                      <span className="text-right">Price</span>
-                    </div>
-                    {searchDropdownProducts.map((product, index) => {
-                      const label = formatProductSearchLabel({
-                        ...product,
-                        sales_rate_exc_dis_and_tax: product.price,
-                      });
-                      return (
+                    {searchDropdownProducts.map((product, index) => (
                       <button
                         key={product.id}
                         ref={(el) => {
@@ -3440,8 +3211,7 @@ export function NewSale() {
                         role="option"
                         aria-selected={index === highlightedProductIndex}
                         className={cn(
-                          "grid w-full grid-cols-1 items-center gap-y-1 px-3 py-2.5 text-left text-sm transition-colors",
-                          "sm:grid-cols-[minmax(0,1fr)_5.5rem] sm:gap-x-3 sm:gap-y-0",
+                          "flex w-full items-center justify-between gap-3 px-3 py-2.5 text-left text-sm transition-colors",
                           index === highlightedProductIndex
                             ? "bg-blue-50 text-blue-900"
                             : "hover:bg-slate-50",
@@ -3450,17 +3220,12 @@ export function NewSale() {
                         onMouseEnter={() => setHighlightedProductIndex(index)}
                         onClick={() => selectProductForSale(product)}
                       >
-                        <span
-                          className="min-w-0 truncate font-medium"
-                          title={label}
-                        >
-                          {truncatePosProductName(label, 80)}
-                        </span>
-                        <span className="text-right text-xs font-semibold tabular-nums text-blue-600 sm:text-sm">
+                        <span className="truncate font-medium">{product.name}</span>
+                        <span className="shrink-0 text-xs font-semibold text-blue-600 tabular-nums">
                           Rs {product.price.toLocaleString()}
                         </span>
                       </button>
-                    );})}
+                    ))}
                     {searchDropdownOverflowCount > 0 && (
                       <p className="border-t border-gray-100 px-3 py-2 text-xs text-gray-500">
                         +{searchDropdownOverflowCount} more — type a more specific name or code
@@ -3469,18 +3234,158 @@ export function NewSale() {
                   </div>
                 )}
               </div>
+
+              <div
+                className={cn(
+                  "flex h-11 w-full shrink-0 items-stretch overflow-hidden rounded-md border bg-white shadow-sm transition-opacity sm:h-10 sm:w-[15rem]",
+                  quickAdjustLine ? "border-gray-200" : "border-dashed border-gray-200 opacity-40",
+                )}
+                title={
+                  quickAdjustLine
+                    ? `Adjust quantity for ${quickAdjustLine.name}`
+                    : "Add a product to adjust quantity"
+                }
+              >
+                <Button
+                  type="button"
+                  variant="ghost"
+                  disabled={!quickAdjustLine}
+                  className="h-11 w-12 shrink-0 rounded-none border-r border-gray-200 px-0 hover:bg-slate-100 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-10 sm:w-11"
+                  aria-label="Decrease quantity"
+                  data-quick-qty="true"
+                  onClick={() => {
+                    const lineId =
+                      activeCartLineIdRef.current ??
+                      lastAddedProductId.current ??
+                      quickAdjustLine?.id;
+                    if (lineId) bumpQuantity(lineId, -1);
+                  }}
+                >
+                  <Minus className="h-4 w-4" />
+                </Button>
+                <div className="flex min-w-0 flex-1 flex-col items-center justify-center border-r border-gray-200 bg-slate-50/90 px-1 py-0 sm:px-2">
+                  <Input
+                    ref={quickQtyInputRef}
+                    disabled={!quickAdjustLine}
+                    type="text"
+                    inputMode={
+                      quickAdjustLine && isWeightUnit(quickAdjustLine.unitName || quickAdjustLine.unit)
+                        ? "text"
+                        : "decimal"
+                    }
+                    placeholder="Qty"
+                    data-quantity-input="true"
+                    data-quick-qty="true"
+                    enterKeyHint="next"
+                    value={
+                      quickAdjustLine
+                        ? quantityInputs[quickAdjustLine.id] ??
+                          formatQuantityValue(quickAdjustLine.quantity)
+                        : ""
+                    }
+                    onFocus={() => {
+                      // Prefer the ref set by addToCart — focusing this input
+                      // often happens before React re-renders, so quickAdjustLine
+                      // can still point at the previous cart line.
+                      const lineId =
+                        activeCartLineIdRef.current ??
+                        lastAddedProductId.current ??
+                        quickAdjustLine?.id;
+                      if (!lineId) return;
+                      quantityFocusLineIdRef.current = lineId;
+                      isUserInteractingRef.current = true;
+                      switchActiveCartLine(lineId);
+                    }}
+                    onChange={(e) => {
+                      const lineId =
+                        activeCartLineIdRef.current ??
+                        lastAddedProductId.current ??
+                        quickAdjustLine?.id;
+                      if (!lineId) return;
+                      const value = e.target.value;
+                      setQuantityModes((prev) => ({ ...prev, [lineId]: "custom" }));
+                      setQuantityInputs((prev) => {
+                        const next = { ...prev, [lineId]: value };
+                        quantityInputsRef.current = next;
+                        return next;
+                      });
+                      // Commit quantity on Enter/blur only — avoids rewriting
+                      // "50" into "0.05" while the user is still typing.
+                    }}
+                    onBlur={() => {
+                      const lineId = quantityFocusLineIdRef.current;
+                      if (!lineId) return;
+                      if (quantityEnterConfirmedRef.current === lineId) {
+                        quantityEnterConfirmedRef.current = null;
+                        quantityFocusLineIdRef.current = null;
+                        setTimeout(() => {
+                          isUserInteractingRef.current = false;
+                        }, 300);
+                        return;
+                      }
+                      applyTypedOverlayToCart(lineId);
+                      clearQuantityOverlay(lineId);
+                      quantityFocusLineIdRef.current = null;
+                      setTimeout(() => {
+                        isUserInteractingRef.current = false;
+                      }, 300);
+                    }}
+                    onKeyDown={(e) => {
+                      const lineId =
+                        activeCartLineIdRef.current ??
+                        lastAddedProductId.current ??
+                        quickAdjustLine?.id;
+                      if (!lineId) return;
+                      if (e.key === "Enter" || e.key === "NumpadEnter" || e.key === "Go") {
+                        e.preventDefault();
+                        quantityFocusLineIdRef.current = lineId;
+                        confirmQuantityAndReturnToSearch(lineId);
+                        return;
+                      }
+                      // Don't change qty with keyboard arrows — use +/- or type.
+                      if (e.key === "ArrowUp" || e.key === "ArrowDown") {
+                        e.preventDefault();
+                      }
+                    }}
+                    className="h-7 w-full max-w-[4rem] border-0 bg-transparent p-0 text-center text-sm font-bold tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-7 sm:max-w-[5.5rem] sm:text-base [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none disabled:opacity-50"
+                  />
+                  <span className="hidden max-w-full truncate text-[10px] leading-none text-gray-500 sm:block">
+                    {quickAdjustLine
+                      ? `Rs ${formatMoney(getSellingPrice(quickAdjustLine))} each`
+                      : "each"}
+                  </span>
+                </div>
+                <Button
+                  ref={quickQtyPlusRef}
+                  type="button"
+                  variant="ghost"
+                  disabled={!quickAdjustLine}
+                  className="h-11 w-12 shrink-0 rounded-none px-0 hover:bg-blue-50 hover:text-blue-700 disabled:opacity-40 focus-visible:ring-0 focus-visible:ring-offset-0 sm:h-10 sm:w-11"
+                  aria-label="Increase quantity"
+                  data-quick-qty="true"
+                  onClick={() => {
+                    const lineId =
+                      activeCartLineIdRef.current ??
+                      lastAddedProductId.current ??
+                      quickAdjustLine?.id;
+                    if (lineId) bumpQuantity(lineId, 1);
+                  }}
+                >
+                  <Plus className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
             <div className="mt-1.5 hidden flex-wrap items-center gap-2 text-sm text-gray-600 sm:mt-3 sm:flex">
               <span className="flex items-center gap-1.5">
-                {(isProductQueryPending || serverSearchLoading) && gridProducts.length === 0 ? (
+                {isProductQueryPending && filteredProducts.length === 0 ? (
                   <>
                     Searching…
                     <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
                   </>
                 ) : (
                   <>
-                    {gridProducts.length} product
-                    {gridProducts.length === 1 ? "" : "s"}
+                    {filteredProducts.length} product
+                    {filteredProducts.length === 1 ? "" : "s"}
                     {selectedCategory !== "all" ? ` in ${selectedCategoryLabel}` : ""}
                     {(isProductQueryPending || productsRefreshing) && (
                       <Loader2 className="h-3.5 w-3.5 animate-spin text-blue-500" />
@@ -3531,16 +3436,14 @@ export function NewSale() {
               </div>
             ))}
           </div>
-        ) : gridProducts.length === 0 ? (
+        ) : filteredProducts.length === 0 ? (
           <div className="flex flex-col items-center justify-center rounded-2xl border border-dashed border-slate-200 bg-slate-50/50 py-16">
             <LayoutGrid className="mb-3 h-10 w-10 text-slate-300" />
             <p className="text-sm font-medium text-slate-600">No products found</p>
-            <p className="mt-1 max-w-sm px-4 text-center text-xs text-slate-400">
+            <p className="mt-1 text-xs text-slate-400">
               {selectedCategory !== "all"
                 ? `Try another category or clear "${selectedCategoryLabel}"`
-                : searchTerm.trim()
-                  ? "Custom barcodes are saved when you print labels in Barcode Generator (Custom mode). Print once, then search or scan here."
-                  : "Try a different search term"}
+                : "Try a different search term"}
             </p>
           </div>
         ) : !virtualizeGrid ? (
@@ -3582,7 +3485,7 @@ export function NewSale() {
       {/* Cart Section */}
       <div
         className={cn(
-          "flex w-full min-h-0 flex-col overflow-hidden bg-white lg:h-full lg:w-[400px] lg:shrink-0 lg:border-l lg:border-slate-200",
+          "flex w-full min-h-0 flex-col overflow-hidden bg-white lg:h-full lg:w-[360px] lg:shrink-0 lg:border-l lg:border-slate-200",
           cart.length === 0
             ? "max-lg:hidden"
             : cn(
@@ -3620,7 +3523,7 @@ export function NewSale() {
               <Button
                 size="sm"
                 onClick={() => startPayment("Cash")}
-                disabled={paymentLoading || branchLoading || !salesAllowed}
+                disabled={paymentLoading || branchLoading || !hasBranch}
                 className="h-9 text-xs font-semibold"
               >
                 <DollarSign className="mr-1.5 h-3.5 w-3.5" />
@@ -3630,21 +3533,11 @@ export function NewSale() {
                 size="sm"
                 variant="outline"
                 onClick={() => startPayment("Card")}
-                disabled={paymentLoading || branchLoading || !salesAllowed}
+                disabled={paymentLoading || branchLoading || !hasBranch}
                 className="h-9 text-xs font-semibold"
               >
                 <CreditCard className="mr-1.5 h-3.5 w-3.5" />
                 Card
-              </Button>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={() => startPayment("Split")}
-                disabled={paymentLoading || branchLoading || !salesAllowed}
-                className="col-span-2 h-8 text-xs"
-              >
-                <Split className="mr-1.5 h-3.5 w-3.5" />
-                Bank · Wallet · Split payment
               </Button>
             </div>
           )}
@@ -3664,82 +3557,14 @@ export function NewSale() {
                 size="sm"
                 onClick={holdCurrentSale}
                 className="h-7 flex-1 px-2 text-[11px]"
-                disabled={isHoldingSale || branchLoading || !salesAllowed}
+                disabled={isHoldingSale || branchLoading || !hasBranch}
               >
                 {isHoldingSale ? "…" : "Hold"}
               </Button>
             </div>
           )}
 
-          <div
-            className={cn(
-              "mt-2 mb-3 border-b border-slate-100 pb-3",
-              mobileCartOpen ? "block" : "hidden lg:block",
-            )}
-          >
-            <form
-              autoComplete="off"
-              onSubmit={(e) => {
-                e.preventDefault();
-                commitCartSearchEntry();
-              }}
-            >
-              <div className="relative">
-                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
-                <Input
-                  ref={cartSearchInputRef}
-                  type="text"
-                  name="pos-cart-product-search"
-                  placeholder="Scan or type barcode"
-                  value={cartSearchTerm}
-                  enterKeyHint="done"
-                  onChange={(e) => {
-                    const v = e.target.value;
-                    setCartSearchTerm(v);
-                    setCartSearchOpen(!!v.trim());
-                  }}
-                  onFocus={() => {
-                    if (cartSearchTerm.trim()) setCartSearchOpen(true);
-                  }}
-                  onBlur={(e) => {
-                    const related = e.relatedTarget as HTMLElement | null;
-                    if (related?.closest("[data-cart-search-dropdown]")) return;
-                    window.setTimeout(() => setCartSearchOpen(false), 150);
-                  }}
-                  className="h-8 border-slate-200 pl-8 text-xs shadow-sm"
-                />
-              </div>
-            </form>
-            {cartSearchOpen && cartSearchTerm.trim() && cartLookupProducts.length > 0 ? (
-              <ul
-                data-cart-search-dropdown
-                className="mt-1 max-h-36 overflow-y-auto rounded-md border border-slate-200 bg-white py-0.5 shadow-md"
-              >
-                {cartLookupProducts.map((product) => {
-                  const label = formatProductSearchLabel({
-                    ...product,
-                    sales_rate_exc_dis_and_tax: product.price,
-                  });
-                  return (
-                    <li key={product.id}>
-                      <button
-                        type="button"
-                        className="w-full px-2.5 py-2 text-left text-xs hover:bg-slate-50"
-                        onMouseDown={(e) => e.preventDefault()}
-                        onClick={() => selectProductForSale(product)}
-                      >
-                        <span className="line-clamp-2 font-medium text-slate-900">
-                          {truncatePosProductName(label, 64)}
-                        </span>
-                      </button>
-                    </li>
-                  );
-                })}
-              </ul>
-            ) : null}
-          </div>
-
-          <div className="hidden lg:block pt-0.5">
+          <div className="hidden lg:block">
           <div className="flex items-center justify-between gap-2">
             <div>
               <h2 className="text-sm font-semibold text-slate-900">Cart</h2>
@@ -3764,7 +3589,7 @@ export function NewSale() {
                   size="sm"
                   onClick={holdCurrentSale}
                   className="h-7 px-2 text-[11px]"
-                  disabled={isHoldingSale || branchLoading || !salesAllowed}
+                  disabled={isHoldingSale || branchLoading || !hasBranch}
                 >
                   {isHoldingSale ? "…" : "Hold"}
                 </Button>
@@ -3778,7 +3603,7 @@ export function NewSale() {
               size="sm"
               onClick={handleViewHeldSales}
               className="mt-2 h-7 w-full justify-between px-2 text-[11px] text-slate-600"
-              disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !salesAllowed}
+              disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !hasBranch}
             >
               <span>
                 {isViewingHeldSales || holdSalesLoading
@@ -3876,7 +3701,6 @@ export function NewSale() {
                   const isActive = activeCartLineId === item.id;
                   const qtyDisplay =
                     quantityInputs[item.id] ?? formatQuantityValue(item.quantity);
-                  const lineBarcode = resolveCartItemBarcode(item, products);
 
                   return (
                     <li
@@ -3896,7 +3720,7 @@ export function NewSale() {
                           }
                         }}
                         className={cn(
-                          "group flex cursor-pointer items-start gap-2 rounded-lg px-2 py-2 transition-colors",
+                          "group flex cursor-pointer items-center gap-2 rounded-lg px-2 py-2 transition-colors",
                           isActive
                             ? "bg-blue-50 ring-1 ring-inset ring-blue-200"
                             : "hover:bg-slate-50",
@@ -3976,32 +3800,20 @@ export function NewSale() {
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <p className="text-[13px] font-medium leading-snug text-slate-900 break-words">
+                          <p className="truncate text-[13px] font-medium leading-tight text-slate-900">
                             {item.name}
                           </p>
-                          {lineBarcode ? (
-                            <p className="mt-1 flex flex-wrap items-baseline gap-x-1 leading-snug">
-                              <span className="shrink-0 text-[11px] font-medium text-slate-500">
-                                Barcode:
-                              </span>
-                              <span
-                                className="font-mono text-xs font-semibold tabular-nums text-slate-800 break-all"
-                                title={`Scan code: ${lineBarcode}`}
-                              >
-                                {lineBarcode}
-                              </span>
-                            </p>
-                          ) : null}
+                          <p className="mt-0.5 text-[11px] tabular-nums text-slate-500">
+                            Rs {formatMoney(effectiveUnitPrice)} each
+                            {isPriceOverridden(item) && (
+                              <span className="ml-1 font-medium text-amber-600">· custom</span>
+                            )}
+                          </p>
                         </div>
 
-                        <div className="shrink-0 pt-0.5 text-right">
-                          <span className="text-[13px] font-bold tabular-nums text-slate-900">
-                            {formatMoney(lineAmount)}
-                          </span>
-                          {isPriceOverridden(item) && (
-                            <p className="text-[10px] font-medium text-amber-600">Custom price</p>
-                          )}
-                        </div>
+                        <span className="shrink-0 text-[13px] font-bold tabular-nums text-slate-900">
+                          {formatMoney(lineAmount)}
+                        </span>
 
                         <div className="flex shrink-0 items-center">
                           <Popover
@@ -4276,6 +4088,34 @@ export function NewSale() {
                   </span>
                 </div>
 
+                {isLoyaltyWinnerCustomer && (
+                  <div
+                    className={`flex items-center justify-between gap-2 rounded-md px-2 py-1.5 text-[11px] font-medium ${
+                      loyaltyStatus?.eligible
+                        ? "bg-emerald-50 text-emerald-700"
+                        : "bg-amber-50 text-amber-700"
+                    }`}
+                  >
+                    {loyaltyStatusLoading ? (
+                      <span>Checking lifetime discount…</span>
+                    ) : loyaltyStatus?.eligible ? (
+                      <>
+                        <span>
+                          🎁 Lifetime winner — {loyaltyStatus.discountPercent}% off, capped at{" "}
+                          {formatMoney(Number(loyaltyStatus.discountCap ?? 0))}
+                        </span>
+                        <span className="shrink-0 tabular-nums">
+                          {(loyaltyStatus.usedThisMonth ?? 0) + 1}/{loyaltyStatus.monthlyLimit} this month
+                        </span>
+                      </>
+                    ) : (
+                      <span>
+                        Lifetime discount not applied: {loyaltyStatus?.reason || "not eligible"}
+                      </span>
+                    )}
+                  </div>
+                )}
+
                 {!showDiscountRow && globalDiscountAmount === 0 ? (
                   <button
                     type="button"
@@ -4335,8 +4175,6 @@ export function NewSale() {
                     <span className="tabular-nums">−{formatMoney(globalDiscountAmount)}</span>
                   </div>
                 )}
-
-                <SaleExtrasPanel extras={saleExtras} />
               </div>
 
               <div className="flex items-center justify-between border-t border-slate-200/80 bg-blue-600 px-2 py-2 text-white sm:px-3 sm:py-2.5">
@@ -4351,7 +4189,7 @@ export function NewSale() {
               <Button
                 size="lg"
                 onClick={() => startPayment("Cash")}
-                disabled={paymentLoading || branchLoading || !salesAllowed}
+                disabled={paymentLoading || branchLoading || !hasBranch}
                 className="h-10 text-sm font-semibold sm:h-11"
               >
                 <DollarSign className="mr-2 h-4 w-4" />
@@ -4361,55 +4199,92 @@ export function NewSale() {
                 size="lg"
                 variant="outline"
                 onClick={() => startPayment("Card")}
-                disabled={paymentLoading || branchLoading || !salesAllowed}
+                disabled={paymentLoading || branchLoading || !hasBranch}
                 className="h-10 text-sm font-semibold sm:h-11"
               >
                 <CreditCard className="mr-2 h-4 w-4" />
                 Card
               </Button>
             </div>
-            <div className="mt-1.5 grid grid-cols-3 gap-1.5 sm:gap-2">
-              {([
-                ["Bank", Landmark],
-                ["Wallet", Smartphone],
-                ["Split", Split],
-              ] as const).map(([method, Icon]) => (
-                <Button
-                  key={method}
-                  size="sm"
-                  variant="outline"
-                  onClick={() => startPayment(method)}
-                  disabled={paymentLoading || branchLoading || !salesAllowed}
-                  className="h-8 text-xs font-medium text-slate-600"
-                >
-                  <Icon className="mr-1.5 h-3.5 w-3.5" />
-                  {method}
-                </Button>
-              ))}
-            </div>
           </div>
         )}
       </div>
 
-      <SplitPaymentDialog
+      <Dialog
         open={paymentDialogOpen}
-        total={total}
-        initialMethod={paymentMethodPending}
-        customerName={
-          selectedCustomer
-            ? customers.find((c) => c.id === selectedCustomer)?.name ||
-              pinnedCustomer?.name ||
-              "this customer"
-            : null
-        }
-        loading={paymentLoading}
-        error={paymentError}
-        onCancel={resetPaymentState}
-        onConfirm={(result) => {
-          setPaymentError("");
-          void handlePayment(result.label, result.amountPaid, result.change, result);
-        }}
-      />
+        onOpenChange={handlePaymentDialogOpenChange}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {paymentMethodPending ? `${paymentMethodPending} Payment` : "Payment"}
+            </DialogTitle>
+            <DialogDescription>
+              Enter the amount received to calculate the change due.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="rounded-lg bg-slate-50 p-3 text-sm">
+              <div className="flex items-center justify-between text-gray-600">
+                <span>Payable Amount</span>
+                <span className="font-semibold text-gray-900">
+                  Rs {formatMoney(total)}
+                </span>
+              </div>
+              <div className="mt-2 flex items-center justify-between text-green-600 font-semibold">
+                <span>Change Due</span>
+                <span>Rs {calculatedChange.toFixed(2)}</span>
+              </div>
+            </div>
+            <div>
+              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
+                Amount Received
+              </label>
+              <Input
+                type="text"
+                inputMode="decimal"
+                autoFocus
+                value={tenderedAmount}
+                onChange={(e) => handleTenderedInputChange(e.target.value)}
+                onKeyDown={(e) => {
+                  // Enter: Confirm payment
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    confirmPayment();
+                  }
+                  // Escape: Cancel payment
+                  if (e.key === "Escape") {
+                    e.preventDefault();
+                    resetPaymentState();
+                  }
+                }}
+                className="mt-1"
+                data-amount-input="true"
+              />
+            </div>
+            {paymentError && (
+              <p className="text-sm text-red-600">{paymentError}</p>
+            )}
+          </div>
+          <DialogFooter className="pt-2">
+            <Button
+              variant="outline"
+              onClick={resetPaymentState}
+              disabled={paymentLoading}
+            >
+              Cancel
+            </Button>
+            <Button
+              onClick={confirmPayment}
+              disabled={paymentLoading || !paymentMethodPending}
+            >
+              {paymentLoading
+                ? "Processing..."
+                : `Confirm ${paymentMethodPending ?? "Payment"}`}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog
         open={saleSuccessOpen}
