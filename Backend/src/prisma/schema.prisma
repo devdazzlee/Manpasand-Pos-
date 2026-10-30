@@ -468,6 +468,11 @@ model Purchase {
   cost_price         Decimal
   sale_price         Decimal
   purchase_date      DateTime               @default(now())
+  // Position within its bulk Stock In submission (0, 1, 2…). Every line in
+  // one submission shares the same purchase_date, so without this, sorting
+  // by purchase_date alone ties across the whole batch and Postgres returns
+  // them in an arbitrary order instead of entry order.
+  line_no            Int                     @default(0)
   invoice_ref        String?
   notes              String?
   delivery_status    PurchaseDeliveryStatus  @default(COMPLETE)

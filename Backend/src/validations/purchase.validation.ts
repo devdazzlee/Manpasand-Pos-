@@ -81,5 +81,7 @@ export const listPurchasesSchema = z.object({
     branchId: z.string().optional(),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
+    sortBy: z.enum(['date', 'name']).optional(),
+    sortOrder: z.enum(['asc', 'desc']).optional(),
   }),
 });

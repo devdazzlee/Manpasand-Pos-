@@ -172,7 +172,7 @@ export class PurchaseService {
     return prisma.$transaction(async (tx) => {
       const purchaseIds: string[] = [];
 
-      for (const line of data.lines) {
+      for (const [lineNo, line] of data.lines.entries()) {
         if (!line.productId) throw new AppError(400, 'Product is required on every line');
         if (!Number.isFinite(line.quantity) || line.quantity <= 0) {
           throw new AppError(400, `Invalid quantity on line for product ${line.productId}`);
@@ -202,6 +202,7 @@ export class PurchaseService {
             cost_price: line.costPrice,
             sale_price: line.salePrice ?? line.costPrice,
             purchase_date: data.purchaseDate || new Date(),
+            line_no: lineNo,
             invoice_ref: data.invoiceRef,
             notes: noteText,
             delivery_status: data.deliveryStatus || 'COMPLETE',
@@ -310,6 +311,8 @@ export class PurchaseService {
     startDate?: Date;
     endDate?: Date;
     userId?: string;
+    sortBy?: 'date' | 'name';
+    sortOrder?: 'asc' | 'desc';
   }) {
     const page = params.page || 1;
     const limit = params.limit || 20;
@@ -326,13 +329,23 @@ export class PurchaseService {
       if (params.endDate) where.purchase_date.lte = params.endDate;
     }
 
+    const sortOrder = params.sortOrder || 'desc';
+    // line_no always breaks ties, because every line in one bulk Stock In
+    // submission shares the same purchase_date — without it, products from
+    // the same entry would come back in an arbitrary order instead of the
+    // order they were added.
+    const orderBy: Prisma.PurchaseOrderByWithRelationInput[] =
+      params.sortBy === 'name'
+        ? [{ product: { name: sortOrder } }, { line_no: 'asc' }]
+        : [{ purchase_date: sortOrder }, { line_no: 'asc' }];
+
     const [total, purchases] = await Promise.all([
       prisma.purchase.count({ where }),
       prisma.purchase.findMany({
         where,
         skip,
         take: limit,
-        orderBy: { purchase_date: 'desc' },
+        orderBy,
         include: {
           product: true,
           supplier: true,

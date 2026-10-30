@@ -43,6 +43,8 @@ export const listPurchases = asyncHandler(async (req: Request, res: Response) =>
     branchId: query.branchId,
     startDate,
     endDate,
+    sortBy: query.sortBy === 'name' ? 'name' : 'date',
+    sortOrder: query.sortOrder === 'asc' ? 'asc' : 'desc',
   });
   new ApiResponse(result.data, 'Purchases retrieved', 200, true, result.meta).send(res);
 });

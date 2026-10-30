@@ -226,6 +226,13 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
   const [filterBranch, setFilterBranch] = useState<string>("all");
   const [filterStart, setFilterStart] = useState<Date | undefined>(undefined);
   const [filterEnd, setFilterEnd] = useState<Date | undefined>(undefined);
+  // "entry" = newest batch first, and within a batch, products in the order
+  // they were added — the default anyone expects after a multi-product
+  // Stock In. "name" sorts don't carry entry order (there's nothing to
+  // preserve across different products), so they're plain A-Z/Z-A.
+  const [historySort, setHistorySort] = useState<
+    "entry_desc" | "entry_asc" | "name_asc" | "name_desc"
+  >("entry_desc");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
   const [exporting, setExporting] = useState(false);
 
@@ -260,7 +267,12 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     async (pg = page) => {
       setHistoryLoading(true);
       try {
-        const params: any = { page: pg, limit: PAGE_SIZE };
+        const params: any = {
+          page: pg,
+          limit: PAGE_SIZE,
+          sortBy: historySort.startsWith("name") ? "name" : "date",
+          sortOrder: historySort.endsWith("asc") ? "asc" : "desc",
+        };
         if (filterSupplier !== "all") params.supplierId = filterSupplier;
         if (filterBranch !== "all") params.branchId = filterBranch;
         if (filterStart) params.startDate = filterStart.toISOString();
@@ -279,7 +291,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
         setHistoryLoading(false);
       }
     },
-    [filterSupplier, filterBranch, filterStart, filterEnd, page],
+    [filterSupplier, filterBranch, filterStart, filterEnd, historySort, page],
   );
 
   useEffect(() => {
@@ -897,6 +909,32 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                       {b.name}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+
+              <Select
+                value={historySort}
+                onValueChange={(v) => {
+                  setHistorySort(v as typeof historySort);
+                  setPage(1);
+                }}
+              >
+                <SelectTrigger className="h-10 text-sm text-black">
+                  <SelectValue placeholder="Sort by" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="entry_desc" className="text-sm">
+                    Newest batch first
+                  </SelectItem>
+                  <SelectItem value="entry_asc" className="text-sm">
+                    Oldest batch first
+                  </SelectItem>
+                  <SelectItem value="name_asc" className="text-sm">
+                    Product name (A-Z)
+                  </SelectItem>
+                  <SelectItem value="name_desc" className="text-sm">
+                    Product name (Z-A)
+                  </SelectItem>
                 </SelectContent>
               </Select>
 
