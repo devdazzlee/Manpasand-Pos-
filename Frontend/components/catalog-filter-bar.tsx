@@ -1,5 +1,6 @@
 "use client";
 
+import { SHOW_STITCH_TYPE } from "@/config/constants";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Check, ChevronsUpDown, X } from "lucide-react";
@@ -270,7 +271,7 @@ export function CatalogFilterBar({
   return (
     <div className={cn("space-y-3", className)}>
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <StitchTabs value={value.stitchType} onChange={(next) => set("stitchType", next)} />
+        {SHOW_STITCH_TYPE ? <StitchTabs value={value.stitchType} onChange={(next) => set("stitchType", next)} /> : <span />}
         {clearable && hasCatalogFilters(value) && (
           <Button type="button" variant="ghost" size="sm" className="h-8" onClick={() => onChange(EMPTY_CATALOG_FILTERS)}>
             <X className="mr-1 h-3.5 w-3.5" />

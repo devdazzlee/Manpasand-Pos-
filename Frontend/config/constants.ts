@@ -13,6 +13,9 @@ export const PEHNAWA_DEFAULT_STORE_ADDRESS = "Karachi, Pakistan";
 /** Shown on product barcode labels before the product name (e.g. MANPASAND DATES). */
 export const BARCODE_LABEL_BRAND_PREFIX = "MANPASAND";
 
+/** Stitched / Unstitched product type (a clothing filter). Off for Manpasand. */
+export const SHOW_STITCH_TYPE = false;
+
 /** Sale receipt footer — not shown on product barcode labels. */
 export const RECEIPT_EXCHANGE_POLICY_TITLE = "EXCHANGE POLICY";
 // Manpasand prints no exchange policy; add lines here to show one on receipts.

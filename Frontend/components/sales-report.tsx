@@ -1,5 +1,6 @@
 "use client";
 
+import { SHOW_STITCH_TYPE } from "@/config/constants";
 import { useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { format } from "date-fns";
 import {
@@ -373,7 +374,7 @@ export function SalesReport() {
   };
 
   const exportRows = () =>
-    visibleLines.map((line) => [
+    visibleLines.map((line) => dropStitch<string | number>([
       format(new Date(line.date), "dd MMM yyyy HH:mm"),
       line.voucher,
       TYPE_META[line.type as Exclude<LineType, "ALL">]?.label || line.typeLabel || line.type,
@@ -390,8 +391,11 @@ export function SalesReport() {
       line.rate,
       line.discount ?? 0,
       line.amount,
-    ]);
-  const EXPORT_HEADER = ["Date", "Voucher", "Type", "Customer", "Branch", "SKU", "Item", "Category", "Subcategory", "Stitched / Unstitched", "Vendor", "Unit", "Qty", "Rate", "Discount", "Amount"];
+    ]));
+  // Column 9 is Stitched / Unstitched; dropped where that product type is not used.
+  const STITCH_COL = 9;
+  const dropStitch = <T,>(row: T[]): T[] => (SHOW_STITCH_TYPE ? row : row.filter((_, i) => i !== STITCH_COL));
+  const EXPORT_HEADER = dropStitch(["Date", "Voucher", "Type", "Customer", "Branch", "SKU", "Item", "Category", "Subcategory", "Stitched / Unstitched", "Vendor", "Unit", "Qty", "Rate", "Discount", "Amount"]);
 
   const summaryRows = (): (string | number)[][] => [
     ["Period", periodLabel(from, to)],
@@ -418,7 +422,7 @@ export function SalesReport() {
       XLSX.utils.book_append_sheet(wb, ws, name);
     };
     add("Summary", [["Item", "Value"], ...summaryRows()], [18, 40]);
-    add("Lines", [EXPORT_HEADER, ...exportRows()], [18, 20, 10, 22, 16, 14, 30, 16, 16, 12, 18, 8, 8, 10, 10, 12]);
+    add("Lines", [EXPORT_HEADER, ...exportRows()], dropStitch([18, 20, 10, 22, 16, 14, 30, 16, 16, 12, 18, 8, 8, 10, 10, 12]));
     add(
       "Top items",
       [["Item", "SKU", "Qty sold", "Amount"], ...topItems.map((row) => [row.name, row.sku, row.quantity, Math.round(row.amount * 100) / 100])],

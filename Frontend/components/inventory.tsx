@@ -1,5 +1,6 @@
 "use client"
 
+import { SHOW_STITCH_TYPE } from "@/config/constants";
 import { ProductPriceHistory } from "@/components/inventory/product-price-history"
 import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
@@ -814,6 +815,7 @@ const ProductForm = ({
       {/* Basic Information */}
       <div className="space-y-4">
         <h3 className="text-lg font-semibold">Basic Information</h3>
+        {SHOW_STITCH_TYPE && (
         <div className="flex flex-wrap items-center gap-3 rounded-md border bg-muted/30 px-3 py-2">
           <Label className="text-sm font-medium">Stitched / Unstitched</Label>
           <StitchTabs
@@ -823,6 +825,7 @@ const ProductForm = ({
           />
           <span className="text-xs text-muted-foreground">Used by every report&apos;s Stitched / Unstitched tab.</span>
         </div>
+        )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           <div>
             <Label htmlFor="name">Product Name *</Label>
@@ -1405,7 +1408,7 @@ const ProductForm = ({
               id="new-subcat-name"
               value={newSubcatName}
               onChange={(e) => setNewSubcatName(e.target.value)}
-              placeholder="e.g. Unstitched, Stitched, Kids"
+              placeholder="e.g. Dry Fruits, Spices, Dates"
               autoFocus
               onKeyDown={(e) => {
                 if (e.key === "Enter") {

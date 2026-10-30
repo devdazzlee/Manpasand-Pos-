@@ -426,7 +426,7 @@ const Subcategories: React.FC = () => {
           </div>
           <h1 className="text-2xl font-bold leading-none tracking-tight text-gray-900 md:text-[1.75rem]">Sub-Categories</h1>
           <p className="mt-1.5 text-sm text-gray-500">
-            Group products inside a category, e.g. Stitched 3pc, Unstitched 2pc, Kids
+            Group products inside a category, e.g. Almonds, Cashews, Pistachios
             {isRefreshing ? (
               <span className="ml-2 inline-flex items-center gap-1 text-xs text-gray-400">
                 <Loader2 className="h-3 w-3 animate-spin" />
@@ -584,7 +584,7 @@ const Subcategories: React.FC = () => {
               <p className="mt-1 text-sm text-gray-500">
                 {search || status !== "all"
                   ? "Try a different search or filter."
-                  : "Create one to start grouping products, e.g. Stitched 3pc."}
+                  : "Create one to start grouping products, e.g. Almonds."}
               </p>
             </div>
             {search || status !== "all" ? (
@@ -738,7 +738,7 @@ const Subcategories: React.FC = () => {
                   void submit();
                 }
               }}
-              placeholder="e.g. Stitched 3pc"
+              placeholder="e.g. Almonds"
               className="h-10"
               disabled={submitting}
               autoFocus

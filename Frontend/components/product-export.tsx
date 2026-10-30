@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox"
 import { Download, Loader2 } from "lucide-react"
 import apiClient from "@/lib/apiClient"
-import { API_ENDPOINTS } from "@/config/constants"
+import { API_ENDPOINTS, SHOW_STITCH_TYPE } from "@/config/constants"
 import { useToast } from "@/hooks/use-toast"
 
 interface DropdownOption {
@@ -17,7 +17,7 @@ interface DropdownOption {
   name: string
 }
 
-const EXPORT_COLUMNS = [
+const ALL_EXPORT_COLUMNS = [
   { key: "product_id", label: "Product ID" },
   { key: "product_code", label: "Product Code" },
   { key: "product_name", label: "Product Name" },
@@ -75,6 +75,8 @@ const EXPORT_COLUMNS = [
   { key: "created_at", label: "Created At" },
   { key: "updated_at", label: "Updated At" },
 ] as const
+
+const EXPORT_COLUMNS = ALL_EXPORT_COLUMNS.filter((column) => SHOW_STITCH_TYPE || column.key !== "stitch_type")
 
 export function ProductExport() {
   const { toast } = useToast()
@@ -253,6 +255,7 @@ export function ProductExport() {
               </Select>
             </div>
 
+            {SHOW_STITCH_TYPE && (
             <div className="space-y-2">
               <Label>Stitched / Unstitched</Label>
               <Select value={stitchType} onValueChange={setStitchType}>
@@ -264,6 +267,7 @@ export function ProductExport() {
                 </SelectContent>
               </Select>
             </div>
+            )}
 
             <div className="space-y-2">
               <Label>Supplier</Label>

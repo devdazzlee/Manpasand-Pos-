@@ -1,5 +1,6 @@
 "use client";
 
+import { SHOW_STITCH_TYPE } from "@/config/constants";
 import { useEffect, useState } from "react";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { AlertTriangle } from "lucide-react";
@@ -74,7 +75,7 @@ type SalesRow = {
 const DIMS = [
   { id: "category", label: "Category" },
   { id: "subcategory", label: "Sub-category" },
-  { id: "stitch", label: "Stitched / Unstitched" },
+  ...(SHOW_STITCH_TYPE ? [{ id: "stitch", label: "Stitched / Unstitched" }] : []),
   { id: "brand", label: "Brand" },
   { id: "collection", label: "Collection" },
   { id: "size", label: "Size" },

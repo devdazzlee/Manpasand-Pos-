@@ -1,5 +1,6 @@
 "use client";
 
+import { SHOW_STITCH_TYPE } from "@/config/constants";
 import { useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -17,7 +18,7 @@ export function BulkProductUpload() {
       const response = await apiClient.get(`${API_BASE}/products/export/excel`, {
         responseType: "blob",
         params: {
-          columns: "product_name,purchase_rate,sales_rate_inc,stock,min_qty,max_qty,category_name,subcategory_name,stitch_type,supplier_name,brand_name"
+          columns: `product_name,purchase_rate,sales_rate_inc,stock,min_qty,max_qty,category_name,subcategory_name,${SHOW_STITCH_TYPE ? "stitch_type," : ""}supplier_name,brand_name`
         }
       });
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -110,10 +111,9 @@ export function BulkProductUpload() {
             name: "Subcategory",
             description: "Subcategory name (optional).",
           },
-          {
-            name: "Stitched / Unstitched",
-            description: "Write Stitched or Unstitched; leave blank if not set (optional).",
-          },
+          ...(SHOW_STITCH_TYPE
+            ? [{ name: "Stitched / Unstitched", description: "Write Stitched or Unstitched; leave blank if not set (optional)." }]
+            : []),
           {
             name: "Supplier",
             description: "Vendor name (optional).",
