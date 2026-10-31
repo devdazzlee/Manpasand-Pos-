@@ -5,7 +5,7 @@ import sharp from 'sharp';
 
 // Images are stored on the server's disk and served by nginx from UPLOADS_PUBLIC_URL.
 // New uploads land in tmp/ first (the product/category doesn't exist yet), then
-// finalizeImage() renames them after the product/category name, e.g. products/ajwa-dates-2.jpg
+// finalizeImage() renames them after the product/category name, e.g. products/ajwa-dates-3f9a1c2b.jpg
 export const UPLOADS_DIR = path.resolve(process.env.UPLOADS_DIR || path.join(process.cwd(), 'uploads'));
 export const UPLOADS_PUBLIC_URL = (process.env.UPLOADS_PUBLIC_URL || '/uploads').replace(/\/+$/, '');
 
@@ -103,14 +103,20 @@ export class LocalImageService {
     return results;
   }
 
-  /** Moves a tmp upload to <folder>/<name-slug>[-n].<ext>. Other URLs are returned unchanged. */
+  /**
+   * Moves a tmp upload to <folder>/<name-slug>-<hash>.<ext>. Other URLs are returned unchanged.
+   * The hash makes every upload a new URL: replacing an image deletes the old file first, so
+   * without it the new file reused the old name and browsers/nginx/Next.js kept serving the
+   * cached old picture.
+   */
   async finalizeImage(url: string, folder: string, name: string): Promise<string> {
     const src = urlToPath(url);
     if (!src || path.basename(path.dirname(src)) !== TMP_FOLDER) return url;
     try {
       const data = await fs.readFile(src);
       const ext = path.extname(src).slice(1) || 'jpg';
-      const fileName = await writeUnique(path.join(UPLOADS_DIR, folder), slugify(name), ext, data);
+      const hash = crypto.createHash('sha1').update(data).digest('hex').slice(0, 8);
+      const fileName = await writeUnique(path.join(UPLOADS_DIR, folder), `${slugify(name)}-${hash}`, ext, data);
       await fs.unlink(src).catch(() => undefined);
       return `${UPLOADS_PUBLIC_URL}/${folder}/${fileName}`;
     } catch (error) {

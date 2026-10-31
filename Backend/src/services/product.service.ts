@@ -639,7 +639,7 @@ export class ProductService {
         return verifiedRelations;
     }
 
-    /** Stores uploaded images under the product's name (local storage), e.g. products/ajwa-dates-2.jpg */
+    /** Stores uploaded images under the product's name (local storage), e.g. products/ajwa-dates-3f9a1c2b.jpg */
     private async nameProductImages(productId: string, urls: string[]): Promise<string[]> {
         if (urls.length === 0) return urls;
         const product = await prisma.product.findUnique({
