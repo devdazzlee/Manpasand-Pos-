@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/alert-dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Checkbox } from "@/components/ui/checkbox"
-import { ChevronDown } from "lucide-react"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Label } from "@/components/ui/label"
@@ -81,6 +80,8 @@ import {
   MoreHorizontal,
   Power,
   PowerOff,
+  ChevronDown,
+  SlidersHorizontal,
 } from "lucide-react"
 import apiClient from "@/lib/apiClient"
 import { usePosData } from "@/hooks/use-pos-data"
@@ -1474,6 +1475,9 @@ export default function Inventory() {
     "ALL" | "ACTIVE" | "INACTIVE" | "OUT" | "LOW" | "FEATURED" | "HIDDEN_WEB"
   >("ALL")
   const [viewMode, setViewMode] = useState<"table" | "grid">("table")
+  // Phone: collapse chips / sort / catalog pickers so the product list is not
+  // covered by the sticky filter strip. Desktop always shows the full panel.
+  const [filtersOpen, setFiltersOpen] = useState(false)
 
   // State for dropdown options (these will be loaded from global store)
   const [units, setUnits] = useState<DropdownOption[]>([])
@@ -1813,6 +1817,13 @@ export default function Inventory() {
     searchTerm.trim() !== "" ||
     hasCatalogFilters(catalogFilters) ||
     statusFilter !== "ALL"
+
+  const appliedFilterCount =
+    (statusFilter !== "ALL" ? 1 : 0) +
+    catalogFilters.supplierIds.length +
+    catalogFilters.categoryIds.length +
+    catalogFilters.subcategoryIds.length +
+    (catalogFilters.stitchType !== "all" ? 1 : 0)
 
   // "Loading" = a fetch is in flight, or none has completed yet (no meta), and
   // we still have nothing to show. Prevents the counts/stats flashing 0 before
@@ -2804,152 +2815,198 @@ export default function Inventory() {
         )}
       </div>
 
-      {/* Filters — sticky on phones so search stays above the keyboard */}
-      <div className="sticky top-14 z-20 -mx-4 space-y-3 border-b border-gray-200 bg-gray-50/95 px-4 py-3 shadow-sm backdrop-blur-sm sm:top-16 lg:static lg:mx-0 lg:border-0 lg:bg-transparent lg:px-0 lg:py-0 lg:shadow-none lg:backdrop-blur-none">
-      <div className="rounded-xl border border-gray-200 bg-white p-3 sm:p-4 space-y-3 shadow-sm">
-        <div className="flex flex-wrap gap-1.5">
-          {statusChips.map((chip) => {
-            const active = statusFilter === chip.key
-            return (
-              <button
-                key={chip.key}
-                type="button"
-                onClick={() => {
-                  setStatusFilter(chip.key)
+      {/* Filters: on phones only search + a Filters toggle stay sticky so the
+          product list is not covered. Chips, sort, and catalog pickers expand
+          in document flow (same pattern as CompactReportFilters). */}
+      <div className="rounded-xl border border-gray-200 bg-white shadow-sm">
+        <div className="sticky top-14 z-20 -mx-px rounded-[0.7rem] border-b border-gray-200 bg-white/95 px-3 py-3 shadow-sm backdrop-blur-sm sm:top-16 sm:px-4 lg:static lg:mx-0 lg:rounded-none lg:border-0 lg:bg-white lg:px-4 lg:pb-0 lg:pt-4 lg:shadow-none lg:backdrop-blur-none">
+          <div className="flex items-center gap-2">
+            <form
+              className="relative min-w-0 flex-1"
+              autoComplete="off"
+              action=""
+              onSubmit={(e) => {
+                e.preventDefault()
+                const input = e.currentTarget.querySelector("input")
+                if (input instanceof HTMLInputElement) input.blur()
+              }}
+            >
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" />
+              <Input
+                type="search"
+                name="product-catalog-search"
+                placeholder="Search name, SKU, code, category..."
+                value={searchTerm}
+                autoComplete="off"
+                autoCorrect="off"
+                autoCapitalize="none"
+                spellCheck={false}
+                inputMode="search"
+                enterKeyHint="search"
+                data-lpignore="true"
+                data-1p-ignore="true"
+                data-form-type="other"
+                onChange={(e) => {
+                  setSearchTerm(e.target.value)
                   setCurrentPage(1)
                 }}
-                className={cn(
-                  "inline-flex items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-semibold transition-colors",
-                  active
-                    ? "bg-gray-900 text-white border-gray-900"
-                    : "bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
-                )}
-              >
-                {chip.label}
-                <span
+                className="h-10 pl-10 pr-10 [&::-webkit-search-cancel-button]:hidden"
+              />
+              {searchTerm ? (
+                <button
+                  type="button"
+                  aria-label="Clear search"
+                  className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600"
+                  onClick={() => {
+                    setSearchTerm("")
+                    setCurrentPage(1)
+                  }}
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              ) : null}
+            </form>
+            <button
+              type="button"
+              aria-expanded={filtersOpen}
+              aria-controls="catalog-filter-panel"
+              onClick={() => setFiltersOpen((open) => !open)}
+              className="inline-flex h-10 shrink-0 items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 text-xs font-semibold text-gray-700 transition-colors hover:bg-gray-50 lg:hidden"
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              Filters
+              {appliedFilterCount > 0 ? (
+                <span className="inline-flex min-w-[1.25rem] items-center justify-center rounded-full bg-gray-900 px-1 text-[10px] tabular-nums text-white">
+                  {appliedFilterCount}
+                </span>
+              ) : null}
+              <ChevronDown className={cn("h-4 w-4 text-gray-400 transition-transform", filtersOpen && "rotate-180")} />
+            </button>
+          </div>
+        </div>
+
+        <div
+          id="catalog-filter-panel"
+          className={cn(
+            "space-y-3 px-3 pb-3 pt-3 sm:px-4 sm:pb-4",
+            filtersOpen ? "block" : "hidden lg:block",
+          )}
+        >
+          <div className="-mx-1 flex gap-1.5 overflow-x-auto px-1 pb-0.5 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {statusChips.map((chip) => {
+              const active = statusFilter === chip.key
+              return (
+                <button
+                  key={chip.key}
+                  type="button"
+                  onClick={() => {
+                    setStatusFilter(chip.key)
+                    setCurrentPage(1)
+                  }}
                   className={cn(
-                    "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-[10px] tabular-nums",
-                    active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500",
+                    "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3 h-8 text-xs font-semibold transition-colors",
+                    active
+                      ? "bg-gray-900 text-white border-gray-900"
+                      : "bg-white text-gray-600 border-gray-200 hover:border-gray-300 hover:bg-gray-50",
                   )}
                 >
-                  {isCatalogLoading ? (
-                    <span
-                      className={cn(
-                        "my-[3px] h-2 w-3 animate-pulse rounded-full",
-                        active ? "bg-white/50" : "bg-gray-300",
-                      )}
-                    />
-                  ) : (
-                    chip.count
-                  )}
-                </span>
-              </button>
-            )
-          })}
-        </div>
+                  {chip.label}
+                  <span
+                    className={cn(
+                      "inline-flex min-w-[1.25rem] items-center justify-center rounded-full px-1 text-[10px] tabular-nums",
+                      active ? "bg-white/20 text-white" : "bg-gray-100 text-gray-500",
+                    )}
+                  >
+                    {isCatalogLoading ? (
+                      <span
+                        className={cn(
+                          "my-[3px] h-2 w-3 animate-pulse rounded-full",
+                          active ? "bg-white/50" : "bg-gray-300",
+                        )}
+                      />
+                    ) : (
+                      chip.count
+                    )}
+                  </span>
+                </button>
+              )
+            })}
+          </div>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2.5">
-          <form
-            className="relative min-w-0 sm:col-span-2"
-            autoComplete="off"
-            action=""
-            onSubmit={(e) => {
-              e.preventDefault()
-              const input = e.currentTarget.querySelector("input")
-              if (input instanceof HTMLInputElement) input.blur()
-            }}
-          >
-            <Search className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 h-4 w-4" />
-            <Input
-              type="search"
-              name="product-catalog-search"
-              placeholder="Search name, SKU, code, category..."
-              value={searchTerm}
-              autoComplete="off"
-              autoCorrect="off"
-              autoCapitalize="none"
-              spellCheck={false}
-              inputMode="search"
-              enterKeyHint="search"
-              data-lpignore="true"
-              data-1p-ignore="true"
-              data-form-type="other"
-              onChange={(e) => {
-                setSearchTerm(e.target.value)
+          <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+            <Select
+              value={sortBy}
+              onValueChange={(v) => {
+                setSortBy(v)
                 setCurrentPage(1)
               }}
-              className="h-10 pl-10 pr-10 [&::-webkit-search-cancel-button]:hidden"
-            />
-            {searchTerm ? (
-              <button
-                type="button"
-                aria-label="Clear search"
-                className="absolute right-2 top-1/2 flex h-7 w-7 -translate-y-1/2 items-center justify-center rounded-full text-gray-400 hover:bg-gray-100 hover:text-gray-600"
-                onClick={() => {
-                  setSearchTerm("")
-                  setCurrentPage(1)
-                }}
-              >
-                <X className="h-4 w-4" />
-              </button>
-            ) : null}
-          </form>
-          <Select
-            value={sortBy}
-            onValueChange={(v) => {
-              setSortBy(v)
-              setCurrentPage(1)
-            }}
-          >
-            <SelectTrigger className="h-10 w-full">
-              <SelectValue placeholder="Sort by" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="name-asc">Name (A → Z)</SelectItem>
-              <SelectItem value="name-desc">Name (Z → A)</SelectItem>
-              <SelectItem value="stock-desc">Stock (High → Low)</SelectItem>
-              <SelectItem value="stock-asc">Stock (Low → High)</SelectItem>
-              <SelectItem value="price-desc">Price (High → Low)</SelectItem>
-              <SelectItem value="price-asc">Price (Low → High)</SelectItem>
-              <SelectItem value="newest">Newest first</SelectItem>
-              <SelectItem value="oldest">Oldest first</SelectItem>
-            </SelectContent>
-          </Select>
-          <Select
-            value={String(pageSize)}
-            onValueChange={(value) => {
-              setPageSize(Number(value))
-              setCurrentPage(1)
-            }}
-          >
-            <SelectTrigger className="h-10 w-full">
-              <SelectValue placeholder="Per page" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="10">10 per page</SelectItem>
-              <SelectItem value="20">20 per page</SelectItem>
-              <SelectItem value="50">50 per page</SelectItem>
-              <SelectItem value="100">100 per page</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-
-        <CatalogFilterBar
-          value={catalogFilters}
-          onChange={(next) => {
-            setCatalogFilters(next)
-            setCurrentPage(1)
-          }}
-        />
-
-        {hasActiveFilters && (
-          <div className="flex justify-end">
-            <Button type="button" variant="ghost" size="sm" className="h-8 text-xs" onClick={clearCatalogFilters}>
-              Clear filters
-            </Button>
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="Sort by" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="name-asc">Name (A → Z)</SelectItem>
+                <SelectItem value="name-desc">Name (Z → A)</SelectItem>
+                <SelectItem value="stock-desc">Stock (High → Low)</SelectItem>
+                <SelectItem value="stock-asc">Stock (Low → High)</SelectItem>
+                <SelectItem value="price-desc">Price (High → Low)</SelectItem>
+                <SelectItem value="price-asc">Price (Low → High)</SelectItem>
+                <SelectItem value="newest">Newest first</SelectItem>
+                <SelectItem value="oldest">Oldest first</SelectItem>
+              </SelectContent>
+            </Select>
+            <Select
+              value={String(pageSize)}
+              onValueChange={(value) => {
+                setPageSize(Number(value))
+                setCurrentPage(1)
+              }}
+            >
+              <SelectTrigger className="h-10 w-full">
+                <SelectValue placeholder="Per page" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10 per page</SelectItem>
+                <SelectItem value="20">20 per page</SelectItem>
+                <SelectItem value="50">50 per page</SelectItem>
+                <SelectItem value="100">100 per page</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
-        )}
-      </div>
+
+          <CatalogFilterBar
+            value={catalogFilters}
+            onChange={(next) => {
+              setCatalogFilters(next)
+              setCurrentPage(1)
+            }}
+          />
+
+          <div className="flex items-center justify-between gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-8 text-xs lg:hidden"
+              onClick={() => setFiltersOpen(false)}
+            >
+              Done
+            </Button>
+            {hasActiveFilters ? (
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="ml-auto h-8 text-xs"
+                onClick={clearCatalogFilters}
+              >
+                Clear filters
+              </Button>
+            ) : (
+              <span className="hidden lg:block" />
+            )}
+          </div>
+        </div>
       </div>
 
       {/* Products */}
