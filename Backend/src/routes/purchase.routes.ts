@@ -5,6 +5,7 @@ import {
   createPurchase,
   createBulkPurchase,
   listPurchases,
+  exportPurchases,
   getPurchaseById,
   updatePurchase,
   getMonthlyStats,
@@ -21,6 +22,7 @@ import {
   createPurchaseSchema,
   createBulkPurchaseSchema,
   listPurchasesSchema,
+  exportPurchasesSchema,
   updatePurchaseSchema,
   updateStockInBillSchema,
   appendBillLineSchema,
@@ -42,6 +44,7 @@ router.post('/', validate(createPurchaseSchema), createPurchase);
 router.post('/bulk', validate(createBulkPurchaseSchema), createBulkPurchase);
 router.get('/', validate(listPurchasesSchema), listPurchases);
 router.get('/stats', getMonthlyStats);
+router.get('/export', validate(exportPurchasesSchema), exportPurchases);
 
 router.get('/hold', validate(listHoldPurchasesSchema), getHoldPurchases);
 router.post('/hold', validate(createHoldPurchaseSchema), createHoldPurchase);

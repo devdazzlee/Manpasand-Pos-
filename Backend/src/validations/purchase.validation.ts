@@ -82,10 +82,25 @@ export const listPurchasesSchema = z.object({
     branchId: z.string().optional(),
     startDate: z.string().optional(),
     endDate: z.string().optional(),
-    sortBy: z.enum(['date', 'name']).optional(),
+    sortBy: z.enum(['date', 'purchase_date', 'name', 'supplier', 'branch', 'qty', 'value']).optional(),
     sortOrder: z.enum(['asc', 'desc']).optional(),
     search: z.string().optional(),
+    paymentMode: z.enum(['CASH', 'CREDIT', 'MIX']).optional(),
+    deliveryStatus: z.enum(['COMPLETE', 'PARTIAL']).optional(),
     groupBy: z.enum(['line', 'bill']).optional().default('line'),
+  }),
+});
+
+export const exportPurchasesSchema = z.object({
+  query: z.object({
+    supplierId: z.string().optional(),
+    branchId: z.string().optional(),
+    startDate: z.string().optional(),
+    endDate: z.string().optional(),
+    search: z.string().optional(),
+    paymentMode: z.enum(['CASH', 'CREDIT', 'MIX']).optional(),
+    deliveryStatus: z.enum(['COMPLETE', 'PARTIAL']).optional(),
+    sortOrder: z.enum(['asc', 'desc']).optional(),
   }),
 });
 

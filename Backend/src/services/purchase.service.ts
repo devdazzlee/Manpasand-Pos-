@@ -23,6 +23,9 @@ const PURCHASE_TX_OPTIONS = { maxWait: 20_000, timeout: 30_000 } as const;
 
 type PurchaseListRow = Prisma.PurchaseGetPayload<{ include: typeof PURCHASE_LIST_INCLUDE }>;
 
+/** date = entry order (when the Stock In was saved); purchase_date = the bill's own date. */
+export type PurchaseSortBy = 'date' | 'purchase_date' | 'name' | 'supplier' | 'branch' | 'qty' | 'value';
+
 function billKey(p: {
   id: string;
   bill_group_id?: string | null;
@@ -349,7 +352,8 @@ export class PurchaseService {
           ? data.invoiceRef
           : existingLines[0].invoice_ref;
 
-      for (const line of data.lines) {
+      // The edit form lists lines in bill order, so its position is the line_no.
+      for (const [lineNo, line] of data.lines.entries()) {
         const qty = Number(line.quantity);
         const cost = Number(line.costPrice);
         const sale =
@@ -431,6 +435,7 @@ export class PurchaseService {
               cost_price: cost,
               sale_price: sale,
               purchase_date: purchaseDate,
+              line_no: lineNo,
               invoice_ref: invoiceRef,
               notes: noteText,
               delivery_status: deliveryStatus,
@@ -448,6 +453,7 @@ export class PurchaseService {
               cost_price: cost,
               sale_price: sale,
               purchase_date: purchaseDate,
+              line_no: lineNo,
               invoice_ref: invoiceRef,
               bill_group_id: billGroupId,
               notes: noteText,
@@ -982,35 +988,17 @@ export class PurchaseService {
     return result;
   }
 
-  async listPurchases(params: {
-    page?: number;
-    limit?: number;
+  private buildListWhere(params: {
     productId?: string;
     supplierId?: string;
     branchId?: string;
     startDate?: Date;
     endDate?: Date;
     userId?: string;
-    sortBy?: 'date' | 'name';
-    sortOrder?: 'asc' | 'desc';
     search?: string;
-    /** line = each product row (default). bill = one row per supplier receipt. */
-    groupBy?: 'line' | 'bill';
-  }) {
-    const page = Math.max(params.page || 1, 1);
-    const limit = Math.min(Math.max(params.limit || 20, 1), 100);
-    const skip = (page - 1) * limit;
-    const groupBy = params.groupBy === 'bill' ? 'bill' : 'line';
-    const sortOrder = params.sortOrder || 'desc';
-    // line_no always breaks ties, because every line in one bulk Stock In
-    // submission shares the same purchase_date — without it, products from
-    // the same entry would come back in an arbitrary order instead of the
-    // order they were added.
-    const orderBy: Prisma.PurchaseOrderByWithRelationInput[] =
-      params.sortBy === 'name'
-        ? [{ product: { name: sortOrder } }, { line_no: 'asc' }]
-        : [{ purchase_date: sortOrder }, { line_no: 'asc' }];
-
+    paymentMode?: 'CASH' | 'CREDIT' | 'MIX';
+    deliveryStatus?: 'COMPLETE' | 'PARTIAL';
+  }): Prisma.PurchaseWhereInput {
     const where: Prisma.PurchaseWhereInput = {};
     if (params.productId) where.product_id = params.productId;
     if (params.supplierId) where.supplier_id = params.supplierId;
@@ -1031,6 +1019,60 @@ export class PurchaseService {
         { supplier: { name: { contains: search, mode: 'insensitive' } } },
       ];
     }
+    // Payment mode lives in the bill notes ("Pay: CASH · paid …"), same on every line of a bill.
+    if (params.paymentMode) {
+      where.notes = { contains: `Pay: ${params.paymentMode}`, mode: 'insensitive' };
+    }
+    if (params.deliveryStatus) where.delivery_status = params.deliveryStatus;
+
+    return where;
+  }
+
+  async listPurchases(params: {
+    page?: number;
+    limit?: number;
+    productId?: string;
+    supplierId?: string;
+    branchId?: string;
+    startDate?: Date;
+    endDate?: Date;
+    userId?: string;
+    sortBy?: PurchaseSortBy;
+    sortOrder?: 'asc' | 'desc';
+    search?: string;
+    paymentMode?: 'CASH' | 'CREDIT' | 'MIX';
+    deliveryStatus?: 'COMPLETE' | 'PARTIAL';
+    /** line = each product row (default). bill = one row per supplier receipt. */
+    groupBy?: 'line' | 'bill';
+  }) {
+    const page = Math.max(params.page || 1, 1);
+    const limit = Math.min(Math.max(params.limit || 20, 1), 100);
+    const skip = (page - 1) * limit;
+    const groupBy = params.groupBy === 'bill' ? 'bill' : 'line';
+    const sortOrder = params.sortOrder || 'desc';
+    // "Newest batch first" must use created_at. purchase_date is the business
+    // date and is often the same clock time for every receipt saved that day,
+    // so sorting on it leaves the latest Stock In buried among older bills.
+    // line_no still breaks ties so products inside one save stay in entry order.
+    // Every other sort falls back to entry order, so equal values stay predictable.
+    const sortBy = params.sortBy || 'date';
+    const entryOrder: Prisma.PurchaseOrderByWithRelationInput[] = [
+      { created_at: sortOrder },
+      { line_no: 'asc' },
+      { id: 'asc' },
+    ];
+    const lineSortKey: Partial<Record<PurchaseSortBy, Prisma.PurchaseOrderByWithRelationInput>> = {
+      purchase_date: { purchase_date: sortOrder },
+      name: { product: { name: sortOrder } },
+      supplier: { supplier: { name: sortOrder } },
+      branch: { warehouse_branch: { name: sortOrder } },
+      qty: { quantity: sortOrder },
+    };
+    const orderBy: Prisma.PurchaseOrderByWithRelationInput[] = lineSortKey[sortBy]
+      ? [lineSortKey[sortBy]!, ...entryOrder]
+      : entryOrder;
+
+    const where = this.buildListWhere(params);
 
     const totalsRows = await prisma.purchase.findMany({
       where,
@@ -1049,16 +1091,41 @@ export class PurchaseService {
     };
 
     if (groupBy === 'line') {
-      const [total, purchases] = await Promise.all([
-        prisma.purchase.count({ where }),
-        prisma.purchase.findMany({
+      let total: number;
+      let purchases: PurchaseListRow[];
+      if (sortBy === 'value') {
+        // qty × cost isn't a column, so rank the light rows here and load only this page.
+        const ranked = await prisma.purchase.findMany({
           where,
-          skip,
-          take: limit,
-          orderBy,
+          orderBy: entryOrder,
+          select: { id: true, quantity: true, cost_price: true },
+        });
+        const dir = sortOrder === 'asc' ? 1 : -1;
+        const value = (r: (typeof ranked)[number]) => asNumber(r.quantity) * asNumber(r.cost_price);
+        const pageIds = ranked
+          .map((r, i) => ({ id: r.id, v: value(r), i }))
+          .sort((a, b) => dir * (a.v - b.v) || a.i - b.i)
+          .slice(skip, skip + limit)
+          .map((r) => r.id);
+        const rows = await prisma.purchase.findMany({
+          where: { id: { in: pageIds } },
           include: PURCHASE_LIST_INCLUDE,
-        }),
-      ]);
+        });
+        const byId = new Map(rows.map((r) => [r.id, r]));
+        total = ranked.length;
+        purchases = pageIds.map((id) => byId.get(id)!).filter(Boolean);
+      } else {
+        [total, purchases] = await Promise.all([
+          prisma.purchase.count({ where }),
+          prisma.purchase.findMany({
+            where,
+            skip,
+            take: limit,
+            orderBy,
+            include: PURCHASE_LIST_INCLUDE,
+          }),
+        ]);
+      }
       return {
         data: purchases,
         meta: {
@@ -1075,7 +1142,7 @@ export class PurchaseService {
     // Bill-wise: load matching lines, group, then paginate groups.
     const allLines = await prisma.purchase.findMany({
       where,
-      orderBy: [{ purchase_date: 'desc' }, { line_no: 'asc' }],
+      orderBy: [{ created_at: 'desc' }, { line_no: 'asc' }],
       include: PURCHASE_LIST_INCLUDE,
       take: 5000,
     });
@@ -1085,6 +1152,7 @@ export class PurchaseService {
       {
         bill_group_id: string;
         purchase_date: Date;
+        created_at: Date;
         invoice_ref: string | null;
         supplier: PurchaseListRow['supplier'];
         warehouse_branch: PurchaseListRow['warehouse_branch'];
@@ -1108,10 +1176,16 @@ export class PurchaseService {
         if (row.purchase_date > existing.purchase_date) {
           existing.purchase_date = row.purchase_date;
         }
+        // A bill sorts by when it was first saved; products added while
+        // editing it later must not move the whole bill to the top.
+        if (row.created_at < existing.created_at) {
+          existing.created_at = row.created_at;
+        }
       } else {
         groupMap.set(key, {
           bill_group_id: key,
           purchase_date: row.purchase_date,
+          created_at: row.created_at,
           invoice_ref: row.invoice_ref,
           supplier: row.supplier,
           warehouse_branch: row.warehouse_branch,
@@ -1124,39 +1198,55 @@ export class PurchaseService {
       }
     }
 
-    const bills = Array.from(groupMap.values()).sort(
-      (a, b) => b.purchase_date.getTime() - a.purchase_date.getTime(),
-    );
+    const dir = sortOrder === 'asc' ? 1 : -1;
+    const firstProductName = (b: { lines: PurchaseListRow[] }) =>
+      [...b.lines].sort((x, y) => x.line_no - y.line_no)[0]?.product?.name || '';
+    const bills = Array.from(groupMap.values()).sort((a, b) => {
+      let primary = 0;
+      if (sortBy === 'name') primary = firstProductName(a).localeCompare(firstProductName(b));
+      else if (sortBy === 'supplier') primary = (a.supplier?.name || '').localeCompare(b.supplier?.name || '');
+      else if (sortBy === 'branch') primary = (a.warehouse_branch?.name || '').localeCompare(b.warehouse_branch?.name || '');
+      else if (sortBy === 'qty') primary = a.quantity - b.quantity;
+      else if (sortBy === 'value') primary = a.value - b.value;
+      else if (sortBy === 'purchase_date') primary = a.purchase_date.getTime() - b.purchase_date.getTime();
+      if (primary !== 0) return dir * primary;
+      return dir * (a.created_at.getTime() - b.created_at.getTime());
+    });
     const total = bills.length;
-    const pageBills = bills.slice(skip, skip + limit).map((b) => ({
-      id: b.lines[0]?.id,
+    const pageBills = bills.slice(skip, skip + limit).map((b) => {
+      const orderedLines = [...b.lines].sort((a, c) => (a.line_no ?? 0) - (c.line_no ?? 0));
+      const anchor = orderedLines[0];
+      return {
+      id: anchor?.id,
       bill_group_id: b.bill_group_id,
       purchase_date: b.purchase_date,
+      created_at: b.created_at,
       invoice_ref: b.invoice_ref,
       supplier: b.supplier,
       warehouse_branch: b.warehouse_branch,
       user: b.user,
       delivery_status: b.delivery_status,
-      line_count: b.lines.length,
+      line_count: orderedLines.length,
       quantity: Math.round(b.quantity * 100) / 100,
       cost_price: b.quantity > 0 ? Math.round((b.value / b.quantity) * 100) / 100 : 0,
       value: Math.round(b.value * 100) / 100,
       product: {
-        id: b.lines[0]?.product_id,
+        id: anchor?.product_id,
         name:
-          b.lines.length === 1
-            ? b.lines[0]?.product?.name || '—'
-            : `${b.lines.length} products`,
-        sku: b.lines.length === 1 ? b.lines[0]?.product?.sku : null,
+          orderedLines.length === 1
+            ? anchor?.product?.name || '—'
+            : `${orderedLines.length} products`,
+        sku: orderedLines.length === 1 ? anchor?.product?.sku : null,
       },
-      lines: b.lines.map((l) => ({
+      lines: orderedLines.map((l) => ({
         id: l.id,
         product: l.product,
         quantity: Number(l.quantity) || 0,
         cost_price: Number(l.cost_price) || 0,
         value: (Number(l.quantity) || 0) * (Number(l.cost_price) || 0),
       })),
-    }));
+    };
+    });
 
     return {
       data: pageBills,
@@ -1167,6 +1257,116 @@ export class PurchaseService {
         totalPages: Math.max(1, Math.ceil(total / limit)),
         groupBy: 'bill' as const,
         ...totalsMeta,
+      },
+    };
+  }
+
+  /**
+   * Every matching bill with all its product lines, for PDF/Excel reports.
+   * Bills follow entry order (first save time) and lines follow line_no,
+   * exactly like the history screen — never just the page on screen.
+   */
+  async exportPurchases(params: {
+    supplierId?: string;
+    branchId?: string;
+    startDate?: Date;
+    endDate?: Date;
+    search?: string;
+    paymentMode?: 'CASH' | 'CREDIT' | 'MIX';
+    deliveryStatus?: 'COMPLETE' | 'PARTIAL';
+    sortOrder?: 'asc' | 'desc';
+  }) {
+    const MAX_LINES = 20000;
+    const where = this.buildListWhere(params);
+    const lines = await prisma.purchase.findMany({
+      where,
+      orderBy: [{ created_at: 'asc' }, { line_no: 'asc' }, { id: 'asc' }],
+      include: {
+        product: {
+          select: {
+            name: true,
+            sku: true,
+            code: true,
+            custom_code: true,
+            label_barcode: true,
+            unit: { select: { name: true } },
+          },
+        },
+        supplier: { select: { name: true } },
+        warehouse_branch: { select: { name: true } },
+        user: { select: { email: true } },
+      },
+      take: MAX_LINES + 1,
+    });
+    const truncated = lines.length > MAX_LINES;
+    if (truncated) lines.length = MAX_LINES;
+
+    type ExportLine = (typeof lines)[number];
+    const groups = new Map<string, { first: ExportLine; lines: ExportLine[] }>();
+    for (const line of lines) {
+      const key = billKey(line);
+      const group = groups.get(key);
+      if (group) group.lines.push(line);
+      else groups.set(key, { first: line, lines: [line] });
+    }
+
+    const bills = Array.from(groups.entries()).map(([key, g]) => {
+      const ordered = [...g.lines].sort(
+        (a, b) => a.line_no - b.line_no || a.created_at.getTime() - b.created_at.getTime(),
+      );
+      const notes = ordered.map((l) => l.notes).find((n) => n && /Pay:/i.test(n)) || ordered[0].notes;
+      const pay = parseStockInPayNotes(notes);
+      let quantity = 0;
+      let value = 0;
+      const items = ordered.map((l) => {
+        const qty = asNumber(l.quantity);
+        const cost = asNumber(l.cost_price);
+        quantity += qty;
+        value += qty * cost;
+        return {
+          id: l.id,
+          product_id: l.product_id,
+          product_name: l.product?.name || '—',
+          sku: l.product?.sku || null,
+          code: l.product?.custom_code || l.product?.code || null,
+          barcode: l.product?.label_barcode || l.product?.sku || null,
+          unit: l.product?.unit?.name || null,
+          quantity: qty,
+          cost_price: cost,
+          sale_price: asNumber(l.sale_price),
+          value: Math.round(qty * cost * 100) / 100,
+        };
+      });
+      return {
+        bill_group_id: key,
+        anchor_id: ordered[0].id,
+        purchase_date: g.first.purchase_date,
+        created_at: g.first.created_at,
+        invoice_ref: g.first.invoice_ref,
+        supplier: g.first.supplier?.name || '—',
+        branch: g.first.warehouse_branch?.name || '—',
+        recorded_by: g.first.user?.email || null,
+        delivery_status: g.first.delivery_status,
+        payment_mode: pay.mode,
+        paid_amount: pay.paidAmount,
+        credit_amount: pay.creditAmount,
+        line_count: items.length,
+        quantity: Math.round(quantity * 1000) / 1000,
+        value: Math.round(value * 100) / 100,
+        lines: items,
+      };
+    });
+
+    if (params.sortOrder === 'desc') bills.reverse();
+
+    return {
+      bills,
+      meta: {
+        billCount: bills.length,
+        lineCount: lines.length,
+        totalQuantity: Math.round(bills.reduce((s, b) => s + b.quantity, 0) * 1000) / 1000,
+        totalValue: Math.round(bills.reduce((s, b) => s + b.value, 0) * 100) / 100,
+        truncated,
       },
     };
   }
@@ -1183,7 +1383,7 @@ export class PurchaseService {
     if (groupId) {
       billLines = await prisma.purchase.findMany({
         where: { bill_group_id: groupId },
-        orderBy: { created_at: 'asc' },
+        orderBy: [{ line_no: 'asc' }, { created_at: 'asc' }],
         include: PURCHASE_LIST_INCLUDE,
       });
     } else {
@@ -1200,7 +1400,7 @@ export class PurchaseService {
             invoice_ref: purchase.invoice_ref,
             purchase_date: { gte: dayStart, lte: dayEnd },
           },
-          orderBy: { created_at: 'asc' },
+          orderBy: [{ line_no: 'asc' }, { created_at: 'asc' }],
           include: PURCHASE_LIST_INCLUDE,
         });
       }
@@ -1536,9 +1736,11 @@ export class PurchaseService {
     }
 
     return prisma.$transaction(async (tx) => {
+      let siblingIds = [anchor.id];
       if (!anchor.bill_group_id) {
         const siblings = await this.getPurchaseById(anchorPurchaseId);
         const siblingLines = siblings.bill_lines || [anchor];
+        siblingIds = siblingLines.map((l) => l.id);
         for (const line of siblingLines) {
           await tx.purchase.update({
             where: { id: line.id },
@@ -1546,6 +1748,14 @@ export class PurchaseService {
           });
         }
       }
+
+      // Appended products go to the end of the bill, not to position 0.
+      const lastLine = await tx.purchase.aggregate({
+        where: anchor.bill_group_id
+          ? { bill_group_id: anchor.bill_group_id }
+          : { id: { in: siblingIds } },
+        _max: { line_no: true },
+      });
 
       const purchase = await tx.purchase.create({
         data: {
@@ -1556,6 +1766,7 @@ export class PurchaseService {
           cost_price: cost,
           sale_price: sale,
           purchase_date: anchor.purchase_date,
+          line_no: (lastLine._max.line_no ?? -1) + 1,
           invoice_ref: anchor.invoice_ref,
           bill_group_id: billGroupId,
           notes: anchor.notes,

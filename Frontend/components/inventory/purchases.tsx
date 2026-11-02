@@ -48,6 +48,8 @@ import { format } from "date-fns";
 import {
   Search,
   CalendarIcon,
+  ArrowDownWideNarrow,
+  ArrowUpNarrowWide,
   Loader2,
   PackagePlus,
   FileSpreadsheet,
@@ -85,10 +87,8 @@ import { ExcelUploadDialog, type ExcelField } from "@/components/inventory/excel
 import { STOCK_IN_SOURCES } from "@/components/inventory/stock-ops/constants";
 import { InventoryKpiGrid } from "@/components/inventory/stock-ops/inventory-kpi-grid";
 import { useInventoryDashboard } from "@/components/inventory/stock-ops/use-inventory-dashboard";
-import { StockOpsActions } from "@/components/inventory/stock-ops/stock-ops-actions";
+import { StockInExportDialog } from "@/components/inventory/stock-in-export-dialog";
 import {
-  downloadExcel,
-  downloadBrandedPdf,
   formatMoney,
   formatQty,
   yieldForUi,
@@ -255,6 +255,65 @@ type EditPurchaseForm = {
   lines: EditLineForm[];
 };
 
+type HistorySortBy = "date" | "purchase_date" | "name" | "supplier" | "branch" | "qty" | "value";
+
+const SORT_OPTIONS: {
+  id: HistorySortBy;
+  label: string;
+  defaultDir: "asc" | "desc";
+  dirLabels: Record<"asc" | "desc", string>;
+}[] = [
+  { id: "date", label: "Entry time", defaultDir: "desc", dirLabels: { desc: "Newest first", asc: "Oldest first" } },
+  { id: "purchase_date", label: "Bill date", defaultDir: "desc", dirLabels: { desc: "Newest first", asc: "Oldest first" } },
+  { id: "supplier", label: "Supplier", defaultDir: "asc", dirLabels: { asc: "A → Z", desc: "Z → A" } },
+  { id: "branch", label: "Branch", defaultDir: "asc", dirLabels: { asc: "A → Z", desc: "Z → A" } },
+  { id: "name", label: "Product", defaultDir: "asc", dirLabels: { asc: "A → Z", desc: "Z → A" } },
+  { id: "value", label: "Value", defaultDir: "desc", dirLabels: { desc: "Highest first", asc: "Lowest first" } },
+  { id: "qty", label: "Quantity", defaultDir: "desc", dirLabels: { desc: "Highest first", asc: "Lowest first" } },
+];
+
+type DatePreset = "all" | "today" | "yesterday" | "7d" | "week" | "month" | "last_month" | "year";
+
+const DATE_PRESETS: { id: DatePreset; label: string }[] = [
+  { id: "all", label: "All time" },
+  { id: "today", label: "Today" },
+  { id: "yesterday", label: "Yesterday" },
+  { id: "7d", label: "Last 7 days" },
+  { id: "week", label: "This week" },
+  { id: "month", label: "This month" },
+  { id: "last_month", label: "Last month" },
+  { id: "year", label: "This year" },
+];
+
+/** [from, to] as calendar days (the fetch extends "to" to 23:59); null = no date filter. */
+function datePresetRange(preset: DatePreset): [Date, Date] | null {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const daysAgo = (n: number) => new Date(today.getFullYear(), today.getMonth(), today.getDate() - n);
+  switch (preset) {
+    case "today":
+      return [today, today];
+    case "yesterday":
+      return [daysAgo(1), daysAgo(1)];
+    case "7d":
+      return [daysAgo(6), today];
+    case "week":
+      // Week starts on Monday.
+      return [daysAgo((today.getDay() + 6) % 7), today];
+    case "month":
+      return [new Date(today.getFullYear(), today.getMonth(), 1), today];
+    case "last_month":
+      return [
+        new Date(today.getFullYear(), today.getMonth() - 1, 1),
+        new Date(today.getFullYear(), today.getMonth(), 0),
+      ];
+    case "year":
+      return [new Date(today.getFullYear(), 0, 1), today];
+    default:
+      return null;
+  }
+}
+
 export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   void onNavigate;
   const { stats: dashboardStats, loading: dashboardLoading } = useInventoryDashboard();
@@ -325,15 +384,14 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
   const [filterBranch, setFilterBranch] = useState<string>("all");
   const [filterStart, setFilterStart] = useState<Date | undefined>(undefined);
   const [filterEnd, setFilterEnd] = useState<Date | undefined>(undefined);
-  // "entry" = newest batch first, and within a batch, products in the order
-  // they were added — the default anyone expects after a multi-product
-  // Stock In. "name" sorts don't carry entry order (there's nothing to
-  // preserve across different products), so they're plain A-Z/Z-A.
-  const [historySort, setHistorySort] = useState<
-    "entry_desc" | "entry_asc" | "name_asc" | "name_desc"
-  >("entry_desc");
+  // "date" = entry order (when the Stock In was saved); inside a bill,
+  // products always stay in the order they were added.
+  const [historySortBy, setHistorySortBy] = useState<HistorySortBy>("date");
+  const [historySortDir, setHistorySortDir] = useState<"asc" | "desc">("desc");
+  const [filterPayment, setFilterPayment] = useState<"all" | "CASH" | "CREDIT" | "MIX">("all");
+  const [filterStatus, setFilterStatus] = useState<"all" | "COMPLETE" | "PARTIAL">("all");
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
-  const [exporting, setExporting] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   const [monthStats, setMonthStats] = useState<PurchaseMonthStats>({
     totalPurchases: 0,
@@ -451,10 +509,12 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
           page: pg,
           limit: PAGE_SIZE,
           groupBy: historyGroupMode,
-          sortBy: historySort.startsWith("name") ? "name" : "date",
-          sortOrder: historySort.endsWith("asc") ? "asc" : "desc",
+          sortBy: historySortBy,
+          sortOrder: historySortDir,
         };
         if (filterSupplier !== "all") params.supplierId = filterSupplier;
+        if (filterPayment !== "all") params.paymentMode = filterPayment;
+        if (filterStatus !== "all") params.deliveryStatus = filterStatus;
         if (filterBranch !== "all") params.branchId = filterBranch;
         if (debouncedSearch) params.search = debouncedSearch;
         if (filterStart) params.startDate = filterStart.toISOString();
@@ -477,7 +537,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
         setHistoryLoading(false);
       }
     },
-    [filterSupplier, filterBranch, filterStart, filterEnd, page, debouncedSearch, PAGE_SIZE, historyGroupMode, historySort],
+    [filterSupplier, filterBranch, filterPayment, filterStatus, filterStart, filterEnd, page, debouncedSearch, PAGE_SIZE, historyGroupMode, historySortBy, historySortDir],
   );
 
   useEffect(() => {
@@ -774,47 +834,34 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     (searchQuery.trim() ? 1 : 0) +
     (filterSupplier !== "all" ? 1 : 0) +
     (filterBranch !== "all" ? 1 : 0) +
+    (filterPayment !== "all" ? 1 : 0) +
+    (filterStatus !== "all" ? 1 : 0) +
     (filterStart || filterEnd ? 1 : 0);
 
-  type DatePreset = "all" | "today" | "7d" | "month";
   const applyDatePreset = (preset: DatePreset) => {
-    const now = new Date();
-    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    if (preset === "all") {
-      setFilterStart(undefined);
-      setFilterEnd(undefined);
-    } else if (preset === "today") {
-      setFilterStart(startOfDay(now));
-      setFilterEnd(startOfDay(now));
-    } else if (preset === "7d") {
-      const from = startOfDay(now);
-      from.setDate(from.getDate() - 6);
-      setFilterStart(from);
-      setFilterEnd(startOfDay(now));
-    } else {
-      setFilterStart(new Date(now.getFullYear(), now.getMonth(), 1));
-      setFilterEnd(startOfDay(now));
-    }
+    const range = datePresetRange(preset);
+    setFilterStart(range?.[0]);
+    setFilterEnd(range?.[1]);
     setPage(1);
   };
   const activeDatePreset: DatePreset | null = (() => {
     if (!filterStart && !filterEnd) return "all";
     if (!filterStart || !filterEnd) return null;
-    const now = new Date();
     const sameDay = (a: Date, b: Date) => a.toDateString() === b.toDateString();
-    if (!sameDay(filterEnd, now)) return null;
-    if (sameDay(filterStart, now)) return "today";
-    const seven = new Date(now);
-    seven.setDate(seven.getDate() - 6);
-    if (sameDay(filterStart, seven)) return "7d";
-    if (sameDay(filterStart, new Date(now.getFullYear(), now.getMonth(), 1))) return "month";
-    return null;
+    return (
+      DATE_PRESETS.find((p) => {
+        const r = datePresetRange(p.id);
+        return r && sameDay(r[0], filterStart) && sameDay(r[1], filterEnd);
+      })?.id ?? null
+    );
   })();
 
   const hasActiveFilters =
     searchQuery.trim() !== "" ||
     filterSupplier !== "all" ||
     filterBranch !== "all" ||
+    filterPayment !== "all" ||
+    filterStatus !== "all" ||
     !!filterStart ||
     !!filterEnd;
 
@@ -822,116 +869,11 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     setSearchQuery("");
     setFilterSupplier("all");
     setFilterBranch("all");
+    setFilterPayment("all");
+    setFilterStatus("all");
     setFilterStart(undefined);
     setFilterEnd(undefined);
     setPage(1);
-  };
-
-  const exportHeaders = [
-    "Date",
-    "Product",
-    "Supplier",
-    "Branch",
-    "Qty",
-    "Cost",
-    "Value",
-    "Invoice",
-    "Status",
-  ];
-
-  const buildExportRows = () =>
-    filteredRows.map((r) => {
-      const qty = Number(r.quantity) || 0;
-      const cost = Number(r.cost_price) || 0;
-      return [
-        r.purchase_date ? new Date(r.purchase_date).toLocaleString() : "",
-        r.product?.name || "",
-        r.supplier?.name || "",
-        r.warehouse_branch?.name || "",
-        qty,
-        cost,
-        qty * cost,
-        r.invoice_ref || "",
-        r.delivery_status || "COMPLETE",
-      ];
-    });
-
-  const exportExcel = async () => {
-    if (filteredRows.length === 0) {
-      toast.error("Nothing to export");
-      return;
-    }
-    setExporting(true);
-    await yieldForUi();
-    try {
-      downloadExcel(
-        `purchases-${Date.now()}.xlsx`,
-        "Purchases",
-        exportHeaders,
-        buildExportRows(),
-      );
-      toast.success("Excel downloaded");
-    } catch {
-      toast.error("Failed to export Excel");
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const exportPdf = async () => {
-    if (filteredRows.length === 0) {
-      toast.error("Nothing to export");
-      return;
-    }
-    setExporting(true);
-    await yieldForUi();
-    try {
-      const pdfRows = filteredRows.map((r) => {
-        const qty = Number(r.quantity) || 0;
-        const cost = Number(r.cost_price) || 0;
-        return [
-          r.purchase_date
-            ? new Date(r.purchase_date).toLocaleDateString()
-            : "",
-          r.product?.name || "",
-          r.supplier?.name || "",
-          r.warehouse_branch?.name || "",
-          formatQty(qty),
-          formatMoney(cost),
-          formatMoney(qty * cost),
-        ];
-      });
-
-      await downloadBrandedPdf({
-        filename: `purchases-${Date.now()}.pdf`,
-        title: "Stock In — Purchases",
-        subtitle: "Supplier delivery history",
-        logoDataUri,
-        summary: [
-          { label: "Records", value: filteredRows.length.toLocaleString() },
-          {
-            label: "This month",
-            value: monthStats.totalPurchases.toLocaleString(),
-          },
-          { label: "Month value", value: formatMoney(monthStats.totalValue) },
-        ],
-        columns: [
-          { header: "Date", width: 1.1 },
-          { header: "Product", width: 2.2 },
-          { header: "Supplier", width: 1.4 },
-          { header: "Branch", width: 1.2 },
-          { header: "Qty", align: "right", width: 0.8 },
-          { header: "Cost", align: "right", width: 1 },
-          { header: "Value", align: "right", width: 1.1 },
-        ],
-        rows: pdfRows,
-      });
-      toast.success("PDF downloaded");
-    } catch {
-      toast.error("Failed to export PDF");
-    } finally {
-      setExporting(false);
-    }
   };
 
   // ------- Excel import -------
@@ -1510,11 +1452,25 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             <FileSpreadsheet className="mr-2 h-4 w-4 text-emerald-600" />
             Import products
           </Button>
-          <StockOpsActions
-            onExportExcel={exportExcel}
-            onExportPdf={exportPdf}
-            disabled={historyLoading || filteredRows.length === 0}
-            exporting={exporting}
+          <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => setExportOpen(true)}>
+            <FileText className="mr-2 h-4 w-4 text-slate-600" />
+            Export PDF / Excel
+          </Button>
+          <StockInExportDialog
+            open={exportOpen}
+            onOpenChange={setExportOpen}
+            suppliers={visibleSuppliers}
+            branches={branches}
+            initial={{
+              supplierId: filterSupplier,
+              branchId: filterBranch,
+              start: filterStart,
+              end: filterEnd,
+              search: debouncedSearch,
+              paymentMode: filterPayment,
+              deliveryStatus: filterStatus,
+            }}
+            logoDataUri={logoDataUri}
           />
           {tab === "history" ? (
             <Button className="h-9 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700" onClick={() => setTab("new")}>
@@ -1671,14 +1627,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             <div className="space-y-4 border-t border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-indigo-50/30 px-4 py-4 sm:px-5">
               <div className="flex flex-wrap items-center gap-1.5">
                 <span className="mr-1 text-xs font-semibold text-indigo-900/80">Period</span>
-                {(
-                  [
-                    { id: "all", label: "All time" },
-                    { id: "today", label: "Today" },
-                    { id: "7d", label: "Last 7 days" },
-                    { id: "month", label: "This month" },
-                  ] as const
-                ).map((p) => (
+                {DATE_PRESETS.map((p) => (
                   <button
                     key={p.id}
                     type="button"
@@ -1693,13 +1642,41 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                     {p.label}
                   </button>
                 ))}
-                {activeDatePreset === null ? (
-                  <span className="rounded-full border border-indigo-600 bg-indigo-600 px-3 py-1 text-xs font-medium text-white">Custom</span>
-                ) : null}
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      className={cn(
+                        "inline-flex items-center gap-1 rounded-full border px-3 py-1 text-xs font-medium transition-colors",
+                        activeDatePreset === null
+                          ? "border-indigo-600 bg-indigo-600 text-white shadow-sm"
+                          : "border-indigo-200 bg-white text-slate-600 hover:border-indigo-300 hover:text-indigo-700",
+                      )}
+                    >
+                      <CalendarIcon className="h-3 w-3" />
+                      {activeDatePreset === null && (filterStart || filterEnd)
+                        ? `${filterStart ? format(filterStart, "dd MMM yy") : "…"} – ${filterEnd ? format(filterEnd, "dd MMM yy") : "…"}`
+                        : "Custom"}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-auto p-0" align="start">
+                    <CalendarComponent
+                      mode="range"
+                      numberOfMonths={2}
+                      defaultMonth={filterStart}
+                      selected={{ from: filterStart, to: filterEnd }}
+                      onSelect={(r) => {
+                        setFilterStart(r?.from);
+                        setFilterEnd(r?.to ?? r?.from);
+                        setPage(1);
+                      }}
+                    />
+                  </PopoverContent>
+                </Popover>
               </div>
 
-              <div className="grid grid-cols-1 gap-x-3 gap-y-4 border-t border-dashed border-indigo-200 pt-4 md:grid-cols-2 xl:grid-cols-5">
-                <div className="space-y-1.5 md:col-span-2 xl:col-span-1">
+              <div className="grid grid-cols-1 gap-x-3 gap-y-4 border-t border-dashed border-indigo-200 pt-4 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-1.5 md:col-span-2">
                   <Label className="text-xs font-semibold text-indigo-900/80">Search</Label>
                   <div className="relative">
                     <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
@@ -1752,6 +1729,45 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                           {b.name}
                         </SelectItem>
                       ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-indigo-900/80">Payment</Label>
+                  <Select
+                    value={filterPayment}
+                    onValueChange={(v) => {
+                      setFilterPayment(v as typeof filterPayment);
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-10 border-indigo-200/80 bg-white text-sm shadow-sm">
+                      <SelectValue placeholder="All payments" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All payments</SelectItem>
+                      <SelectItem value="CASH">Paid</SelectItem>
+                      <SelectItem value="CREDIT">Credit (unpaid)</SelectItem>
+                      <SelectItem value="MIX">Part paid</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-indigo-900/80">Delivery</Label>
+                  <Select
+                    value={filterStatus}
+                    onValueChange={(v) => {
+                      setFilterStatus(v as typeof filterStatus);
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-10 border-indigo-200/80 bg-white text-sm shadow-sm">
+                      <SelectValue placeholder="All statuses" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="all">All statuses</SelectItem>
+                      <SelectItem value="COMPLETE">Complete</SelectItem>
+                      <SelectItem value="PARTIAL">Partial</SelectItem>
                     </SelectContent>
                   </Select>
                 </div>
@@ -1835,23 +1851,46 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                     );
                   })}
                 </div>
-                <Select
-                  value={historySort}
-                  onValueChange={(v) => {
-                    setHistorySort(v as typeof historySort);
-                    setPage(1);
-                  }}
-                >
-                  <SelectTrigger className="h-9 w-[170px] text-xs text-black">
-                    <SelectValue placeholder="Sort by" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="entry_desc" className="text-sm">Newest batch first</SelectItem>
-                    <SelectItem value="entry_asc" className="text-sm">Oldest batch first</SelectItem>
-                    <SelectItem value="name_asc" className="text-sm">Product name (A-Z)</SelectItem>
-                    <SelectItem value="name_desc" className="text-sm">Product name (Z-A)</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="inline-flex items-center rounded-lg border border-slate-200 bg-white shadow-sm">
+                  <Select
+                    value={historySortBy}
+                    onValueChange={(v) => {
+                      const next = v as HistorySortBy;
+                      setHistorySortBy(next);
+                      // Dates start newest-first, names A-Z, amounts biggest-first.
+                      setHistorySortDir(SORT_OPTIONS.find((o) => o.id === next)?.defaultDir ?? "desc");
+                      setPage(1);
+                    }}
+                  >
+                    <SelectTrigger className="h-9 w-[150px] border-0 text-xs text-black shadow-none focus:ring-0">
+                      <span className="mr-1 text-slate-400">Sort:</span>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {SORT_OPTIONS.map((o) => (
+                        <SelectItem key={o.id} value={o.id} className="text-sm">
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <button
+                    type="button"
+                    title="Switch ascending / descending"
+                    onClick={() => {
+                      setHistorySortDir((d) => (d === "asc" ? "desc" : "asc"));
+                      setPage(1);
+                    }}
+                    className="inline-flex h-9 items-center gap-1.5 border-l border-slate-200 px-2.5 text-xs font-medium text-slate-700 hover:bg-slate-50"
+                  >
+                    {historySortDir === "asc" ? (
+                      <ArrowUpNarrowWide className="h-3.5 w-3.5" />
+                    ) : (
+                      <ArrowDownWideNarrow className="h-3.5 w-3.5" />
+                    )}
+                    {SORT_OPTIONS.find((o) => o.id === historySortBy)?.dirLabels[historySortDir]}
+                  </button>
+                </div>
                 <div className="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 shadow-sm">
                   {(
                     [

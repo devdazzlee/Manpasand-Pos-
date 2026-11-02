@@ -43,12 +43,29 @@ export const listPurchases = asyncHandler(async (req: Request, res: Response) =>
     branchId: query.branchId,
     startDate,
     endDate,
-    sortBy: query.sortBy === 'name' ? 'name' : 'date',
+    sortBy: query.sortBy || 'date',
     sortOrder: query.sortOrder === 'asc' ? 'asc' : 'desc',
     search: query.search ? String(query.search) : undefined,
+    paymentMode: query.paymentMode || undefined,
+    deliveryStatus: query.deliveryStatus || undefined,
     groupBy: query.groupBy === 'bill' ? 'bill' : 'line',
   });
   new ApiResponse(result.data, 'Purchases retrieved', 200, true, result.meta).send(res);
+});
+
+export const exportPurchases = asyncHandler(async (req: Request, res: Response) => {
+  const query = req.query as any;
+  const result = await purchaseService.exportPurchases({
+    supplierId: query.supplierId,
+    branchId: query.branchId,
+    startDate: query.startDate ? new Date(query.startDate) : undefined,
+    endDate: query.endDate ? new Date(query.endDate) : undefined,
+    search: query.search ? String(query.search) : undefined,
+    paymentMode: query.paymentMode || undefined,
+    deliveryStatus: query.deliveryStatus || undefined,
+    sortOrder: query.sortOrder === 'desc' ? 'desc' : 'asc',
+  });
+  new ApiResponse(result.bills, 'Purchases export', 200, true, result.meta).send(res);
 });
 
 export const getPurchaseById = asyncHandler(async (req: Request, res: Response) => {
