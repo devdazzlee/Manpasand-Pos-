@@ -176,7 +176,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
       }
     }
 
-    if (role === "BRANCH_MANAGER" && initialBranchId) {
+    if ((role === "BRANCH_MANAGER" || role === "SUPERVISOR") && initialBranchId) {
       setSelectedBranchId(initialBranchId);
       loadStats(initialBranchId);
     } else {

@@ -82,7 +82,7 @@ import {
   getStockRowImage,
   yieldForUi,
 } from "@/components/inventory/stock-ops/export-utils";
-import { isReadOnlyRole } from "@/lib/role-utils";
+import { getInventoryReadOnly } from "@/lib/role-utils";
 import {
   CatalogFilterBar,
   EMPTY_CATALOG_FILTERS,
@@ -151,7 +151,7 @@ function DetailSection({
 }
 
 export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }) {
-  const readOnly = typeof window !== "undefined" && isReadOnlyRole(localStorage.getItem("role"));
+  const readOnly = getInventoryReadOnly();
   const {
     stats: dashboardStats,
     branchSummary,

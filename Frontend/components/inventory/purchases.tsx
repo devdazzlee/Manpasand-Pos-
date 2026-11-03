@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -315,6 +316,8 @@ function datePresetRange(preset: DatePreset): [Date, Date] | null {
 }
 
 export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+  // Branch accounts: history only — no new receipts, edits or deletes.
+  const readOnly = getInventoryReadOnly();
   void onNavigate;
   const { stats: dashboardStats, loading: dashboardLoading } = useInventoryDashboard();
   const {
@@ -1448,10 +1451,12 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => setExcelDialogOpen(true)}>
+          {!readOnly && (
+<Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => setExcelDialogOpen(true)}>
             <FileSpreadsheet className="mr-2 h-4 w-4 text-emerald-600" />
             Import products
           </Button>
+)}
           <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => setExportOpen(true)}>
             <FileText className="mr-2 h-4 w-4 text-slate-600" />
             Export PDF / Excel
@@ -1473,10 +1478,10 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             logoDataUri={logoDataUri}
           />
           {tab === "history" ? (
-            <Button className="h-9 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700" onClick={() => setTab("new")}>
+            (!readOnly ? <Button className="h-9 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700" onClick={() => setTab("new")}>
               <Plus className="mr-2 h-4 w-4" />
               New receipt
-            </Button>
+            </Button> : null)
           ) : null}
         </div>
       </div>
@@ -1486,7 +1491,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
         onValueChange={(v) => setTab(v as "history" | "bills" | "new" | "returns")}
         className="space-y-5"
       >
-        <TabsList className="grid h-11 w-full max-w-2xl grid-cols-4 rounded-xl border border-slate-200 bg-slate-100/80 p-1">
+        <TabsList className={cn(readOnly && "hidden", "grid h-11 w-full max-w-2xl grid-cols-4 rounded-xl border border-slate-200 bg-slate-100/80 p-1")}>
           <TabsTrigger
             value="history"
             className="h-9 gap-1.5 rounded-lg text-sm font-medium text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm"
@@ -1942,9 +1947,9 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                       <X className="mr-1 h-3.5 w-3.5" /> Clear filters
                     </Button>
                   ) : (
-                    <Button size="sm" className="mt-4 h-8 bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => setTab("new")}>
+                    (!readOnly ? <Button size="sm" className="mt-4 h-8 bg-emerald-600 text-white hover:bg-emerald-700" onClick={() => setTab("new")}>
                       <Plus className="mr-1 h-3.5 w-3.5" /> New receipt
-                    </Button>
+                    </Button> : null)
                   )}
                 </div>
               ) : (
@@ -2122,7 +2127,8 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                       <Eye className="h-3.5 w-3.5 mr-1" />
                                       View
                                     </Button>
-                                    <Button
+                                    {!readOnly && (
+<Button
                                       variant="ghost"
                                       size="sm"
                                       className="h-8 px-2 text-xs"
@@ -2134,8 +2140,9 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                       <Pencil className="h-3.5 w-3.5 mr-1" />
                                       Edit
                                     </Button>
+)}
                                     {historyGroupMode === "line" ? (
-                                      <Button
+                                      (!readOnly ? <Button
                                         variant="ghost"
                                         size="sm"
                                         className="h-8 px-2 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
@@ -2155,9 +2162,9 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                       >
                                         <Trash2 className="h-3.5 w-3.5 mr-1" />
                                         Del
-                                      </Button>
+                                      </Button> : null)
                                     ) : (
-                                      <Button
+                                      (!readOnly ? <Button
                                         variant="ghost"
                                         size="sm"
                                         className="h-8 px-2 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
@@ -2172,7 +2179,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                       >
                                         <Trash2 className="h-3.5 w-3.5 mr-1" />
                                         Del
-                                      </Button>
+                                      </Button> : null)
                                     )}
                                   </div>
                                 </TableCell>
@@ -2268,7 +2275,8 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                   <Eye className="h-3.5 w-3.5 mr-1" />
                                   View
                                 </Button>
-                                <Button
+                                {!readOnly && (
+<Button
                                   variant="outline"
                                   size="sm"
                                   className="h-8 text-xs"
@@ -2277,8 +2285,9 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                   <Pencil className="h-3.5 w-3.5 mr-1" />
                                   Edit
                                 </Button>
+)}
                                 {historyGroupMode === "line" ? (
-                                  <Button
+                                  (!readOnly ? <Button
                                     variant="outline"
                                     size="sm"
                                     className="h-8 text-xs text-red-600 hover:bg-red-50"
@@ -2292,9 +2301,9 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                   >
                                     <Trash2 className="h-3.5 w-3.5 mr-1" />
                                     Delete
-                                  </Button>
+                                  </Button> : null)
                                 ) : (
-                                  <Button
+                                  (!readOnly ? <Button
                                     variant="outline"
                                     size="sm"
                                     className="h-8 text-xs text-red-600 hover:bg-red-50"
@@ -2307,7 +2316,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                   >
                                     <Trash2 className="h-3.5 w-3.5 mr-1" />
                                     Delete bill
-                                  </Button>
+                                  </Button> : null)
                                 )}
                               </div>
                             }
@@ -3900,13 +3909,15 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                     )}
                     {receiptDownloading ? "Preparing…" : "Download receipt"}
                   </Button>
-                  <Button onClick={startEditingPurchase}>
+                  {!readOnly && (
+<Button onClick={startEditingPurchase}>
                     <Pencil className="mr-2 h-4 w-4" />
                     Edit
                   </Button>
+)}
                   {Array.isArray(purchaseDetail.bill_lines) &&
                   purchaseDetail.bill_lines.length === 1 ? (
-                    <Button
+                    (!readOnly ? <Button
                       variant="destructive"
                       disabled={Boolean(purchaseDetail.purchase_invoice_id)}
                       onClick={() =>
@@ -3920,9 +3931,9 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
                       Delete line
-                    </Button>
+                    </Button> : null)
                   ) : purchaseDetail.bill_lines?.length > 1 ? (
-                    <Button
+                    (!readOnly ? <Button
                       variant="destructive"
                       onClick={() =>
                         requestDeleteBillFromHistory(
@@ -3933,7 +3944,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                     >
                       <Trash2 className="mr-2 h-4 w-4" />
                       Delete whole bill
-                    </Button>
+                    </Button> : null)
                   ) : null}
                 </>
               ) : null}

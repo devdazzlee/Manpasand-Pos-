@@ -81,6 +81,31 @@ const lockRequestToBranch = (req: Request, branchId: string) => {
   }
 };
 
+/**
+ * Branch accounts get view-only inventory: they can see their branch's stock,
+ * stock-ins, transfers, stock-outs and adjustments, but every change to
+ * products or stock is made centrally (admin / warehouse / purchase roles).
+ * Selling still moves stock — that goes through /sale, not these routes.
+ */
+const BRANCH_READONLY_INVENTORY_PREFIXES = [
+  '/products',
+  '/stock',
+  '/stock-out',
+  '/stock-adjustments',
+  '/stock-imports',
+  '/purchases',
+  '/purchase-orders',
+  '/purchase-returns',
+  '/purchase-invoices',
+  '/transfers',
+  '/inventory',
+];
+const isBranchInventoryWrite = (req: Request) => {
+  if (['GET', 'HEAD', 'OPTIONS'].includes(req.method)) return false;
+  const path = apiPath(req);
+  return BRANCH_READONLY_INVENTORY_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
+};
+
 /** Paths a branch user without an assigned branch may still use (sign in/out, own profile). */
 const UNASSIGNED_ALLOWED_PREFIX = '/auth/';
 
@@ -125,6 +150,9 @@ const authenticate = async (req: Request, res: Response, next: NextFunction) => 
       throw new AppError(403, 'This account is view-only (products and stock)');
     }
     if (isBranchLockedRole(userExists.role)) {
+      if (isBranchInventoryWrite(req)) {
+        throw new AppError(403, 'Inventory is view-only for branch accounts. Ask the owner or warehouse to make this change.');
+      }
       if (userExists.branch_id) {
         lockRequestToBranch(req, userExists.branch_id);
       } else if (!`${apiPath(req)}/`.startsWith(UNASSIGNED_ALLOWED_PREFIX)) {

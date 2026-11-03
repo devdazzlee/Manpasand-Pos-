@@ -100,7 +100,7 @@ import {
   sanitizeManualBarcodeValue,
   type LabelBarcodeMode,
 } from "@/lib/labelBarcode"
-import { isReadOnlyRole } from "@/lib/role-utils"
+import { getInventoryReadOnly } from "@/lib/role-utils"
 import {
   CatalogFilterBar,
   EMPTY_CATALOG_FILTERS,
@@ -1495,7 +1495,7 @@ export default function Inventory() {
   /** When set, Add form was opened via Duplicate — banner + clearer title. */
   const [duplicatingFromName, setDuplicatingFromName] = useState<string | null>(null)
   // View-only accounts never get the add / edit / duplicate forms.
-  const readOnly = typeof window !== "undefined" && isReadOnlyRole(localStorage.getItem("role"))
+  const readOnly = getInventoryReadOnly()
   // Custom-barcode helpers: hint under the field (duplicate) and "code already used" guard.
   const [barcodeHint, setBarcodeHint] = useState<string | null>(null)
   const [barcodeTaken, setBarcodeTaken] = useState(false)

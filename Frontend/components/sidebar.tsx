@@ -109,6 +109,11 @@ const BRANCH_DATA_ROLES: UserRole[] = [
   "SUPER_ADMIN",
   "ADMIN",
 ];
+/**
+ * Branch accounts see inventory screens in view-only mode, scoped to their own
+ * branch by the server. (SUPERVISOR inherits BRANCH_MANAGER access.)
+ */
+const withBranchView = (roles: UserRole[]): UserRole[] => [...roles, "BRANCH_MANAGER"];
 const STAFF_ROLES: UserRole[] = [
   "SUPER_ADMIN",
   "ADMIN",
@@ -249,13 +254,13 @@ const menuSections: SidebarMenuSection[] = [
         id: "inventory-dashboard",
         label: "Inventory Dashboard",
         icon: LayoutDashboard,
-        roles: INVENTORY_ROLES,
+        roles: withBranchView(INVENTORY_ROLES),
       },
       {
         id: "inventory",
         label: "Products",
         icon: Package,
-        roles: INVENTORY_ROLES,
+        roles: withBranchView(INVENTORY_ROLES),
       },
     ],
   },
@@ -268,37 +273,37 @@ const menuSections: SidebarMenuSection[] = [
         id: "stock-management",
         label: "Stock Management",
         icon: Warehouse,
-        roles: INVENTORY_ROLES,
+        roles: withBranchView(INVENTORY_ROLES),
       },
       {
         id: "stock-view",
         label: "Stock by Location",
         icon: Grid3X3,
-        roles: INVENTORY_ROLES,
+        roles: withBranchView(INVENTORY_ROLES),
       },
       {
         id: "purchases",
         label: "Stock In",
         icon: Truck,
-        roles: PURCHASE_ROLES,
+        roles: withBranchView(PURCHASE_ROLES),
       },
       {
         id: "stock-out",
         label: "Stock Out",
         icon: Package,
-        roles: STOCK_OUT_ROLES,
+        roles: withBranchView(STOCK_OUT_ROLES),
       },
       {
         id: "transfers",
         label: "Transfers",
         icon: ArrowRightLeft,
-        roles: INVENTORY_ROLES,
+        roles: withBranchView(INVENTORY_ROLES),
       },
       {
         id: "stock-adjustment",
         label: "Stock Adjustment",
         icon: SlidersHorizontal,
-        roles: INVENTORY_ROLES,
+        roles: withBranchView(INVENTORY_ROLES),
       },
       {
         id: "scan-stock-count",

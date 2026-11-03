@@ -22,6 +22,18 @@ const KNOWN_ROLES: UserRole[] = [
 /** View-only account: products and stock, no changes. */
 export const isReadOnlyRole = (role?: string | null) => role === "INVENTORY_VIEWER";
 
+/**
+ * Inventory screens are view-only for this role: the inventory viewer, and
+ * branch accounts (manager / supervisor / cashier), whose stock is changed
+ * centrally. The server enforces the same rule; this only hides the controls.
+ */
+export const isInventoryReadOnly = (role?: string | null) =>
+  role === "INVENTORY_VIEWER" || role === "BRANCH_MANAGER" || role === "SUPERVISOR" || role === "CASHIER";
+
+/** Read the signed-in role's inventory access (safe during SSR). */
+export const getInventoryReadOnly = () =>
+  typeof window !== "undefined" && isInventoryReadOnly(localStorage.getItem("role"));
+
 export const normalizeUserRole = (role?: string | null): UserRole | null => {
   if (!role) {
     return null;

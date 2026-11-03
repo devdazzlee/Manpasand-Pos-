@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -165,6 +166,8 @@ function statusTone(s: string) {
 }
 
 export function Transfers() {
+  // Branch accounts: see transfers in/out of their branch; dispatch/receive/cancel is done centrally.
+  const readOnly = getInventoryReadOnly();
   const logoDataUri = useLogoDataUri();
   const {
     products,
@@ -421,6 +424,7 @@ export function Transfers() {
   };
 
   const updateStatus = async (id: string, status: string) => {
+    if (readOnly) return;
     setStatusBusyId(id);
     try {
       await apiClient.patch(`${API_BASE}/transfers/${id}/status`, { status });
@@ -626,7 +630,7 @@ export function Transfers() {
         <Printer className="h-3.5 w-3.5" />
       </Button>
       {t.status === "PENDING" ? (
-        <Button
+        (!readOnly ? <Button
           size="sm"
           className="h-8 bg-sky-600 text-xs text-white hover:bg-sky-700"
           disabled={statusBusyId === t.id}
@@ -641,10 +645,10 @@ export function Transfers() {
               Dispatch
             </>
           )}
-        </Button>
+        </Button> : null)
       ) : null}
       {t.status === "DISPATCHED" ? (
-        <Button
+        (!readOnly ? <Button
           size="sm"
           className="h-8 bg-emerald-600 text-xs text-white hover:bg-emerald-700"
           disabled={statusBusyId === t.id}
@@ -659,10 +663,10 @@ export function Transfers() {
               Receive
             </>
           )}
-        </Button>
+        </Button> : null)
       ) : null}
       {t.status === "PENDING" || t.status === "DISPATCHED" ? (
-        <Button
+        (!readOnly ? <Button
           size="sm"
           variant="ghost"
           className="h-8 w-8 p-0 text-slate-400 hover:bg-rose-50 hover:text-rose-600"
@@ -674,7 +678,7 @@ export function Transfers() {
           }}
         >
           <X className="h-4 w-4" />
-        </Button>
+        </Button> : null)
       ) : null}
     </div>
   );
@@ -716,10 +720,12 @@ export function Transfers() {
             disabled={loading || filteredRows.length === 0}
             exporting={exporting}
           />
-          <Button className="h-9 bg-blue-600 text-white shadow-sm hover:bg-blue-700" onClick={() => setDialogOpen(true)}>
+          {!readOnly && (
+<Button className="h-9 bg-blue-600 text-white shadow-sm hover:bg-blue-700" onClick={() => setDialogOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             New transfer
           </Button>
+)}
         </div>
       </div>
 
@@ -1271,9 +1277,9 @@ export function Transfers() {
                   <X className="mr-1 h-3.5 w-3.5" /> Clear filters
                 </Button>
               ) : (
-                <Button size="sm" className="mt-4 h-8 bg-blue-600 text-white hover:bg-blue-700" onClick={() => setDialogOpen(true)}>
+                (!readOnly ? <Button size="sm" className="mt-4 h-8 bg-blue-600 text-white hover:bg-blue-700" onClick={() => setDialogOpen(true)}>
                   <Plus className="mr-1 h-3.5 w-3.5" /> New transfer
-                </Button>
+                </Button> : null)
               )}
             </div>
           ) : (

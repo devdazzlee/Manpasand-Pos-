@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, type ComponentType } from "react";
+import { getInventoryReadOnly } from "@/lib/role-utils";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -209,6 +210,8 @@ const normHeader = (h: string) => h.toLowerCase().replace(/[^a-z0-9]/g, "");
 const normKey = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\s+/g, " ");
 
 export function StockAdjustment() {
+  // Branch accounts: see adjustment history only.
+  const readOnly = getInventoryReadOnly();
   const logoDataUri = useLogoDataUri();
   const { products, categories, branches, productsLoading, branchesLoading, fetchProducts, fetchBranches } = usePosData();
 
@@ -425,6 +428,7 @@ export function StockAdjustment() {
   }, [lines, lineVariance, costMap, onHand]);
 
   const openNew = (type: AdjustmentType = "RECONCILIATION") => {
+    if (readOnly) return;
     setForm({ ...DEFAULT_FORM, adjustmentType: type, adjustmentCategory: DEFAULT_CATEGORY[type], branchId: filterBranch !== "all" ? filterBranch : "" });
     setLines([]);
     setFormErrors({});
@@ -820,18 +824,24 @@ export function StockAdjustment() {
             <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} />
           </Button>
           <StockOpsActions onExportExcel={exportExcel} onExportPdf={exportPdf} disabled={loading || rows.length === 0} exporting={exporting} />
-          <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => openNew("SUBTRACTION")}>
+          {!readOnly && (
+<Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => openNew("SUBTRACTION")}>
             <Minus className="mr-2 h-4 w-4 text-rose-600" />
             Remove
           </Button>
-          <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => openNew("ADDITION")}>
+)}
+          {!readOnly && (
+<Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => openNew("ADDITION")}>
             <Plus className="mr-2 h-4 w-4 text-emerald-600" />
             Add
           </Button>
-          <Button className="h-9 bg-sky-600 text-white shadow-sm hover:bg-sky-700" onClick={() => openNew("RECONCILIATION")}>
+)}
+          {!readOnly && (
+<Button className="h-9 bg-sky-600 text-white shadow-sm hover:bg-sky-700" onClick={() => openNew("RECONCILIATION")}>
             <ClipboardCheck className="mr-2 h-4 w-4" />
             Start stock count
           </Button>
+)}
         </div>
       </div>
 
@@ -1123,9 +1133,9 @@ export function StockAdjustment() {
                   <X className="mr-1 h-3.5 w-3.5" /> Clear filters
                 </Button>
               ) : (
-                <Button size="sm" className="mt-4 h-8 bg-sky-600 text-white hover:bg-sky-700" onClick={() => openNew("RECONCILIATION")}>
+                (!readOnly ? <Button size="sm" className="mt-4 h-8 bg-sky-600 text-white hover:bg-sky-700" onClick={() => openNew("RECONCILIATION")}>
                   <ClipboardCheck className="mr-1 h-3.5 w-3.5" /> Start stock count
-                </Button>
+                </Button> : null)
               )}
             </div>
           ) : (

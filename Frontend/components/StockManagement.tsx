@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -316,6 +317,8 @@ interface Movement {
 }
 
 export function StockManagement({ onNavigate }: StockManagementProps) {
+  // Branch accounts: see stock, no operations (the server rejects them too).
+  const readOnly = getInventoryReadOnly();
   const logoDataUri = useLogoDataUri();
 
   // Global store data — shared catalog across Stock In / Out / Management
@@ -1112,6 +1115,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
 
   type StockOp = "add" | "adjust" | "remove" | "transfer";
   const openOperation = (kind: StockOp, row?: Stock) => {
+    if (readOnly) return;
     clearProductUI();
     const branchId = row?.branch?.id || (branchFilter !== ALL_BRANCHES ? branchFilter : "");
     const lines: StockLineItem[] = row
@@ -1150,7 +1154,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
 
   const thCls = "h-10 whitespace-nowrap px-2 text-[11px] font-semibold uppercase tracking-wider text-slate-500";
 
-  const renderRowActions = (row: Stock) => (
+  const renderRowActions = (row: Stock) => readOnly ? null : (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
         <Button size="icon" variant="outline" className="h-8 w-8" title="Stock actions">
@@ -1240,6 +1244,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
           </Button>
 
           {/* Stock operations: one joined group on desktop, a menu on small screens */}
+          {!readOnly && (<>
           <div className="hidden h-9 shrink-0 items-stretch divide-x divide-slate-200 overflow-hidden rounded-md border border-slate-200 bg-white shadow-sm md:inline-flex">
             {[
               { kind: "transfer" as const, label: "Transfer", icon: ArrowRightLeft, tone: "text-blue-600" },
@@ -1279,10 +1284,11 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
+          </>)}
 
           <StockManagementToolbar
             className="flex shrink-0 flex-nowrap items-center gap-2"
-            onAddStock={() => openOperation("add")}
+            onAddStock={readOnly ? undefined : () => openOperation("add")}
             onExportExcel={handleExportExcel}
             onExportPdf={handleExportPdf}
             exportDisabled={allStocks.length === 0}

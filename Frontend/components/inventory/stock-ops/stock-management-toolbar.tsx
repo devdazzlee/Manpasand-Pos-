@@ -16,7 +16,8 @@ import {
 } from "lucide-react";
 
 interface StockManagementToolbarProps {
-  onAddStock: () => void;
+  /** Omit to hide "Add stock" (view-only accounts). */
+  onAddStock?: () => void;
   onExportExcel?: () => void | Promise<void>;
   onExportPdf?: () => void | Promise<void>;
   exportDisabled?: boolean;
@@ -37,15 +38,17 @@ export function StockManagementToolbar({
 
   return (
     <div className={className ?? "flex flex-wrap items-center gap-2"}>
-      <Button
-        size="sm"
-        className="h-9 text-sm shrink-0 bg-gray-900 hover:bg-gray-800"
-        onClick={onAddStock}
-        disabled={busy}
-      >
-        <Plus className="h-4 w-4 mr-1.5" />
-        Add stock
-      </Button>
+      {onAddStock && (
+        <Button
+          size="sm"
+          className="h-9 text-sm shrink-0 bg-gray-900 hover:bg-gray-800"
+          onClick={onAddStock}
+          disabled={busy}
+        >
+          <Plus className="h-4 w-4 mr-1.5" />
+          Add stock
+        </Button>
+      )}
 
       {(onExportExcel || onExportPdf) && (
         <DropdownMenu>

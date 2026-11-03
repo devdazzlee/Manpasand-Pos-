@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -187,6 +188,8 @@ function lineRate(row: MovementRow) {
 }
 
 export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void }) {
+  // Branch accounts: dispatch history only, no new dispatches.
+  const readOnly = getInventoryReadOnly();
   void onNavigate;
   const logoDataUri = useLogoDataUri();
   const {
@@ -801,7 +804,8 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
           </div>
         </div>
         <div className="flex shrink-0 flex-wrap items-center gap-2">
-          <Button
+          {!readOnly && (
+<Button
             variant="outline"
             className="h-9 bg-white shadow-sm"
             onClick={() => setExcelDialogOpen(true)}
@@ -809,6 +813,7 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
             <FileSpreadsheet className="mr-2 h-4 w-4 text-rose-600" />
             Import lines
           </Button>
+)}
           <StockOpsActions
             onExportExcel={exportExcel}
             onExportPdf={exportPdf}
@@ -816,13 +821,13 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
             exporting={exporting}
           />
           {tab === "history" ? (
-            <Button
+            (!readOnly ? <Button
               className="h-9 bg-rose-600 text-white shadow-sm hover:bg-rose-700"
               onClick={() => setTab("new")}
             >
               <Plus className="mr-2 h-4 w-4" />
               New dispatch
-            </Button>
+            </Button> : null)
           ) : null}
         </div>
       </div>
@@ -832,7 +837,7 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
         onValueChange={(v) => setTab(v as "history" | "new")}
         className="space-y-5"
       >
-        <TabsList className="grid h-11 w-full max-w-md grid-cols-2 rounded-xl border border-slate-200 bg-slate-100/80 p-1">
+        <TabsList className={cn(readOnly && "hidden", "grid h-11 w-full max-w-md grid-cols-2 rounded-xl border border-slate-200 bg-slate-100/80 p-1")}>
           <TabsTrigger
             value="history"
             className="h-9 gap-1.5 rounded-lg text-sm font-medium text-slate-600 data-[state=active]:bg-white data-[state=active]:text-slate-900 data-[state=active]:shadow-sm"
@@ -1208,13 +1213,13 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                       <X className="mr-1 h-3.5 w-3.5" /> Clear filters
                     </Button>
                   ) : (
-                    <Button
+                    (!readOnly ? <Button
                       size="sm"
                       className="mt-4 h-8 bg-rose-600 text-white hover:bg-rose-700"
                       onClick={() => setTab("new")}
                     >
                       <Plus className="mr-1 h-3.5 w-3.5" /> New dispatch
-                    </Button>
+                    </Button> : null)
                   )}
                 </div>
               ) : (
@@ -1500,7 +1505,8 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                 </p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                <Button
+                {!readOnly && (
+<Button
                   type="button"
                   variant="outline"
                   size="sm"
@@ -1511,6 +1517,7 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                   <FileSpreadsheet className="h-3.5 w-3.5 mr-1.5" />
                   Import lines
                 </Button>
+)}
                 <Button
                   type="button"
                   variant="ghost"
