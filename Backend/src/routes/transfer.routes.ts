@@ -1,5 +1,7 @@
 import { Router } from 'express';
 import { validate } from '../middleware/validation.middleware';
+import { branchOwnershipParam } from '../middleware/branch-ownership.middleware';
+import { prisma } from '../prisma/client';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 import {
   createTransfer,
@@ -21,6 +23,15 @@ router.use(
   authorize(['SUPER_ADMIN', 'ADMIN', 'WAREHOUSE_MANAGER', 'BRANCH_MANAGER'])
 );
 
+// A branch user may only see / act on transfers into or out of their branch.
+router.param(
+  'id',
+  branchOwnershipParam((id) =>
+    prisma.transfer
+      .findUnique({ where: { id }, select: { from_branch_id: true, to_branch_id: true } })
+      .then((t) => t && [t.from_branch_id, t.to_branch_id]),
+  ),
+);
 router.post('/', validate(createTransferSchema), createTransfer);
 router.patch('/:id/status', validate(updateTransferStatusSchema), updateTransferStatus);
 router.get('/pending', getPendingTransfers);

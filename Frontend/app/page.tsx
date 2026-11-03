@@ -5,6 +5,7 @@ import { LoginForm } from "@/components/login-form";
 import { Dashboard } from "@/components/dashboard";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { clearTabFromUrl } from "@/lib/dashboard-tabs";
+import { clearPosBranchChoice } from "@/hooks/use-pos-branch";
 
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
@@ -61,7 +62,11 @@ export default function Home() {
     _branch: string, // you can ignore/remove this param
     user: { email: string; role: string; branch_id: string | null }
   ) => {
-    console.log("🔐 Login Data:", { jwt, _branch, user });
+    // A new identity must never inherit the previous account's branch
+    // (e.g. an admin's picked branch on a shared shop PC).
+    clearPosBranchChoice();
+    localStorage.removeItem("branchName");
+    localStorage.removeItem("branchAddress");
     localStorage.setItem("token", jwt);
     localStorage.setItem("branch", user.branch_id ?? "Not Found");
     localStorage.setItem("role", user.role);
@@ -113,6 +118,7 @@ export default function Home() {
     });
 
     localStorage.clear();
+    clearPosBranchChoice();
 
     Object.entries(preserved).forEach(([key, value]) => localStorage.setItem(key, value));
 

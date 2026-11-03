@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, type ReactNode } from "react"
+import { useState, useEffect, useRef, type ReactNode } from "react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -37,10 +37,11 @@ import {
   Undo2,
 } from "lucide-react"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { mapBranchOption, type BranchOption } from "@/lib/branch-utils"
 import apiClient from "@/lib/apiClient"
 import { API_BASE } from "@/config/constants"
 import { normalizeUserRole, type UserRole } from "@/lib/role-utils"
-import { useLogoDataUri } from "@/hooks/use-logo-data-uri"
 import { cn } from "@/lib/utils"
 
 const INVENTORY_NAV_ROLES: UserRole[] = [
@@ -123,6 +124,16 @@ interface DashboardHomeProps {
 
 type ModalKind = "sales" | "transactions" | "customers" | "lowstock" | null
 
+/** Ranking window for Top Products; values match the API's ?period=. */
+const TOP_PERIODS = [
+  { value: "today", short: "Today", label: "Today" },
+  { value: "7d", short: "7D", label: "Last 7 days" },
+  { value: "30d", short: "30D", label: "Last 30 days" },
+  { value: "all", short: "All", label: "All time" },
+] as const
+type TopPeriod = (typeof TOP_PERIODS)[number]["value"]
+const topPeriodLabel = (p: TopPeriod) => TOP_PERIODS.find((x) => x.value === p)?.label ?? "Last 30 days"
+
 const PAYMENT_ICON: Record<string, any> = {
   CASH: Wallet,
   CARD: CreditCard,
@@ -145,17 +156,32 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
   const { loading: exportLoading, withLoading: withExportLoading } = useLoading()
   const { toast } = useToast()
-  const logoDataUri = useLogoDataUri()
   const canOpenInventory = role ? INVENTORY_NAV_ROLES.includes(role) : false
   const isAdmin = role === "SUPER_ADMIN" || role === "ADMIN"
 
-  const getTopProducts = async () => {
+  // Admin-only scope filter: "all" = whole business, otherwise one branch id.
+  // Branch users never see this — the server pins them to their own branch.
+  const [scopeBranchId, setScopeBranchId] = useState<string>("all")
+  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
+  // Guards against a slow response for an older selection overwriting a newer one.
+  const loadSeq = useRef(0)
+  const scopeParams = (branchId: string) => (branchId && branchId !== "all" ? { branchId } : {})
+
+  const [topPeriod, setTopPeriod] = useState<TopPeriod>("30d")
+  const [topLoading, setTopLoading] = useState(false)
+  const topSeq = useRef(0)
+
+  const getTopProducts = async (branchId: string, period: TopPeriod) => {
+    const seq = ++topSeq.current
     try {
-      const response = await apiClient.get('/products/best-selling')
-      if (response?.data?.success) {
-        setTopProducts(response.data.data || [])
-      }
+      const response = await apiClient.get('/products/best-selling', {
+        params: { ...scopeParams(branchId), period },
+      })
+      if (seq !== topSeq.current) return // a newer branch/period request superseded this one
+      setTopProducts(response?.data?.success ? response.data.data || [] : [])
     } catch (error: any) {
+      if (seq !== topSeq.current) return
+      setTopProducts([])
       toast({
         variant: "destructive",
         title: "Top Products Error",
@@ -164,9 +190,9 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
     }
   }
 
-  const getRecentSales = async () => {
+  const getRecentSales = async (branchId: string) => {
     try {
-      const response = await apiClient.get('/sale/recent', { params: { limit: 20 } })
+      const response = await apiClient.get('/sale/recent', { params: { limit: 20, ...scopeParams(branchId) } })
       if (response?.data?.success) {
         setRecentSales(response.data.data || [])
       } else {
@@ -182,9 +208,9 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
     }
   }
 
-  const getStats = async () => {
+  const getStats = async (branchId: string) => {
     try {
-      const response = await apiClient.get('/dashboard/stats')
+      const response = await apiClient.get('/dashboard/stats', { params: scopeParams(branchId) })
       if (response?.data?.success) {
         setStats(response.data.data || null)
       } else {
@@ -200,19 +226,48 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
     }
   }
 
-  const loadAllData = async () => {
+  const loadAllData = async (branchId: string) => {
+    const seq = ++loadSeq.current
+    setInitialLoading(true) // every card switches to its skeleton while the new scope loads
     await Promise.all([
-      getTopProducts(),
-      getRecentSales(),
-      getStats()
+      getTopProducts(branchId, topPeriod),
+      getRecentSales(branchId),
+      getStats(branchId)
     ])
-    setInitialLoading(false)
+    if (seq === loadSeq.current) setInitialLoading(false)
   }
 
   useEffect(() => {
-    setRole(normalizeUserRole(localStorage.getItem("role")))
-    loadAllData()
+    const currentRole = normalizeUserRole(localStorage.getItem("role"))
+    setRole(currentRole)
+    loadAllData("all")
+    if (currentRole === "SUPER_ADMIN" || currentRole === "ADMIN") {
+      apiClient
+        .get("/branches", { params: { page: 1, limit: 100, is_active: true } })
+        .then((res) => {
+          const raw = Array.isArray(res?.data?.data) ? res.data.data : []
+          setBranchOptions(raw.map(mapBranchOption).filter((b: BranchOption) => b.id && b.is_active !== false))
+        })
+        .catch(() => setBranchOptions([]))
+    }
   }, [])
+
+  const handleTopPeriodChange = async (period: TopPeriod) => {
+    if (period === topPeriod) return
+    setTopPeriod(period)
+    setTopLoading(true)
+    try {
+      await getTopProducts(scopeBranchId, period)
+    } finally {
+      setTopLoading(false)
+    }
+  }
+
+  const handleScopeChange = (value: string) => {
+    if (value === scopeBranchId) return
+    setScopeBranchId(value)
+    loadAllData(value)
+  }
 
   useEffect(() => {
     if (activeModal !== "customers" || customersFetched) return
@@ -235,314 +290,47 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
       .finally(() => setCustomersLoading(false))
   }, [activeModal, customersFetched])
 
-  type PdfCol = { label: string; width: number; align?: "right" }
-
-  const generateReport = async (): Promise<string> => {
-    if (!stats) throw new Error("No dashboard data loaded yet")
-
-    const { jsPDF } = await import("jspdf")
-    const doc = new jsPDF({ unit: "mm", format: "a4" })
-
-    const pageWidth = 210
-    const pageHeight = 297
-    const margin = 14
-    const usableWidth = pageWidth - margin * 2
-    const bottomLimit = pageHeight - 16
-    const generatedAt = new Date()
-    const scopeLabel = stats.branch ? stats.branch.name : "All Branches"
-    let y = margin
-
-    const shortTime = (d: string) => new Date(d).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-
-    // ---------- Header band ----------
-    const bandHeight = 28
-    doc.setFillColor(15, 23, 42) // slate-900
-    doc.rect(0, 0, pageWidth, bandHeight, "F")
-
-    let textX = margin
-    if (logoDataUri) {
-      try {
-        const img = await new Promise<HTMLImageElement>((resolve, reject) => {
-          const el = new Image()
-          el.onload = () => resolve(el)
-          el.onerror = reject
-          el.src = logoDataUri
-        })
-        const aspect = img.naturalWidth / img.naturalHeight || 2.6
-        const maxH = 12
-        let imgH = maxH
-        let imgW = imgH * aspect
-        if (imgW > 46) {
-          imgW = 46
-          imgH = imgW / aspect
-        }
-        doc.addImage(logoDataUri, "PNG", margin, (bandHeight - imgH) / 2, imgW, imgH)
-        textX = margin + imgW + 5
-      } catch {
-        // ignore — image load failed; header continues without logo
-      }
-    }
-
-    doc.setTextColor(255, 255, 255)
-    doc.setFont("helvetica", "bold")
-    doc.setFontSize(12)
-    doc.text("MANPASAND POS", textX, 13)
-    doc.setFont("helvetica", "normal")
-    doc.setFontSize(9)
-    doc.text("Daily Sales Report", textX, 19.5)
-
-    doc.setFontSize(8)
-    doc.text(`Generated ${generatedAt.toLocaleString()}`, pageWidth - margin, 11, { align: "right" })
-    doc.text(`Scope: ${scopeLabel}`, pageWidth - margin, 16.5, { align: "right" })
-    doc.text(`${stats.totalCustomers} total customers`, pageWidth - margin, 22, { align: "right" })
-
-    y = bandHeight + 8
-
-    // ---------- Summary KPI tiles (mirrors the dashboard's 4 stat cards) ----------
-    const kpis: { label: string; value: string; sub: string }[] = [
-      { label: "TODAY'S SALES", value: formatCurrency(stats.todaySalesTotal), sub: `${stats.todaySalesCount} transactions` },
-      { label: "RECENT TRANSACTIONS", value: String(recentSales.length), sub: "Latest activity" },
-      { label: "TOTAL CUSTOMERS", value: String(stats.totalCustomers), sub: `+${stats.newCustomersToday} new today` },
-      { label: "LOW STOCK ITEMS", value: String(stats.lowStockCount), sub: "Need restock" },
-    ]
-    const boxGap = 4
-    const boxW = (usableWidth - boxGap * 3) / 4
-    const boxH = 22
-    kpis.forEach((kpi, i) => {
-      const x = margin + i * (boxW + boxGap)
-      doc.setDrawColor(226, 232, 240)
-      doc.setFillColor(248, 250, 252)
-      doc.roundedRect(x, y, boxW, boxH, 2, 2, "FD")
-      doc.setFont("helvetica", "bold")
-      doc.setFontSize(6.3)
-      doc.setTextColor(100, 116, 139)
-      doc.text(kpi.label, x + 3, y + 6)
-      doc.setFontSize(11)
-      doc.setTextColor(15, 23, 42)
-      doc.text(kpi.value, x + 3, y + 13)
-      doc.setFont("helvetica", "normal")
-      doc.setFontSize(6.3)
-      doc.setTextColor(100, 116, 139)
-      doc.text(kpi.sub, x + 3, y + 18)
-    })
-    y += boxH + 10
-
-    const ensureSpace = (needed: number) => {
-      if (y + needed > bottomLimit) {
-        doc.addPage()
-        y = margin
-      }
-    }
-
-    const drawSectionTitle = (title: string) => {
-      ensureSpace(12)
-      doc.setFont("helvetica", "bold")
-      doc.setFontSize(11)
-      doc.setTextColor(15, 23, 42)
-      doc.text(title, margin, y)
-      doc.setDrawColor(37, 99, 235)
-      doc.setLineWidth(0.6)
-      doc.line(margin, y + 1.6, margin + 10, y + 1.6)
-      y += 7
-    }
-
-    const drawTableHeader = (cols: PdfCol[]) => {
-      doc.setFillColor(241, 245, 249)
-      doc.rect(margin, y, usableWidth, 6.5, "F")
-      doc.setFont("helvetica", "bold")
-      doc.setFontSize(7)
-      doc.setTextColor(51, 65, 85)
-      let x = margin
-      cols.forEach((c) => {
-        const tx = c.align === "right" ? x + c.width - 2 : x + 2
-        doc.text(c.label, tx, y + 4.4, c.align === "right" ? { align: "right" } : undefined)
-        x += c.width
-      })
-      y += 6.5
-    }
-
-    const drawTable = (title: string, cols: PdfCol[], rows: (string | number)[][]) => {
-      drawSectionTitle(title)
-      drawTableHeader(cols)
-      if (!rows.length) {
-        doc.setFont("helvetica", "italic")
-        doc.setFontSize(8)
-        doc.setTextColor(148, 163, 184)
-        doc.text("No data available", margin + 2, y + 4.5)
-        y += 8
-        return
-      }
-      const rowH = 6.2
-      rows.forEach((row, idx) => {
-        if (y + rowH > bottomLimit) {
-          doc.addPage()
-          y = margin
-          drawTableHeader(cols)
-        }
-        if (idx % 2 === 1) {
-          doc.setFillColor(248, 250, 252)
-          doc.rect(margin, y, usableWidth, rowH, "F")
-        }
-        doc.setFont("helvetica", "normal")
-        doc.setFontSize(7.2)
-        doc.setTextColor(30, 41, 59)
-        let x = margin
-        row.forEach((cell, ci) => {
-          const c = cols[ci]
-          const tx = c.align === "right" ? x + c.width - 2 : x + 2
-          const text = doc.splitTextToSize(String(cell ?? "-"), c.width - 4)[0] ?? ""
-          doc.text(text, tx, y + rowH - 1.8, c.align === "right" ? { align: "right" } : undefined)
-          x += c.width
-        })
-        y += rowH
-      })
-      y += 6
-    }
-
-    // ---------- Today's Sales (exact match of the Today's Sales KPI + modal) ----------
-    const todaySalesCols: PdfCol[] = isAdmin
-      ? [
-          { label: "SALE #", width: 42 },
-          { label: "BRANCH", width: 38 },
-          { label: "TIME", width: 26 },
-          { label: "STATUS", width: 26 },
-          { label: "AMOUNT", width: usableWidth - 42 - 38 - 26 - 26, align: "right" },
-        ]
-      : [
-          { label: "SALE #", width: 55 },
-          { label: "TIME", width: 40 },
-          { label: "STATUS", width: 35 },
-          { label: "AMOUNT", width: usableWidth - 55 - 40 - 35, align: "right" },
-        ]
-    const todaySalesRows = stats.todaySales.map((s) =>
-      isAdmin
-        ? [s.sale_number, s.branch?.name || "-", shortTime(s.created_at), s.status, formatCurrency(s.total_amount)]
-        : [s.sale_number, shortTime(s.created_at), s.status, formatCurrency(s.total_amount)],
-    )
-    drawTable(`Today's Sales — ${formatCurrency(stats.todaySalesTotal)}`, todaySalesCols, todaySalesRows)
-
-    // ---------- Recent Transactions ----------
-    const recentCols: PdfCol[] = isAdmin
-      ? [
-          { label: "CUSTOMER", width: 38 },
-          { label: "SALE #", width: 32 },
-          { label: "BRANCH", width: 30 },
-          { label: "TIME", width: 25 },
-          { label: "STATUS", width: 22 },
-          { label: "AMOUNT", width: usableWidth - 38 - 32 - 30 - 25 - 22, align: "right" },
-        ]
-      : [
-          { label: "CUSTOMER", width: 48 },
-          { label: "SALE #", width: 42 },
-          { label: "TIME", width: 30 },
-          { label: "STATUS", width: 25 },
-          { label: "AMOUNT", width: usableWidth - 48 - 42 - 30 - 25, align: "right" },
-        ]
-    const recentRows = recentSales.map((sale) =>
-      isAdmin
-        ? [sale.customerName, sale.saleNumber, sale.branch?.name || "-", shortTime(sale.saleDate), sale.status, formatCurrency(sale.totalAmount)]
-        : [sale.customerName, sale.saleNumber, shortTime(sale.saleDate), sale.status, formatCurrency(sale.totalAmount)],
-    )
-    drawTable("Recent Transactions", recentCols, recentRows)
-
-    // ---------- Top Products ----------
-    const topCols: PdfCol[] = isAdmin
-      ? [
-          { label: "#", width: 8 },
-          { label: "PRODUCT", width: 46 },
-          { label: "CATEGORY", width: 26 },
-          { label: "BRANCH", width: 30 },
-          { label: "ORDERS", width: 18 },
-          { label: "SOLD", width: 18 },
-          { label: "PRICE", width: usableWidth - 8 - 46 - 26 - 30 - 18 - 18, align: "right" },
-        ]
-      : [
-          { label: "#", width: 8 },
-          { label: "PRODUCT", width: 64 },
-          { label: "CATEGORY", width: 32 },
-          { label: "ORDERS", width: 20 },
-          { label: "SOLD", width: 20 },
-          { label: "PRICE", width: usableWidth - 8 - 64 - 32 - 20 - 20, align: "right" },
-        ]
-    const topRows = topProducts.map((product, index) =>
-      isAdmin
-        ? [index + 1, product.name, product.category, product.topBranch?.name || "-", product.order_count, product.quantity_sold, formatCurrency(product.price)]
-        : [index + 1, product.name, product.category, product.order_count, product.quantity_sold, formatCurrency(product.price)],
-    )
-    drawTable("Top Products", topCols, topRows)
-
-    // ---------- Payment Methods Today ----------
-    const paymentCols: PdfCol[] = [
-      { label: "METHOD", width: 70 },
-      { label: "TRANSACTIONS", width: 60 },
-      { label: "TOTAL", width: usableWidth - 70 - 60, align: "right" },
-    ]
-    const paymentRows = stats.paymentBreakdown.map((p) => [
-      p.method.charAt(0) + p.method.slice(1).toLowerCase(),
-      p.count,
-      formatCurrency(p.total),
-    ])
-    drawTable("Payment Methods Today", paymentCols, paymentRows)
-
-    // ---------- Low Stock Alerts ----------
-    const lowStockCols: PdfCol[] = isAdmin
-      ? [
-          { label: "PRODUCT", width: 62 },
-          { label: "SKU", width: 36 },
-          { label: "BRANCH", width: 42 },
-          { label: "QTY LEFT", width: usableWidth - 62 - 36 - 42, align: "right" },
-        ]
-      : [
-          { label: "PRODUCT", width: 90 },
-          { label: "SKU", width: 50 },
-          { label: "QTY LEFT", width: usableWidth - 90 - 50, align: "right" },
-        ]
-    const lowStockRows = stats.lowStockProducts.map((item) =>
-      isAdmin
-        ? [item.product.name, item.product.sku, item.branch?.name || "-", item.current_quantity]
-        : [item.product.name, item.product.sku, item.current_quantity],
-    )
-    drawTable("Low Stock Alerts", lowStockCols, lowStockRows)
-
-    // ---------- Footer on every page ----------
-    const totalPages = doc.getNumberOfPages()
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i)
-      doc.setDrawColor(226, 232, 240)
-      doc.setLineWidth(0.3)
-      doc.line(margin, pageHeight - 13, pageWidth - margin, pageHeight - 13)
-      doc.setFont("helvetica", "normal")
-      doc.setFontSize(7.5)
-      doc.setTextColor(148, 163, 184)
-      doc.text("MANPASAND POS · Confidential business report", margin, pageHeight - 8)
-      doc.text(`Page ${i} of ${totalPages}`, pageWidth - margin, pageHeight - 8, { align: "right" })
-    }
-
-    const dateSlug = generatedAt.toISOString().slice(0, 10)
-    const scopeSlug = scopeLabel.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")
-    const filename = `manpasand-daily-report-${scopeSlug}-${dateSlug}.pdf`
-    doc.save(filename)
-    return filename
-  }
-
+  /**
+   * Export = fetch fresh data for the selected scope, then render.
+   * The PDF never reuses on-screen state, so it can't mix branches if the
+   * selection changed mid-load, and it reflects sales made since the page opened.
+   */
   const handleExportReport = async () => {
-    toast({
-      title: "Preparing your report",
-      description: "Building a PDF from the exact numbers shown on this dashboard...",
-    })
+    if (exportLoading) return
+    const branchId = isAdmin ? scopeBranchId : "all"
+    const params = scopeParams(branchId)
     await withExportLoading(async () => {
       try {
-        const filename = await generateReport()
+        const [statsRes, topRes] = await Promise.all([
+          apiClient.get("/dashboard/stats", { params }),
+          apiClient.get("/products/best-selling", { params: { ...params, period: topPeriod } }),
+        ])
+        const freshStats: DashboardStats | null = statsRes?.data?.data ?? null
+        if (!freshStats) throw new Error("No dashboard data returned")
+
+        const scopeLabel =
+          freshStats.branch?.name ||
+          (branchId !== "all" ? branchOptions.find((b) => b.id === branchId)?.name : undefined) ||
+          "All Branches"
+
+        const { downloadDashboardReportPdf } = await import("@/lib/dashboard-report-pdf")
+        const filename = await downloadDashboardReportPdf({
+          scope: { branchId: branchId === "all" ? null : branchId, label: scopeLabel },
+          stats: freshStats,
+          topProducts: Array.isArray(topRes?.data?.data) ? topRes.data.data : [],
+          topProductsPeriod: topPeriodLabel(topPeriod),
+          preparedBy: typeof window !== "undefined" ? localStorage.getItem("userEmail") : null,
+        })
         toast({
           variant: "success",
           title: "Report downloaded",
-          description: `Saved to your downloads as ${filename}`,
+          description: `${scopeLabel} · saved as ${filename}`,
         })
-      } catch (error) {
+      } catch (error: any) {
         toast({
           variant: "destructive",
-          title: "Export Failed",
-          description: "Could not generate the report",
+          title: "Export failed",
+          description: error?.response?.data?.message || "Could not generate the report. Please try again.",
         })
       }
     })
@@ -662,18 +450,47 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <p className="text-sm text-slate-500">Welcome back! Here&apos;s what&apos;s happening today.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
-            {stats?.branch ? (
+          {isAdmin ? (
+            <Select value={scopeBranchId} onValueChange={handleScopeChange} disabled={(initialLoading && !stats) || exportLoading}>
+              <SelectTrigger
+                className={cn(
+                  "h-9 w-full gap-0 text-sm font-medium shadow-sm sm:w-[220px] [&>span]:flex-1 [&>span]:text-left",
+                  scopeBranchId === "all"
+                    ? "border-slate-200 bg-white text-slate-700"
+                    : "border-blue-300 bg-blue-50 text-blue-900"
+                )}
+                aria-label="Show dashboard for"
+              >
+                {/* Icon + value are direct children: SelectTrigger line-clamps child <span>s,
+                    which stacked them vertically when wrapped together. */}
+                {scopeBranchId === "all" ? (
+                  <Building2 className="mr-2 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+                ) : (
+                  <MapPin className="mr-2 h-4 w-4 shrink-0 text-blue-600" aria-hidden />
+                )}
+                <SelectValue placeholder="All Branches" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {branchOptions.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                    {b.branch_type === "WAREHOUSE" ? " (Warehouse)" : ""}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
               <MapPin className="h-4 w-4 shrink-0 text-slate-500" />
-            ) : (
-              <Building2 className="h-4 w-4 shrink-0 text-slate-500" />
-            )}
-            <span className="max-w-[180px] truncate">{stats?.branch ? stats.branch.name : "All Branches"}</span>
-          </div>
+              <span className="max-w-[180px] truncate">{stats?.branch?.name || "Your branch"}</span>
+            </div>
+          )}
           <LoadingButton
             onClick={handleExportReport}
             loading={exportLoading}
-            loadingText="Generating..."
+            loadingText="Preparing report..."
+            disabled={initialLoading && !stats}
             className="h-9 w-full shadow-sm sm:w-auto"
           >
             <Download className="mr-2 h-4 w-4" />
@@ -874,10 +691,37 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
         <Card className="overflow-hidden rounded-xl border-slate-200">
           <PanelHeader
             title="Top Products"
-            description="Best sellers by quantity sold"
-            action={<CountPill>Best sellers</CountPill>}
+            description={`Best sellers by quantity · ${topPeriodLabel(topPeriod)}`}
+            action={
+              <div
+                role="radiogroup"
+                aria-label="Top products period"
+                className="inline-flex shrink-0 rounded-lg border border-slate-200 bg-slate-50 p-0.5"
+              >
+                {TOP_PERIODS.map((p) => {
+                  const active = p.value === topPeriod
+                  return (
+                    <button
+                      key={p.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={active}
+                      title={p.label}
+                      disabled={initialLoading || topLoading}
+                      onClick={() => handleTopPeriodChange(p.value)}
+                      className={cn(
+                        "rounded-md px-2 py-1 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/20 disabled:cursor-not-allowed",
+                        active ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-800",
+                      )}
+                    >
+                      {p.short}
+                    </button>
+                  )
+                })}
+              </div>
+            }
           />
-          {initialLoading ? (
+          {initialLoading || topLoading ? (
             <PanelLoader label="Loading top products..." />
           ) : visibleTopProducts.length ? (
             <ul className="divide-y divide-slate-100">
@@ -923,7 +767,11 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
               ))}
             </ul>
           ) : (
-            <EmptyState icon={Package} title="No top products data" hint="Best sellers will be ranked here once items sell." />
+            <EmptyState
+              icon={Package}
+              title={`No sales ${topPeriod === "today" ? "today" : topPeriod === "all" ? "yet" : "in this period"}`}
+              hint="Best sellers will be ranked here once items sell."
+            />
           )}
         </Card>
       </div>

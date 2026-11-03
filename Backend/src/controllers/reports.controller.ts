@@ -12,8 +12,12 @@ const reportsService = new ReportsService();
  * Query: from, to (YYYY-MM-DD), limit
  */
 export const getReportsData = asyncHandler(async (req: Request, res: Response) => {
-  const branchId = (req.query.branch_id as string | undefined) || (req.user?.branch_id as string | undefined);
   const userRole = req.user?.role as string | undefined;
+  const isAdmin = userRole === 'ADMIN' || userRole === 'SUPER_ADMIN';
+  // Only admins choose the branch; everyone else is pinned to their own.
+  const branchId = isAdmin
+    ? (req.query.branch_id as string | undefined) || undefined
+    : (req.user?.branch_id as string | undefined);
   const { limit } = req.query;
 
   const today = businessTodayYmd();

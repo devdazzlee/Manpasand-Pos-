@@ -3,6 +3,8 @@ export interface BranchOption {
   name: string;
   address?: string;
   is_active?: boolean;
+  /** "BRANCH" (a shop that sells) or "WAREHOUSE". */
+  branch_type?: string | null;
 }
 
 export const isAdminRole = (role?: string | null) =>
@@ -42,4 +44,5 @@ export const mapBranchOption = (branch: any): BranchOption => ({
   name: String(branch?.name || "Unknown Branch"),
   address: typeof branch?.address === "string" ? branch.address : "",
   is_active: branch?.is_active !== false,
+  branch_type: typeof branch?.branch_type === "string" ? branch.branch_type : null,
 });

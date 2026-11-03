@@ -9,8 +9,24 @@ import {
   normalizeBranchId,
 } from "@/lib/branch-utils";
 
-/** The branch an admin last chose on the Sales screen (admins have no own branch). */
+/**
+ * Admins have no branch of their own, so the billing branch is chosen on the
+ * Sales screen every time it opens. It is deliberately NOT remembered or
+ * defaulted: a pre-selected branch is how admin bills silently landed in the
+ * wrong branch. This key is only cleaned up from older app versions.
+ */
 const POS_BRANCH_KEY = "posBranchId";
+
+/** Remove any remembered admin branch choice left by older versions (login / logout). */
+export function clearPosBranchChoice() {
+  if (typeof window === "undefined") return;
+  try {
+    sessionStorage.removeItem(POS_BRANCH_KEY);
+    localStorage.removeItem(POS_BRANCH_KEY); // legacy location
+  } catch {
+    // storage blocked: nothing to clear
+  }
+}
 
 interface BranchInfo {
   name: string;
@@ -36,7 +52,7 @@ export function usePosBranch() {
         const role = localStorage.getItem("role");
         const isAdmin = isAdminRole(role);
         const storedBranchId = normalizeBranchId(localStorage.getItem("branch"));
-        const adminBranchId = normalizeBranchId(localStorage.getItem(POS_BRANCH_KEY)) || storedBranchId;
+        clearPosBranchChoice();
 
         if (!cancelled) {
           setAdminMode(isAdmin);
@@ -49,27 +65,17 @@ export function usePosBranch() {
           const rawBranches = Array.isArray(response?.data?.data) ? response.data.data : [];
           const activeBranches = rawBranches
             .map(mapBranchOption)
-            .filter((branch: BranchOption) => branch.id && branch.is_active !== false);
+            .filter((branch: BranchOption) => branch.id && branch.is_active !== false)
+            // Warehouses don't bill customers (the server rejects it too).
+            .filter((branch: BranchOption) => branch.branch_type !== "WAREHOUSE");
 
           if (cancelled) return;
 
           setBranches(activeBranches);
 
-          const initialBranch =
-            activeBranches.find((branch: BranchOption) => branch.id === adminBranchId) ||
-            activeBranches[0] ||
-            null;
-
-          if (initialBranch) {
-            setSelectedBranchId(initialBranch.id);
-            setBranchInfo({
-              name: initialBranch.name,
-              address: initialBranch.address || "",
-            });
-          } else {
-            setSelectedBranchId("");
-            setBranchInfo({ name: "Admin", address: "" });
-          }
+          // Never pre-select: the admin must consciously pick the branch.
+          setSelectedBranchId("");
+          setBranchInfo({ name: "", address: "" });
 
           return;
         }
@@ -133,14 +139,9 @@ export function usePosBranch() {
     [branches, selectedBranchId]
   );
 
-  // Admin picks the branch the bill belongs to; remembered for next time.
+  // Admin picks the branch the bill belongs to (kept only while the screen is open).
   const selectBranch = (branchId: string) => {
     setSelectedBranchId(branchId);
-    try {
-      localStorage.setItem(POS_BRANCH_KEY, branchId);
-    } catch {
-      // storage blocked: the choice just is not remembered
-    }
   };
 
   return {

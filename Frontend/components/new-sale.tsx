@@ -105,6 +105,7 @@ import {
 } from "@/components/ui/select";
 import { useHoldSales } from "@/hooks/use-hold-sales";
 import { usePosBranch } from "@/hooks/use-pos-branch";
+import { PosBranchBar } from "@/components/pos/pos-branch-bar";
 import {
   RepeatSaleCombobox,
   type RepeatSalePayload,
@@ -674,6 +675,34 @@ export function NewSale() {
     branchInfo,
     hasBranch,
   } = usePosBranch();
+  // Admin tried to bill without choosing a branch → highlight the picker.
+  const [branchError, setBranchError] = useState(false);
+  const handleSelectBranch = (branchId: string) => {
+    setBranchError(false);
+    selectBranch(branchId);
+  };
+  /**
+   * Gate for every action that writes a sale. Admins must pick the branch
+   * explicitly; instead of a silently disabled button they get a clear error
+   * pointing at the picker.
+   */
+  const requireBranch = (): boolean => {
+    if (hasBranch) return true;
+    setBranchError(true);
+    if (adminMode) {
+      toast.error("Select a branch first", {
+        description: "Choose which branch this sale belongs to before billing.",
+      });
+      const bar = Array.from(document.querySelectorAll<HTMLElement>("[data-pos-branch-bar]")).find(
+        (el) => el.offsetParent !== null
+      );
+      bar?.scrollIntoView({ behavior: "smooth", block: "center" });
+      bar?.querySelector<HTMLElement>("button")?.focus();
+    } else {
+      toast.error("No branch is assigned to your account. Ask the owner to assign one.");
+    }
+    return false;
+  };
   const { holdSales, holdSale, retrieveHoldSale, deleteHoldSale, holdSalesLoading, refreshHoldSales } =
     useHoldSales(selectedBranchId);
   const searchInputRef = useRef<HTMLInputElement>(null);
@@ -1782,7 +1811,7 @@ export function NewSale() {
   };
 
   const holdCurrentSale = async () => {
-    if (cart.length === 0 || !hasBranch) {
+    if (cart.length === 0 || !requireBranch()) {
       return;
     }
 
@@ -2167,7 +2196,7 @@ export function NewSale() {
   };
 
   const startPayment = (method: "Cash" | "Card") => {
-    if (!hasBranch) {
+    if (!requireBranch()) {
       return;
     }
 
@@ -2982,20 +3011,17 @@ export function NewSale() {
               )}
             </div>
             <div className="hidden flex-wrap items-center gap-2 sm:flex">
-              {adminMode && posBranches.length > 0 && (
-                <Select value={selectedBranchId || undefined} onValueChange={selectBranch} disabled={paymentLoading}>
-                  <SelectTrigger className="h-10 w-[200px]" aria-label="Branch for this sale">
-                    <SelectValue placeholder="Choose branch" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {posBranches.map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
+              <PosBranchBar
+                adminMode={adminMode}
+                branches={posBranches}
+                selectedBranchId={selectedBranchId}
+                branchName={branchInfo.name}
+                loading={branchLoading}
+                disabled={paymentLoading || (hasBranch && cart.length > 0)}
+                onSelect={handleSelectBranch}
+                error={branchError}
+                className="sm:w-[240px]"
+              />
               <RepeatSaleCombobox
                 branchId={selectedBranchId}
                 disabled={paymentLoading || branchLoading || !hasBranch}
@@ -3005,7 +3031,7 @@ export function NewSale() {
                 <Button
                   variant="outline"
                   onClick={holdCurrentSale}
-                  disabled={isHoldingSale || branchLoading || !hasBranch}
+                  disabled={isHoldingSale || branchLoading || (!adminMode && !hasBranch)}
                 >
                   {isHoldingSale ? "Saving..." : "Hold Sale"}
                 </Button>
@@ -3074,11 +3100,18 @@ export function NewSale() {
               />
             </div>
           </div>
-          {!hasBranch && !branchLoading && (
-            <p className="mb-4 max-w-sm text-sm text-amber-700">
-              Branch is not configured. Hold Sale and checkout may fail until a branch is assigned.
-            </p>
-          )}
+          <div className="mb-2 sm:hidden">
+            <PosBranchBar
+              adminMode={adminMode}
+              branches={posBranches}
+              selectedBranchId={selectedBranchId}
+              branchName={branchInfo.name}
+              loading={branchLoading}
+              disabled={paymentLoading || (hasBranch && cart.length > 0)}
+              onSelect={handleSelectBranch}
+              error={branchError}
+            />
+          </div>
           <div className="mb-2 sm:hidden">
             <RepeatSaleCombobox
               branchId={selectedBranchId}
@@ -3540,7 +3573,7 @@ export function NewSale() {
               <Button
                 size="sm"
                 onClick={() => startPayment("Cash")}
-                disabled={paymentLoading || branchLoading || !hasBranch}
+                disabled={paymentLoading || branchLoading || (!adminMode && !hasBranch)}
                 className="h-9 text-xs font-semibold"
               >
                 <DollarSign className="mr-1.5 h-3.5 w-3.5" />
@@ -3550,7 +3583,7 @@ export function NewSale() {
                 size="sm"
                 variant="outline"
                 onClick={() => startPayment("Card")}
-                disabled={paymentLoading || branchLoading || !hasBranch}
+                disabled={paymentLoading || branchLoading || (!adminMode && !hasBranch)}
                 className="h-9 text-xs font-semibold"
               >
                 <CreditCard className="mr-1.5 h-3.5 w-3.5" />
@@ -3574,7 +3607,7 @@ export function NewSale() {
                 size="sm"
                 onClick={holdCurrentSale}
                 className="h-7 flex-1 px-2 text-[11px]"
-                disabled={isHoldingSale || branchLoading || !hasBranch}
+                disabled={isHoldingSale || branchLoading || (!adminMode && !hasBranch)}
               >
                 {isHoldingSale ? "…" : "Hold"}
               </Button>
@@ -3606,7 +3639,7 @@ export function NewSale() {
                   size="sm"
                   onClick={holdCurrentSale}
                   className="h-7 px-2 text-[11px]"
-                  disabled={isHoldingSale || branchLoading || !hasBranch}
+                  disabled={isHoldingSale || branchLoading || (!adminMode && !hasBranch)}
                 >
                   {isHoldingSale ? "…" : "Hold"}
                 </Button>
@@ -4206,7 +4239,7 @@ export function NewSale() {
               <Button
                 size="lg"
                 onClick={() => startPayment("Cash")}
-                disabled={paymentLoading || branchLoading || !hasBranch}
+                disabled={paymentLoading || branchLoading || (!adminMode && !hasBranch)}
                 className="h-10 text-sm font-semibold sm:h-11"
               >
                 <DollarSign className="mr-2 h-4 w-4" />
@@ -4216,7 +4249,7 @@ export function NewSale() {
                 size="lg"
                 variant="outline"
                 onClick={() => startPayment("Card")}
-                disabled={paymentLoading || branchLoading || !hasBranch}
+                disabled={paymentLoading || branchLoading || (!adminMode && !hasBranch)}
                 className="h-10 text-sm font-semibold sm:h-11"
               >
                 <CreditCard className="mr-2 h-4 w-4" />
@@ -4241,6 +4274,15 @@ export function NewSale() {
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
+            <div
+              className={cn(
+                "flex items-center justify-between rounded-lg border px-3 py-2 text-sm",
+                adminMode ? "border-blue-200 bg-blue-50 text-blue-900" : "border-slate-200 bg-white text-slate-700"
+              )}
+            >
+              <span>Recorded in branch</span>
+              <span className="font-semibold">{branchInfo.name || "—"}</span>
+            </div>
             <div className="rounded-lg bg-slate-50 p-3 text-sm">
               <div className="flex items-center justify-between text-gray-600">
                 <span>Payable Amount</span>

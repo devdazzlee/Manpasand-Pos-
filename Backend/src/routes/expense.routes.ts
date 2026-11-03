@@ -34,6 +34,8 @@ import {
     updateRecurringExpenseSchema,
 } from '../validations/expense.validation';
 import { validate } from '../middleware/validation.middleware';
+import { branchOwnershipParam } from '../middleware/branch-ownership.middleware';
+import { prisma } from '../prisma/client';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
@@ -66,6 +68,14 @@ router.delete('/recurring/:id', canConfigure, validate(idParamSchema), deleteRec
 /* expenses */
 router.get('/', validate(listExpensesSchema), listExpenses);
 router.post('/', validate(createExpenseSchema), createExpense);
+// A branch user may only open / edit / delete expenses of their own branch.
+// (Category / recurring ids don't match an expense and pass straight through.)
+router.param(
+  'id',
+  branchOwnershipParam((id) =>
+    prisma.expense.findUnique({ where: { id }, select: { branch_id: true } }).then((e) => e && [e.branch_id]),
+  ),
+);
 router.get('/:id', validate(idParamSchema), getExpense);
 router.patch('/:id', validate(updateExpenseSchema), updateExpense);
 router.delete('/:id', validate(idParamSchema), deleteExpense);

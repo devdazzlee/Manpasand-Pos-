@@ -2,6 +2,8 @@ import { Request, Router } from "express";
 import { requirePermission } from "../middleware/permission.middleware";
 import { authenticate, authorize } from "../middleware/auth.middleware";
 import { validate } from "../middleware/validation.middleware";
+import { branchOwnershipParam } from '../middleware/branch-ownership.middleware';
+import { prisma } from '../prisma/client';
 import {
     getSalesController,
     getSalesForReturnsController,
@@ -58,6 +60,13 @@ const saleCheckoutPermissions = async (req: Request) => {
     return keys;
 };
 
+// A branch user may only open / refund / void / edit sales of their own branch.
+router.param(
+  "saleId",
+  branchOwnershipParam((id) =>
+    prisma.sale.findUnique({ where: { id }, select: { branch_id: true } }).then((s) => s && [s.branch_id]),
+  ),
+);
 router.use(authenticate);
 router.use("/hold", authorize(holdSaleRoles));
 

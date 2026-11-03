@@ -24,3 +24,22 @@ export async function assertCashRegisterOpenForSale(branchId: string): Promise<v
     );
   }
 }
+
+/**
+ * Warehouses store stock and transfer it to shops; they don't bill customers.
+ * New sales (and held bills) are only allowed at active shop branches.
+ * Returns / exchanges of older warehouse sales are not blocked, so history
+ * can still be corrected.
+ */
+export function assertBranchCanSell(branch: {
+  name: string;
+  branch_type?: string | null;
+  is_active?: boolean | null;
+}): void {
+  if (branch.branch_type === 'WAREHOUSE') {
+    throw new AppError(400, `${branch.name} is a warehouse — sales can only be made at a shop branch.`);
+  }
+  if (branch.is_active === false) {
+    throw new AppError(400, `${branch.name} is inactive — reactivate it before billing.`);
+  }
+}

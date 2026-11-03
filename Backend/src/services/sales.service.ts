@@ -1,7 +1,7 @@
 import { PaymentMethod, PaymentStatus, Prisma, SaleItemType, SaleStatus, StockMovementType } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
-import { assertCashRegisterOpenForSale } from '../utils/register-sale-guard';
+import { assertBranchCanSell, assertCashRegisterOpenForSale } from '../utils/register-sale-guard';
 import { ALLOW_NEGATIVE_STOCK_SALE } from '../config/pos-rules';
 import { businessDayRange, businessTodayYmd, businessTodayRange, toBusinessYmd } from '../utils/timezone';
 import { allocateSaleNumber } from '../utils/saleNumber';
@@ -963,6 +963,7 @@ class SaleService {
     if (!branch) {
       throw new AppError(400, 'Invalid branch');
     }
+    assertBranchCanSell(branch);
     await assertCashRegisterOpenForSale(branchId);
 
     const normalizedItems = items.map((item) => ({
@@ -1146,6 +1147,7 @@ class SaleService {
     ]);
     if (customerId && !customer) throw new AppError(400, 'Invalid customer');
     if (!branch) throw new AppError(400, 'Invalid branch');
+    assertBranchCanSell(branch);
     if (!items.length) throw new AppError(400, 'No items provided');
     await assertCashRegisterOpenForSale(branchId);
     if (salespersonId) {

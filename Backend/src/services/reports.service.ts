@@ -19,8 +19,14 @@ export type ReportsQuery = {
 export class ReportsService {
   private saleScope(q: ReportsQuery): Prisma.SaleWhereInput {
     const where: Prisma.SaleWhereInput = { status: SOLD };
-    if (q.userRole !== 'ADMIN' && q.userRole !== 'SUPER_ADMIN' && q.branchId) {
+    const isAdmin = q.userRole === 'ADMIN' || q.userRole === 'SUPER_ADMIN';
+    if (q.branchId) {
+      // The controller already pins non-admins to their own branch; an admin
+      // who picked a branch gets that branch, not the whole business.
       where.branch_id = q.branchId;
+    } else if (!isAdmin) {
+      // A branch user with no branch assigned must see nothing, never everything.
+      where.branch_id = '__no_branch__';
     }
     if (q.from && q.to) {
       const { start, end } = localRange(q.from, q.to);

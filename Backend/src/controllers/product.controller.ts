@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { ProductService } from '../services/product.service';
 import { ReportsService } from '../services/reports.service';
+import { businessTodayYmd, shiftBusinessYmd } from '../utils/timezone';
 import { ApiResponse } from '../utils/apiResponse';
 import asyncHandler from '../middleware/asyncHandler';
 import { resolveBranchId } from '../utils/resolveBranchId';
@@ -367,13 +368,24 @@ export const getFeaturedProducts = asyncHandler(async (req: Request, res: Respon
     new ApiResponse(featuredProducts, 'Featured products retrieved successfully', 200).send(res);
 });
 
+/** Ranking window for best sellers, in business-timezone days (null = all time). */
+const BEST_SELLING_PERIODS: Record<string, number | null> = { today: 0, '7d': 6, '30d': 29, all: null };
+
 export const getBestSellingProducts = asyncHandler(async (req: Request, res: Response) => {
     const branchId = resolveBranchId(req);
     const limit = req.query.limit ? Number(req.query.limit) : 10;
+    // ?period=today|7d|30d|all (default 30d). Ranking all-time history makes
+    // a long-gone bestseller outrank what is actually selling now.
+    const requested = String(req.query.period || '30d');
+    const period = requested in BEST_SELLING_PERIODS ? requested : '30d';
+    const back = BEST_SELLING_PERIODS[period];
+    const to = businessTodayYmd();
+    const from = back === null ? undefined : shiftBusinessYmd(to, -back);
     const bestSellingProducts = await reportsService.getBestSellingProducts({
         branchId,
         userRole: req.user?.role,
         limit,
+        ...(from ? { from, to } : {}),
     });
     new ApiResponse(bestSellingProducts, 'Best selling products retrieved successfully', 200).send(res);
 });

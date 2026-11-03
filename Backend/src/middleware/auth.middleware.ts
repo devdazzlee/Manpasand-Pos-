@@ -49,6 +49,41 @@ const viewerMayRead = (req: Request) => {
 };
 const viewerAllowed = (req: Request) => viewerMayRead(req) || VIEWER_WRITE_PATHS.includes(apiPath(req));
 
+/**
+ * Roles that work inside exactly one branch. For these users the branch is a
+ * property of the account, never of the request: whatever branch the browser
+ * sends (a stale localStorage value, a shared PC an admin used earlier, a
+ * tampered request) is replaced with the user's own branch. Admins, warehouse
+ * and purchase managers legitimately work across branches and are not locked.
+ */
+const BRANCH_LOCKED_ROLES = new Set(['BRANCH_MANAGER', 'SUPERVISOR', 'CASHIER']);
+const BRANCH_PARAM_KEYS = ['branchId', 'branch_id'] as const;
+
+export const isBranchLockedRole = (role?: string | null) => !!role && BRANCH_LOCKED_ROLES.has(role);
+
+/**
+ * Pin a branch-bound request to the user's branch.
+ * - Query: always set, even when the client omitted it. Many list endpoints
+ *   treat "no branch filter" as "all branches", so an omitted param must never
+ *   widen a branch user's view.
+ * - Body: overwritten only when present (injecting unknown keys into write
+ *   payloads could change their meaning).
+ */
+const lockRequestToBranch = (req: Request, branchId: string) => {
+  const query = req.query as Record<string, unknown>;
+  for (const key of BRANCH_PARAM_KEYS) query[key] = branchId;
+
+  const body = req.body as Record<string, unknown> | undefined;
+  if (body && typeof body === 'object' && !Array.isArray(body)) {
+    for (const key of BRANCH_PARAM_KEYS) {
+      if (key in body) body[key] = branchId;
+    }
+  }
+};
+
+/** Paths a branch user without an assigned branch may still use (sign in/out, own profile). */
+const UNASSIGNED_ALLOWED_PREFIX = '/auth/';
+
 const authenticate = async (req: Request, res: Response, next: NextFunction) => {
   try {
     const token = req.headers.authorization?.split(' ')[1];
@@ -88,6 +123,15 @@ const authenticate = async (req: Request, res: Response, next: NextFunction) => 
     };
     if (userExists.role === 'INVENTORY_VIEWER' && !viewerAllowed(req)) {
       throw new AppError(403, 'This account is view-only (products and stock)');
+    }
+    if (isBranchLockedRole(userExists.role)) {
+      if (userExists.branch_id) {
+        lockRequestToBranch(req, userExists.branch_id);
+      } else if (!`${apiPath(req)}/`.startsWith(UNASSIGNED_ALLOWED_PREFIX)) {
+        // Fail closed: services read "no branch" as "every branch", so a branch
+        // account with no branch must not reach any data endpoint at all.
+        throw new AppError(403, 'Your account is not assigned to a branch. Ask the owner to assign one.');
+      }
     }
     next();
   } catch (error) {
