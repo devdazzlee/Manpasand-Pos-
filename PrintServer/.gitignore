@@ -9,4 +9,4 @@ node_modules
 daemon/*.log
 daemon/*.xml
 daemon/*.exe
-daemon/*.exe.config
+daemon/*.exe.config.npm-cache

@@ -292,7 +292,17 @@ async function main() {
   log(`Folder: ${ROOT}\n`);
 
   log('[STEP 1] npm install...');
-  run('npm install');
+  try {
+    run('npm install');
+  } catch {
+    // The user's npm cache is often locked (antivirus / another npm). Retry with a
+    // fresh cache inside this folder so the setup does not depend on it.
+    log('\n[RETRY] npm cache was busy - trying again with a fresh cache...');
+    const cache = path.join(ROOT, '.npm-cache');
+    sleep(3000);
+    run(`npm install --cache "${cache}" --prefer-online`);
+    try { fs.rmSync(cache, { recursive: true, force: true }); } catch {}
+  }
   log('[OK]\n');
   buildRawPrintHelper();
 
