@@ -63,7 +63,10 @@ router.post('/upload-image', authenticate, productWriters, upload.single('image'
 router.post('/bulk-upload', authenticate, productWriters, uploadBulk.single('file'), bulkUploadProducts);
 router.post('/import-row', authenticate, productWriters, importProductRow);
 router.delete('/all', authenticate, authorize(['SUPER_ADMIN']), deleteAllProducts);
-router.get('/', validate(listProductsSchema), listProducts);
+// Every POS product route needs a staff login: these responses carry purchase
+// prices, stock and supplier data. The website / customer app read the catalog
+// through /web and /customer/app, which serve a public (cost-free) view.
+router.get('/', authenticate, validate(listProductsSchema), listProducts);
 router.get('/pos-catalog', authenticate, getPosCatalog);
 // Options for the report filter bar, readable by every signed-in role.
 router.get(
@@ -104,12 +107,12 @@ router.get(
     new ApiResponse(await barcodeAvailability(code, excludeId), 'Barcode availability').send(res);
   }),
 );
-router.get('/export/excel', exportProductsToExcel);
-router.get('/featured', getFeaturedProducts);
+router.get('/export/excel', authenticate, exportProductsToExcel);
+router.get('/featured', authenticate, getFeaturedProducts);
 router.get('/best-selling', authenticate, getBestSellingProducts);
-router.get('/:id/cost-history', validate(getProductSchema), getProductCostHistory);
-router.get('/:id/price-history', validate(getProductSchema), getProductPriceHistory);
-router.get('/:id', validate(getProductSchema), getProduct);
+router.get('/:id/cost-history', authenticate, validate(getProductSchema), getProductCostHistory);
+router.get('/:id/price-history', authenticate, validate(getProductSchema), getProductPriceHistory);
+router.get('/:id', authenticate, validate(getProductSchema), getProduct);
 router.patch('/:id', authenticate, productWriters, validate(updateProductSchema), requirePermission(priceChangeCheck), updateProduct);
 router.patch('/:id/toggle-status', authenticate, productWriters, validate(getProductSchema), toggleProductStatus);
 router.delete('/:id', authenticate, authorize(['SUPER_ADMIN', 'ADMIN']), validate(getProductSchema), deleteProduct);
