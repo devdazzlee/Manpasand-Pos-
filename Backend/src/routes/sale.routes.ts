@@ -88,6 +88,8 @@ router.post("/", validate(createSaleSchema), requirePermission(saleCheckoutPermi
 router.patch("/:saleId/refund", validate(refundSaleSchema), requirePermission("sales.refund"), refundSaleController);
 router.patch("/:saleId/cancel", requirePermission("sales.void"), cancelSaleController);
 router.patch("/:saleId", requirePermission("sales.edit"), updateSaleController);
-router.delete("/:saleId", requirePermission("sales.delete", { approvable: false }), deleteSaleController);
+// Deleting a bill needs "Delete bills" permission, or approval from someone who has it
+// (owner / admin login typed into the manager-approval popup). Logged in the audit trail.
+router.delete("/:saleId", requirePermission("sales.delete"), deleteSaleController);
 
 export default router;
