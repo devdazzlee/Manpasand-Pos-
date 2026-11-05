@@ -442,15 +442,6 @@ export function StockInExportDialog({
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Branch</Label>
-              <SearchableSelect
-                value={branchId}
-                onValueChange={setBranchId}
-                options={[{ value: "all", label: "All branches" }, ...branches.map((b) => ({ value: b.id, label: b.name }))]}
-                placeholder="All branches"
-              />
-            </div>
-            <div className="space-y-1.5">
               <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Payment</Label>
               <Select value={paymentMode} onValueChange={(v) => setPaymentMode(v as PaymentFilter)}>
                 <SelectTrigger className="h-10 bg-white">

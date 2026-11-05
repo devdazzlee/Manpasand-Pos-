@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
+import { getBranchScope } from "@/lib/branch-scope";
 import { format } from "date-fns";
 import {
   BookOpenText,
@@ -81,7 +82,7 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
   const [tab, setTab] = useState<Tab>(start.tab);
   const [reportView, setReportView] = useState<ReportView>(start.report ?? "balance");
   const [preset, setPreset] = useState<Preset>("thisMonth");
-  const [filters, setFilters] = useState<CoaFilters>({ from: initial.from, to: initial.to, branchId: "all" });
+  const [filters, setFilters] = useState<CoaFilters>({ from: initial.from, to: initial.to, branchId: getBranchScope() ?? "all" }); // branch = header switcher
   const [draft, setDraft] = useState({ from: initial.from, to: initial.to });
   const [customOpen, setCustomOpen] = useState(false);
   const [tree, setTree] = useState<CoaTree | null>(null);
@@ -288,24 +289,6 @@ export function ChartOfAccounts({ initialTab = "overview", onNavigate }: { initi
             </div>
             <span className={cn("whitespace-nowrap text-xs font-medium transition-colors", refreshing ? "text-gray-400" : "text-gray-600")}>{periodLabel}</span>
           </div>
-          {(tree?.branches.length ?? 0) > 1 && (
-            <div className="flex items-center gap-2 md:ml-auto">
-              <Building2 className="h-4 w-4 text-gray-400" />
-              <Select value={filters.branchId} onValueChange={(v) => setFilters((f) => ({ ...f, branchId: v }))}>
-                <SelectTrigger className="h-8 w-[200px] rounded-lg text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All branches</SelectItem>
-                  {(tree?.branches || []).map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          )}
         </div>
 
         {/* tabs */}

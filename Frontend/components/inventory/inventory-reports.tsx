@@ -1009,22 +1009,6 @@ export function InventoryReports() {
                 ) : null}
               </div>
             </div>
-            <div className="space-y-1.5">
-              <Label className={filterLabel}>Branch</Label>
-              <Select value={filterBranch} onValueChange={setFilterBranch}>
-                <SelectTrigger className={filterControl}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All branches</SelectItem>
-                  {branches.map((x) => (
-                    <SelectItem key={x.id} value={x.id}>
-                      {x.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
             {active.dates
               ? (
                   [

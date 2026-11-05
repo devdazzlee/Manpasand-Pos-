@@ -372,19 +372,6 @@ export function StockInBillsTab({
                 ))}
               </SelectContent>
             </Select>
-            <Select value={filterBranch} onValueChange={setFilterBranch}>
-              <SelectTrigger className="h-9 text-sm">
-                <SelectValue placeholder="Branch" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All branches</SelectItem>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
             <Button
               type="button"
               variant="outline"

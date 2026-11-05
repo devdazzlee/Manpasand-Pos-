@@ -587,24 +587,6 @@ export function StockQuantityReport() {
                 ))}
               </div>
             </div>
-            {isAdmin ? (
-              <div className="space-y-1.5">
-                <Label className={filterLabelCls}>Location</Label>
-                <Select value={branchId} onValueChange={setBranchId}>
-                  <SelectTrigger className={filterControl}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All locations</SelectItem>
-                    {(report?.branches || []).map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
           </div>
 
           <CatalogFilterBar

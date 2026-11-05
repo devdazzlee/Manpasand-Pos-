@@ -326,19 +326,11 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
     setCurrentPage(1);
   };
 
+  // A location card drives the header branch switcher (one branch control for
+  // the whole back office). Clicking the active card again goes back to all.
   const selectLocation = (branchId: string) => {
-    const branch = branches.find((b) => b.id === branchId);
-    const isWarehouse = (branch?.branch_type || "").toUpperCase() === "WAREHOUSE";
-    if (activeLocationId === branchId) {
-      setBranchFilter(ALL_BRANCHES);
-      setWarehouseFilter(ALL_WAREHOUSES);
-    } else if (isWarehouse) {
-      setWarehouseFilter(branchId);
-      setBranchFilter(ALL_BRANCHES);
-    } else {
-      setBranchFilter(branchId);
-      setWarehouseFilter(ALL_WAREHOUSES);
-    }
+    setBranchFilter(activeLocationId === branchId ? ALL_BRANCHES : branchId);
+    setWarehouseFilter(ALL_WAREHOUSES);
     setCurrentPage(1);
   };
 
@@ -917,35 +909,6 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
                 }}
                 className={cn(filterControlCls, "font-mono")}
               />
-            </div>
-            <div className="space-y-1.5">
-              <Label className={filterLabelCls}>Location</Label>
-              <Select value={activeLocationId || ALL_BRANCHES} onValueChange={setLocation}>
-                <SelectTrigger className={filterControlCls}>
-                  <SelectValue placeholder="All locations" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_BRANCHES}>All locations</SelectItem>
-                  {branches.filter((b) => (b.branch_type || "").toUpperCase() !== "WAREHOUSE").length > 0 ? (
-                    <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Branches</div>
-                  ) : null}
-                  {branches
-                    .filter((b) => (b.branch_type || "").toUpperCase() !== "WAREHOUSE")
-                    .map((b) => (
-                      <SelectItem key={b.id} value={b.id}>
-                        {b.name}
-                      </SelectItem>
-                    ))}
-                  {warehouses.length > 0 ? (
-                    <div className="px-2 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-wider text-slate-400">Warehouses</div>
-                  ) : null}
-                  {warehouses.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
             </div>
             <div className="space-y-1.5">
               <Label className={filterLabelCls}>Brand</Label>

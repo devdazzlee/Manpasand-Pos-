@@ -197,21 +197,6 @@ export function InsightsHub() {
             {current && (current.period || (current.branch && isAdmin && branches.length > 1)) && (
               <Toolbar>
                 {current.period && <PeriodPicker value={period} onChange={setPeriod} />}
-                {current.branch && isAdmin && branches.length > 1 && (
-                  <Select value={branchId} onValueChange={setBranchId}>
-                    <SelectTrigger className="h-9 w-48 bg-white">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="all">All branches</SelectItem>
-                      {branches.map((b) => (
-                        <SelectItem key={b.id} value={b.id}>
-                          {b.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                )}
               </Toolbar>
             )}
 

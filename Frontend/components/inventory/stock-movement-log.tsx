@@ -541,30 +541,6 @@ export function StockMovementLog() {
             </Select>
           </div>
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-medium text-gray-500">Branch</Label>
-            <Select
-              value={filterBranch}
-              onValueChange={(v) => {
-                setFilterBranch(v);
-                setPage(1);
-              }}
-            >
-              <SelectTrigger className="h-10 text-sm text-black">
-                <SelectValue placeholder="All branches" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all" className="text-sm">
-                  All branches
-                </SelectItem>
-                {branches.map((b) => (
-                  <SelectItem key={b.id} value={b.id} className="text-sm">
-                    {b.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
 
           <div
             className="space-y-1.5 sm:col-span-2 xl:col-span-2 relative"

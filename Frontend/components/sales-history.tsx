@@ -1401,28 +1401,6 @@ export function SalesHistory() {
                   </Select>
                 </div>
 
-                {isAdmin && (
-                  <div className="space-y-1.5">
-                    <Label className={filterLabelClass}>Branch</Label>
-                    {branchesLoading && branches.length === 0 ? (
-                      <Skeleton className="h-9 w-full rounded-md" />
-                    ) : (
-                      <Select value={branchFilter} onValueChange={setBranchFilter}>
-                        <SelectTrigger className={filterControlClass}>
-                          <SelectValue placeholder="Branch" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Branches</SelectItem>
-                          {branches.map((b) => (
-                            <SelectItem key={b.id} value={b.id}>
-                              {b.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    )}
-                  </div>
-                )}
               </div>
 
               {datePreset === "custom" && (

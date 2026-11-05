@@ -313,26 +313,6 @@ export function BalanceSheet() {
                 setPreset("custom");
               }}
             />
-            <div className="space-y-1">
-              <Label>Branch</Label>
-              {loading && !report ? (
-                <Skeleton className="h-9 w-full rounded-md" />
-              ) : (
-                <Select value={branchId} onValueChange={setBranchId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="All branches" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All branches</SelectItem>
-                    {(report?.branches || []).map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        {branch.name} ({branch.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              )}
-            </div>
           </>
         }
       />

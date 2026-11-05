@@ -539,22 +539,6 @@ export function InventoryAudit() {
           </div>
           <div className="grid grid-cols-1 gap-x-3 gap-y-4 border-t border-dashed border-indigo-200 pt-4 md:grid-cols-2 xl:grid-cols-4">
             <div className="space-y-1.5">
-              <Label className={filterLabel}>Branch</Label>
-              <Select value={filterBranch} onValueChange={setFilterBranch}>
-                <SelectTrigger className={filterControl}>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All branches</SelectItem>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
               <Label className={filterLabel}>Product</Label>
               <ReportItemCombobox
                 value={filterProduct}

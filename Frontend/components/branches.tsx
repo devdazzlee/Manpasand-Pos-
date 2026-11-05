@@ -503,7 +503,7 @@ export function Branches() {
             <SelectValue placeholder="Filter by status" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All Branches</SelectItem>
+            <SelectItem value="all">All statuses</SelectItem>
             <SelectItem value="active">Active Only</SelectItem>
             <SelectItem value="inactive">Inactive Only</SelectItem>
           </SelectContent>

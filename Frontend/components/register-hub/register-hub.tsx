@@ -958,21 +958,6 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
         </div>
         <Input type="date" value={from} max={to} onChange={(e) => setFrom(e.target.value)} className="h-9 w-40" />
         <Input type="date" value={to} min={from} onChange={(e) => setTo(e.target.value)} className="h-9 w-40" />
-        {branches.length > 1 && (
-          <Select value={branch} onValueChange={setBranch}>
-            <SelectTrigger className="h-9 w-44">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All branches</SelectItem>
-              {branches.map((b) => (
-                <SelectItem key={b.id} value={b.id}>
-                  {b.name}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
         <Select value={status} onValueChange={setStatus}>
           <SelectTrigger className="h-9 w-44">
             <SelectValue />

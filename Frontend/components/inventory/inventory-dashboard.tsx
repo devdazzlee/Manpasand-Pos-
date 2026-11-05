@@ -620,30 +620,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
             </span>
           ) : null}
         </div>
-        <div className="grid gap-4 border-t border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-indigo-50/30 px-4 py-4 sm:px-5 lg:grid-cols-[260px_minmax(0,1fr)] lg:items-end">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold text-indigo-900/80">Location</Label>
-            {canFilterBranches ? (
-              <Select value={selectedBranchId || "all"} disabled={refreshing} onValueChange={onBranchChange}>
-                <SelectTrigger className="h-10 border-indigo-200/80 bg-white shadow-sm">
-                  <SelectValue placeholder="All branches" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All branches</SelectItem>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            ) : (
-              <div className="flex h-10 items-center gap-2 rounded-md border border-indigo-200/80 bg-white px-3 text-sm text-slate-700 shadow-sm">
-                <MapPin className="h-4 w-4 text-indigo-500" />
-                <span className="truncate">{selectedBranchName}</span>
-              </div>
-            )}
-          </div>
+        <div className="grid gap-4 border-t border-indigo-100 bg-gradient-to-b from-indigo-50/80 to-indigo-50/30 px-4 py-4 sm:px-5">
           <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-6">
             {visibleActions.map((action) => {
               const Icon = action.icon;

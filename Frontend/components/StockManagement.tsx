@@ -1957,22 +1957,6 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
               <Input placeholder="Scan or type…" value={barcodeSearch} onChange={(e) => setBarcodeSearch(e.target.value)} className={cn(filterControlCls, "font-mono")} />
             </div>
             <div className="space-y-1.5">
-              <Label className={filterLabelCls}>Branch</Label>
-              <Select value={branchFilter} onValueChange={setBranchFilter}>
-                <SelectTrigger className={filterControlCls}>
-                  <SelectValue placeholder="All branches" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ALL_BRANCHES}>All branches</SelectItem>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
               <Label className={filterLabelCls}>Brand</Label>
               <Select value={brandFilter} onValueChange={setBrandFilter}>
                 <SelectTrigger className={filterControlCls}>

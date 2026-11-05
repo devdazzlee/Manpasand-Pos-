@@ -1018,28 +1018,6 @@ export function StockAdjustment() {
               </div>
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs font-semibold text-indigo-900/80">Branch</Label>
-              <Select
-                value={filterBranch}
-                onValueChange={(v) => {
-                  setFilterBranch(v);
-                  setPage(1);
-                }}
-              >
-                <SelectTrigger className="h-10 border-indigo-200/80 bg-white text-sm shadow-sm">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">All branches</SelectItem>
-                  {branches.map((b) => (
-                    <SelectItem key={b.id} value={b.id}>
-                      {b.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1.5">
               <Label className="text-xs font-semibold text-indigo-900/80">Reason</Label>
               <Select
                 value={filterCategory}

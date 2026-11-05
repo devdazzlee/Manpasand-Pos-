@@ -872,24 +872,6 @@ export function SalesReport() {
               </>
             )}
 
-            {isAdmin ? (
-              <div className="space-y-1.5">
-                <Label className={filterLabelClass}>Branch</Label>
-                <Select value={branchId} onValueChange={setBranchId}>
-                  <SelectTrigger className={filterControl}>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All branches</SelectItem>
-                    {(report?.branches || []).map((branch) => (
-                      <SelectItem key={branch.id} value={branch.id}>
-                        {branch.name} ({branch.code})
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            ) : null}
           </div>
 
           <CatalogFilterBar
