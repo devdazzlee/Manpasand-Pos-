@@ -67,6 +67,7 @@ import guestOrderRoutes from './routes/guestOrder.routes';
 import webRoutes from './routes/web.routes';
 import alfalahRoutes from './routes/alfalah.routes';
 import cron from 'node-cron';
+import { startRegisterScheduler } from './services/register-scheduler.service';
 import { UPLOADS_DIR } from './services/common/localImageService';
 
 const vAPI = process.env.vAPI || '/api/v1';
@@ -242,7 +243,13 @@ app.get('/', (req, res) => {
 app.use(errorHandler);
 app.use(notFoundHandler);
 
-// Remind about long-open registers — never auto-close (cashiers must close with a count).
+// Daily register cycle (Pakistan time): auto-close forgotten registers at 07:55,
+// auto-open every shop branch at 08:00. See register-scheduler.service.ts.
+if (!process.env.VERCEL) {
+  startRegisterScheduler();
+}
+
+// Remind about long-open registers.
 if (!process.env.VERCEL) {
   cron.schedule('0 * * * *', async () => {
     const cutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
