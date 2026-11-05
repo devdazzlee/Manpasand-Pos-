@@ -400,6 +400,22 @@ app.post('/print-receipt', async (req, res) => {
       });
     }
 
+    // "Default Printer" is only a placeholder shown when Windows printers could not be
+    // listed. Never send a job to it: look the printers up again and use the real one.
+    if (printer.name === 'Default Printer') {
+      const real = (await getAvailablePrinters()).filter((p) => p.name !== 'Default Printer');
+      const pick = real.find((p) => p.isDefault) || real[0];
+      if (!pick) {
+        return res.status(400).json({
+          success: false,
+          error:
+            'No receipt printer found in Windows. Install / switch on the receipt printer, then pick it in POS printer settings.',
+        });
+      }
+      console.log(`[print-receipt] "Default Printer" placeholder -> using "${pick.name}"`);
+      printer.name = pick.name;
+    }
+
     const copies = job?.copies ?? 1;
     // Use logoPath from receiptData if provided, otherwise use default
     const logoToUse = receiptData.logoPath || logoPath;
