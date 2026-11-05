@@ -1,6 +1,7 @@
 "use client";
 
 import React from "react";
+import { getHideCost } from "@/lib/role-utils";
 import { Package, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { StockStatusBadge } from "@/components/inventory/stock-ops/stock-status-badge";
@@ -52,6 +53,8 @@ export function StockRecordCard({
   onView,
   className,
 }: StockRecordCardProps) {
+  // Branch accounts never see purchase cost or stock value.
+  const hideCost = getHideCost();
   const avail = available ?? quantity - reserved;
   const isNegative = quantity < 0 || avail < 0;
   const meta = [branch, category].filter(Boolean).join(" | ");
@@ -131,6 +134,7 @@ export function StockRecordCard({
             </p>
           )}
         </div>
+        {!hideCost && (
         <div className="text-right">
           <p className="text-[10px] font-medium uppercase tracking-wide text-slate-400">
             Value
@@ -139,12 +143,13 @@ export function StockRecordCard({
             {fmtMoney(value ?? 0)}
           </p>
         </div>
+        )}
       </div>
 
       {/* Row 4: pricing footer */}
       <div className="mt-2 flex items-center justify-between gap-2 text-[11px] text-slate-500">
         <span className="truncate">
-          Cost {fmtMoney(cost)} / Sell {fmtMoney(sell)}
+          {hideCost ? `Sell ${fmtMoney(sell)}` : `Cost ${fmtMoney(cost)} / Sell ${fmtMoney(sell)}`}
         </span>
         {onView && (
           <span className="inline-flex items-center shrink-0 text-slate-600 font-medium">

@@ -82,7 +82,7 @@ import {
   getStockRowImage,
   yieldForUi,
 } from "@/components/inventory/stock-ops/export-utils";
-import { getInventoryReadOnly } from "@/lib/role-utils";
+import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils";
 import {
   CatalogFilterBar,
   EMPTY_CATALOG_FILTERS,
@@ -152,6 +152,8 @@ function DetailSection({
 
 export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   const readOnly = getInventoryReadOnly();
+  // Branch accounts never see purchase cost or cost-based stock value.
+  const hideCost = getHideCost();
   const {
     stats: dashboardStats,
     branchSummary,
@@ -351,7 +353,7 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
         s.branch?.name || "",
         qty - reserved,
         reserved,
-        qty * cost,
+        ...(hideCost ? [] : [qty * cost]),
         s.last_updated ? new Date(s.last_updated).toLocaleString() : "",
       ];
     });
@@ -363,7 +365,7 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
     "Branch",
     "Available",
     "Reserved",
-    "Inventory Value",
+    ...(hideCost ? [] : ["Inventory Value"]),
     "Last Updated",
   ];
 
@@ -409,7 +411,7 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
           s.product?.sku || "",
           s.branch?.name || "",
           formatQty(qty - reserved),
-          formatMoney(qty * cost),
+          ...(hideCost ? [] : [formatMoney(qty * cost)]),
         ];
       });
 
@@ -421,17 +423,14 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
         summary: [
           { label: "Records", value: stocks.length.toLocaleString() },
           { label: "Quantity", value: formatQty(stockMeta.totalQuantity) },
-          {
-            label: "Inventory Value",
-            value: formatMoney(stockMeta.totalInventoryValue),
-          },
+          ...(hideCost ? [] : [{ label: "Inventory Value", value: formatMoney(stockMeta.totalInventoryValue) }]),
         ],
         columns: [
           { header: "Product", width: 2.4 },
           { header: "SKU", width: 1.2 },
           { header: "Location", width: 1.4 },
           { header: "Available", align: "right", width: 1 },
-          { header: "Value", align: "right", width: 1.1 },
+          ...(hideCost ? [] : [{ header: "Value", align: "right" as const, width: 1.1 }]),
         ],
         rows: pdfRows,
       });
@@ -589,14 +588,18 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
       {/* Summary cards */}
       <div className="grid grid-cols-2 gap-3 md:gap-4 xl:grid-cols-4">
         {[
-          {
-            label: "Stock value (cost)",
-            value: `Rs ${formatMoney(stockMeta.totalInventoryValue)}`,
-            hint: activeLocationId ? activeLocationName : "All locations",
-            icon: Wallet,
-            tone: "bg-indigo-50 text-indigo-600",
-            accent: "bg-indigo-500",
-          },
+          ...(hideCost
+            ? []
+            : [
+                {
+                  label: "Stock value (cost)",
+                  value: `Rs ${formatMoney(stockMeta.totalInventoryValue)}`,
+                  hint: activeLocationId ? activeLocationName : "All locations",
+                  icon: Wallet,
+                  tone: "bg-indigo-50 text-indigo-600",
+                  accent: "bg-indigo-500",
+                },
+              ]),
           {
             label: "Retail value",
             value: `Rs ${formatMoney(activeLocationId ? Number(branchSummary.find((b) => b.branchId === activeLocationId)?.retail || 0) : retailTotal)}`,
@@ -755,10 +758,10 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
                   <div className="mt-3 flex items-end justify-between gap-2">
                     <div className="min-w-0">
                       <p className={cn("truncate text-lg font-semibold tabular-nums", Number(loc.value) < 0 ? "text-rose-600" : "text-slate-900")}>
-                        Rs {formatMoney(loc.value)}
+                        Rs {formatMoney(hideCost ? Number(loc.retail || 0) : loc.value)}
                       </p>
                       <p className="text-[11px] text-slate-500">
-                        cost · retail Rs {formatMoney(Number(loc.retail || 0))}
+                        {hideCost ? "retail value" : `cost · retail Rs ${formatMoney(Number(loc.retail || 0))}`}
                       </p>
                     </div>
                     <p className="shrink-0 text-right text-[11px] tabular-nums text-slate-400">{share.toFixed(0)}% of value</p>
@@ -808,7 +811,7 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
               <p className="truncate text-xs text-slate-500">
                 {!hasStockMeta && loading
                   ? "Loading totals…"
-                  : `${stockMeta.total.toLocaleString()} rows · ${formatQty(stockMeta.totalQuantity)} units · Rs ${formatMoney(stockMeta.totalInventoryValue)}`}
+                  : `${stockMeta.total.toLocaleString()} rows · ${formatQty(stockMeta.totalQuantity)} units${hideCost ? "" : ` · Rs ${formatMoney(stockMeta.totalInventoryValue)}`}`}
               </p>
             </div>
           </div>
@@ -1078,8 +1081,8 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
                         <TableHead className={thCls}>Location</TableHead>
                         <TableHead className={cn(thCls, "text-right")}>On hand</TableHead>
                         <TableHead className={cn(thCls, "w-32")}>Level</TableHead>
-                        <TableHead className={cn(thCls, "text-right")}>Cost / Sell</TableHead>
-                        <TableHead className={cn(thCls, "text-right")}>Value</TableHead>
+                        <TableHead className={cn(thCls, "text-right")}>{hideCost ? "Sell" : "Cost / Sell"}</TableHead>
+                        <TableHead className={cn(thCls, "text-right")}>{hideCost ? "Retail value" : "Value"}</TableHead>
                         <TableHead className={thCls}>Status</TableHead>
                         <TableHead className={cn(thCls, "pr-5 text-right")}>Updated</TableHead>
                       </TableRow>
@@ -1143,12 +1146,18 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
                               <p className="mt-1 text-[10px] text-slate-400">min {formatQty(minQty)}</p>
                             </TableCell>
                             <TableCell className="whitespace-nowrap px-2 py-3 text-right text-sm tabular-nums">
-                              <p className="text-slate-500">{formatMoney(cost)}</p>
+                              {!hideCost && <p className="text-slate-500">{formatMoney(cost)}</p>}
                               <p className="font-semibold text-slate-900">{sell ? formatMoney(sell) : EMPTY}</p>
                             </TableCell>
                             <TableCell className="whitespace-nowrap px-2 py-3 text-right text-sm tabular-nums">
-                              <p className="font-semibold text-slate-900">{formatMoney(qty * cost)}</p>
-                              {sell ? <p className="text-[10px] text-emerald-700">retail {formatMoney(Math.max(qty, 0) * sell)}</p> : null}
+                              {hideCost ? (
+                                <p className="font-semibold text-slate-900">{sell ? formatMoney(Math.max(qty, 0) * sell) : EMPTY}</p>
+                              ) : (
+                                <>
+                                  <p className="font-semibold text-slate-900">{formatMoney(qty * cost)}</p>
+                                  {sell ? <p className="text-[10px] text-emerald-700">retail {formatMoney(Math.max(qty, 0) * sell)}</p> : null}
+                                </>
+                              )}
                             </TableCell>
                             <TableCell className="px-2 py-3">
                               <StockStatusBadge qty={qty} minQty={minQty} />
@@ -1432,10 +1441,12 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
                 </DetailSection>
 
                 <DetailSection title="Pricing">
+                  {!hideCost && (
                   <DetailRow
                     label="Purchase rate"
                     value={formatMoney(detailProduct?.purchase_rate)}
                   />
+                  )}
                   <DetailRow
                     label="Sales rate (ex. tax)"
                     value={formatMoney(

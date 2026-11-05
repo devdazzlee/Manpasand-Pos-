@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { getInventoryReadOnly } from "@/lib/role-utils";
+import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -318,6 +318,8 @@ function datePresetRange(preset: DatePreset): [Date, Date] | null {
 export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   // Branch accounts: history only — no new receipts, edits or deletes.
   const readOnly = getInventoryReadOnly();
+  // Branch accounts see what was received (qty), never purchase cost or spend.
+  const hideCost = getHideCost();
   void onNavigate;
   const { stats: dashboardStats, loading: dashboardLoading } = useInventoryDashboard();
   const {
@@ -1457,10 +1459,12 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             Import products
           </Button>
 )}
+          {!hideCost && (
           <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => setExportOpen(true)}>
             <FileText className="mr-2 h-4 w-4 text-slate-600" />
             Export PDF / Excel
           </Button>
+          )}
           <StockInExportDialog
             open={exportOpen}
             onOpenChange={setExportOpen}
@@ -1550,18 +1554,24 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                 tone: "bg-sky-50 text-sky-600",
                 accent: "bg-sky-500",
               },
-              {
-                label: "Spend this month",
-                value: `Rs ${formatMoney(monthStats.totalValue)}`,
-                hint: `Stock value now Rs ${formatMoney(dashboardStats.totalInventoryValue)}`,
-                icon: DollarSign,
-                tone: "bg-indigo-50 text-indigo-600",
-                accent: "bg-indigo-500",
-              },
+              ...(hideCost
+                ? []
+                : [
+                    {
+                      label: "Spend this month",
+                      value: `Rs ${formatMoney(monthStats.totalValue)}`,
+                      hint: `Stock value now Rs ${formatMoney(dashboardStats.totalInventoryValue)}`,
+                      icon: DollarSign,
+                      tone: "bg-indigo-50 text-indigo-600",
+                      accent: "bg-indigo-500",
+                    },
+                  ]),
               {
                 label: activeHistoryFilterCount ? "Matching filters" : "All receipts",
                 value: total.toLocaleString(),
-                hint: `${formatQty(filteredTotals.quantity)} units · Rs ${formatMoney(filteredTotals.value)}`,
+                hint: hideCost
+                  ? `${formatQty(filteredTotals.quantity)} units`
+                  : `${formatQty(filteredTotals.quantity)} units · Rs ${formatMoney(filteredTotals.value)}`,
                 icon: FileText,
                 tone: "bg-amber-50 text-amber-600",
                 accent: "bg-amber-500",
@@ -1607,7 +1617,8 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                     ) : null}
                   </p>
                   <p className="truncate text-xs text-slate-500">
-                    {total.toLocaleString()} receipts · {formatQty(filteredTotals.quantity)} units · Rs {formatMoney(filteredTotals.value)}
+                    {total.toLocaleString()} receipts · {formatQty(filteredTotals.quantity)} units
+                    {hideCost ? null : <> · Rs {formatMoney(filteredTotals.value)}</>}
                   </p>
                 </div>
               </div>
@@ -1872,7 +1883,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                       <SelectValue />
                     </SelectTrigger>
                     <SelectContent>
-                      {SORT_OPTIONS.map((o) => (
+                      {SORT_OPTIONS.filter((o) => !(hideCost && o.id === "value")).map((o) => (
                         <SelectItem key={o.id} value={o.id} className="text-sm">
                           {o.label}
                         </SelectItem>
@@ -1983,12 +1994,14 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                             <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">
                               Qty
                             </TableHead>
+                            {!hideCost && (<>
                             <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">
                               {historyGroupMode === "bill" ? "Avg cost" : "Cost"}
                             </TableHead>
                             <TableHead className="text-xs font-semibold text-gray-600 text-right px-2">
                               Value
                             </TableHead>
+                            </>)}
                             <TableHead className="text-xs font-semibold text-gray-600 px-2">
                               Status
                             </TableHead>
@@ -2094,12 +2107,14 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                 <TableCell className="py-2.5 px-2 text-sm text-right tabular-nums text-gray-900">
                                   {formatQty(qty)}
                                 </TableCell>
+                                {!hideCost && (<>
                                 <TableCell className="py-2.5 px-2 text-sm text-right tabular-nums text-gray-700">
                                   {cost > 0 ? formatMoney(cost) : "—"}
                                 </TableCell>
                                 <TableCell className="py-2.5 px-2 text-sm text-right tabular-nums font-medium text-gray-900">
                                   {formatMoney(value)}
                                 </TableCell>
+                                </>)}
                                 <TableCell className="py-2.5 px-2">
                                   <span
                                     className={cn(
@@ -2225,8 +2240,8 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                             })}`}
                             title={gridTitle}
                             subtitle={gridSubtitle}
-                            amount={formatMoney(value)}
-                            amountLabel="Value"
+                            amount={hideCost ? undefined : formatMoney(value)}
+                            amountLabel={hideCost ? undefined : "Value"}
                             meta={
                               <div className="space-y-1">
                                 <p>
@@ -2257,12 +2272,12 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                             }
                             highlights={[
                               { label: "Qty", value: formatQty(qty) },
-                              { label: "Cost", value: formatMoney(cost) },
-                              {
-                                label: "Value",
-                                value: formatMoney(value),
-                                tone: "success",
-                              },
+                              ...(hideCost
+                                ? []
+                                : [
+                                    { label: "Cost", value: formatMoney(cost) },
+                                    { label: "Value", value: formatMoney(value), tone: "success" as const },
+                                  ]),
                             ]}
                             actions={
                               <div className="flex items-center gap-2">
@@ -3730,6 +3745,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                           {purchaseDetail.user?.email || "—"}
                         </p>
                       </div>
+                      {!hideCost && (
                       <div>
                         <p className="text-[11px] font-medium uppercase tracking-wide text-slate-400">
                           Bill total
@@ -3738,6 +3754,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                           Rs {formatMoney(billValue)}
                         </p>
                       </div>
+                      )}
                     </div>
                   </div>
 
@@ -3780,12 +3797,14 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                             <TableHead className="w-20 text-right text-xs font-semibold text-slate-600">
                               Qty
                             </TableHead>
+                            {!hideCost && (<>
                             <TableHead className="w-24 text-right text-xs font-semibold text-slate-600">
                               Cost
                             </TableHead>
                             <TableHead className="w-28 text-right text-xs font-semibold text-slate-600">
                               Total
                             </TableHead>
+                            </>)}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -3809,12 +3828,14 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                                 <TableCell className="text-right text-sm tabular-nums">
                                   {formatQty(lqty)}
                                 </TableCell>
+                                {!hideCost && (<>
                                 <TableCell className="text-right text-sm tabular-nums text-slate-700">
                                   {formatMoney(lcost)}
                                 </TableCell>
                                 <TableCell className="text-right text-sm font-semibold tabular-nums text-slate-900">
                                   {formatMoney(lqty * lcost)}
                                 </TableCell>
+                                </>)}
                               </TableRow>
                             );
                           })}
@@ -3826,6 +3847,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                         {formatQty(billQty)} units · {billLines.length} line
                         {billLines.length === 1 ? "" : "s"}
                       </span>
+                      {!hideCost && (
                       <div className="text-right">
                         <p className="text-[11px] uppercase tracking-wide text-slate-400">
                           Grand total
@@ -3834,6 +3856,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                           Rs {formatMoney(billValue)}
                         </p>
                       </div>
+                      )}
                     </div>
                   </div>
 

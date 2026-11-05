@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, type ComponentType } from "react";
-import { getInventoryReadOnly } from "@/lib/role-utils";
+import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -212,6 +212,8 @@ const normKey = (v: unknown) => String(v ?? "").trim().toLowerCase().replace(/\s
 export function StockAdjustment() {
   // Branch accounts: see adjustment history only.
   const readOnly = getInventoryReadOnly();
+  // Branch accounts see unit variances only; value impact is at purchase cost.
+  const hideCost = getHideCost();
   const logoDataUri = useLogoDataUri();
   const { products, categories, branches, productsLoading, branchesLoading, fetchProducts, fetchBranches } = usePosData();
 
@@ -708,7 +710,7 @@ export function StockAdjustment() {
       downloadExcel(
         `stock-adjustments-${format(new Date(), "yyyy-MM-dd")}.xlsx`,
         "Adjustments",
-        ["Date", "Reference", "Product", "SKU", "Branch", "Type", "Reason", "System qty", "New qty", "Variance", "Value impact", "Note", "By"],
+        ["Date", "Reference", "Product", "SKU", "Branch", "Type", "Reason", "System qty", "New qty", "Variance", ...(hideCost ? [] : ["Value impact"]), "Note", "By"],
         rows.map((a) => {
           const diff = Number(a.difference) || 0;
           const sys = Number(a.system_quantity) || 0;
@@ -723,7 +725,7 @@ export function StockAdjustment() {
             sys,
             sys + diff,
             diff,
-            diff * (Number(a.product?.purchase_rate) || 0),
+            ...(hideCost ? [] : [diff * (Number(a.product?.purchase_rate) || 0)]),
             a.reason || "",
             a.user?.email || "",
           ];
@@ -754,7 +756,7 @@ export function StockAdjustment() {
           { label: "Adjustments", value: summary.count.toLocaleString() },
           { label: "Units gained", value: `+${formatQty(summary.unitsGained)}` },
           { label: "Units lost", value: `-${formatQty(summary.unitsLost)}` },
-          { label: "Net value", value: signedMoney(summary.netValue) },
+          ...(hideCost ? [] : [{ label: "Net value", value: signedMoney(summary.netValue) }]),
         ],
         columns: [
           { header: "Date", width: 1 },
@@ -763,7 +765,7 @@ export function StockAdjustment() {
           { header: "Type", width: 1 },
           { header: "Reason", width: 1.2 },
           { header: "Variance", align: "right", width: 0.8 },
-          { header: "Value", align: "right", width: 1 },
+          ...(hideCost ? [] : [{ header: "Value", align: "right" as const, width: 1 }]),
         ],
         rows: rows.map((a) => {
           const diff = Number(a.difference) || 0;
@@ -774,7 +776,7 @@ export function StockAdjustment() {
             typeMeta(a.adjustment_type).label,
             categoryLabel(a.adjustment_category),
             signedQty(diff),
-            signedMoney(diff * (Number(a.product?.purchase_rate) || 0)),
+            ...(hideCost ? [] : [signedMoney(diff * (Number(a.product?.purchase_rate) || 0))]),
           ];
         }),
       });
@@ -875,15 +877,19 @@ export function StockAdjustment() {
             accent: "bg-rose-500",
             valueClass: "text-rose-700",
           },
-          {
-            label: "Net value impact",
-            value: signedMoney(summary.netValue),
-            hint: `Net ${signedQty(summary.netUnits)} units`,
-            icon: Wallet,
-            tone: summary.netValue < 0 ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600",
-            accent: summary.netValue < 0 ? "bg-rose-500" : "bg-emerald-500",
-            valueClass: summary.netValue < 0 ? "text-rose-700" : summary.netValue > 0 ? "text-emerald-700" : "text-slate-900",
-          },
+          ...(hideCost
+            ? []
+            : [
+                {
+                  label: "Net value impact",
+                  value: signedMoney(summary.netValue),
+                  hint: `Net ${signedQty(summary.netUnits)} units`,
+                  icon: Wallet,
+                  tone: summary.netValue < 0 ? "bg-rose-50 text-rose-600" : "bg-emerald-50 text-emerald-600",
+                  accent: summary.netValue < 0 ? "bg-rose-500" : "bg-emerald-500",
+                  valueClass: summary.netValue < 0 ? "text-rose-700" : summary.netValue > 0 ? "text-emerald-700" : "text-slate-900",
+                },
+              ]),
         ].map((card) => {
           const Icon = card.icon;
           return (
@@ -1149,7 +1155,7 @@ export function StockAdjustment() {
                     <TableHead>Type · reason</TableHead>
                     <TableHead className="text-right">Before → after</TableHead>
                     <TableHead className="text-right">Variance</TableHead>
-                    <TableHead className="text-right">Value</TableHead>
+                    {!hideCost && <TableHead className="text-right">Value</TableHead>}
                     <TableHead className="pr-5">By</TableHead>
                   </TableRow>
                 </TableHeader>
@@ -1194,9 +1200,11 @@ export function StockAdjustment() {
                         <TableCell className={cn("whitespace-nowrap py-3 text-right text-base font-semibold tabular-nums", diff > 0 ? "text-emerald-700" : diff < 0 ? "text-rose-700" : "text-slate-500")}>
                           {signedQty(diff)}
                         </TableCell>
+                        {!hideCost && (
                         <TableCell className={cn("whitespace-nowrap py-3 text-right text-sm tabular-nums", value > 0 ? "text-emerald-700" : value < 0 ? "text-rose-700" : "text-slate-400")}>
                           {value ? signedMoney(value) : "—"}
                         </TableCell>
+                        )}
                         <TableCell className="py-3 pr-5 text-xs text-slate-500">{a.user?.email?.split("@")[0] || "—"}</TableCell>
                       </TableRow>
                     );
@@ -1574,7 +1582,7 @@ export function StockAdjustment() {
                     <dl className="divide-y divide-slate-100 rounded-lg border border-slate-100">
                       {[
                         ["Reason", categoryLabel(detailRow.adjustment_category)],
-                        ["Value impact", cost ? signedMoney(diff * cost) : "—"],
+                        ...(hideCost ? [] : [["Value impact", cost ? signedMoney(diff * cost) : "—"]]),
                         ["Counted", detailRow.physical_count != null ? formatQty(Number(detailRow.physical_count)) : "—"],
                         ["Reference", detailRow.reference_no || "—"],
                         ["Recorded by", detailRow.user?.email || "—"],

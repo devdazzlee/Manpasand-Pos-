@@ -30,6 +30,16 @@ export const isReadOnlyRole = (role?: string | null) => role === "INVENTORY_VIEW
 export const isInventoryReadOnly = (role?: string | null) =>
   role === "INVENTORY_VIEWER" || role === "BRANCH_MANAGER" || role === "SUPERVISOR" || role === "CASHIER";
 
+/**
+ * Purchase price / cost / stock value are owner-level figures. Branch accounts
+ * never see them (the server strips them from responses too).
+ */
+export const isCostHidden = (role?: string | null) =>
+  role === "BRANCH_MANAGER" || role === "SUPERVISOR" || role === "CASHIER";
+
+export const getHideCost = () =>
+  typeof window !== "undefined" && isCostHidden(localStorage.getItem("role"));
+
 /** Read the signed-in role's inventory access (safe during SSR). */
 export const getInventoryReadOnly = () =>
   typeof window !== "undefined" && isInventoryReadOnly(localStorage.getItem("role"));

@@ -1,7 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getInventoryReadOnly } from "@/lib/role-utils";
+import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -319,6 +319,8 @@ interface Movement {
 export function StockManagement({ onNavigate }: StockManagementProps) {
   // Branch accounts: see stock, no operations (the server rejects them too).
   const readOnly = getInventoryReadOnly();
+  // Branch accounts never see purchase cost, margin or stock value.
+  const hideCost = getHideCost();
   const logoDataUri = useLogoDataUri();
 
   // Global store data — shared catalog across Stock In / Out / Management
@@ -743,6 +745,9 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     "Branch",
   ];
 
+  // "Cost Price" and "Inventory Value" columns — left out for branch accounts.
+  const EXPORT_COST_COLS = new Set([5, 10]);
+
   const handleExportExcel = async () => {
     if (allStocks.length === 0) {
       toast.error("Nothing to export");
@@ -754,8 +759,10 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
       downloadExcel(
         `inventory_export_${new Date().toISOString().split("T")[0]}.xlsx`,
         "Inventory",
-        exportHeaders,
-        buildExportRows(),
+        hideCost ? exportHeaders.filter((_, i) => !EXPORT_COST_COLS.has(i)) : exportHeaders,
+        hideCost
+          ? buildExportRows().map((r) => r.filter((_, i) => !EXPORT_COST_COLS.has(i)))
+          : buildExportRows(),
       );
       toast.success("Excel downloaded");
     } catch {
@@ -788,8 +795,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
           s.product?.sku || getProductBarcode(s.product) || "",
           s.branch?.name || "",
           formatQty(available),
-          formatMoney(cost),
-          formatMoney(qty * cost),
+          ...(hideCost ? [] : [formatMoney(cost), formatMoney(qty * cost)]),
         ];
       });
 
@@ -801,10 +807,9 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
         summary: [
           { label: "Records", value: totalStocks.toLocaleString() },
           { label: "Quantity", value: formatQty(stockMeta.totalQuantity || 0) },
-          {
-            label: "Inventory Value",
-            value: formatMoney(stockMeta.totalInventoryValue || 0),
-          },
+          ...(hideCost
+            ? []
+            : [{ label: "Inventory Value", value: formatMoney(stockMeta.totalInventoryValue || 0) }]),
           {
             label: "Low Stock",
             value: (stockMeta.lowStockCount || 0).toLocaleString(),
@@ -815,8 +820,12 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
           { header: "SKU", width: 1.1 },
           { header: "Branch", width: 1.3 },
           { header: "Available", align: "right", width: 0.9 },
-          { header: "Cost", align: "right", width: 0.9 },
-          { header: "Value", align: "right", width: 1 },
+          ...(hideCost
+            ? []
+            : [
+                { header: "Cost", align: "right" as const, width: 0.9 },
+                { header: "Value", align: "right" as const, width: 1 },
+              ]),
         ],
         rows: pdfRows,
       });
@@ -1709,7 +1718,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
 
 
       {/* Summary cards */}
-      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3 md:gap-4">
+      <div className={cn("grid grid-cols-1 gap-3 md:gap-4", hideCost ? "sm:grid-cols-2" : "sm:grid-cols-3")}>
         {[
           {
             label: "Products tracked",
@@ -1727,14 +1736,18 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
             tone: "bg-sky-50 text-sky-600",
             accent: "bg-sky-500",
           },
-          {
-            label: "Stock value (cost)",
-            value: `Rs ${formatMoney(stockMeta.totalInventoryValue || 0)}`,
-            hint: "Quantity × purchase rate",
-            icon: Wallet,
-            tone: "bg-emerald-50 text-emerald-600",
-            accent: "bg-emerald-500",
-          },
+          ...(hideCost
+            ? []
+            : [
+                {
+                  label: "Stock value (cost)",
+                  value: `Rs ${formatMoney(stockMeta.totalInventoryValue || 0)}`,
+                  hint: "Quantity × purchase rate",
+                  icon: Wallet,
+                  tone: "bg-emerald-50 text-emerald-600",
+                  accent: "bg-emerald-500",
+                },
+              ]),
         ].map((card) => {
           const Icon = card.icon;
           return (
@@ -2082,9 +2095,9 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                           <TableHead className={thCls}>Location</TableHead>
                           <TableHead className={cn(thCls, "text-right")}>On hand</TableHead>
                           <TableHead className={cn(thCls, "w-32")}>Level</TableHead>
-                          <TableHead className={cn(thCls, "text-right")}>Cost / Sell</TableHead>
-                          <TableHead className={cn(thCls, "text-right")}>Margin</TableHead>
-                          <TableHead className={cn(thCls, "text-right")}>Value</TableHead>
+                          <TableHead className={cn(thCls, "text-right")}>{hideCost ? "Sell" : "Cost / Sell"}</TableHead>
+                          {!hideCost && <TableHead className={cn(thCls, "text-right")}>Margin</TableHead>}
+                          {!hideCost && <TableHead className={cn(thCls, "text-right")}>Value</TableHead>}
                           <TableHead className={thCls}>Status</TableHead>
                           <TableHead className={cn(thCls, "pr-5 text-right")}>Actions</TableHead>
                         </TableRow>
@@ -2162,9 +2175,10 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                                 <p className="mt-1 text-[10px] text-slate-400">min {formatQty(minQty)}</p>
                               </TableCell>
                               <TableCell className="whitespace-nowrap px-2 py-3 text-right text-sm tabular-nums">
-                                <p className="text-slate-500">{formatMoney(cost)}</p>
+                                {!hideCost && <p className="text-slate-500">{formatMoney(cost)}</p>}
                                 <p className="font-semibold text-slate-900">{formatMoney(sell)}</p>
                               </TableCell>
+                              {!hideCost && (<>
                               <TableCell className="whitespace-nowrap px-2 py-3 text-right text-sm tabular-nums">
                                 {marginPct == null ? (
                                   <span className="text-slate-300">—</span>
@@ -2178,6 +2192,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                                 <p className="font-semibold text-slate-900">{formatMoney(qty * cost)}</p>
                                 <p className="text-[10px] text-emerald-700">retail {formatMoney(Math.max(qty, 0) * sell)}</p>
                               </TableCell>
+                              </>)}
                               <TableCell className="px-2 py-3">
                                 <Badge variant="outline" className={cn("whitespace-nowrap text-[10px] font-semibold", status.className)}>
                                   {status.label}
@@ -2604,10 +2619,12 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
                   label="Maximum stock"
                   value={formatQty(Number(viewProduct?.max_qty ?? 0))}
                 />
+                {!hideCost && (
                 <DetailRow
                   label="Purchase rate"
                   value={formatMoney(viewProduct?.purchase_rate)}
                 />
+                )}
                 <DetailRow
                   label="Sales rate"
                   value={formatMoney(

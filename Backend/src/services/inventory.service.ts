@@ -328,7 +328,7 @@ export class InventoryService {
         overstockRows.push({ ...base, maxQuantity: maxQty, excess: qty - maxQty, excessValue: round2((qty - maxQty) * cost) });
       }
       if (qty > 0 && !sold30ByRow.has(rowKey(s.product_id, s.branch_id))) {
-        deadRows.push({ ...base, value: round2(qty * cost) });
+        deadRows.push({ ...base, value: round2(qty * cost), retail: round2(positive * price) });
       }
     }
 

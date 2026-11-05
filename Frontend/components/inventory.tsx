@@ -100,7 +100,7 @@ import {
   sanitizeManualBarcodeValue,
   type LabelBarcodeMode,
 } from "@/lib/labelBarcode"
-import { getInventoryReadOnly } from "@/lib/role-utils"
+import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils"
 import {
   CatalogFilterBar,
   EMPTY_CATALOG_FILTERS,
@@ -1496,6 +1496,8 @@ export default function Inventory() {
   const [duplicatingFromName, setDuplicatingFromName] = useState<string | null>(null)
   // View-only accounts never get the add / edit / duplicate forms.
   const readOnly = getInventoryReadOnly()
+  // Branch accounts never see purchase prices.
+  const hideCost = getHideCost()
   // Custom-barcode helpers: hint under the field (duplicate) and "code already used" guard.
   const [barcodeHint, setBarcodeHint] = useState<string | null>(null)
   const [barcodeTaken, setBarcodeTaken] = useState(false)
@@ -3095,9 +3097,11 @@ export default function Inventory() {
                           <TableHead className="w-[10%] whitespace-nowrap px-3 text-right text-xs font-semibold text-gray-600">
                             Stock
                           </TableHead>
+                          {!hideCost && (
                           <TableHead className="w-[11%] px-3 text-right text-xs font-semibold text-gray-600">
                             Purchase
                           </TableHead>
+                          )}
                           <TableHead className="w-[11%] px-3 text-right text-xs font-semibold text-gray-600">
                             Sales
                           </TableHead>
@@ -3158,9 +3162,11 @@ export default function Inventory() {
                                   {stockTone.label}
                                 </p>
                               </TableCell>
+                              {!hideCost && (
                               <TableCell className="whitespace-nowrap px-3 py-2.5 text-right text-sm tabular-nums text-gray-800">
                                 {formatRs(product.purchase_rate)}
                               </TableCell>
+                              )}
                               <TableCell className="whitespace-nowrap px-3 py-2.5 text-right text-sm font-semibold tabular-nums text-blue-700">
                                 {formatRs(product.sales_rate_exc_dis_and_tax)}
                               </TableCell>
@@ -3218,17 +3224,19 @@ export default function Inventory() {
                               </p>
                             </div>
                           </div>
-                          <div className="grid grid-cols-3 gap-2 rounded-lg bg-slate-50 border border-slate-100 p-2.5">
+                          <div className={cn(hideCost ? "grid-cols-2" : "grid-cols-3", "grid gap-2 rounded-lg bg-slate-50 border border-slate-100 p-2.5")}>
                             <div>
                               <p className="text-[10px] uppercase text-gray-500 font-medium">Stock</p>
                               <p className={cn("text-sm font-bold tabular-nums", stockTone.valueClassName)}>
                                 {formatStockQty(stock)}
                               </p>
                             </div>
+                            {!hideCost && (
                             <div>
                               <p className="text-[10px] uppercase text-gray-500 font-medium">Purchase</p>
                               <p className="text-sm font-semibold tabular-nums">{formatRs(product.purchase_rate)}</p>
                             </div>
+                            )}
                             <div>
                               <p className="text-[10px] uppercase text-gray-500 font-medium">Sales</p>
                               <p className="text-sm font-semibold tabular-nums text-blue-700">
@@ -3303,19 +3311,21 @@ export default function Inventory() {
                             </Badge>
                           </div>
 
-                          <div className="mt-3 grid grid-cols-3 gap-2 rounded-lg bg-slate-50 border border-slate-100 p-2.5">
+                          <div className={cn(hideCost ? "grid-cols-2" : "grid-cols-3", "mt-3 grid gap-2 rounded-lg bg-slate-50 border border-slate-100 p-2.5")}>
                             <div>
                               <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Stock</p>
                               <p className={cn("mt-0.5 text-sm font-bold tabular-nums", stockTone.valueClassName)}>
                                 {formatStockQty(stock)}
                               </p>
                             </div>
+                            {!hideCost && (
                             <div>
                               <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Purchase</p>
                               <p className="mt-0.5 text-sm font-semibold tabular-nums text-gray-900">
                                 {formatRs(product.purchase_rate)}
                               </p>
                             </div>
+                            )}
                             <div>
                               <p className="text-[10px] font-medium uppercase tracking-wide text-gray-500">Sales</p>
                               <p className="mt-0.5 text-sm font-semibold tabular-nums text-blue-700">

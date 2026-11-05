@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, type ComponentType, type ReactNode } from "react";
+import { getHideCost } from "@/lib/role-utils";
 import { format } from "date-fns";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -133,6 +134,8 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
   const { toast } = useToast();
 
   const canFilterBranches = userRole ? BRANCH_FILTER_ROLES.has(userRole) : false;
+  // Branch accounts see quantities and retail value only, never cost or profit.
+  const hideCost = getHideCost();
 
   const visibleActions = useMemo(
     () => QUICK_ACTIONS.filter((a) => !a.roles || (userRole ? a.roles.includes(userRole) : false)),
@@ -267,10 +270,14 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
         ["Metric", "Value"],
         ["Scope", selectedBranchName],
         ["Generated", format(new Date(), "dd MMM yyyy HH:mm")],
-        ["Stock value (cost)", stats.positiveInventoryValue],
-        ["Retail value", i.retailValue],
-        ["Potential profit", i.potentialProfit],
-        ["Margin %", i.marginPct],
+        ...(hideCost
+          ? [["Retail value", i.retailValue] as (string | number)[]]
+          : [
+              ["Stock value (cost)", stats.positiveInventoryValue],
+              ["Retail value", i.retailValue],
+              ["Potential profit", i.potentialProfit],
+              ["Margin %", i.marginPct],
+            ]),
         ["Units on hand", stats.totalStockQuantity],
         ["Reserved units", i.reservedQuantity],
         ["Active SKUs", stats.totalSkus],
@@ -278,7 +285,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
         ["Low stock (locations)", stats.lowStockCount],
         ["Negative stock (locations)", stats.negativeStockCount],
         ["Dead stock (30d, locations)", i.deadStockCount],
-        ["Dead stock value", i.deadStockValue],
+        ...(hideCost ? [] : [["Dead stock value", i.deadStockValue] as (string | number)[]]),
         ["Overstock (locations)", i.overstockCount],
         ["Pending transfers", stats.pendingTransferCount],
         ["Units in (7d)", i.movementSummary.stockIn7],
@@ -304,13 +311,25 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
         ["Product", "SKU", "Branch", "On hand", "Value", "Last sale"],
         ...i.deadStockItems.map((r) => [r.name, r.sku, r.branch.name, r.quantity, r.value, r.lastSaleAt ? format(new Date(r.lastSaleAt), "dd MMM yyyy") : "Never"]),
       ]);
-      add("Overstock", [["Product", "SKU", "Branch", "On hand", "Max", "Excess", "Excess value"], ...i.overstockItems.map((r) => [r.name, r.sku, r.branch.name, r.quantity, r.maxQuantity, r.excess, r.excessValue])]);
-      add("Top value", [["Product", "SKU", "Category", "Qty", "Cost value", "Retail value"], ...i.topValueItems.map((r) => [r.name, r.sku, r.category, r.quantity, r.value, r.retail])]);
+      add("Overstock", hideCost
+        ? [["Product", "SKU", "Branch", "On hand", "Max", "Excess"], ...i.overstockItems.map((r) => [r.name, r.sku, r.branch.name, r.quantity, r.maxQuantity, r.excess])]
+        : [["Product", "SKU", "Branch", "On hand", "Max", "Excess", "Excess value"], ...i.overstockItems.map((r) => [r.name, r.sku, r.branch.name, r.quantity, r.maxQuantity, r.excess, r.excessValue])]);
+      add("Top value", hideCost
+        ? [["Product", "SKU", "Category", "Qty", "Retail value"], ...i.topValueItems.map((r) => [r.name, r.sku, r.category, r.quantity, r.retail])]
+        : [["Product", "SKU", "Category", "Qty", "Cost value", "Retail value"], ...i.topValueItems.map((r) => [r.name, r.sku, r.category, r.quantity, r.value, r.retail])]);
       add("By branch", [
-        ["Branch", "SKUs", "Units", "Cost value", "Retail value", "Low", "Out"],
-        ...stats.branchSummary.map((b) => [b.name, b.items, b.quantity ?? 0, b.value, b.retail ?? 0, b.lowCount ?? 0, b.outCount ?? 0]),
+        hideCost
+          ? ["Branch", "SKUs", "Units", "Retail value", "Low", "Out"]
+          : ["Branch", "SKUs", "Units", "Cost value", "Retail value", "Low", "Out"],
+        ...stats.branchSummary.map((b) =>
+          hideCost
+            ? [b.name, b.items, b.quantity ?? 0, b.retail ?? 0, b.lowCount ?? 0, b.outCount ?? 0]
+            : [b.name, b.items, b.quantity ?? 0, b.value, b.retail ?? 0, b.lowCount ?? 0, b.outCount ?? 0],
+        ),
       ]);
-      add("By category", [["Category", "SKUs in stock", "Units", "Cost value", "Retail value"], ...stats.categorySummary.map((c) => [c.name, c.items, c.quantity ?? 0, c.value, c.retail ?? 0])]);
+      add("By category", hideCost
+        ? [["Category", "SKUs in stock", "Units", "Retail value"], ...stats.categorySummary.map((c) => [c.name, c.items, c.quantity ?? 0, c.retail ?? 0])]
+        : [["Category", "SKUs in stock", "Units", "Cost value", "Retail value"], ...stats.categorySummary.map((c) => [c.name, c.items, c.quantity ?? 0, c.value, c.retail ?? 0])]);
       add("Daily flow", [["Date", "Units in", "Units out", "Units sold"], ...i.dailyTrend.map((d) => [d.date, d.stockIn, d.stockOut, d.sold])]);
       XLSX.writeFile(wb, `inventory-dashboard-${format(new Date(), "yyyy-MM-dd")}.xlsx`);
       toast({ title: "Export ready", description: "Inventory dashboard saved as Excel." });
@@ -334,7 +353,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
   const hasNegativeStock = (stats?.negativeStockCount ?? 0) > 0;
   const healthTone = healthScore >= 80 ? "emerald" : healthScore >= 50 ? "amber" : "rose";
 
-  const heroCards = [
+  const allHeroCards = [
     {
       label: "Stock value (cost)",
       value: compactRs(displayValue),
@@ -348,7 +367,9 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
       label: "Retail value",
       value: compactRs(ins?.retailValue ?? 0),
       exact: formatRs(ins?.retailValue ?? 0),
-      hint: `Potential profit ${compactRs(ins?.potentialProfit ?? 0)} · ${(ins?.marginPct ?? 0).toFixed(1)}% margin`,
+      hint: hideCost
+        ? "On-hand × selling price"
+        : `Potential profit ${compactRs(ins?.potentialProfit ?? 0)} · ${(ins?.marginPct ?? 0).toFixed(1)}% margin`,
       icon: PiggyBank,
       tone: "bg-emerald-50 text-emerald-600",
       accent: "bg-emerald-500",
@@ -373,6 +394,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
       progress: healthScore,
     },
   ];
+  const heroCards = hideCost ? allHeroCards.filter((c) => c.label !== "Stock value (cost)") : allHeroCards;
 
   const alertTiles: Array<{
     key: AttentionTab | "negative";
@@ -418,7 +440,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
       key: "dead",
       label: "Dead stock",
       value: formatQty(ins?.deadStockCount ?? 0),
-      hint: `${compactRs(ins?.deadStockValue ?? 0)} · no sale 30d`,
+      hint: hideCost ? "No sale in 30 days" : `${compactRs(ins?.deadStockValue ?? 0)} · no sale 30d`,
       icon: Moon,
       active: (ins?.deadStockCount ?? 0) > 0,
       tone: "slate",
@@ -828,9 +850,11 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
                   <span>
                     <strong className="tabular-nums text-slate-900">{formatQty(ins.deadStockCount)}</strong> locations with stock but no sale in 30 days
                   </span>
+                  {!hideCost && (
                   <span>
                     Tied-up value <strong className="tabular-nums text-slate-900">{formatRs(ins.deadStockValue)}</strong>
                   </span>
+                  )}
                   <span className="text-slate-400">Showing the 10 highest value</span>
                 </div>
                 <table className="w-full">
@@ -839,7 +863,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
                       <th className={th}>Product</th>
                       <th className={th}>Location</th>
                       <th className={cn(th, "text-right")}>On hand</th>
-                      <th className={cn(th, "text-right")}>Value</th>
+                      <th className={cn(th, "text-right")}>{hideCost ? "Retail value" : "Value"}</th>
                       <th className={cn(th, "text-right")}>Last sale</th>
                     </tr>
                   </thead>
@@ -874,7 +898,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
                     <th className={cn(th, "text-right")}>On hand</th>
                     <th className={cn(th, "text-right")}>Max</th>
                     <th className={cn(th, "text-right")}>Excess</th>
-                    <th className={cn(th, "text-right")}>Excess value</th>
+                    {!hideCost && <th className={cn(th, "text-right")}>Excess value</th>}
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
@@ -888,7 +912,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
                       <td className={cn(td, "text-right tabular-nums")}>{formatQty(r.quantity)}</td>
                       <td className={cn(td, "text-right tabular-nums text-slate-500")}>{formatQty(r.maxQuantity)}</td>
                       <td className={cn(td, "text-right font-semibold tabular-nums text-violet-700")}>+{formatQty(r.excess)}</td>
-                      <td className={cn(td, "whitespace-nowrap text-right tabular-nums")}>{formatRs(r.excessValue)}</td>
+                      {!hideCost && <td className={cn(td, "whitespace-nowrap text-right tabular-nums")}>{formatRs(r.excessValue)}</td>}
                     </tr>
                   ))}
                 </tbody>
@@ -1003,7 +1027,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
         </Card>
 
         <Card className="overflow-hidden rounded-xl border-slate-200 shadow-sm">
-          <PanelHeader icon={<Layers className="h-4 w-4" />} title="Value by category" description="Cost value of stock on hand, with retail value" />
+          <PanelHeader icon={<Layers className="h-4 w-4" />} title="Value by category" description={hideCost ? "Retail value of stock on hand" : "Cost value of stock on hand, with retail value"} />
           {refreshing ? (
             <ListSkeleton />
           ) : categoryChartData.length === 0 ? (
@@ -1059,7 +1083,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
                   <tr>
                     <th className={th}>Product</th>
                     <th className={cn(th, "text-right")}>Qty</th>
-                    <th className={cn(th, "text-right")}>Cost value</th>
+                    {!hideCost && <th className={cn(th, "text-right")}>Cost value</th>}
                     <th className={cn(th, "text-right")}>Retail</th>
                   </tr>
                 </thead>
@@ -1073,7 +1097,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
                         </p>
                       </td>
                       <td className={cn(td, "text-right tabular-nums text-slate-600")}>{formatQty(r.quantity)}</td>
-                      <td className={cn(td, "whitespace-nowrap text-right font-semibold tabular-nums text-slate-900")}>{formatRs(r.value)}</td>
+                      {!hideCost && <td className={cn(td, "whitespace-nowrap text-right font-semibold tabular-nums text-slate-900")}>{formatRs(r.value)}</td>}
                       <td className={cn(td, "whitespace-nowrap text-right tabular-nums text-emerald-700")}>{formatRs(r.retail)}</td>
                     </tr>
                   ))}
@@ -1135,7 +1159,9 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
             title="Purchases this month"
             description={`${formatQty(stats?.procurementHealth?.count || 0)} purchase records`}
             action={
-              <span className="text-base font-semibold tabular-nums text-slate-900">{formatRs(stats?.procurementHealth?.totalValue || 0)}</span>
+              hideCost ? undefined : (
+                <span className="text-base font-semibold tabular-nums text-slate-900">{formatRs(stats?.procurementHealth?.totalValue || 0)}</span>
+              )
             }
           />
           {refreshing ? (
@@ -1153,7 +1179,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
                   </div>
                   <div className="shrink-0 text-right">
                     <p className="text-sm font-semibold tabular-nums text-slate-900">{formatQty(p.quantity)} units</p>
-                    <p className="text-[11px] tabular-nums text-slate-500">@ {formatRs(p.costPrice)}</p>
+                    {!hideCost && <p className="text-[11px] tabular-nums text-slate-500">@ {formatRs(p.costPrice)}</p>}
                   </div>
                 </li>
               ))}

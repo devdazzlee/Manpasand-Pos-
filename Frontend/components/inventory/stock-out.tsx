@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
-import { getInventoryReadOnly } from "@/lib/role-utils";
+import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
@@ -190,6 +190,8 @@ function lineRate(row: MovementRow) {
 export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void }) {
   // Branch accounts: dispatch history only, no new dispatches.
   const readOnly = getInventoryReadOnly();
+  // Branch accounts see quantities only; dispatch rates are at purchase cost.
+  const hideCost = getHideCost();
   void onNavigate;
   const logoDataUri = useLogoDataUri();
   const {
@@ -399,8 +401,7 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
     "Branch",
     "Reason",
     "Qty removed",
-    "Rate",
-    "Value",
+    ...(hideCost ? [] : ["Rate", "Value"]),
     "Previous qty",
     "New qty",
     "Notes",
@@ -418,8 +419,7 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
         r.branch?.name || "",
         reasonLabel(r.movement_type),
         qty,
-        rate,
-        qty * rate,
+        ...(hideCost ? [] : [rate, qty * rate]),
         Number(r.previous_qty) || 0,
         Number(r.new_qty) || 0,
         r.notes || "",
@@ -466,8 +466,7 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
           r.branch?.name || "",
           reasonLabel(r.movement_type),
           formatQty(qty),
-          formatMoney(rate),
-          formatMoney(qty * rate),
+          ...(hideCost ? [] : [formatMoney(rate), formatMoney(qty * rate)]),
         ];
       });
 
@@ -482,7 +481,7 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
             label: "This month",
             value: monthStats.totalDispatches.toLocaleString(),
           },
-          { label: "Month value", value: formatMoney(monthStats.totalValue) },
+          ...(hideCost ? [] : [{ label: "Month value", value: formatMoney(monthStats.totalValue) }]),
         ],
         columns: [
           { header: "Date", width: 1.1 },
@@ -490,8 +489,12 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
           { header: "Branch", width: 1.3 },
           { header: "Reason", width: 1.4 },
           { header: "Qty", align: "right", width: 0.8 },
-          { header: "Rate", align: "right", width: 1 },
-          { header: "Value", align: "right", width: 1.1 },
+          ...(hideCost
+            ? []
+            : [
+                { header: "Rate", align: "right" as const, width: 1 },
+                { header: "Value", align: "right" as const, width: 1.1 },
+              ]),
         ],
         rows: pdfRows,
       });
@@ -882,18 +885,24 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                 tone: "bg-sky-50 text-sky-600",
                 accent: "bg-sky-500",
               },
-              {
-                label: "Value this month",
-                value: `Rs ${formatMoney(monthStats.totalValue)}`,
-                hint: "At recorded dispatch rates",
-                icon: DollarSign,
-                tone: "bg-indigo-50 text-indigo-600",
-                accent: "bg-indigo-500",
-              },
+              ...(hideCost
+                ? []
+                : [
+                    {
+                      label: "Value this month",
+                      value: `Rs ${formatMoney(monthStats.totalValue)}`,
+                      hint: "At recorded dispatch rates",
+                      icon: DollarSign,
+                      tone: "bg-indigo-50 text-indigo-600",
+                      accent: "bg-indigo-500",
+                    },
+                  ]),
               {
                 label: activeHistoryFilterCount ? "Matching filters" : "All dispatches",
                 value: total.toLocaleString(),
-                hint: `${formatQty(pageTotals.units)} units · Rs ${formatMoney(pageTotals.value)} on this page`,
+                hint: hideCost
+                  ? `${formatQty(pageTotals.units)} units on this page`
+                  : `${formatQty(pageTotals.units)} units · Rs ${formatMoney(pageTotals.value)} on this page`,
                 icon: FileText,
                 tone: "bg-amber-50 text-amber-600",
                 accent: "bg-amber-500",
@@ -951,8 +960,8 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                     ) : null}
                   </p>
                   <p className="truncate text-xs text-slate-500">
-                    {total.toLocaleString()} dispatches · {formatQty(pageTotals.units)} units · Rs{" "}
-                    {formatMoney(pageTotals.value)}
+                    {total.toLocaleString()} dispatches · {formatQty(pageTotals.units)} units
+                    {hideCost ? null : <> · Rs {formatMoney(pageTotals.value)}</>}
                   </p>
                 </div>
               </div>
@@ -1243,8 +1252,8 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                             <TableHead className="px-2">Branch</TableHead>
                             <TableHead className="px-2">Reason</TableHead>
                             <TableHead className="px-2 text-right">Qty</TableHead>
-                            <TableHead className="px-2 text-right">Rate</TableHead>
-                            <TableHead className="px-2 text-right">Value</TableHead>
+                            {!hideCost && <TableHead className="px-2 text-right">Rate</TableHead>}
+                            {!hideCost && <TableHead className="px-2 text-right">Value</TableHead>}
                             <TableHead className="pl-2 pr-3 text-right">Action</TableHead>
                           </TableRow>
                         </TableHeader>
@@ -1300,12 +1309,14 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                                 <TableCell className="px-2 py-2.5 text-right text-sm font-medium tabular-nums text-rose-600">
                                   −{formatQty(qty)}
                                 </TableCell>
+                                {!hideCost && (<>
                                 <TableCell className="px-2 py-2.5 text-right text-sm tabular-nums text-gray-700">
                                   {rate > 0 ? formatMoney(rate) : "—"}
                                 </TableCell>
                                 <TableCell className="px-2 py-2.5 text-right text-sm font-medium tabular-nums text-gray-900">
                                   {rate > 0 ? formatMoney(qty * rate) : "—"}
                                 </TableCell>
+                                </>)}
                                 <TableCell className="py-2.5 pl-2 pr-3 text-right">
                                   <Button
                                     variant="ghost"
@@ -1389,10 +1400,9 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
                                 value: `−${formatQty(qty)}`,
                                 tone: "danger",
                               },
-                              {
-                                label: "Rate",
-                                value: rate > 0 ? formatMoney(rate) : "—",
-                              },
+                              ...(hideCost
+                                ? []
+                                : [{ label: "Rate", value: rate > 0 ? formatMoney(rate) : "—" }]),
                               {
                                 label: "After",
                                 value: formatQty(Number(r.new_qty) || 0),

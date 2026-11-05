@@ -114,6 +114,8 @@ const BRANCH_DATA_ROLES: UserRole[] = [
  * branch by the server. (SUPERVISOR inherits BRANCH_MANAGER access.)
  */
 const withBranchView = (roles: UserRole[]): UserRole[] => [...roles, "BRANCH_MANAGER"];
+/** Business-wide accounting and finance reports: owner / admin only, never branches. */
+const OWNER_FINANCE_ROLES: UserRole[] = ["SUPER_ADMIN", "ADMIN"];
 const STAFF_ROLES: UserRole[] = [
   "SUPER_ADMIN",
   "ADMIN",
@@ -446,13 +448,13 @@ const menuSections: SidebarMenuSection[] = [
     label: "Accounts",
     expandable: true,
     items: [
-      { id: "chart-of-accounts", label: "Accounts Overview", icon: ListTree, roles: SALES_ROLES },
-      { id: "money-flow", label: "Money Flow", icon: Waves, roles: SALES_ROLES },
+      { id: "chart-of-accounts", label: "Accounts Overview", icon: ListTree, roles: OWNER_FINANCE_ROLES },
+      { id: "money-flow", label: "Money Flow", icon: Waves, roles: OWNER_FINANCE_ROLES },
       { id: "money-check", label: "Money Check", icon: ShieldCheck, roles: ADMIN_ROLES },
-      { id: "journal-vouchers", label: "Adjustments (Journal)", icon: NotebookPen, roles: SALES_ROLES },
-      { id: "expense-breakdown", label: "Expense Breakdown", icon: PieChart, roles: SALES_ROLES },
-      { id: "budgets", label: "Budgets", icon: Target, roles: SALES_ROLES },
-      { id: "close-books", label: "Close Books", icon: BookLock, roles: SALES_ROLES },
+      { id: "journal-vouchers", label: "Adjustments (Journal)", icon: NotebookPen, roles: OWNER_FINANCE_ROLES },
+      { id: "expense-breakdown", label: "Expense Breakdown", icon: PieChart, roles: OWNER_FINANCE_ROLES },
+      { id: "budgets", label: "Budgets", icon: Target, roles: OWNER_FINANCE_ROLES },
+      { id: "close-books", label: "Close Books", icon: BookLock, roles: OWNER_FINANCE_ROLES },
     ],
   },
   {
@@ -476,37 +478,37 @@ const menuSections: SidebarMenuSection[] = [
         id: "insights",
         label: "Business Insights",
         icon: Lightbulb,
-        roles: SALES_ROLES,
+        roles: OWNER_FINANCE_ROLES,
       },
       {
         id: "financial-statement",
         label: "Financial Statement",
         icon: Scale,
-        roles: SALES_ROLES,
+        roles: OWNER_FINANCE_ROLES,
       },
       {
         id: "profit-loss",
         label: "Profit & Loss",
         icon: LineChart,
-        roles: SALES_ROLES,
+        roles: OWNER_FINANCE_ROLES,
       },
       {
         id: "balance-sheet",
         label: "Balance Sheet",
         icon: Wallet,
-        roles: SALES_ROLES,
+        roles: OWNER_FINANCE_ROLES,
       },
       {
         id: "trial-balance",
         label: "Trial Balance",
         icon: BookOpen,
-        roles: SALES_ROLES,
+        roles: OWNER_FINANCE_ROLES,
       },
       {
         id: "product-sales-profit",
         label: "Product Sales & Profit",
         icon: Percent,
-        roles: SALES_ROLES,
+        roles: OWNER_FINANCE_ROLES,
       },
       // {
       //   id: "users",

@@ -2,11 +2,17 @@ import { Request, Response } from 'express';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { StockOutService } from '../services/stock-out.service';
+import { isBranchLockedRole } from '../middleware/auth.middleware';
 
 const stockOutService = new StockOutService();
 
 export const getMonthlyStats = asyncHandler(async (req: Request, res: Response) => {
   const stats = await stockOutService.getMonthlyStats(req.query.branchId as string | undefined);
+  // Value here is at purchase cost: branch accounts get quantities only.
+  if (isBranchLockedRole(req.user?.role)) {
+    const { totalValue: _cost, ...withoutCost } = stats as typeof stats & { totalValue?: number };
+    return new ApiResponse(withoutCost, 'Monthly stock-out stats retrieved').send(res);
+  }
   new ApiResponse(stats, 'Monthly stock-out stats retrieved').send(res);
 });
 

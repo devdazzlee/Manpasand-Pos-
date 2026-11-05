@@ -3,6 +3,7 @@ import jwt from 'jsonwebtoken';
 import { config } from '../config/app';
 import { AppError } from '../utils/apiError';
 import { prisma } from '../prisma/client';
+import { stripCost } from '../utils/hide-cost';
 
 declare global {
   namespace Express {
@@ -106,6 +107,40 @@ const isBranchInventoryWrite = (req: Request) => {
   return BRANCH_READONLY_INVENTORY_PREFIXES.some((p) => path === p || path.startsWith(`${p}/`));
 };
 
+/**
+ * Owner-level finance (accounting books, P&L, balance sheet, trial balance,
+ * product profit, money check, business insights) is off-limits to branch
+ * accounts. The few lookups the branch Expenses screen needs stay open.
+ */
+const BRANCH_DENIED_PREFIXES = [
+  '/chart-of-accounts',
+  '/finance',
+  '/financial-statement',
+  '/profit-loss',
+  '/balance-sheet',
+  '/trial-balance',
+  '/product-sales-profit',
+  '/money-check',
+  '/analytics',
+];
+const BRANCH_FINANCE_EXCEPTIONS: Array<{ prefix: string; methods?: string[] }> = [
+  { prefix: '/chart-of-accounts/expense-accounts' },
+  { prefix: '/chart-of-accounts/expense-groups', methods: ['GET'] },
+  { prefix: '/chart-of-accounts/money-accounts', methods: ['GET'] },
+  { prefix: '/chart-of-accounts/payment-routing', methods: ['GET'] },
+  { prefix: '/finance/expenses/' },
+  { prefix: '/finance/attachments/' },
+];
+const isBranchFinanceDenied = (req: Request) => {
+  const path = apiPath(req);
+  const under = (p: string) => path === p || path.startsWith(p.endsWith('/') ? p : `${p}/`);
+  if (!BRANCH_DENIED_PREFIXES.some(under)) return false;
+  return !BRANCH_FINANCE_EXCEPTIONS.some(
+    (e) => (path === e.prefix || path.startsWith(e.prefix.endsWith('/') ? e.prefix : `${e.prefix}/`) || (e.prefix.endsWith('/') && path.startsWith(e.prefix))) &&
+      (!e.methods || e.methods.includes(req.method)),
+  );
+};
+
 /** Paths a branch user without an assigned branch may still use (sign in/out, own profile). */
 const UNASSIGNED_ALLOWED_PREFIX = '/auth/';
 
@@ -150,6 +185,12 @@ const authenticate = async (req: Request, res: Response, next: NextFunction) => 
       throw new AppError(403, 'This account is view-only (products and stock)');
     }
     if (isBranchLockedRole(userExists.role)) {
+      // Branch accounts never receive purchase prices / costs, whatever the endpoint.
+      const json = res.json.bind(res);
+      res.json = (body?: unknown) => json(stripCost(body));
+      if (isBranchFinanceDenied(req)) {
+        throw new AppError(403, 'Business accounts and finance reports are only available to the owner / admin.');
+      }
       if (isBranchInventoryWrite(req)) {
         throw new AppError(403, 'Inventory is view-only for branch accounts. Ask the owner or warehouse to make this change.');
       }
