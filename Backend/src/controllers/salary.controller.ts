@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { resolveBranchId } from '../utils/resolveBranchId';
 import { SalaryService } from '../services/salary.service';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
@@ -25,7 +26,7 @@ export const listSalaries = asyncHandler(async (req: Request, res: Response) => 
   } = req.query;
 
   const result = await salaryService.listSalaries({
-    branch_id: req.user?.branch_id || undefined,
+    branch_id: resolveBranchId(req),
     page: Number(page),
     limit: Number(limit),
     employee_id: employee_id as string | undefined,

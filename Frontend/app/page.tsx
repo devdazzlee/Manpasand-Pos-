@@ -6,6 +6,7 @@ import { Dashboard } from "@/components/dashboard";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import { clearTabFromUrl } from "@/lib/dashboard-tabs";
 import { clearPosBranchChoice } from "@/hooks/use-pos-branch";
+import { clearBranchScope } from "@/lib/branch-scope";
 
 export default function Home() {
   const [token, setToken] = useState<string | null>(null);
@@ -65,6 +66,7 @@ export default function Home() {
     // A new identity must never inherit the previous account's branch
     // (e.g. an admin's picked branch on a shared shop PC).
     clearPosBranchChoice();
+    clearBranchScope(); // back office starts on All branches for each new login
     localStorage.removeItem("branchName");
     localStorage.removeItem("branchAddress");
     localStorage.setItem("token", jwt);

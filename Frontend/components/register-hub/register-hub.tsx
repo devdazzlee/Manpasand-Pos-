@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   applyRegisterOpenedToCache,
@@ -915,7 +916,7 @@ function Reconciliation({ branches, onOpenSession }: { branches: { id: string; n
   const today = format(new Date(), "yyyy-MM-dd");
   const [from, setFrom] = useState(format(subDays(new Date(), 6), "yyyy-MM-dd"));
   const [to, setTo] = useState(today);
-  const [branch, setBranch] = useState("all");
+  const [branch, setBranch] = useScopedBranch("all");
   const [status, setStatus] = useState("ALL");
   const [data, setData] = useState<ReconReport | null>(null);
   const [loading, setLoading] = useState(false);

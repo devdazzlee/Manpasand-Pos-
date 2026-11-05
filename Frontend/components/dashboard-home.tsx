@@ -1,6 +1,7 @@
 "use client"
 
 import { useState, useEffect, useRef, type ReactNode } from "react"
+import { useScopedBranch } from "@/lib/branch-scope"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -37,8 +38,6 @@ import {
   Undo2,
 } from "lucide-react"
 import { StatCardSkeleton } from "@/components/ui/stat-card-skeleton"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { mapBranchOption, type BranchOption } from "@/lib/branch-utils"
 import apiClient from "@/lib/apiClient"
 import { API_BASE } from "@/config/constants"
 import { normalizeUserRole, type UserRole } from "@/lib/role-utils"
@@ -161,8 +160,9 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
   // Admin-only scope filter: "all" = whole business, otherwise one branch id.
   // Branch users never see this — the server pins them to their own branch.
-  const [scopeBranchId, setScopeBranchId] = useState<string>("all")
-  const [branchOptions, setBranchOptions] = useState<BranchOption[]>([])
+  // Branch comes from the header switcher (all pages share it); the page
+  // remounts when it changes, so this value is fixed for this mount.
+  const [scopeBranchId] = useScopedBranch("all")
   // Guards against a slow response for an older selection overwriting a newer one.
   const loadSeq = useRef(0)
   const scopeParams = (branchId: string) => (branchId && branchId !== "all" ? { branchId } : {})
@@ -240,16 +240,8 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
   useEffect(() => {
     const currentRole = normalizeUserRole(localStorage.getItem("role"))
     setRole(currentRole)
-    loadAllData("all")
-    if (currentRole === "SUPER_ADMIN" || currentRole === "ADMIN") {
-      apiClient
-        .get("/branches", { params: { page: 1, limit: 100, is_active: true } })
-        .then((res) => {
-          const raw = Array.isArray(res?.data?.data) ? res.data.data : []
-          setBranchOptions(raw.map(mapBranchOption).filter((b: BranchOption) => b.id && b.is_active !== false))
-        })
-        .catch(() => setBranchOptions([]))
-    }
+    loadAllData(scopeBranchId)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleTopPeriodChange = async (period: TopPeriod) => {
@@ -261,12 +253,6 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
     } finally {
       setTopLoading(false)
     }
-  }
-
-  const handleScopeChange = (value: string) => {
-    if (value === scopeBranchId) return
-    setScopeBranchId(value)
-    loadAllData(value)
   }
 
   useEffect(() => {
@@ -310,7 +296,6 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
 
         const scopeLabel =
           freshStats.branch?.name ||
-          (branchId !== "all" ? branchOptions.find((b) => b.id === branchId)?.name : undefined) ||
           "All Branches"
 
         const { downloadDashboardReportPdf } = await import("@/lib/dashboard-report-pdf")
@@ -450,42 +435,6 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
           <p className="text-sm text-slate-500">Welcome back! Here&apos;s what&apos;s happening today.</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          {isAdmin ? (
-            <Select value={scopeBranchId} onValueChange={handleScopeChange} disabled={(initialLoading && !stats) || exportLoading}>
-              <SelectTrigger
-                className={cn(
-                  "h-9 w-full gap-0 text-sm font-medium shadow-sm sm:w-[220px] [&>span]:flex-1 [&>span]:text-left",
-                  scopeBranchId === "all"
-                    ? "border-slate-200 bg-white text-slate-700"
-                    : "border-blue-300 bg-blue-50 text-blue-900"
-                )}
-                aria-label="Show dashboard for"
-              >
-                {/* Icon + value are direct children: SelectTrigger line-clamps child <span>s,
-                    which stacked them vertically when wrapped together. */}
-                {scopeBranchId === "all" ? (
-                  <Building2 className="mr-2 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-                ) : (
-                  <MapPin className="mr-2 h-4 w-4 shrink-0 text-blue-600" aria-hidden />
-                )}
-                <SelectValue placeholder="All Branches" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {branchOptions.map((b) => (
-                  <SelectItem key={b.id} value={b.id}>
-                    {b.name}
-                    {b.branch_type === "WAREHOUSE" ? " (Warehouse)" : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <div className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
-              <MapPin className="h-4 w-4 shrink-0 text-slate-500" />
-              <span className="max-w-[180px] truncate">{stats?.branch?.name || "Your branch"}</span>
-            </div>
-          )}
           <LoadingButton
             onClick={handleExportReport}
             loading={exportLoading}

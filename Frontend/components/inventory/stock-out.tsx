@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -217,7 +218,7 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
 
   const [searchQuery, setSearchQuery] = useState("");
   const [filterReason, setFilterReason] = useState<string>("all");
-  const [filterBranch, setFilterBranch] = useState<string>("all");
+  const [filterBranch, setFilterBranch] = useScopedBranch("all");
   const [filterStart, setFilterStart] = useState<Date | undefined>(undefined);
   const [filterEnd, setFilterEnd] = useState<Date | undefined>(undefined);
   const [viewMode, setViewMode] = useState<"table" | "grid">("table");
@@ -388,7 +389,6 @@ export function StockOut({ onNavigate }: { onNavigate?: (tab: string) => void })
   const clearFilters = () => {
     setSearchQuery("");
     setFilterReason("all");
-    setFilterBranch("all");
     setFilterStart(undefined);
     setFilterEnd(undefined);
     setPage(1);

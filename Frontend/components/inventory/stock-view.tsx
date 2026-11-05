@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -184,7 +185,7 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<string | null>(null);
 
-  const [branchFilter, setBranchFilter] = useState(ALL_BRANCHES);
+  const [branchFilter, setBranchFilter] = useScopedBranch(ALL_BRANCHES);
   const [warehouseFilter, setWarehouseFilter] = useState(ALL_WAREHOUSES);
   const [brandFilter, setBrandFilter] = useState(ALL_BRANDS);
   const [stockStatusFilter, setStockStatusFilter] = useState(ALL_STOCK_STATUS);
@@ -317,7 +318,7 @@ export function StockView({ onNavigate }: { onNavigate?: (tab: string) => void }
     setSearch("");
     setSkuSearch("");
     setBarcodeSearch("");
-    setBranchFilter(ALL_BRANCHES);
+    // Branch is the header switcher's choice; "Clear filters" leaves it alone.
     setWarehouseFilter(ALL_WAREHOUSES);
     setCatalog(EMPTY_CATALOG_FILTERS);
     setBrandFilter(ALL_BRANDS);

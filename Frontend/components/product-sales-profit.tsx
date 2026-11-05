@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { format } from "date-fns";
 import { Printer, RefreshCw, Search, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -110,7 +111,7 @@ export function ProductSalesProfit() {
   const [draftTo, setDraftTo] = useState(initial.to);
   const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const catalogLabel = useCatalogFilterLabel(catalog);
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useScopedBranch("all");
   const [search, setSearch] = useState("");
   const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -168,7 +169,6 @@ export function ProductSalesProfit() {
     setDraftFrom(range.from);
     setDraftTo(range.to);
     setCatalog(EMPTY_CATALOG_FILTERS);
-    setBranchId("all");
     setSearch("");
   };
 

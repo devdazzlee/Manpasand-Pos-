@@ -166,9 +166,10 @@ class OrderService {
     });
   }
 
-  async getOrders(status?: Order['status'], page: number = 1, pageSize: number = 10) {
+  async getOrders(status?: Order['status'], page: number = 1, pageSize: number = 10, branchId?: string) {
     const where = {
       status: status ? (status as Order['status']) : undefined,
+      ...(branchId ? { branch_id: branchId } : {}),
     };
 
     const [orders, total] = await Promise.all([

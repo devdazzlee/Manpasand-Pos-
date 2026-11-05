@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect, useMemo, useCallback, type ComponentType, type ReactNode } from "react";
+import { getBranchScope, setBranchScope } from "@/lib/branch-scope";
 import { getHideCost } from "@/lib/role-utils";
 import { format } from "date-fns";
 import { Card } from "@/components/ui/card";
@@ -183,8 +184,10 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
       setSelectedBranchId(initialBranchId);
       loadStats(initialBranchId);
     } else {
-      setSelectedBranchId("");
-      loadStats();
+      // Admin: start on the header branch switcher's choice.
+      const scoped = getBranchScope() || "";
+      setSelectedBranchId(scoped);
+      loadStats(scoped || undefined);
     }
 
     fetchBranchesForFilter()
@@ -194,10 +197,9 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
 
   const goTo = (tab: string) => onNavigate?.(tab);
 
+  // Changing the location here moves the header switcher too (the page then reloads for it).
   const onBranchChange = (value: string) => {
-    const bid = value === "all" ? "" : value;
-    setSelectedBranchId(bid);
-    loadStats(bid, true);
+    setBranchScope(value === "all" ? null : value);
   };
 
   const healthScore = useMemo(() => {

@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { resolveBranchId } from '../utils/resolveBranchId';
 import { EmployeeStatus, EmploymentType } from '@prisma/client';
 import { EmployeeService } from '../services/employee.service';
 import { EmployeeTypeService } from '../services/employeeType.service';
@@ -31,7 +32,7 @@ export const listEmployees = asyncHandler(async (req: Request, res: Response) =>
   } = req.query;
 
   const result = await employeeService.listEmployees({
-    branch_id: req.user?.branch_id,
+    branch_id: resolveBranchId(req),
     page: Number(page),
     limit: Number(limit),
     search: search as string | undefined,

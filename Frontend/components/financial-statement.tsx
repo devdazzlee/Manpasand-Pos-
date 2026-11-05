@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ReactNode } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { format } from "date-fns";
 import {
   CalendarDays,
@@ -158,7 +159,7 @@ export function FinancialStatement() {
   const [to, setTo] = useState(initial.to);
   const [draftFrom, setDraftFrom] = useState(initial.from);
   const [draftTo, setDraftTo] = useState(initial.to);
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useScopedBranch("all");
   const [paymentMethod, setPaymentMethod] = useState("ALL");
   const [cashierId, setCashierId] = useState("all");
   const [categoryId, setCategoryId] = useState("all");
@@ -226,7 +227,6 @@ export function FinancialStatement() {
     setTo(range.to);
     setDraftFrom(range.from);
     setDraftTo(range.to);
-    setBranchId("all");
     setPaymentMethod("ALL");
     setCashierId("all");
     setCategoryId("all");

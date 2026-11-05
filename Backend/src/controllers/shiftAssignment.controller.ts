@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { resolveBranchId } from '../utils/resolveBranchId';
 import { ShiftAssignmentService } from '../services/shiftAssignment.service';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
@@ -64,6 +65,7 @@ export const getAllShifts = asyncHandler(async (req: Request, res: Response) => 
     date_from: typeof q.date_from === 'string' ? q.date_from : undefined,
     date_to: typeof q.date_to === 'string' ? q.date_to : undefined,
     period: q.period as any,
+    branch_id: resolveBranchId(req),
   });
   new ApiResponse(
     result.data,

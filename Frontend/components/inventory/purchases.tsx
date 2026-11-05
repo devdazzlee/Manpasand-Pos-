@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -386,7 +387,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     return () => clearTimeout(t);
   }, [searchQuery]);
   const [filterSupplier, setFilterSupplier] = useState<string>("all");
-  const [filterBranch, setFilterBranch] = useState<string>("all");
+  const [filterBranch, setFilterBranch] = useScopedBranch("all");
   const [filterStart, setFilterStart] = useState<Date | undefined>(undefined);
   const [filterEnd, setFilterEnd] = useState<Date | undefined>(undefined);
   // "date" = entry order (when the Stock In was saved); inside a bill,
@@ -873,7 +874,6 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
   const clearFilters = () => {
     setSearchQuery("");
     setFilterSupplier("all");
-    setFilterBranch("all");
     setFilterPayment("all");
     setFilterStatus("all");
     setFilterStart(undefined);

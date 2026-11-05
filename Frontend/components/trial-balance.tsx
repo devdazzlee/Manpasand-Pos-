@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { format } from "date-fns";
 import {
   CalendarDays,
@@ -119,7 +120,7 @@ export function TrialBalance() {
   const [to, setTo] = useState(initial.to);
   const [draftFrom, setDraftFrom] = useState(initial.from);
   const [draftTo, setDraftTo] = useState(initial.to);
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useScopedBranch("all");
   const [report, setReport] = useState<TrialBalanceData | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -172,7 +173,6 @@ export function TrialBalance() {
     setTo(range.to);
     setDraftFrom(range.from);
     setDraftTo(range.to);
-    setBranchId("all");
   };
 
   const branchLabel =

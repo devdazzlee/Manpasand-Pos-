@@ -1,6 +1,7 @@
 "use client";
 
 import { SHOW_STITCH_TYPE } from "@/config/constants";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { useCallback, useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
 import { format } from "date-fns";
 import {
@@ -177,7 +178,7 @@ export function SalesReport() {
   const [mode, setMode] = useState<Mode>("customer");
   const [customerId, setCustomerId] = useState("all");
   const [productId, setProductId] = useState("all");
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useScopedBranch("all");
   const [search, setSearch] = useState("");
   const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const catalogLabel = useCatalogFilterLabel(catalog);
@@ -270,7 +271,6 @@ export function SalesReport() {
     applyPreset(DEFAULT_PRESET);
     setCustomerId("all");
     setProductId("all");
-    setBranchId("all");
     setCatalog(EMPTY_CATALOG_FILTERS);
     setSearch("");
   };

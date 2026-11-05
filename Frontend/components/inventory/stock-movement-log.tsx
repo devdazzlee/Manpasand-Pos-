@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -158,7 +159,7 @@ export function StockMovementLog() {
   useScrollToTopOnPageChange(page);
 
   const [searchQuery, setSearchQuery] = useState("");
-  const [filterBranch, setFilterBranch] = useState("all");
+  const [filterBranch, setFilterBranch] = useScopedBranch("all");
   const [filterType, setFilterType] = useState("all");
   const [filterDirection, setFilterDirection] = useState<"all" | "in" | "out">(
     "all",
@@ -309,7 +310,6 @@ export function StockMovementLog() {
 
   const clearFilters = () => {
     setSearchQuery("");
-    setFilterBranch("all");
     setFilterType("all");
     setFilterDirection("all");
     setFilterProductId("all");

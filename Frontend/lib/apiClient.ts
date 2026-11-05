@@ -1,6 +1,27 @@
 import { API_BASE } from "@/config/constants";
 import axios, { AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { approvalHeaders, requestApproval } from "@/lib/approval";
+import { getActiveBranchScope } from "@/lib/branch-scope";
+
+/**
+ * API areas whose data belongs to a branch and whose endpoints accept a
+ * branch filter. Company-wide data (branches, catalog, suppliers, tax, users…)
+ * is deliberately absent, so dropdown lists are never cut down to one branch.
+ */
+const BRANCH_SCOPED_API = [
+  "/dashboard", "/reports", "/sales-report", "/register-report", "/sale", "/cash-register", "/till",
+  "/expenses", "/products", "/stock", "/stock-out", "/stock-adjustments", "/stock-imports", "/transfers",
+  "/purchases", "/purchase-orders", "/purchase-invoices", "/purchase-returns", "/purchase-report",
+  "/inventory", "/stock-quantity-report", "/product-sales-profit", "/commissions", "/payroll",
+  "/financial-statement", "/profit-loss", "/balance-sheet", "/trial-balance", "/chart-of-accounts",
+  "/finance", "/analytics", "/order", "/employee", "/salaries", "/shift-assignment", "/audit",
+];
+
+function isBranchScopedUrl(url?: string): boolean {
+  if (!url) return false;
+  const path = url.replace(/^https?:\/\/[^/]+/, "").replace(/^\/api\/v\d+/, "").split("?")[0];
+  return BRANCH_SCOPED_API.some((p) => path === p || path.startsWith(`${p}/`));
+}
 
 // Create axios instance
 const apiClient = axios.create({
@@ -18,6 +39,17 @@ apiClient.interceptors.request.use(
 
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
+    }
+
+    // Back-office branch scope (admin header switcher): scope every read of
+    // branch-specific data to the chosen branch, unless the caller already
+    // asked for a specific branch. Writes are never touched.
+    const scope = getActiveBranchScope();
+    if (scope && (config.method ?? "get").toLowerCase() === "get" && isBranchScopedUrl(config.url)) {
+      const params = (config.params ?? {}) as Record<string, unknown>;
+      if (params.branchId == null && params.branch_id == null && !/[?&]branch_?[iI]d=/.test(config.url ?? "")) {
+        config.params = { ...params, branchId: scope, branch_id: scope };
+      }
     }
 
     // Cache busting is handled via `_t` query params and server response headers.

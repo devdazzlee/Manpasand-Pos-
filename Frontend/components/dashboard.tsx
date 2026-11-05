@@ -1,11 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Sidebar } from "@/components/sidebar";
 import { DashboardHome } from "@/components/dashboard-home";
 import { Button } from "@/components/ui/button";
 import { Menu, PanelLeftOpen } from "lucide-react";
 import { useDashboardTab } from "@/lib/dashboard-tabs";
+import { BranchScopeSwitcher } from "@/components/branch-scope-switcher";
+import { announceBranchScopeApplies, syncBranchScopeApplies, useBranchScope } from "@/lib/branch-scope";
+import { useStore } from "@/lib/store";
 import { scrollMainToTop } from "@/lib/scroll-main";
 import { useDismissKeyboardOnScroll } from "@/hooks/use-dismiss-keyboard-on-scroll";
 
@@ -98,6 +102,46 @@ interface DashboardProps {
 
 const SIDEBAR_OPEN_KEY = "pehnava-sidebar-open";
 
+/**
+ * Pages whose data is not split by branch (catalog, master data, settings) or
+ * that pick their own branch (the Sales screen bills one explicit branch).
+ * The header branch switcher shows "Company-wide" on these and adds no filter.
+ * Every other page follows the switcher.
+ */
+const COMPANY_WIDE_TABS = new Set([
+  "new-sale",
+  "website-orders", // online orders are not tied to a branch
+  "orders",
+  "barcode-generator",
+  "categories",
+  "sub-categories",
+  "units",
+  "brand",
+  "colors",
+  "sizes",
+  "branches",
+  "suppliers",
+  "pricing",
+  "promotions",
+  "loyalty",
+  "loyalty-winners",
+  "gift-cards",
+  "customers",
+  "designation",
+  "tax-management",
+  "money-check",
+  "users",
+  "multi-location",
+  "integrations",
+  "backup",
+  "settings",
+  "printer-settings",
+  "product-export",
+  "bulk-product-upload",
+  "opening-stock-import",
+  "scan-stock-count",
+]);
+
 function readInitialSidebarOpen(): boolean {
   if (typeof window === "undefined") return true;
   const stored = localStorage.getItem(SIDEBAR_OPEN_KEY);
@@ -109,6 +153,29 @@ function readInitialSidebarOpen(): boolean {
 export function Dashboard({ onLogout }: DashboardProps) {
   const { activeTab, setActiveTab } = useDashboardTab();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Header branch switcher: set during render so the page's first request
+  // already carries (or skips) the branch filter.
+  const scopeApplies = !COMPANY_WIDE_TABS.has(activeTab);
+  syncBranchScopeApplies(scopeApplies);
+  useEffect(() => announceBranchScopeApplies(), [scopeApplies]);
+  const { branchId: scopeBranchId } = useBranchScope();
+  const queryClient = useQueryClient();
+  const firstScope = useRef(true);
+  useEffect(() => {
+    if (firstScope.current) {
+      firstScope.current = false;
+      return;
+    }
+    // Switching branch: drop every cached list so no page shows the previous
+    // branch's numbers, then the remounted page loads fresh data.
+    queryClient.removeQueries();
+    const store = useStore.getState() as any;
+    if (Array.isArray(store.products) && store.products.length && typeof store.fetchProducts === "function") {
+      void store.fetchProducts({ force: true });
+    }
+  }, [scopeBranchId, queryClient]);
+  const scopeKey = scopeApplies ? scopeBranchId ?? "all" : "company";
 
   useEffect(() => {
     setSidebarOpen(readInitialSidebarOpen());
@@ -339,6 +406,9 @@ export function Dashboard({ onLogout }: DashboardProps) {
         </Button>
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/logo.png" alt="MANPASAND POS" className="h-11 w-auto max-w-[160px] object-contain" />
+        <div className="ml-auto">
+          <BranchScopeSwitcher compact />
+        </div>
       </header>
 
       {!sidebarOpen ? (
@@ -360,7 +430,13 @@ export function Dashboard({ onLogout }: DashboardProps) {
         id="app-main-scroll"
         className="flex w-full min-w-0 flex-1 flex-col pt-14 sm:pt-16 lg:min-h-0 lg:overflow-y-auto lg:pt-0"
       >
-        {renderContent()}
+        <div className="sticky top-0 z-20 hidden h-14 shrink-0 items-center justify-end gap-3 border-b border-slate-200 bg-white/90 px-6 backdrop-blur supports-[backdrop-filter]:bg-white/75 lg:flex">
+          <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Viewing</span>
+          <BranchScopeSwitcher />
+        </div>
+        <div key={scopeKey} className="flex min-w-0 flex-1 flex-col">
+          {renderContent()}
+        </div>
       </main>
     </div>
   );

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState, type ComponentType } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { format } from "date-fns";
 import {
   AlertTriangle,
@@ -143,7 +144,7 @@ export function StockQuantityReport() {
   const [draftTo, setDraftTo] = useState(initial.to);
   const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const catalogLabel = useCatalogFilterLabel(catalog);
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useScopedBranch("all");
   const [itemType, setItemType] = useState<ItemType>("all");
   const [activity, setActivity] = useState<Activity>("moved");
   const [search, setSearch] = useState("");
@@ -228,7 +229,6 @@ export function StockQuantityReport() {
   const clearFilters = () => {
     applyPreset(DEFAULT_PRESET);
     setCatalog(EMPTY_CATALOG_FILTERS);
-    setBranchId("all");
     setItemType("all");
     setActivity("moved");
     setSearch("");

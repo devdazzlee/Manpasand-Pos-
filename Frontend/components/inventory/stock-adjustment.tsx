@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef, type ComponentType } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils";
 import * as XLSX from "xlsx";
 import { Button } from "@/components/ui/button";
@@ -229,7 +230,7 @@ export function StockAdjustment() {
 
   const [searchQuery, setSearchQuery] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
-  const [filterBranch, setFilterBranch] = useState("all");
+  const [filterBranch, setFilterBranch] = useScopedBranch("all");
   const [filterType, setFilterType] = useState("all");
   const [filterCategory, setFilterCategory] = useState("all");
   const [filterStart, setFilterStart] = useState<Date | undefined>();
@@ -289,7 +290,6 @@ export function StockAdjustment() {
 
   const clearFilters = () => {
     setSearchQuery("");
-    setFilterBranch("all");
     setFilterType("all");
     setFilterCategory("all");
     setFilterStart(undefined);

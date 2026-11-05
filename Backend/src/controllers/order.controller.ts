@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { resolveBranchId } from '../utils/resolveBranchId';
 import { OrderService } from '../services/order.service';
 import { ApiResponse } from '../utils/apiResponse';
 import asyncHandler from '../middleware/asyncHandler';
@@ -17,7 +18,8 @@ const getOrders = asyncHandler(async (req: Request, res: Response) => {
   const orders = await orderService.getOrders(
     status ? (status as OrderStatus) : undefined,
     parseInt(page as string, 10),
-    parseInt(pageSize as string, 10)
+    parseInt(pageSize as string, 10),
+    resolveBranchId(req),
   );
 
   new ApiResponse(orders, 'Orders retrieved successfully').send(res);

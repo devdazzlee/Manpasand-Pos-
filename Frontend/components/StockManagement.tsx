@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { getHideCost, getInventoryReadOnly } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -370,7 +371,7 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
   const [hasStockMeta, setHasStockMeta] = useState(false);
 
   // UI state
-  const [branchFilter, setBranchFilter] = useState<string>(ALL_BRANCHES);
+  const [branchFilter, setBranchFilter] = useScopedBranch(ALL_BRANCHES);
   // Vendor / category / subcategory (multi-select) + Stitched / Unstitched.
   const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const [brandFilter, setBrandFilter] = useState<string>(ALL_BRANDS);
@@ -1112,7 +1113,6 @@ export function StockManagement({ onNavigate }: StockManagementProps) {
     setSearchTerm("");
     setSkuSearch("");
     setBarcodeSearch("");
-    setBranchFilter(ALL_BRANCHES);
     setCatalog(EMPTY_CATALOG_FILTERS);
     setBrandFilter(ALL_BRANDS);
     setStockStatusFilter(ALL_STOCK_STATUS);

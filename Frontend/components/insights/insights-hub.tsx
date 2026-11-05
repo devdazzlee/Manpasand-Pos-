@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import {
   buildDashboardTabHref,
   INSIGHTS_REPORT_IDS,
@@ -61,7 +62,7 @@ export function InsightsHub() {
     writeInsightsParamsToUrl(next);
   }, []);
   const [period, setPeriod] = useState<Period>(defaultPeriod("30d"));
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useScopedBranch("all");
   const [branches, setBranches] = useState<{ id: string; name: string }[]>([]);
 
   useEffect(() => {

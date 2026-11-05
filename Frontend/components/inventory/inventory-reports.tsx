@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { format } from "date-fns";
 import {
   AlertTriangle,
@@ -506,7 +507,7 @@ export function InventoryReports() {
 
   const [searchInput, setSearchInput] = useState("");
   const [search, setSearch] = useState("");
-  const [filterBranch, setFilterBranch] = useState("all");
+  const [filterBranch, setFilterBranch] = useScopedBranch("all");
   // Vendor / category / subcategory (multi-select) + Stitched / Unstitched.
   const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const [chip, setChip] = useState("all");
@@ -644,7 +645,6 @@ export function InventoryReports() {
   const clearFilters = () => {
     setSearchInput("");
     setSearch("");
-    setFilterBranch("all");
     setCatalog(EMPTY_CATALOG_FILTERS);
     setChip("all");
     applyPreset(defaultPreset);

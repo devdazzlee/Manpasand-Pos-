@@ -235,6 +235,7 @@ export class ShiftAssignmentService {
   }
 
   async listShifts(params: {
+    branch_id?: string;
     page?: number;
     limit?: number;
     fetch_all?: boolean;
@@ -254,6 +255,7 @@ export class ShiftAssignmentService {
     const where: Prisma.ShiftAssignmentWhereInput = {};
 
     if (params.employee_id) where.employee_id = params.employee_id;
+    if (params.branch_id) where.employee = { branch_id: params.branch_id };
 
     if (params.search?.trim()) {
       const q = params.search.trim();

@@ -1,6 +1,7 @@
 "use client";
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -443,7 +444,7 @@ export function SalesHistory() {
   const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const { people: salespeople } = useSalespeople();
   const [salespersonTarget, setSalespersonTarget] = useState<Sale | null>(null);
-  const [branchFilter, setBranchFilter] = useState<string>("all");
+  const [branchFilter, setBranchFilter] = useScopedBranch("all");
   const [showFilters, setShowFilters] = useState(true);
 
   const [currentPage, setCurrentPage] = useState(1);
@@ -704,7 +705,6 @@ export function SalesHistory() {
     setOrderStatus("all");
     setCashierId("all");
     setSalespersonFilter("all");
-    setBranchFilter("all");
     setCatalog(EMPTY_CATALOG_FILTERS);
   };
 

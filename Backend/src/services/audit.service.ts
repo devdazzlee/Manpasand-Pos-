@@ -122,6 +122,7 @@ export async function listAudit(q: {
   from?: Date;
   to?: Date;
   userId?: string;
+  branchId?: string;
   category?: string;
   action?: string;
   entityId?: string;
@@ -134,6 +135,7 @@ export async function listAudit(q: {
   const where: Prisma.AuditLogWhereInput = {
     ...(q.from || q.to ? { created_at: { ...(q.from ? { gte: q.from } : {}), ...(q.to ? { lte: q.to } : {}) } } : {}),
     ...(q.userId ? { user_id: q.userId } : {}),
+    ...(q.branchId ? { branch_id: q.branchId } : {}),
     ...(q.category ? { category: q.category } : {}),
     ...(q.action ? { action: { startsWith: q.action } } : {}),
     ...(q.entityId ? { entity_id: q.entityId } : {}),

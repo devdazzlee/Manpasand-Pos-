@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useScopedBranch } from "@/lib/branch-scope";
 import { format } from "date-fns";
 import {
   ArrowLeft,
@@ -207,7 +208,7 @@ export function DayReports({
   const [draftFrom, setDraftFrom] = useState(initial.from);
   const [draftTo, setDraftTo] = useState(initial.to);
   const [search, setSearch] = useState("");
-  const [branchId, setBranchId] = useState("all");
+  const [branchId, setBranchId] = useScopedBranch("all");
   const [catalog, setCatalog] = useState<CatalogFilters>(EMPTY_CATALOG_FILTERS);
   const catalogLabel = useCatalogFilterLabel(catalog);
   const [page, setPage] = useState(1);
@@ -388,7 +389,6 @@ export function DayReports({
     setDraftFrom(range.from);
     setDraftTo(range.to);
     setSearch("");
-    setBranchId("all");
     setCatalog(EMPTY_CATALOG_FILTERS);
     setPage(1);
   };
@@ -640,49 +640,6 @@ export function DayReports({
           </div>
         </div>
         <div className="flex flex-wrap gap-2">
-          {!report ? (
-            <Skeleton className="h-9 w-[220px] rounded-md" />
-          ) : report.isAdmin ? (
-            <Select
-              value={branchId}
-              onValueChange={(value) => {
-                setBranchId(value);
-                setPage(1);
-              }}
-              disabled={loading}
-            >
-              <SelectTrigger
-                aria-label="Show data for branch"
-                className={cn(
-                  "h-9 w-full gap-0 text-sm font-medium shadow-sm sm:w-[220px] [&>span]:flex-1 [&>span]:text-left",
-                  branchId === "all"
-                    ? "border-slate-200 bg-white text-slate-700"
-                    : "border-blue-300 bg-blue-50 text-blue-900",
-                )}
-              >
-                {/* Icon + value as direct children: SelectTrigger line-clamps child spans. */}
-                {branchId === "all" ? (
-                  <Building2 className="mr-2 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-                ) : (
-                  <MapPin className="mr-2 h-4 w-4 shrink-0 text-blue-600" aria-hidden />
-                )}
-                <SelectValue placeholder="All Branches" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All Branches</SelectItem>
-                {(report.branches || []).map((branch) => (
-                  <SelectItem key={branch.id} value={branch.id}>
-                    {branch.name}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <div className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
-              <MapPin className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
-              <span className="max-w-[180px] truncate">{report.scopeLabel || "Your branch"}</span>
-            </div>
-          )}
           <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={() => onBack?.()}>
             <ArrowLeft className="mr-2 h-4 w-4" />
             Dashboard
