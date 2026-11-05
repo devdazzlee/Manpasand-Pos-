@@ -72,6 +72,13 @@ export interface ReceiptData {
   thankYouMessage?: string;
   footerMessage?: string;
   logoPath?: string;
+  /**
+   * "report" prints a label/value report (e.g. register closing slip) instead of
+   * a sale receipt. Older print servers ignore it and fall back to items/summaryLines.
+   */
+  layout?: "sale" | "report";
+  metaLines?: { label: string; value: string }[];
+  reportSections?: { title: string; rows: ReceiptSummaryLine[]; emptyText?: string }[];
 }
 
 export interface Printer {

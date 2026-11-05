@@ -78,6 +78,9 @@ import {
 } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import apiClient from "@/lib/apiClient";
+import { printClosingSlip } from "@/lib/register-closing-slip";
+import { usePrinterSettings } from "@/hooks/use-printer-settings";
+import { PrintClosingSlipButton } from "@/components/register-hub/print-closing-slip-button";
 import { cn } from "@/lib/utils";
 import { ymd, rangeForPreset } from "@/lib/business-timezone";
 import { downloadRegisterReportPdf } from "@/lib/register-report-pdf";
@@ -239,6 +242,7 @@ export function RegisterReport() {
   const [savingClose, setSavingClose] = useState(false);
   const role = typeof window !== "undefined" ? localStorage.getItem("role") : null;
   const isAdmin = role === "SUPER_ADMIN" || role === "ADMIN";
+  const { getReceiptPrinterObj } = usePrinterSettings();
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -306,6 +310,17 @@ export function RegisterReport() {
       const variance = Number(response.data?.data?.variance ?? 0);
       const label = Math.abs(variance) < 0.005 ? "Balanced" : variance > 0 ? "Over" : "Short";
       toast({ title: `Register closed · ${label}`, description: `Variance ${money(variance)}` });
+      // Closing slip goes to the receipt printer in the background.
+      const closedId = closeTarget.id;
+      printClosingSlip(closedId, getReceiptPrinterObj())
+        .then(() => toast({ title: "Closing slip printed" }))
+        .catch((err) =>
+          toast({
+            variant: "destructive",
+            title: "Closing slip not printed",
+            description: `${err?.message || "Printer did not respond"}. Use "Print slip" to try again.`,
+          }),
+        );
       setCloseTarget(null);
       setCountedCash("");
       await load();
@@ -1170,12 +1185,17 @@ export function RegisterReport() {
                             <Lock className="mr-1.5 h-3.5 w-3.5" />
                             Close
                           </Button>
-                        ) : isAdmin ? (
-                          <Button size="sm" variant="outline" className="h-8" onClick={() => setReopenTarget(session)}>
-                            <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
-                            Reopen
-                          </Button>
-                        ) : null}
+                        ) : (
+                          <div className="flex justify-end gap-2">
+                            <PrintClosingSlipButton sessionId={session.id} label="Print slip" className="h-8" />
+                            {isAdmin ? (
+                              <Button size="sm" variant="outline" className="h-8" onClick={() => setReopenTarget(session)}>
+                                <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
+                                Reopen
+                              </Button>
+                            ) : null}
+                          </div>
+                        )}
                       </TableCell>
                     </TableRow>
                   ))

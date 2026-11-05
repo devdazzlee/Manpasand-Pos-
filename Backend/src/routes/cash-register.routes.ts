@@ -1,6 +1,8 @@
 import { NextFunction, Request, Response, Router } from 'express';
 import { z } from 'zod';
 import { authenticate, authorize } from '../middleware/auth.middleware';
+import { prisma } from '../prisma/client';
+import { branchOwnershipParam } from '../middleware/branch-ownership.middleware';
 import { requirePermission } from '../middleware/permission.middleware';
 import { ApiResponse } from '../utils/apiResponse';
 import { AppError } from '../utils/apiError';
@@ -70,6 +72,14 @@ const reportSchema = z.object({
 
 router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'CASHIER']));
 
+// A branch account may only see / act on its own branch's registers.
+router.param(
+  'id',
+  branchOwnershipParam((id) =>
+    prisma.cashFlow.findUnique({ where: { id }, select: { branch_id: true } }).then((c) => c && [c.branch_id]),
+  ),
+);
+
 router.get(
   '/status',
   wrap(async (req, res) => send(res, 200, await service.status(actor(req)), 'Register status')),
@@ -98,6 +108,12 @@ router.get(
 router.get(
   '/sessions/:id',
   wrap(async (req, res) => send(res, 200, await service.detail(req.params.id), 'Register session')),
+);
+
+// Figures for the printed closing slip (also used to reprint it later).
+router.get(
+  '/sessions/:id/closing-slip',
+  wrap(async (req, res) => send(res, 200, await service.closingSlip(req.params.id), 'Register closing slip')),
 );
 
 // Opening count differs from last night's closing → a supervisor signs off.

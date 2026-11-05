@@ -377,6 +377,8 @@ export class CashRegisterService {
       expensesByMethod,
       expectedByMethod,
       allExpenses,
+      /** Every expense / payout deducted from this register, any payment method. */
+      expenseItems: outflows.map((e) => ({ id: e.id, kind: e.kind, particular: e.particular, amount: e.amount, at: e.date, method: e.paymentMethod })),
       bills: report.salesSummary.saleCount,
       netSales: report.salesSummary.netSales,
       /** Today's result: all sales (any method) minus all expenses (any method). */
@@ -956,6 +958,49 @@ export class CashRegisterService {
       console.error('[register-accounting] post failed', s.id, (err as Error).message),
     );
     return this.detail(s.id);
+  }
+
+  /* ------------------------------ closing slip ------------------------------ */
+
+  /**
+   * Figures for the printed register-closing slip (thermal printer).
+   * Cash in hand = cash revenue − expenses paid in cash; Cash in bank = card +
+   * bank transfer + wallet revenue − expenses paid from those. Together they
+   * equal total revenue − total expenses.
+   */
+  async closingSlip(sessionId: string) {
+    const s = await this.session(sessionId);
+    const live = await this.compute(s);
+    const cashRevenue = r2(live.byMethod.CASH || 0);
+    const cardRevenue = r2(live.byMethod.CARD || 0);
+    const bankRevenue = r2(live.byMethod.BANK_TRANSFER || 0);
+    const walletRevenue = r2(live.byMethod.MOBILE_MONEY || 0);
+    const cashExpense = r2(live.expensesByMethod.CASH || 0);
+    const totalExpense = r2(live.allExpenses);
+    const nonCashExpense = r2(totalExpense - cashExpense);
+    const closer = s.closer?.email ?? null;
+    return {
+      sessionId: s.id,
+      status: s.status,
+      branch: s.branch ? { id: s.branch.id, name: s.branch.name, code: s.branch.code } : null,
+      businessDate: toBusinessYmd(s.opened_at),
+      openedAt: s.opened_at,
+      closedAt: s.closed_at,
+      closedBy: closer,
+      autoClosed: s.status === 'CLOSED' && !s.closed_by && /^Auto-closed/i.test(s.variance_note || ''),
+      bills: live.bills,
+      netSales: live.netSales,
+      cashRevenue,
+      cardRevenue,
+      bankRevenue,
+      walletRevenue,
+      expenses: live.expenseItems.map((e) => ({ particular: e.particular, amount: r2(e.amount), method: String(e.method || 'CASH').toUpperCase(), kind: e.kind })),
+      totalExpense,
+      cashExpense,
+      cashInHand: r2(cashRevenue - cashExpense),
+      cashInBank: r2(cardRevenue + bankRevenue + walletRevenue - nonCashExpense),
+      countedCash: s.closing == null ? null : num(s.closing),
+    };
   }
 
   /* ------------------------------ review / reopen ------------------------------ */

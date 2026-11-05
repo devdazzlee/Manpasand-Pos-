@@ -725,6 +725,78 @@ app.post('/print-receipt', async (req, res) => {
 
     y += hr(y, 'dotted');
 
+    // ===== REPORT LAYOUT (e.g. register closing slip) =====
+    // receiptData.layout === 'report': label/value report instead of a sale
+    // receipt — no customer, item columns, barcode or exchange policy.
+    //   metaLines:      [{ label, value }]
+    //   reportSections: [{ title, rows: [{ label, value, emphasis? }], emptyText? }]
+    //   summaryLines:   [{ label, value, emphasis? }]
+    const isReport = receiptData.layout === 'report';
+    if (isReport) {
+      const reportRow = (label, value, emphasis) => {
+        // Long labels wrap on the left; the amount stays right-aligned on the first line.
+        const valueW = W * 0.36;
+        const size = emphasis ? TOTAL_MAX : BODY_MAX;
+        const left = drawWrapped(String(label || ''), margins.left, y, W - valueW - 2, {
+          maxSize: size,
+          align: 'left',
+          font: emphasis ? boldFont : baseFont,
+        });
+        drawFit(String(value ?? ''), margins.left + W - valueW, y, valueW, {
+          maxSize: size,
+          minSize: emphasis ? TOTAL_MIN : BODY_MIN,
+          align: 'right',
+          font: emphasis ? boldFont : baseFont,
+        });
+        y += Math.max(left.height, lineH(size)) + 1;
+      };
+
+      for (const line of receiptData.metaLines || []) {
+        y += rowLR(String(line.label || ''), String(line.value ?? ''), y);
+      }
+      y += 2;
+      y += hr(y, 'dotted');
+
+      for (const section of receiptData.reportSections || []) {
+        if (section.title) {
+          const usedT = drawFit(String(section.title), margins.left, y, W, {
+            maxSize: TOTAL_MAX,
+            minSize: TOTAL_MIN,
+            align: 'left',
+            font: boldFont,
+          });
+          y += lineH(usedT);
+        }
+        const rows = section.rows || [];
+        if (!rows.length && section.emptyText) {
+          const usedE = drawFit(String(section.emptyText), margins.left, y, W, {
+            maxSize: BODY_MAX,
+            minSize: BODY_MIN,
+            align: 'left',
+          });
+          y += lineH(usedE);
+        }
+        for (const row of rows) reportRow(row.label, row.value, !!row.emphasis);
+        y += 2;
+        y += hr(y, 'dotted');
+      }
+
+      for (const line of receiptData.summaryLines || []) {
+        reportRow(line.label, line.value, !!line.emphasis);
+      }
+      y += 2;
+      y += hr(y, 'dotted');
+
+      if (receiptData.thankYouMessage) {
+        const usedMsg = drawFit(String(receiptData.thankYouMessage), margins.left, y, W, {
+          maxSize: 10.6,
+          minSize: 8.6,
+          align: 'center',
+          font: boldFont,
+        });
+        y += lineH(usedMsg) + 2;
+      }
+    } else {
     // ===== META =====
     const when = new Date(receiptData.timestamp || Date.now());
     const lh1 = rowLR('Receipt #', String(receiptData.transactionId), y);
@@ -962,6 +1034,8 @@ app.post('/print-receipt', async (req, res) => {
         y += block.height + 1;
       }
     }
+
+    } // end sale-receipt layout
 
     const footerAddress = normalizeReceiptAddress(receiptData.address);
     const footerLines = [

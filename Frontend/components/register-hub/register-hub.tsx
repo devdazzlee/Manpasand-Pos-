@@ -61,6 +61,7 @@ import {
   userName,
 } from "./register-api";
 import { CashMoveDialog, CloseRegisterDialog, HandoverDialog, OpenRegisterDialog, ReasonDialog } from "./register-dialogs";
+import { PrintClosingSlipButton } from "./print-closing-slip-button";
 
 type Tab = "live" | "board" | "recon" | "day";
 const TABS: { id: Tab; label: string; icon: typeof Monitor; managerOnly?: boolean }[] = [
@@ -581,6 +582,7 @@ function LiveRegister({
               Approve count
             </Button>
           )}
+          {!open && <PrintClosingSlipButton sessionId={session.id} />}
           {!open && canReopen && (
             <Button size="sm" variant="outline" onClick={onReopen}>
               <RotateCcw className="mr-1.5 h-4 w-4" />

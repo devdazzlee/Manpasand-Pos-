@@ -9,6 +9,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { usePrinterSettings } from "@/hooks/use-printer-settings";
+import { printClosingSlip } from "@/lib/register-closing-slip";
 import { DENOMINATIONS, errorMessage, HandoverMode, METHOD_LABEL, registerApi, rs, SessionDetail, signedRs } from "./register-api";
 
 const TOLERANCE = 0.5;
@@ -506,6 +508,7 @@ export function CloseRegisterDialog({
   onDone: (s: SessionDetail) => void;
 }) {
   const { toast } = useToast();
+  const { getReceiptPrinterObj } = usePrinterSettings();
   const [amount, setAmount] = useState("");
   const [counts, setCounts] = useState<Record<string, number>>({});
   const [recs, setRecs] = useState<Record<string, { actual: string; reference: string }>>({});
@@ -546,6 +549,18 @@ export function CloseRegisterDialog({
   if (!session) return null;
   const expected = session.live.expectedCash;
   const value = amount === "" ? null : Number(amount);
+  const printSlip = (sessionId: string) => {
+    // Print in the background so closing never waits on the printer.
+    printClosingSlip(sessionId, getReceiptPrinterObj())
+      .then(() => toast({ title: "Closing slip printed" }))
+      .catch((err) =>
+        toast({
+          variant: "destructive",
+          title: "Closing slip not printed",
+          description: `${errorMessage(err)} Use "Print closing slip" to try again.`,
+        }),
+      );
+  };
   const submit = async () => {
     if (value == null || value < 0) return toast({ variant: "destructive", title: "Count the cash in the drawer" });
     setBusy(true);
@@ -562,6 +577,7 @@ export function CloseRegisterDialog({
       });
       onOpenChange(false);
       onDone(s);
+      printSlip(s.id);
     } catch (e) {
       toast({ variant: "destructive", title: "Could not close register", description: errorMessage(e) });
     } finally {
