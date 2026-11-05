@@ -2255,10 +2255,11 @@ export class ChartOfAccountsService {
     return { lines: normalized, total: debit };
   }
 
-  async listVouchers(q: { from?: string; to?: string; search?: string; account_id?: string; page?: number; limit?: number }) {
+  async listVouchers(q: { from?: string; to?: string; search?: string; account_id?: string; branchId?: string; page?: number; limit?: number }) {
     const page = Math.max(1, q.page || 1);
     const limit = Math.min(200, Math.max(1, q.limit || 25));
     const where: Prisma.JournalVoucherWhereInput = {};
+    if (q.branchId) where.branch_id = q.branchId;
     if (q.from || q.to) {
       const { start, end } = localRange(q.from || ALL_DATES_FROM, q.to || businessTodayYmd());
       where.voucher_date = { gte: start, lte: end };

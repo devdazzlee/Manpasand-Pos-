@@ -137,6 +137,8 @@ export const listVouchersSchema = z.object({
     to: ymd.optional(),
     search: z.string().trim().optional(),
     account_id: z.string().uuid().optional(),
+    branchId: z.string().optional(),
+    branch_id: z.string().optional(),
     page: z.coerce.number().int().positive().optional(),
     limit: z.coerce.number().int().positive().max(200).optional(),
   }),

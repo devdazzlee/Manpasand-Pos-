@@ -249,6 +249,7 @@ class CustomerService {
     }
 
     public async getCustomers(params?: {
+        sold_at_branch?: string;
         search?: string;
         page?: number;
         limit?: number;
@@ -268,6 +269,7 @@ class CustomerService {
             createdAfter && !Number.isNaN(createdAfter.getTime()) ? createdAfter : null;
 
         const where = {
+            ...(params?.sold_at_branch ? { sales: { some: { branch_id: params.sold_at_branch } } } : {}),
             ...(params?.is_active !== undefined ? { is_active: params.is_active } : {}),
             ...(params?.is_loyalty_winner !== undefined
                 ? { is_loyalty_winner: params.is_loyalty_winner }

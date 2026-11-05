@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState, type ComponentType, type ReactNode } from "react";
+import { getBranchScope } from "@/lib/branch-scope";
 import {
   AlertTriangle,
   ArrowRight,
@@ -49,6 +50,10 @@ export function CoaOverview({
   const [whyOpen, setWhyOpen] = useState(false);
 
   useEffect(() => {
+    // These summaries are company-wide (customers / suppliers aren't split by
+    // branch). With a branch selected in the header, the cards show that
+    // branch's book figures only, without company-wide counts or alerts.
+    if (getBranchScope()) return;
     apiClient
       .get("/customer/receivables/summary")
       .then((r) => {

@@ -259,7 +259,8 @@ export function DashboardHome({ onNavigate }: DashboardHomeProps) {
     if (activeModal !== "customers" || customersFetched) return
     setCustomersLoading(true)
     apiClient
-      .get(`${API_BASE}/customer`)
+      // Same customers the card counts: everyone, or only buyers at the selected branch.
+      .get(`${API_BASE}/customer`, { params: scopeBranchId !== "all" ? { soldAtBranch: scopeBranchId } : {} })
       .then((res) => {
         const list: CustomerRow[] = res.data?.data || []
         list.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime())

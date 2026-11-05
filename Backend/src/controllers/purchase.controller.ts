@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { resolveBranchId } from '../utils/resolveBranchId';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { PurchaseService } from '../services/purchase.service';
@@ -90,7 +91,8 @@ export const updatePurchase = asyncHandler(async (req: Request, res: Response) =
 });
 
 export const getMonthlyStats = asyncHandler(async (req: Request, res: Response) => {
-  const stats = await purchaseService.getMonthlyStats(req.query.warehouseBranchId as string);
+  // Admin: the branch chosen in the header (or all); branch users: their own.
+  const stats = await purchaseService.getMonthlyStats((req.query.warehouseBranchId as string) || resolveBranchId(req));
   new ApiResponse(stats, 'Monthly stats retrieved').send(res);
 });
 

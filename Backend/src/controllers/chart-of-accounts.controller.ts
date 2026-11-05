@@ -1,4 +1,5 @@
 import { Request, Response } from 'express';
+import { resolveBranchId } from '../utils/resolveBranchId';
 import asyncHandler from '../middleware/asyncHandler';
 import { ApiResponse } from '../utils/apiResponse';
 import { ChartOfAccountsService } from '../services/chart-of-accounts.service';
@@ -180,7 +181,7 @@ export const deleteAccount = asyncHandler(async (req: Request, res: Response) =>
 
 export const listVouchers = asyncHandler(async (req: Request, res: Response) => {
   const q = listVouchersSchema.shape.query.parse(req.query);
-  const result = await service.listVouchers(q);
+  const result = await service.listVouchers({ ...q, branchId: resolveBranchId(req) });
   new ApiResponse(result.data, 'Journal vouchers retrieved', 200, true, result.meta).send(res);
 });
 

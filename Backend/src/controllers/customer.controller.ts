@@ -47,6 +47,9 @@ export const getCustomers = asyncHandler(async (req: Request, res: Response) => 
                     : undefined,
         balance: req.query.balance as string | undefined,
         sort: req.query.sort as string | undefined,
+        // Only customers who bought at this branch (dashboard "customers" for a branch).
+        // A dedicated param, not branchId: customer search at the till must still find everyone.
+        sold_at_branch: (req.query.soldAtBranch as string | undefined) || undefined,
     });
     new ApiResponse(result.data, 'Customers fetched', 200, true, result.meta).send(res);
 });
