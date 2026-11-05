@@ -7,6 +7,8 @@ import {
   ArrowUpRight,
   Banknote,
   BarChart3,
+  Building2,
+  MapPin,
   Calculator,
   CalendarDays,
   CheckCircle2,
@@ -772,6 +774,42 @@ export function RegisterReport() {
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {/* Branch: picker for admins (like the Dashboard), fixed label for branch accounts. */}
+          {!report ? (
+            <Skeleton className="h-9 w-[220px] rounded-md" />
+          ) : isAdmin ? (
+            <Select value={branchId} onValueChange={setBranchId} disabled={loading}>
+              <SelectTrigger
+                aria-label="Show register report for branch"
+                className={cn(
+                  "h-9 w-full gap-0 text-sm font-medium shadow-sm sm:w-[220px] [&>span]:flex-1 [&>span]:text-left",
+                  branchId === "all"
+                    ? "border-slate-200 bg-white text-slate-700"
+                    : "border-blue-300 bg-blue-50 text-blue-900",
+                )}
+              >
+                {branchId === "all" ? (
+                  <Building2 className="mr-2 h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+                ) : (
+                  <MapPin className="mr-2 h-4 w-4 shrink-0 text-blue-600" aria-hidden />
+                )}
+                <SelectValue placeholder="All Branches" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All Branches</SelectItem>
+                {(report.filters.registers || []).map((item) => (
+                  <SelectItem key={item.id} value={item.id}>
+                    {item.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <div className="flex h-9 shrink-0 items-center gap-2 rounded-md border border-slate-200 bg-white px-3 text-sm font-medium text-slate-700 shadow-sm">
+              <MapPin className="h-4 w-4 shrink-0 text-slate-500" aria-hidden />
+              <span className="max-w-[180px] truncate">{report.filters.registers?.[0]?.name || "Your branch"}</span>
+            </div>
+          )}
           <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={load} disabled={loading}>
             <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
             Refresh
@@ -973,14 +1011,6 @@ export function RegisterReport() {
               value={preset}
               onChange={(value) => applyPreset(value as Preset)}
               options={PRESETS.map((item) => ({ value: item.id, label: item.label }))}
-              labelClass={filterLabel}
-              triggerClass={filterControl}
-            />
-            <FilterSelect
-              label="Register"
-              value={branchId}
-              onChange={setBranchId}
-              options={[{ value: "all", label: "All registers" }, ...(report?.filters.registers || []).map((item) => ({ value: item.id, label: `${item.name} (${item.number})` }))]}
               labelClass={filterLabel}
               triggerClass={filterControl}
             />
