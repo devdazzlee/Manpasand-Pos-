@@ -673,6 +673,7 @@ export function NewSale() {
     branchLoading,
     selectedBranchId,
     branchInfo,
+    refreshBranchFromServer,
     hasBranch,
   } = usePosBranch();
   // Admin tried to bill without choosing a branch → highlight the picker.
@@ -838,21 +839,22 @@ export function NewSale() {
   const branchAutoDiscountLabel =
     branchInfo.pos_policy?.label?.trim() || null;
 
-  // Apply branch policy from the API and/or customer default (preview only;
-  // SaleService.createSale is the source of truth). Loyalty winners: separate effect.
+  // Customer default % only when this branch has no server policy (preview).
+  // Branch floor is applied in a separate effect so sleep / "touched" ref
+  // cannot hide the mandatory minimum.
   useEffect(() => {
     if (discountTouchedRef.current || isLoyaltyWinnerCustomer) return;
+    if (branchAutoDiscountPercent > 0) return;
     const cust = selectedCustomer
       ? customers.find((c) => c.id === selectedCustomer)
       : null;
     const customerPct = Number((cust as any)?.default_discount_percent) || 0;
-    const pct = Math.max(branchAutoDiscountPercent, customerPct);
-    if (pct > 0) {
+    if (customerPct > 0) {
       setGlobalDiscountType("percentage");
-      setGlobalDiscountValue(String(pct));
+      setGlobalDiscountValue(String(customerPct));
       setShowDiscountRow(true);
       autoDiscountCustomerRef.current = selectedCustomer;
-    } else if (autoDiscountCustomerRef.current && branchAutoDiscountPercent === 0) {
+    } else if (autoDiscountCustomerRef.current) {
       setGlobalDiscountValue("");
       setShowDiscountRow(false);
       autoDiscountCustomerRef.current = null;
@@ -862,7 +864,6 @@ export function NewSale() {
     customers,
     isLoyaltyWinnerCustomer,
     branchAutoDiscountPercent,
-    branchInfo.pos_policy,
   ]);
 
   // Restore the in-progress sale after a refresh, then keep it saved.
@@ -1996,6 +1997,27 @@ export function NewSale() {
 
   const total = Math.max(0, subtractMoney(subtotal, globalDiscountAmount));
 
+  // Mandatory branch bill discount preview (≥ server floor in rupees). Runs even
+  // if discountTouchedRef is true — that ref must not block policy. Also picks
+  // up after sleep once pos_policy is refetched (usePosBranch visibility handler).
+  useEffect(() => {
+    if (isLoyaltyWinnerCustomer) return;
+    if (branchAutoDiscountPercent <= 0) return;
+    if (subtotal <= 0) return;
+    const floorAmount = roundMoney((subtotal * branchAutoDiscountPercent) / 100);
+    if (globalDiscountAmount + 0.005 < floorAmount) {
+      setGlobalDiscountType("percentage");
+      setGlobalDiscountValue(String(branchAutoDiscountPercent));
+      setShowDiscountRow(true);
+    }
+  }, [
+    isLoyaltyWinnerCustomer,
+    branchAutoDiscountPercent,
+    subtotal,
+    globalDiscountAmount,
+    branchInfo.pos_policy,
+  ]);
+
   // Lifetime loyalty-winner discount: 25% of the subtotal, capped at a fixed
   // Rs amount — recomputed as the cart changes so the preview always matches
   // what the backend will actually charge (same cap/branch/monthly rules).
@@ -2121,10 +2143,16 @@ export function NewSale() {
     setCompletedCustomerPhone("");
     setCompletedCustomerEmail("");
     setCart([]);
-    setGlobalDiscountValue("");
-    setShowDiscountRow(false);
     discountTouchedRef.current = false;
     autoDiscountCustomerRef.current = null;
+    if (branchAutoDiscountPercent > 0) {
+      setGlobalDiscountType("percentage");
+      setGlobalDiscountValue(String(branchAutoDiscountPercent));
+      setShowDiscountRow(true);
+    } else {
+      setGlobalDiscountValue("");
+      setShowDiscountRow(false);
+    }
     setSelectedCustomer(null);
     if (searchInputRef.current) {
       searchInputRef.current.focus();

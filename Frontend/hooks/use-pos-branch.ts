@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import apiClient from "@/lib/apiClient";
 import {
   BranchOption,
@@ -44,6 +44,30 @@ export function usePosBranch() {
   });
   const [loading, setLoading] = useState(false);
   const [adminMode, setAdminMode] = useState(false);
+
+  /** Re-fetch current branch so pos_policy stays fresh after sleep / tab restore. */
+  const refreshBranchFromServer = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    const id = selectedBranchId?.trim();
+    if (!id) return;
+    try {
+      const response = await apiClient.get(`/branches/${id}`);
+      const branch = response?.data?.data ? mapBranchOption(response.data.data) : null;
+      if (!branch) return;
+      setBranchInfo({
+        name: branch.name,
+        address: branch.address || "",
+        pos_policy: branch.pos_policy ?? null,
+      });
+      setBranches((prev) =>
+        prev.some((b) => b.id === branch.id)
+          ? prev.map((b) => (b.id === branch.id ? { ...b, ...branch } : b))
+          : prev,
+      );
+    } catch {
+      // Offline or transient error — keep last good branchInfo.
+    }
+  }, [selectedBranchId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,6 +151,30 @@ export function usePosBranch() {
     };
   }, []);
 
+  // After display sleep or tab backgrounding, branch metadata can be stale;
+  // refetch when the user comes back so auto-discount policy is reliable.
+  useEffect(() => {
+    if (typeof document === "undefined" || typeof window === "undefined") return;
+
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      void refreshBranchFromServer();
+    };
+
+    const onPageShow = (e: PageTransitionEvent) => {
+      if (e.persisted) void refreshBranchFromServer();
+    };
+
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    window.addEventListener("pageshow", onPageShow as EventListener);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+      window.removeEventListener("pageshow", onPageShow as EventListener);
+    };
+  }, [refreshBranchFromServer]);
+
   useEffect(() => {
     if (!adminMode) return;
 
@@ -162,6 +210,7 @@ export function usePosBranch() {
     selectedBranchId,
     setSelectedBranchId,
     branchInfo,
+    refreshBranchFromServer,
     hasBranch: Boolean(selectedBranchId),
   };
 }
