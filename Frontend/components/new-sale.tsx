@@ -832,27 +832,38 @@ export function NewSale() {
     };
   }, []);
 
-  // Apply the selected customer's default discount automatically (overridable).
-  // Loyalty-winner customers are handled by a separate effect below instead,
-  // since their discount needs the Rs cap applied, not a plain percentage.
+  const branchAutoDiscountPercent = Number(
+    branchInfo.pos_policy?.auto_bill_discount_percent || 0,
+  );
+  const branchAutoDiscountLabel =
+    branchInfo.pos_policy?.label?.trim() || null;
+
+  // Apply branch policy from the API and/or customer default (preview only;
+  // SaleService.createSale is the source of truth). Loyalty winners: separate effect.
   useEffect(() => {
     if (discountTouchedRef.current || isLoyaltyWinnerCustomer) return;
     const cust = selectedCustomer
       ? customers.find((c) => c.id === selectedCustomer)
       : null;
-    const pct = Number((cust as any)?.default_discount_percent) || 0;
+    const customerPct = Number((cust as any)?.default_discount_percent) || 0;
+    const pct = Math.max(branchAutoDiscountPercent, customerPct);
     if (pct > 0) {
       setGlobalDiscountType("percentage");
       setGlobalDiscountValue(String(pct));
       setShowDiscountRow(true);
       autoDiscountCustomerRef.current = selectedCustomer;
-    } else if (autoDiscountCustomerRef.current) {
-      // Previous customer's auto-discount no longer applies.
+    } else if (autoDiscountCustomerRef.current && branchAutoDiscountPercent === 0) {
       setGlobalDiscountValue("");
       setShowDiscountRow(false);
       autoDiscountCustomerRef.current = null;
     }
-  }, [selectedCustomer, customers, isLoyaltyWinnerCustomer]);
+  }, [
+    selectedCustomer,
+    customers,
+    isLoyaltyWinnerCustomer,
+    branchAutoDiscountPercent,
+    branchInfo.pos_policy,
+  ]);
 
   // Restore the in-progress sale after a refresh, then keep it saved.
   useEffect(() => {
@@ -1956,10 +1967,17 @@ export function NewSale() {
     setCart([]);
     setQuantityInputs({});
     setQuantityModes({});
-    setGlobalDiscountValue("");
-    setShowDiscountRow(false);
     discountTouchedRef.current = false;
     autoDiscountCustomerRef.current = null;
+    // Keep Dhoraji (and any branch) opening discount ready for the next bill.
+    if (branchAutoDiscountPercent > 0) {
+      setGlobalDiscountType("percentage");
+      setGlobalDiscountValue(String(branchAutoDiscountPercent));
+      setShowDiscountRow(true);
+    } else {
+      setGlobalDiscountValue("");
+      setShowDiscountRow(false);
+    }
     setActiveCartLineId(null);
     setPriceEditLineId(null);
     activeCartLineIdRef.current = null;
@@ -2465,10 +2483,16 @@ export function NewSale() {
 
         setTimeout(() => {
           setCart([]);
-          setGlobalDiscountValue("");
-          setShowDiscountRow(false);
           discountTouchedRef.current = false;
           autoDiscountCustomerRef.current = null;
+          if (branchAutoDiscountPercent > 0) {
+            setGlobalDiscountType("percentage");
+            setGlobalDiscountValue(String(branchAutoDiscountPercent));
+            setShowDiscountRow(true);
+          } else {
+            setGlobalDiscountValue("");
+            setShowDiscountRow(false);
+          }
         }, 300);
 
         return true;
@@ -4183,6 +4207,19 @@ export function NewSale() {
                   </div>
                 )}
 
+                {!isLoyaltyWinnerCustomer && branchAutoDiscountPercent > 0 && (
+                  <div
+                    className="rounded-md border border-sky-200 bg-sky-50 px-2 py-1.5 text-[11px] font-medium text-sky-900"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span className="font-semibold">Auto discount</span>
+                    {" — "}
+                    {branchAutoDiscountLabel || "This branch"}: {branchAutoDiscountPercent}% applied to the bill (set
+                    by server; cart preview matches).
+                  </div>
+                )}
+
                 {!showDiscountRow && globalDiscountAmount === 0 ? (
                   <button
                     type="button"
@@ -4196,7 +4233,19 @@ export function NewSale() {
                   </button>
                 ) : (
                   <div className="flex items-center justify-between gap-3">
-                    <span className="shrink-0 text-xs text-slate-500">Discount</span>
+                    <span className="shrink-0 text-xs text-slate-500">
+                      Discount
+                      {!isLoyaltyWinnerCustomer &&
+                      branchAutoDiscountPercent > 0 &&
+                      globalDiscountType === "percentage" &&
+                      Math.abs(
+                        (Number.parseFloat(globalDiscountValue) || 0) - branchAutoDiscountPercent,
+                      ) < 0.01 ? (
+                        <span className="ml-1 rounded bg-sky-100 px-1 py-px text-[10px] font-semibold text-sky-800">
+                          auto
+                        </span>
+                      ) : null}
+                    </span>
                     <div className="flex h-8 w-[9.5rem] shrink-0 overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm focus-within:border-blue-400 focus-within:ring-2 focus-within:ring-blue-500/15">
                       <Select
                         value={globalDiscountType}

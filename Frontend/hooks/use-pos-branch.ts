@@ -31,12 +31,17 @@ export function clearPosBranchChoice() {
 interface BranchInfo {
   name: string;
   address: string;
+  pos_policy: BranchOption["pos_policy"];
 }
 
 export function usePosBranch() {
   const [branches, setBranches] = useState<BranchOption[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState("");
-  const [branchInfo, setBranchInfo] = useState<BranchInfo>({ name: "", address: "" });
+  const [branchInfo, setBranchInfo] = useState<BranchInfo>({
+    name: "",
+    address: "",
+    pos_policy: null,
+  });
   const [loading, setLoading] = useState(false);
   const [adminMode, setAdminMode] = useState(false);
 
@@ -75,7 +80,7 @@ export function usePosBranch() {
 
           // Never pre-select: the admin must consciously pick the branch.
           setSelectedBranchId("");
-          setBranchInfo({ name: "", address: "" });
+          setBranchInfo({ name: "", address: "", pos_policy: null });
 
           return;
         }
@@ -83,7 +88,7 @@ export function usePosBranch() {
         if (!storedBranchId) {
           if (!cancelled) {
             setSelectedBranchId("");
-            setBranchInfo({ name: "", address: "" });
+            setBranchInfo({ name: "", address: "", pos_policy: null });
           }
           return;
         }
@@ -100,10 +105,13 @@ export function usePosBranch() {
         setBranchInfo({
           name: branch.name,
           address: branch.address || "",
+          pos_policy: branch.pos_policy ?? null,
         });
       } catch (error) {
         if (!cancelled) {
-          setBranchInfo((prev) => (prev.name ? prev : { name: "Admin", address: "" }));
+          setBranchInfo((prev) =>
+            prev.name ? prev : { name: "Admin", address: "", pos_policy: null },
+          );
         }
       } finally {
         if (!cancelled) {
@@ -130,6 +138,7 @@ export function usePosBranch() {
     setBranchInfo({
       name: selectedBranch.name,
       address: selectedBranch.address || "",
+      pos_policy: selectedBranch.pos_policy ?? null,
     });
   }, [adminMode, branches, selectedBranchId]);
 

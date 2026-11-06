@@ -24,6 +24,8 @@ import {
 import { createSaleSchema, refundSaleSchema } from "../validations/sale.validation";
 import { PromotionService } from "../services/promotion.service";
 import { loyaltySettings } from "../services/loyalty.service";
+import { branchAutoDiscountAmount } from "../config/branch-discount-policy";
+import { resolveBranchId } from "../utils/resolveBranchId";
 
 const router = Router();
 const holdSaleRoles = [
@@ -43,13 +45,18 @@ const promotionService = new PromotionService();
 const saleCheckoutPermissions = async (req: Request) => {
     const body = req.body || {};
     const keys: string[] = [];
-    // Only the cashier's own discount needs approval; promotions, points and gift cards are checked by the server.
-    if (Number(body.discountAmount) > 0) keys.push("sales.discount");
     const items: { productId: string; price: number; quantity: number }[] = Array.isArray(body.items) ? body.items : [];
-    let total = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0) - (Number(body.discountAmount) || 0);
+    const subtotal = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0);
+    const clientDiscount = Math.max(0, Number(body.discountAmount) || 0);
+    // Branch auto-discount (e.g. Dhoraji 15%) is a server policy — cashiers may
+    // send that amount without sales.discount. Anything above the floor still needs approval.
+    const branchId = resolveBranchId(req) || (req.user?.branch_id as string | undefined);
+    const policyFloor = branchAutoDiscountAmount(branchId, subtotal);
+    if (clientDiscount > policyFloor + 0.005) keys.push("sales.discount");
+    let total = subtotal - Math.max(clientDiscount, policyFloor);
     if (body.applyPromotions !== false && items.length) {
         const promo = await promotionService
-            .evaluate({ lines: items.map((i) => ({ productId: i.productId, price: Number(i.price), quantity: Number(i.quantity) })), branchId: req.user?.branch_id, code: body.promotionCode })
+            .evaluate({ lines: items.map((i) => ({ productId: i.productId, price: Number(i.price), quantity: Number(i.quantity) })), branchId, code: body.promotionCode })
             .catch(() => ({ discount: 0 }));
         total -= promo.discount;
     }

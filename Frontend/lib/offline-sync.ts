@@ -153,6 +153,10 @@ class OfflineSyncManager {
           branchId: sale.branchId,
           customerId: sale.customer?.id,
           salespersonId: (sale as any).salespersonId || undefined,
+          // Branch auto-discount is also enforced server-side; still forward the
+          // till amount so higher cashier discounts survive offline sync.
+          discountAmount: Number((sale as any).discountAmount) || 0,
+          applyPromotions: false,
         };
         
         // Post sale to server

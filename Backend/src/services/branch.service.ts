@@ -4,11 +4,23 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateBranchInput, UpdateBranchInput } from '../validations/branch.validation';
 import { endOfDay, startOfDay } from 'date-fns';
+import { getBranchAutoDiscount } from '../config/branch-discount-policy';
 
 // A branch's "login" is the primary staff account tied to it — a
 // BRANCH_MANAGER for regular branches, a WAREHOUSE_MANAGER for warehouses.
 const primaryRoleFor = (branchType: string): Role =>
   branchType === 'WAREHOUSE' ? Role.WAREHOUSE_MANAGER : Role.BRANCH_MANAGER;
+
+/** Non-secret POS rules for a branch (same source as sale pricing). */
+function withPosPolicy<T extends { id: string }>(branch: T) {
+  const policy = getBranchAutoDiscount(branch.id);
+  return {
+    ...branch,
+    pos_policy: policy
+      ? { auto_bill_discount_percent: policy.percent, label: policy.label }
+      : null,
+  };
+}
 
 export class BranchService {
   public async createBranch(data: CreateBranchInput) {
@@ -115,7 +127,7 @@ export class BranchService {
       throw new AppError(404, 'Branch not found');
     }
 
-    return branch;
+    return withPosPolicy(branch);
   }
 
   public async updateBranch(id: string, data: UpdateBranchInput) {
@@ -196,7 +208,7 @@ export class BranchService {
     ]);
 
     return {
-      data: branches,
+      data: branches.map(withPosPolicy),
       meta: {
         total,
         page,
@@ -306,6 +318,6 @@ export class BranchService {
       throw new Error('Branch not found');
     }
 
-    return branch;
+    return withPosPolicy(branch);
   }
 }

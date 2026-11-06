@@ -3,6 +3,10 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { assertBranchCanSell, assertCashRegisterOpenForSale } from '../utils/register-sale-guard';
 import { ALLOW_NEGATIVE_STOCK_SALE } from '../config/pos-rules';
+import {
+  branchAutoDiscountAmount,
+  getBranchAutoDiscount,
+} from '../config/branch-discount-policy';
 import { businessDayRange, businessTodayYmd, businessTodayRange, toBusinessYmd } from '../utils/timezone';
 import { allocateSaleNumber } from '../utils/saleNumber';
 import { computeOriginalSalePaidFactor } from '../utils/saleReturnPricing';
@@ -1246,10 +1250,34 @@ class SaleService {
       paymentMethod as PaymentMethod,
       subtotalAmt,
     );
-    // A registered loyalty winner's discount is computed and validated here,
-    // on the server, and replaces whatever discount the client sent — this is
-    // the only place the cap/monthly-limit/branch/cash rules are enforced.
-    const manualDiscount = customer?.is_loyalty_winner ? loyalty.amount : Math.max(0, discountAmount ?? 0);
+
+    // Branch opening / auto bill discount (e.g. Dhoraji 15%). Enforced here so
+    // cashiers without sales.discount, offline sync, and API clients cannot
+    // skip it. Loyalty winners still replace manual/branch discount entirely.
+    const branchPolicy = getBranchAutoDiscount(branchId);
+    const policyDiscount = branchAutoDiscountAmount(branchId, subtotalAmt);
+    const clientManual = Math.max(0, discountAmount ?? 0);
+
+    let manualDiscount: number;
+    let branchPolicyApplied: AppliedPromotion | null = null;
+    if (customer?.is_loyalty_winner) {
+      // Cap/monthly-limit/branch/cash rules are only enforced in computeLoyaltyDiscount.
+      manualDiscount = loyalty.amount;
+    } else if (policyDiscount > 0) {
+      // Floor at the branch policy; cashiers with permission may give more.
+      manualDiscount = money2(Math.max(clientManual, policyDiscount));
+      if (manualDiscount <= policyDiscount + 0.005 && branchPolicy) {
+        branchPolicyApplied = {
+          id: `branch-auto:${branchId}`,
+          name: `${branchPolicy.label} opening ${branchPolicy.percent}%`,
+          code: null,
+          type: 'BRANCH_AUTO_PERCENT',
+          amount: policyDiscount,
+        };
+      }
+    } else {
+      manualDiscount = clientManual;
+    }
 
     // Promotions are worked out here, never trusted from the till.
     const promo =
@@ -1260,6 +1288,10 @@ class SaleService {
       throw new AppError(400, `Coupon ${promotionCode.trim().toUpperCase()} is not valid for this bill`);
     }
     const promoDiscount = money2(Math.min(promo.discount, Math.max(0, subtotalAmt - manualDiscount)));
+    const appliedPromotions: AppliedPromotion[] = [
+      ...promo.applied,
+      ...(branchPolicyApplied ? [branchPolicyApplied] : []),
+    ];
 
     // Loyalty points redeemed as a discount.
     let loyaltyDiscount = 0;
@@ -1319,7 +1351,9 @@ class SaleService {
           discount_amount: new Prisma.Decimal(finalDiscount),
           loyalty_discount_applied: loyalty.applied,
           promotion_discount: new Prisma.Decimal(promoDiscount),
-          applied_promotions: promo.applied.length ? (promo.applied as unknown as Prisma.InputJsonValue) : undefined,
+          applied_promotions: appliedPromotions.length
+            ? (appliedPromotions as unknown as Prisma.InputJsonValue)
+            : undefined,
           loyalty_points_redeemed: redeemPoints,
           loyalty_discount: new Prisma.Decimal(loyaltyDiscount),
           loyalty_points_earned: earnPoints,
