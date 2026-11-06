@@ -8,26 +8,29 @@ const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const app_service_1 = __importDefault(require("../services/app.service"));
 const apiResponse_1 = require("../utils/apiResponse");
 const apiError_1 = require("../utils/apiError");
+const public_product_1 = require("../utils/public-product");
 const appService = new app_service_1.default();
+// Public endpoints (website / customer app): every response goes through
+// toPublicCatalog so purchase prices and supplier data never leave the server.
 exports.getHomeData = (0, asyncHandler_1.default)(async (req, res) => {
     const homeData = await appService.getHomeData();
-    new apiResponse_1.ApiResponse(homeData, 'Data fetched successfully', 200).send(res);
+    new apiResponse_1.ApiResponse((0, public_product_1.toPublicCatalog)(homeData), 'Data fetched successfully', 200).send(res);
 });
 exports.searchProducts = (0, asyncHandler_1.default)(async (req, res) => {
     const searchQuery = req.query.search;
     const limit = req.query.limit ? parseInt(req.query.limit) : undefined;
     const searchedProducts = await appService.searchProducts(searchQuery, limit);
-    new apiResponse_1.ApiResponse(searchedProducts, 'Data fetched successfully', 200).send(res);
+    new apiResponse_1.ApiResponse((0, public_product_1.toPublicCatalog)(searchedProducts), 'Data fetched successfully', 200).send(res);
 });
 exports.getProductById = (0, asyncHandler_1.default)(async (req, res) => {
     const product = await appService.getProductById(req.params.id);
     if (!product || !product.is_active || product.display_on_website === false) {
         throw new apiError_1.AppError(404, "Product not found");
     }
-    new apiResponse_1.ApiResponse(product, 'Product fetched successfully', 200).send(res);
+    new apiResponse_1.ApiResponse((0, public_product_1.toPublicCatalog)(product), 'Product fetched successfully', 200).send(res);
 });
 exports.getCategories = (0, asyncHandler_1.default)(async (_req, res) => {
     const categories = await appService.getCategories();
-    new apiResponse_1.ApiResponse(categories, 'Categories fetched successfully', 200).send(res);
+    new apiResponse_1.ApiResponse((0, public_product_1.toPublicCatalog)(categories), 'Categories fetched successfully', 200).send(res);
 });
 //# sourceMappingURL=app.controller.js.map

@@ -7,9 +7,15 @@ exports.logReturn = exports.listStockOut = exports.logBulkStockOut = exports.log
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const stock_out_service_1 = require("../services/stock-out.service");
+const auth_middleware_1 = require("../middleware/auth.middleware");
 const stockOutService = new stock_out_service_1.StockOutService();
 exports.getMonthlyStats = (0, asyncHandler_1.default)(async (req, res) => {
     const stats = await stockOutService.getMonthlyStats(req.query.branchId);
+    // Value here is at purchase cost: branch accounts get quantities only.
+    if ((0, auth_middleware_1.isBranchLockedRole)(req.user?.role)) {
+        const { totalValue: _cost, ...withoutCost } = stats;
+        return new apiResponse_1.ApiResponse(withoutCost, 'Monthly stock-out stats retrieved').send(res);
+    }
     new apiResponse_1.ApiResponse(stats, 'Monthly stock-out stats retrieved').send(res);
 });
 exports.logStockOut = (0, asyncHandler_1.default)(async (req, res) => {

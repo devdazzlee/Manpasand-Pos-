@@ -23,6 +23,15 @@ exports.reportsSchema = zod_1.z.object({
         supplierId: zod_1.z.string().optional(),
         productId: zod_1.z.string().optional(),
         categoryId: zod_1.z.string().optional(),
+        q: zod_1.z.string().max(120).optional(),
+        sort: zod_1.z.string().max(40).optional(),
+        status: zod_1.z.string().max(40).optional(),
+        movementType: zod_1.z.string().max(40).optional(),
+        stockStatus: zod_1.z.string().max(40).optional(),
+        ageBucket: zod_1.z.string().max(40).optional(),
+        page: zod_1.z.string().optional(),
+        limit: zod_1.z.string().optional(),
+        all: zod_1.z.string().optional(),
     }),
 });
 //# sourceMappingURL=inventory.validation.js.map

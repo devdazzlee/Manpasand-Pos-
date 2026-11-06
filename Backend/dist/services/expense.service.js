@@ -6,6 +6,10 @@ const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const helpers_1 = require("../utils/helpers");
 const pagination_1 = require("../utils/pagination");
+const timezone_1 = require("../utils/timezone");
+const chart_of_accounts_service_1 = require("./chart-of-accounts.service");
+const period_lock_service_1 = require("./period-lock.service");
+const register_cash_out_helper_1 = require("./register-cash-out.helper");
 /** Advance a date by one recurrence step. */
 function advanceDate(from, frequency, interval) {
     const d = new Date(from);
@@ -30,16 +34,54 @@ function advanceDate(from, frequency, interval) {
     return d;
 }
 function parseDateInput(value) {
-    if (!value)
-        return undefined;
-    const d = new Date(value);
-    return Number.isNaN(d.getTime()) ? undefined : d;
+    return (0, timezone_1.parseYmdBound)(value, 'start');
 }
+const chartOfAccounts = new chart_of_accounts_service_1.ChartOfAccountsService();
+/**
+ * Keeps an expense's three links consistent:
+ *   account  (Chart of Accounts expense head — what the user picks)
+ *   category (its mirror, used by filters and reports)
+ *   paid from (Cash in Hand / bank account the money left from)
+ * `undefined` in the result means "leave as is" on update.
+ */
+async function resolveExpenseLinks(data, existing) {
+    let accountId = data.account_id;
+    let categoryId = data.category_id;
+    if (accountId) {
+        await chartOfAccounts.assertExpenseAccount(accountId);
+        categoryId = (await chartOfAccounts.ensureCategoryForAccount(accountId)) ?? categoryId ?? null;
+    }
+    else if (categoryId) {
+        const cat = await client_2.prisma.expenseCategory.findUnique({
+            where: { id: categoryId },
+            include: { chart_account: { select: { id: true } } },
+        });
+        if (!cat)
+            throw new apiError_1.AppError(400, 'Invalid expense category');
+        // Old screens send only a category — post to its linked account.
+        if (accountId === undefined || accountId === null)
+            accountId = cat.chart_account?.id ?? accountId;
+    }
+    let paidFrom = data.paid_from_account_id;
+    if (paidFrom) {
+        await chartOfAccounts.assertMoneyAccount(paidFrom);
+    }
+    else if (paidFrom === undefined) {
+        const methodChanged = !existing || (data.payment_method != null && data.payment_method !== existing.payment_method);
+        if (methodChanged)
+            paidFrom = await chartOfAccounts.defaultMoneyAccount(data.payment_method ?? existing?.payment_method ?? 'CASH');
+    }
+    return { accountId, categoryId, paidFrom };
+}
+const ACCOUNT_SELECT = { select: { id: true, code: true, name: true } };
 const EXPENSE_INCLUDE = {
     category: { select: { id: true, name: true } },
+    account: ACCOUNT_SELECT,
+    paid_from: ACCOUNT_SELECT,
     branch: { select: { id: true, name: true } },
     creator: { select: { id: true, email: true } },
     approver: { select: { id: true, email: true } },
+    _count: { select: { attachments: true } },
 };
 /* ============================ categories ============================ */
 class ExpenseCategoryService {
@@ -72,13 +114,15 @@ class ExpenseCategoryService {
         });
         if (clash)
             throw new apiError_1.AppError(400, 'An expense category with this name already exists');
-        return client_2.prisma.expenseCategory.create({
+        const created = await client_2.prisma.expenseCategory.create({
             data: {
                 name,
                 description: data.description?.trim() || null,
                 is_active: data.is_active ?? true,
             },
         });
+        await chartOfAccounts.syncLinkedAccounts().catch(() => undefined);
+        return created;
     }
     async update(id, data) {
         const existing = await client_2.prisma.expenseCategory.findUnique({ where: { id } });
@@ -98,7 +142,16 @@ class ExpenseCategoryService {
             patch.description = data.description?.trim() || null;
         if (data.is_active !== undefined)
             patch.is_active = data.is_active;
-        return client_2.prisma.expenseCategory.update({ where: { id }, data: patch });
+        const updated = await client_2.prisma.expenseCategory.update({ where: { id }, data: patch });
+        if (patch.name) {
+            await client_2.prisma.transactionalAccount
+                .updateMany({
+                where: { expense_category_id: id },
+                data: { name: updated.name },
+            })
+                .catch(() => undefined);
+        }
+        return updated;
     }
     async toggle(id) {
         const existing = await client_2.prisma.expenseCategory.findUnique({ where: { id } });
@@ -125,9 +178,32 @@ class ExpenseCategoryService {
 }
 exports.ExpenseCategoryService = ExpenseCategoryService;
 /* ============================= expenses ============================= */
+/**
+ * Keep the method in step with the account the money left from: paid from
+ * Cash in Hand is CASH, paid from a bank is never CASH — the register counts
+ * drawer cash by this, so "Cash" with a bank account would come off the drawer.
+ */
+async function methodMatchingPaidFrom(paidFrom, method) {
+    const current = method;
+    if (!paidFrom)
+        return current;
+    const account = await client_2.prisma.transactionalAccount.findUnique({ where: { id: paidFrom }, select: { system_key: true } });
+    if (!account)
+        return current;
+    if (account.system_key === 'CASH')
+        return 'CASH';
+    return current === 'CASH' ? 'BANK' : current;
+}
+/** Drawer copies of supplier / salary / commission payments are edited from the payment itself. */
+function assertNotPaymentCopy(row) {
+    if (row.cashflow_id && row.reference && /^(Purchase payment|Salary|Commission) ·/.test(row.particular)) {
+        throw new apiError_1.AppError(400, 'This is a supplier / salary / commission payment — change it from Suppliers, Salaries or Commission');
+    }
+}
 class ExpenseService {
     buildWhere(q) {
-        const where = {};
+        // Supplier / salary / commission payments made from the drawer are not expenses.
+        const where = { NOT: register_cash_out_helper_1.REGISTER_PAYMENT_COPY };
         if (q.search?.trim()) {
             const s = q.search.trim();
             where.OR = [
@@ -138,28 +214,37 @@ class ExpenseService {
         }
         if (q.category_id)
             where.category_id = q.category_id;
+        if (q.account_id)
+            where.account_id = q.account_id;
         if (q.payment_method)
             where.payment_method = q.payment_method;
         if (q.status)
             where.status = q.status;
         if (q.branch_id)
             where.branch_id = q.branch_id;
-        const from = parseDateInput(q.from);
-        const to = parseDateInput(q.to);
-        if (from || to) {
+        const { start, end } = (0, timezone_1.parseOptionalDateRange)(q.from, q.to);
+        if (start || end) {
             where.expense_date = {};
-            if (from)
-                where.expense_date.gte = from;
-            if (to) {
-                const end = new Date(to);
-                end.setHours(23, 59, 59, 999);
+            if (start)
+                where.expense_date.gte = start;
+            if (end)
                 where.expense_date.lte = end;
-            }
         }
         return where;
     }
     async list(q) {
-        const { page, limit, skip } = (0, pagination_1.parsePagination)({ page: q.page, limit: q.limit });
+        const fetchAll = q.fetch_all === 'true';
+        const pageNum = Number(q.page);
+        const limitNum = Number(q.limit);
+        const page = fetchAll
+            ? 1
+            : Number.isFinite(pageNum) && pageNum > 0
+                ? Math.floor(pageNum)
+                : 1;
+        const limit = fetchAll
+            ? 5000
+            : Math.min(5000, Math.max(1, Number.isFinite(limitNum) && limitNum > 0 ? Math.floor(limitNum) : 20));
+        const skip = fetchAll ? 0 : (page - 1) * limit;
         const where = this.buildWhere(q);
         const [rows, total, statusAgg] = await Promise.all([
             client_2.prisma.expense.findMany({
@@ -183,10 +268,13 @@ class ExpenseService {
             totals[row.status] = (0, helpers_1.asNumber)(row._sum.amount);
             counts[row.status] = row._count._all;
         }
+        const metaPage = fetchAll ? 1 : page;
+        const metaLimit = fetchAll ? rows.length : limit;
         return {
             data: rows.map((e) => ({ ...e, amount: (0, helpers_1.asNumber)(e.amount) })),
             meta: {
-                ...(0, pagination_1.paginationMeta)(total, page, limit),
+                ...(0, pagination_1.paginationMeta)(total, metaPage, fetchAll ? Math.max(metaLimit, 1) : limit),
+                ...(fetchAll ? { totalPages: 1, fetchAll: true } : { fetchAll: false }),
                 summary: {
                     totalAmount: totals.PENDING + totals.APPROVED + totals.REJECTED,
                     pendingAmount: totals.PENDING,
@@ -203,26 +291,46 @@ class ExpenseService {
             throw new apiError_1.AppError(404, 'Expense not found');
         return { ...e, amount: (0, helpers_1.asNumber)(e.amount) };
     }
-    async create(data, userId) {
-        if (data.category_id) {
-            const cat = await client_2.prisma.expenseCategory.findUnique({ where: { id: data.category_id } });
-            if (!cat)
-                throw new apiError_1.AppError(400, 'Invalid expense category');
+    async create(data, userId, opts = {}) {
+        const links = await resolveExpenseLinks(data);
+        await (0, period_lock_service_1.assertPeriodOpen)(parseDateInput(data.expense_date) ?? new Date(), 'an expense');
+        // If a register is open for this branch, the expense comes out of that drawer
+        // (cash lowers expected; card/bank are tracked per method). No open register → save only.
+        let cashflowId = null;
+        let drawerOpenedAt = null;
+        let branchId = data.branch_id ?? opts.userBranchId ?? null;
+        {
+            const open = await client_2.prisma.cashFlow.findMany({
+                where: { status: 'OPEN', ...(branchId ? { branch_id: branchId } : {}) },
+                select: { id: true, branch_id: true, opened_at: true },
+            });
+            if (open.length === 1) {
+                cashflowId = open[0].id;
+                drawerOpenedAt = open[0].opened_at;
+                branchId = branchId ?? open[0].branch_id;
+            }
         }
+        const fromDrawer = !!cashflowId;
+        const method = await methodMatchingPaidFrom(links.paidFrom, data.payment_method ?? 'CASH');
         const created = await client_2.prisma.expense.create({
             data: {
                 particular: data.particular.trim(),
                 amount: new client_1.Prisma.Decimal(data.amount),
-                category_id: data.category_id ?? null,
-                payment_method: data.payment_method ?? 'CASH',
+                category_id: links.categoryId ?? null,
+                account_id: links.accountId ?? null,
+                paid_from_account_id: links.paidFrom ?? null,
+                payment_method: method,
                 bank_account: data.bank_account?.trim() || null,
                 reference: data.reference?.trim() || null,
                 vendor: data.vendor?.trim() || null,
                 notes: data.notes?.trim() || null,
-                expense_date: parseDateInput(data.expense_date) ?? new Date(),
-                branch_id: data.branch_id ?? null,
+                expense_date: drawerOpenedAt ? (0, register_cash_out_helper_1.drawerDate)(drawerOpenedAt) : parseDateInput(data.expense_date) ?? new Date(),
+                branch_id: branchId,
                 created_by: userId ?? null,
-                status: 'PENDING',
+                // Recorded in the register = already paid, so it is approved straight away (like a paid-out).
+                ...(fromDrawer
+                    ? { cashflow_id: cashflowId, status: 'APPROVED', approved_by: userId ?? null, approved_at: new Date() }
+                    : { status: 'PENDING' }),
             },
             include: EXPENSE_INCLUDE,
         });
@@ -232,26 +340,32 @@ class ExpenseService {
         const existing = await client_2.prisma.expense.findUnique({ where: { id } });
         if (!existing)
             throw new apiError_1.AppError(404, 'Expense not found');
-        if (existing.status !== 'PENDING') {
-            throw new apiError_1.AppError(400, 'Only pending expenses can be edited');
+        if (existing.status === 'REJECTED') {
+            throw new apiError_1.AppError(400, 'Rejected expenses cannot be edited');
         }
-        if (data.category_id) {
-            const cat = await client_2.prisma.expenseCategory.findUnique({ where: { id: data.category_id } });
-            if (!cat)
-                throw new apiError_1.AppError(400, 'Invalid expense category');
-        }
+        assertNotPaymentCopy(existing);
+        await (0, period_lock_service_1.assertPeriodOpen)(existing.expense_date, 'an expense');
+        if (data.expense_date)
+            await (0, period_lock_service_1.assertPeriodOpen)(parseDateInput(data.expense_date), 'an expense');
+        const links = await resolveExpenseLinks(data, existing);
         const patch = {};
         if (data.particular !== undefined)
             patch.particular = data.particular.trim();
         if (data.amount !== undefined)
             patch.amount = new client_1.Prisma.Decimal(data.amount);
-        if (data.category_id !== undefined) {
-            patch.category = data.category_id
-                ? { connect: { id: data.category_id } }
-                : { disconnect: true };
+        if (links.categoryId !== undefined) {
+            patch.category = links.categoryId ? { connect: { id: links.categoryId } } : { disconnect: true };
         }
-        if (data.payment_method !== undefined)
-            patch.payment_method = data.payment_method;
+        if (links.accountId !== undefined) {
+            patch.account = links.accountId ? { connect: { id: links.accountId } } : { disconnect: true };
+        }
+        if (links.paidFrom !== undefined) {
+            patch.paid_from = links.paidFrom ? { connect: { id: links.paidFrom } } : { disconnect: true };
+        }
+        const finalPaidFrom = links.paidFrom !== undefined ? links.paidFrom : existing.paid_from_account_id;
+        const finalMethod = await methodMatchingPaidFrom(finalPaidFrom, data.payment_method ?? existing.payment_method);
+        if (finalMethod !== existing.payment_method)
+            patch.payment_method = finalMethod;
         if (data.bank_account !== undefined)
             patch.bank_account = data.bank_account?.trim() || null;
         if (data.reference !== undefined)
@@ -273,16 +387,17 @@ class ExpenseService {
             data: patch,
             include: EXPENSE_INCLUDE,
         });
+        await (0, register_cash_out_helper_1.refreshClosedRegister)(existing.cashflow_id);
         return { ...updated, amount: (0, helpers_1.asNumber)(updated.amount) };
     }
     async remove(id) {
         const existing = await client_2.prisma.expense.findUnique({ where: { id } });
         if (!existing)
             throw new apiError_1.AppError(404, 'Expense not found');
-        if (existing.cashflow_id) {
-            throw new apiError_1.AppError(400, 'This expense belongs to a cash register session and cannot be deleted here');
-        }
+        assertNotPaymentCopy(existing);
+        await (0, period_lock_service_1.assertPeriodOpen)(existing.expense_date, 'an expense');
         await client_2.prisma.expense.delete({ where: { id } });
+        await (0, register_cash_out_helper_1.refreshClosedRegister)(existing.cashflow_id);
         return { id };
     }
     async approve(id, userId) {
@@ -291,6 +406,7 @@ class ExpenseService {
             throw new apiError_1.AppError(404, 'Expense not found');
         if (existing.status === 'APPROVED')
             return this.getById(id);
+        await (0, period_lock_service_1.assertPeriodOpen)(existing.expense_date, 'an expense');
         const updated = await client_2.prisma.expense.update({
             where: { id },
             data: {
@@ -307,6 +423,7 @@ class ExpenseService {
         const existing = await client_2.prisma.expense.findUnique({ where: { id } });
         if (!existing)
             throw new apiError_1.AppError(404, 'Expense not found');
+        await (0, period_lock_service_1.assertPeriodOpen)(existing.expense_date, 'an expense');
         const updated = await client_2.prisma.expense.update({
             where: { id },
             data: {
@@ -395,6 +512,8 @@ exports.ExpenseService = ExpenseService;
 /* ======================== recurring expenses ======================== */
 const RECURRING_INCLUDE = {
     category: { select: { id: true, name: true } },
+    account: ACCOUNT_SELECT,
+    paid_from: ACCOUNT_SELECT,
     branch: { select: { id: true, name: true } },
     _count: { select: { generated: true } },
 };
@@ -418,11 +537,14 @@ class RecurringExpenseService {
     }
     async create(data, userId) {
         const start = parseDateInput(data.start_date) ?? new Date();
+        const links = await resolveExpenseLinks(data);
         const created = await client_2.prisma.recurringExpense.create({
             data: {
                 particular: data.particular.trim(),
                 amount: new client_1.Prisma.Decimal(data.amount),
-                category_id: data.category_id ?? null,
+                category_id: links.categoryId ?? null,
+                account_id: links.accountId ?? null,
+                paid_from_account_id: links.paidFrom ?? null,
                 payment_method: data.payment_method ?? 'CASH',
                 bank_account: data.bank_account?.trim() || null,
                 vendor: data.vendor?.trim() || null,
@@ -445,15 +567,20 @@ class RecurringExpenseService {
         const existing = await client_2.prisma.recurringExpense.findUnique({ where: { id } });
         if (!existing)
             throw new apiError_1.AppError(404, 'Recurring expense not found');
+        const links = await resolveExpenseLinks(data, existing);
         const patch = {};
         if (data.particular !== undefined)
             patch.particular = data.particular.trim();
         if (data.amount !== undefined)
             patch.amount = new client_1.Prisma.Decimal(data.amount);
-        if (data.category_id !== undefined) {
-            patch.category = data.category_id
-                ? { connect: { id: data.category_id } }
-                : { disconnect: true };
+        if (links.categoryId !== undefined) {
+            patch.category = links.categoryId ? { connect: { id: links.categoryId } } : { disconnect: true };
+        }
+        if (links.accountId !== undefined) {
+            patch.account = links.accountId ? { connect: { id: links.accountId } } : { disconnect: true };
+        }
+        if (links.paidFrom !== undefined) {
+            patch.paid_from = links.paidFrom ? { connect: { id: links.paidFrom } } : { disconnect: true };
         }
         if (data.payment_method !== undefined)
             patch.payment_method = data.payment_method;
@@ -529,6 +656,8 @@ class RecurringExpenseService {
                         particular: tpl.particular,
                         amount: tpl.amount,
                         category_id: tpl.category_id,
+                        account_id: tpl.account_id,
+                        paid_from_account_id: tpl.paid_from_account_id,
                         payment_method: tpl.payment_method,
                         bank_account: tpl.bank_account,
                         vendor: tpl.vendor,

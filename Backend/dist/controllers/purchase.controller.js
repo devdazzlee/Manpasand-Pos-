@@ -3,7 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.getMonthlyStats = exports.getPurchaseById = exports.listPurchases = exports.createBulkPurchase = exports.createPurchase = void 0;
+exports.deleteHoldPurchase = exports.retrieveHoldPurchase = exports.createHoldPurchase = exports.getHoldPurchases = exports.updateStockInBill = exports.appendBillLine = exports.deleteBill = exports.deletePurchase = exports.getMonthlyStats = exports.updatePurchase = exports.getPurchaseById = exports.exportPurchases = exports.listPurchases = exports.createBulkPurchase = exports.createPurchase = void 0;
+const resolveBranchId_1 = require("../utils/resolveBranchId");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const purchase_service_1 = require("../services/purchase.service");
@@ -44,15 +45,118 @@ exports.listPurchases = (0, asyncHandler_1.default)(async (req, res) => {
         branchId: query.branchId,
         startDate,
         endDate,
+        sortBy: query.sortBy || 'date',
+        sortOrder: query.sortOrder === 'asc' ? 'asc' : 'desc',
+        search: query.search ? String(query.search) : undefined,
+        paymentMode: query.paymentMode || undefined,
+        deliveryStatus: query.deliveryStatus || undefined,
+        groupBy: query.groupBy === 'bill' ? 'bill' : 'line',
     });
     new apiResponse_1.ApiResponse(result.data, 'Purchases retrieved', 200, true, result.meta).send(res);
+});
+exports.exportPurchases = (0, asyncHandler_1.default)(async (req, res) => {
+    const query = req.query;
+    const result = await purchaseService.exportPurchases({
+        supplierId: query.supplierId,
+        branchId: query.branchId,
+        startDate: query.startDate ? new Date(query.startDate) : undefined,
+        endDate: query.endDate ? new Date(query.endDate) : undefined,
+        search: query.search ? String(query.search) : undefined,
+        paymentMode: query.paymentMode || undefined,
+        deliveryStatus: query.deliveryStatus || undefined,
+        sortOrder: query.sortOrder === 'desc' ? 'desc' : 'asc',
+    });
+    new apiResponse_1.ApiResponse(result.bills, 'Purchases export', 200, true, result.meta).send(res);
 });
 exports.getPurchaseById = (0, asyncHandler_1.default)(async (req, res) => {
     const purchase = await purchaseService.getPurchaseById(req.params.id);
     new apiResponse_1.ApiResponse(purchase, 'Purchase retrieved').send(res);
 });
+exports.updatePurchase = (0, asyncHandler_1.default)(async (req, res) => {
+    const body = req.body;
+    const purchaseDate = body.purchaseDate ? new Date(body.purchaseDate) : undefined;
+    const purchase = await purchaseService.updatePurchase(req.params.id, {
+        quantity: body.quantity,
+        costPrice: body.costPrice,
+        salePrice: body.salePrice,
+        purchaseDate,
+        invoiceRef: body.invoiceRef,
+        notes: body.notes,
+        deliveryStatus: body.deliveryStatus,
+        updatedBy: req.user.id,
+    });
+    new apiResponse_1.ApiResponse(purchase, 'Purchase updated successfully').send(res);
+});
 exports.getMonthlyStats = (0, asyncHandler_1.default)(async (req, res) => {
-    const stats = await purchaseService.getMonthlyStats(req.query.warehouseBranchId);
+    // Admin: the branch chosen in the header (or all); branch users: their own.
+    const stats = await purchaseService.getMonthlyStats(req.query.warehouseBranchId || (0, resolveBranchId_1.resolveBranchId)(req));
     new apiResponse_1.ApiResponse(stats, 'Monthly stats retrieved').send(res);
+});
+exports.deletePurchase = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await purchaseService.deletePurchaseLine(req.params.id, req.user.id);
+    new apiResponse_1.ApiResponse(result, 'Purchase line removed').send(res);
+});
+exports.deleteBill = (0, asyncHandler_1.default)(async (req, res) => {
+    const result = await purchaseService.deleteBill(req.params.anchorId, req.user.id);
+    new apiResponse_1.ApiResponse(result, 'Supplier bill removed').send(res);
+});
+exports.appendBillLine = (0, asyncHandler_1.default)(async (req, res) => {
+    const body = req.body;
+    const purchase = await purchaseService.appendBillLine(req.params.anchorId, {
+        productId: body.productId,
+        quantity: body.quantity,
+        costPrice: body.costPrice,
+        salePrice: body.salePrice,
+        createdBy: req.user.id,
+    });
+    new apiResponse_1.ApiResponse(purchase, 'Product added to bill', 201).send(res);
+});
+exports.updateStockInBill = (0, asyncHandler_1.default)(async (req, res) => {
+    const body = req.body;
+    const purchaseDate = body.purchaseDate ? new Date(body.purchaseDate) : undefined;
+    const expiryDate = body.expiryDate === null
+        ? null
+        : body.expiryDate
+            ? new Date(body.expiryDate)
+            : undefined;
+    const purchase = await purchaseService.updateStockInBill(req.params.anchorId, {
+        ...body,
+        purchaseDate,
+        expiryDate,
+        updatedBy: req.user.id,
+    });
+    new apiResponse_1.ApiResponse(purchase, 'Stock In bill updated · stock, ledger & cash synced').send(res);
+});
+exports.getHoldPurchases = (0, asyncHandler_1.default)(async (req, res) => {
+    const branchId = req.query.branchId || undefined;
+    const holds = await purchaseService.getHoldPurchases({ branchId });
+    new apiResponse_1.ApiResponse(holds, 'Hold purchases retrieved').send(res);
+});
+exports.createHoldPurchase = (0, asyncHandler_1.default)(async (req, res) => {
+    const body = req.body;
+    const hold = await purchaseService.createHoldPurchase({
+        branchId: body.branchId,
+        supplierId: body.supplierId,
+        label: body.label,
+        payload: body.payload,
+        createdBy: req.user.id,
+    });
+    new apiResponse_1.ApiResponse(hold, 'Stock In held', 201).send(res);
+});
+exports.retrieveHoldPurchase = (0, asyncHandler_1.default)(async (req, res) => {
+    const branchId = req.body?.branchId || req.query.branchId || undefined;
+    const hold = await purchaseService.retrieveHoldPurchase({
+        holdId: req.params.holdId,
+        branchId,
+    });
+    new apiResponse_1.ApiResponse(hold, 'Hold purchase retrieved').send(res);
+});
+exports.deleteHoldPurchase = (0, asyncHandler_1.default)(async (req, res) => {
+    const branchId = req.query.branchId || undefined;
+    await purchaseService.deleteHoldPurchase({
+        holdId: req.params.holdId,
+        branchId,
+    });
+    new apiResponse_1.ApiResponse(null, 'Hold purchase deleted').send(res);
 });
 //# sourceMappingURL=purchase.controller.js.map

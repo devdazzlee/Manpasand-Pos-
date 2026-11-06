@@ -7,9 +7,18 @@ exports.getReports = exports.getStockByLocation = exports.getStockMovements = ex
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const inventory_service_1 = require("../services/inventory.service");
+const inventory_report_service_1 = require("../services/inventory-report.service");
+const product_filters_1 = require("../utils/product-filters");
 const inventoryService = new inventory_service_1.InventoryService();
+const inventoryReportService = new inventory_report_service_1.InventoryReportService();
 exports.getDashboardStats = (0, asyncHandler_1.default)(async (req, res) => {
-    const stats = await inventoryService.getDashboardStats(req.user?.role, req.query.branchId);
+    // Branch managers are locked to their own branch; previously they could omit
+    // branchId and read every branch's stock.
+    const role = req.user?.role;
+    const branchId = role === 'BRANCH_MANAGER'
+        ? req.user?.branch_id || req.query.branchId
+        : req.query.branchId;
+    const stats = await inventoryService.getDashboardStats(role, branchId);
     new apiResponse_1.ApiResponse(stats, 'Dashboard stats retrieved').send(res);
 });
 exports.getLowStockProducts = (0, asyncHandler_1.default)(async (req, res) => {
@@ -30,6 +39,7 @@ exports.getStockMovements = (0, asyncHandler_1.default)(async (req, res) => {
         page: Number(query.page) || 1,
         limit: Number(query.limit) || 50,
         userRole: req.user?.role,
+        filters: (0, product_filters_1.parseProductFilters)(query),
     });
     new apiResponse_1.ApiResponse(result.data, 'Stock movements retrieved', 200, true, { ...result.meta, summary: result.summary }).send(res);
 });
@@ -41,6 +51,29 @@ exports.getReports = (0, asyncHandler_1.default)(async (req, res) => {
     const query = req.query;
     const startDate = query.startDate ? new Date(query.startDate) : undefined;
     const endDate = query.endDate ? new Date(query.endDate) : undefined;
+    if (query.type !== 'financial_audit') {
+        const report = await inventoryReportService.getReport({
+            type: query.type,
+            branchId: query.branchId,
+            categoryId: query.categoryId,
+            supplierId: query.supplierId,
+            filters: (0, product_filters_1.parseProductFilters)(query),
+            productId: query.productId,
+            startDate,
+            endDate,
+            q: query.q,
+            sort: query.sort,
+            status: query.status,
+            movementType: query.movementType,
+            stockStatus: query.stockStatus,
+            ageBucket: query.ageBucket,
+            page: Number(query.page) || 1,
+            limit: Number(query.limit) || 25,
+            all: query.all === 'true',
+        });
+        new apiResponse_1.ApiResponse(report, 'Report generated').send(res);
+        return;
+    }
     const report = await inventoryService.getReports({
         type: query.type,
         branchId: query.branchId,
@@ -48,6 +81,9 @@ exports.getReports = (0, asyncHandler_1.default)(async (req, res) => {
         endDate,
         supplierId: query.supplierId,
         productId: query.productId,
+        // Was never passed through, so the category filter had no effect.
+        categoryId: query.categoryId,
+        filters: (0, product_filters_1.parseProductFilters)(query),
     });
     new apiResponse_1.ApiResponse(report, 'Report generated').send(res);
 });

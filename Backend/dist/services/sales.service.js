@@ -1,9 +1,25 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.SaleService = void 0;
+exports.resolveTenders = resolveTenders;
 const client_1 = require("@prisma/client");
 const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
+const register_sale_guard_1 = require("../utils/register-sale-guard");
+const pos_rules_1 = require("../config/pos-rules");
+const timezone_1 = require("../utils/timezone");
+const saleNumber_1 = require("../utils/saleNumber");
+const saleReturnPricing_1 = require("../utils/saleReturnPricing");
+const period_lock_service_1 = require("./period-lock.service");
+const promotion_service_1 = require("./promotion.service");
+const loyalty_service_1 = require("./loyalty.service");
+const gift_card_service_1 = require("./gift-card.service");
+const sale_accounting_service_1 = require("./sale-accounting.service");
+const product_cost_service_1 = require("./product-cost.service");
+const product_filters_1 = require("../utils/product-filters");
+const promotionService = new promotion_service_1.PromotionService();
+const loyaltyService = new loyalty_service_1.LoyaltyService();
+const giftCardService = new gift_card_service_1.GiftCardService();
 /** Product on sale lines must include unit so receipt QTY can show "1 Kg". */
 const saleItemProductInclude = {
     product: {
@@ -12,13 +28,59 @@ const saleItemProductInclude = {
         },
     },
 };
+const money2 = (value) => Math.round((value + Number.EPSILON) * 100) / 100;
+/**
+ * Turns the tenders a cashier entered into what is stored on the sale:
+ * card / bank / wallet amounts as given, cash capped at what is left (the rest is change),
+ * and any shortfall left on the customer's account (credit sale).
+ */
+function resolveTenders(params) {
+    const allowed = new Set(['CASH', 'CARD', 'MOBILE_MONEY', 'BANK_TRANSFER']);
+    const source = params.payments?.length
+        ? params.payments
+        : params.paymentMethod === 'CREDIT'
+            ? []
+            : [{ method: params.paymentMethod, amount: params.total }];
+    const tenders = source
+        .map((t) => ({ method: String(t.method).toUpperCase(), amount: money2(Number(t.amount) || 0), reference: t.reference?.trim() || null }))
+        .filter((t) => t.amount > 0);
+    for (const t of tenders) {
+        if (!allowed.has(t.method))
+            throw new apiError_1.AppError(400, `Unsupported payment method: ${t.method}`);
+    }
+    const nonCash = money2(tenders.filter((t) => t.method !== 'CASH').reduce((s, t) => s + t.amount, 0));
+    if (nonCash > params.total + 0.005) {
+        throw new apiError_1.AppError(400, 'Card, bank and wallet payments cannot be more than the bill total');
+    }
+    const cashTendered = money2(tenders.filter((t) => t.method === 'CASH').reduce((s, t) => s + t.amount, 0));
+    const cashApplied = money2(Math.min(cashTendered, Math.max(0, params.total - nonCash)));
+    const rows = [
+        ...tenders.filter((t) => t.method !== 'CASH'),
+        ...(cashApplied > 0 ? [{ method: 'CASH', amount: cashApplied, reference: null }] : []),
+    ];
+    const paid = money2(nonCash + cashApplied);
+    const remainder = money2(params.total - paid);
+    if (remainder > 0.005 && !params.hasCustomer) {
+        throw new apiError_1.AppError(400, `Payment is short by Rs ${remainder.toLocaleString('en-US')}. Select a customer to put the balance on their account.`);
+    }
+    const largest = [...rows].sort((a, b) => b.amount - a.amount)[0];
+    return {
+        rows: rows.map((r) => ({ method: r.method, amount: new client_1.Prisma.Decimal(r.amount), reference: r.reference })),
+        paid,
+        change: money2(cashTendered - cashApplied),
+        status: (remainder > 0.005 ? (paid > 0.005 ? 'PARTIAL' : 'PENDING') : 'PAID'),
+        primary: (paid <= 0.005 ? 'CREDIT' : largest.method),
+    };
+}
 class SaleService {
-    async getSales({ branchId, page, limit, search, startDate, endDate, paymentMethod, paymentStatus, status, cashierId, customerId, sortBy = 'sale_date', sortOrder = 'desc', includeReturns = false, }) {
+    async getSales({ branchId, page, limit, search, startDate, endDate, paymentMethod, paymentStatus, status, cashierId, customerId, salespersonId, sortBy = 'sale_date', sortOrder = 'desc', includeReturns = false, filters, }) {
         const normalizedSearch = search?.replace(/\s+/g, ' ').trim();
         const where = {
             ...(branchId ? { branch_id: branchId } : {}),
             ...(cashierId ? { created_by: cashierId } : {}),
+            ...((0, product_filters_1.hasProductFilters)(filters) ? { sale_items: { some: { product: (0, product_filters_1.productFilterWhere)(filters) } } } : {}),
             ...(customerId ? { customer_id: customerId } : {}),
+            ...(salespersonId ? { salesperson_id: salespersonId === 'none' ? null : salespersonId } : {}),
             ...(paymentMethod && Object.values(client_1.PaymentMethod).includes(paymentMethod)
                 ? { payment_method: paymentMethod }
                 : {}),
@@ -71,6 +133,8 @@ class SaleService {
                 include: saleItemProductInclude,
             },
             customer: true,
+            salesperson: { select: { id: true, name: true, employee_code: true } },
+            payments: { select: { id: true, method: true, amount: true, reference: true } },
             branch: {
                 select: {
                     id: true,
@@ -113,48 +177,60 @@ class SaleService {
         const orderDirection = sortOrder === 'asc' ? 'asc' : 'desc';
         const orderBy = { [orderField]: orderDirection };
         const buildSummary = async () => {
-            const [aggregates, orderCount, refundAgg] = await Promise.all([
+            // Net totals always include return rows (negative totals), matching old POS
+            // "Grand Total". List may still hide returns via listWhere.
+            const [netAgg, listAgg, completedAgg, refundAgg] = await Promise.all([
                 client_2.prisma.sale.aggregate({
-                    where: listWhere,
+                    where,
                     _sum: {
                         total_amount: true,
                         tax_amount: true,
                         discount_amount: true,
+                        payment_received: true,
                     },
                     _count: { _all: true },
-                    _avg: { total_amount: true },
                 }),
-                client_2.prisma.sale.count({
+                client_2.prisma.sale.aggregate({
+                    where: listWhere,
+                    _sum: { total_amount: true },
+                    _count: { _all: true },
+                }),
+                client_2.prisma.sale.aggregate({
                     where: {
                         ...where,
                         status: client_1.SaleStatus.COMPLETED,
                         original_sale_id: null,
                     },
+                    _sum: { total_amount: true },
+                    _count: { _all: true },
                 }),
+                // Only real return docs (negative / child of original) — not originals
+                // that were wrongly left with status REFUNDED.
                 client_2.prisma.sale.aggregate({
                     where: {
                         ...where,
-                        OR: [
-                            { status: client_1.SaleStatus.REFUNDED },
-                            { original_sale_id: { not: null } },
-                            { total_amount: { lt: 0 } },
-                        ],
+                        OR: [{ original_sale_id: { not: null } }, { total_amount: { lt: 0 } }],
                     },
                     _sum: { total_amount: true },
                     _count: { _all: true },
                 }),
             ]);
-            const totalSalesAmount = Number(aggregates._sum.total_amount || 0);
-            const totalTax = Number(aggregates._sum.tax_amount || 0);
-            const totalDiscounts = Number(aggregates._sum.discount_amount || 0);
+            const netSalesAmount = Number(netAgg._sum.total_amount || 0);
+            const completedSum = Number(completedAgg._sum.total_amount || 0);
+            const completedCount = completedAgg._count._all;
+            const totalTax = Number(netAgg._sum.tax_amount || 0);
+            const totalDiscounts = Number(netAgg._sum.discount_amount || 0);
             const refundsAmount = Math.abs(Number(refundAgg._sum.total_amount || 0));
+            const totalPaid = Number(netAgg._sum.payment_received || 0);
             return {
-                totalSales: totalSalesAmount,
-                totalOrders: aggregates._count._all,
-                completedOrders: orderCount,
+                /** Net = sales + returns (negative), same idea as old POS grand total */
+                totalSales: netSalesAmount,
+                totalPaid,
+                totalOrders: includeReturns ? netAgg._count._all : listAgg._count._all,
+                completedOrders: completedCount,
                 totalRefunds: refundsAmount,
                 refundCount: refundAgg._count._all,
-                averageOrderValue: orderCount > 0 ? totalSalesAmount / Math.max(orderCount, 1) : Number(aggregates._avg.total_amount || 0),
+                averageOrderValue: completedCount > 0 ? completedSum / completedCount : 0,
                 totalTaxCollected: totalTax,
                 totalDiscounts,
             };
@@ -195,8 +271,11 @@ class SaleService {
             },
         };
     }
-    async cancelSale(saleId) {
-        const sale = await client_2.prisma.sale.findUnique({ where: { id: saleId } });
+    async cancelSale(saleId, opts = {}) {
+        const sale = await client_2.prisma.sale.findUnique({
+            where: { id: saleId },
+            include: { sale_items: true, _count: { select: { return_sales: true } } },
+        });
         if (!sale)
             throw new apiError_1.AppError(404, 'Sale not found');
         if (sale.status === client_1.SaleStatus.CANCELLED) {
@@ -205,9 +284,57 @@ class SaleService {
         if (sale.original_sale_id) {
             throw new apiError_1.AppError(400, 'Return/exchange transactions cannot be cancelled here');
         }
-        return client_2.prisma.sale.update({
+        if (sale._count.return_sales > 0) {
+            throw new apiError_1.AppError(400, 'This bill has returns/exchanges against it — reverse those first');
+        }
+        const reason = opts.reason?.trim();
+        if (!reason)
+            throw new apiError_1.AppError(400, 'Enter a reason for voiding this bill');
+        await (0, period_lock_service_1.assertPeriodOpen)(sale.sale_date, 'a bill');
+        // Put the goods back on the shelf (only bills that actually took stock).
+        const ops = [];
+        if (sale.branch_id && sale.status === client_1.SaleStatus.COMPLETED) {
+            const qtyByProduct = new Map();
+            for (const item of sale.sale_items) {
+                qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? new client_1.Prisma.Decimal(0)).plus(item.quantity));
+            }
+            const stocks = await client_2.prisma.stock.findMany({
+                where: { branch_id: sale.branch_id, product_id: { in: [...qtyByProduct.keys()] } },
+            });
+            const stockBy = new Map(stocks.map((st) => [st.product_id, st]));
+            for (const [productId, qty] of qtyByProduct) {
+                const prev = new client_1.Prisma.Decimal(stockBy.get(productId)?.current_quantity ?? 0);
+                ops.push(client_2.prisma.stock.upsert({
+                    where: { product_id_branch_id: { product_id: productId, branch_id: sale.branch_id } },
+                    update: { current_quantity: { increment: qty } },
+                    create: { product_id: productId, branch_id: sale.branch_id, current_quantity: qty },
+                }), client_2.prisma.stockMovement.create({
+                    data: {
+                        product_id: productId,
+                        branch_id: sale.branch_id,
+                        movement_type: 'RETURN',
+                        reference_id: sale.id,
+                        reference_type: 'void',
+                        quantity_change: qty,
+                        previous_qty: prev,
+                        new_qty: prev.plus(qty),
+                        notes: `Void of ${sale.invoice_number || sale.sale_number}: ${reason}`,
+                        created_by: opts.userId ?? null,
+                    },
+                }));
+            }
+        }
+        await client_2.prisma.$transaction(ops);
+        await loyaltyService.reverseForSale(sale.id, opts.userId);
+        await giftCardService.refundForSale(sale.id, opts.userId);
+        const cancelled = await client_2.prisma.sale.update({
             where: { id: saleId },
-            data: { status: client_1.SaleStatus.CANCELLED },
+            data: {
+                status: client_1.SaleStatus.CANCELLED,
+                void_reason: reason,
+                voided_by: opts.userId ?? null,
+                voided_at: new Date(),
+            },
             include: {
                 sale_items: { include: saleItemProductInclude },
                 customer: true,
@@ -215,6 +342,11 @@ class SaleService {
                 user: { select: { id: true, email: true, role: true } },
             },
         });
+        // Cancelled bill: its cash / bank voucher goes too.
+        await sale_accounting_service_1.saleAccountingService.repostForSale(saleId, { userId: opts.userId }).catch((err) => {
+            console.error('[sale-accounting] repost after cancel failed', saleId, err.message);
+        });
+        return cancelled;
     }
     async updateSale(saleId, data) {
         const existing = await client_2.prisma.sale.findUnique({
@@ -223,6 +355,7 @@ class SaleService {
         });
         if (!existing)
             throw new apiError_1.AppError(404, 'Sale not found');
+        await (0, period_lock_service_1.assertPeriodOpen)(existing.sale_date, 'a bill');
         if (existing.original_sale_id) {
             throw new apiError_1.AppError(400, 'Return/exchange transactions cannot be edited here');
         }
@@ -248,10 +381,19 @@ class SaleService {
             const productIds = [...new Set(items.map((i) => i.productId))];
             const products = await client_2.prisma.product.findMany({
                 where: { id: { in: productIds } },
-                select: { id: true },
+                select: { id: true, purchase_rate: true },
             });
             if (products.length !== productIds.length) {
                 throw new apiError_1.AppError(400, 'One or more products were not found');
+            }
+            const costByProduct = new Map(products.map((p) => [p.id, Number(p.purchase_rate) || 0]));
+            // Keep frozen cost for lines already on this bill; only new products take today's rate.
+            const frozenCostByProduct = new Map();
+            for (const row of existing.sale_items) {
+                if (row.item_type && row.item_type !== client_1.SaleItemType.ORIGINAL)
+                    continue;
+                if (row.unit_cost != null)
+                    frozenCostByProduct.set(row.product_id, Number(row.unit_cost) || 0);
             }
             // Old sold qty per product (positive) — original sale lines only
             const oldQtyMap = new Map();
@@ -319,6 +461,9 @@ class SaleService {
                     ...(data.customerId !== undefined
                         ? { customer_id: data.customerId || null }
                         : {}),
+                    ...(data.salespersonId !== undefined
+                        ? { salesperson_id: data.salespersonId || null }
+                        : {}),
                     ...(typeof data.paymentReceived === 'number' && !Number.isNaN(data.paymentReceived)
                         ? { payment_received: new client_1.Prisma.Decimal(Math.max(0, data.paymentReceived)) }
                         : {}),
@@ -330,6 +475,9 @@ class SaleService {
                             product: { connect: { id: item.productId } },
                             quantity: new client_1.Prisma.Decimal(item.quantity),
                             unit_price: new client_1.Prisma.Decimal(item.price),
+                            unit_cost: new client_1.Prisma.Decimal(frozenCostByProduct.has(item.productId)
+                                ? frozenCostByProduct.get(item.productId)
+                                : costByProduct.get(item.productId) ?? 0),
                             discount_amount: new client_1.Prisma.Decimal(item.discountAmount || 0),
                             line_total: new client_1.Prisma.Decimal(item.lineTotal),
                             item_type: client_1.SaleItemType.ORIGINAL,
@@ -395,6 +543,11 @@ class SaleService {
                     ? { connect: { id: data.customerId } }
                     : { disconnect: true };
             }
+            if (data.salespersonId !== undefined) {
+                updateData.salesperson = data.salespersonId
+                    ? { connect: { id: data.salespersonId } }
+                    : { disconnect: true };
+            }
             if (typeof data.paymentReceived === 'number' && !Number.isNaN(data.paymentReceived)) {
                 updateData.payment_received = new client_1.Prisma.Decimal(Math.max(0, data.paymentReceived));
             }
@@ -407,18 +560,92 @@ class SaleService {
             }
             await client_2.prisma.sale.update({ where: { id: saleId }, data: updateData });
         }
+        // An edited bill keeps one tender row matching its payment method / amount received.
+        if (data.paymentMethod !== undefined || data.paymentReceived !== undefined || hasItemsUpdate) {
+            const fresh = await client_2.prisma.sale.findUnique({
+                where: { id: saleId },
+                select: { payment_method: true, payment_received: true, _count: { select: { payments: true } } },
+            });
+            const editedPayment = data.paymentMethod !== undefined || data.paymentReceived !== undefined;
+            if (fresh && (editedPayment || fresh._count.payments <= 1)) {
+                await client_2.prisma.salePayment.deleteMany({ where: { sale_id: saleId } });
+                if (fresh.payment_method !== 'CREDIT' && Number(fresh.payment_received) > 0) {
+                    await client_2.prisma.salePayment.create({
+                        data: { sale_id: saleId, method: fresh.payment_method, amount: fresh.payment_received },
+                    });
+                }
+            }
+        }
+        // Returns / exchanges follow their original sale so commission reversals move with it.
+        if (data.salespersonId !== undefined) {
+            await client_2.prisma.sale.updateMany({
+                where: { original_sale_id: saleId },
+                data: { salesperson_id: data.salespersonId || null },
+            });
+        }
+        // Payment method / amount may have changed: keep Cash in Hand / Bank in step.
+        await sale_accounting_service_1.saleAccountingService.repostForSale(saleId).catch((err) => {
+            console.error('[sale-accounting] repost after edit failed', saleId, err.message);
+        });
         return this.getSaleById(saleId);
     }
-    async deleteSale(saleId) {
+    async deleteSale(saleId, opts = {}) {
         const sale = await client_2.prisma.sale.findUnique({
             where: { id: saleId },
-            include: { _count: { select: { return_sales: true } } },
+            include: { sale_items: true, _count: { select: { return_sales: true } } },
         });
         if (!sale)
             throw new apiError_1.AppError(404, 'Sale not found');
         if (sale._count.return_sales > 0) {
             throw new apiError_1.AppError(400, 'Cannot delete a sale that has return/exchange records. Cancel it instead.');
         }
+        await (0, period_lock_service_1.assertPeriodOpen)(sale.sale_date, 'a bill');
+        // Put stock back when deleting a completed bill (same as void/cancel).
+        const ops = [];
+        if (sale.branch_id && sale.status === client_1.SaleStatus.COMPLETED) {
+            const qtyByProduct = new Map();
+            for (const item of sale.sale_items) {
+                // Only restock original sold qty (ignore already-negative return lines if any)
+                const qty = new client_1.Prisma.Decimal(item.quantity);
+                if (qty.lte(0))
+                    continue;
+                qtyByProduct.set(item.product_id, (qtyByProduct.get(item.product_id) ?? new client_1.Prisma.Decimal(0)).plus(qty));
+            }
+            if (qtyByProduct.size > 0) {
+                const stocks = await client_2.prisma.stock.findMany({
+                    where: { branch_id: sale.branch_id, product_id: { in: [...qtyByProduct.keys()] } },
+                });
+                const stockBy = new Map(stocks.map((st) => [st.product_id, st]));
+                for (const [productId, qty] of qtyByProduct) {
+                    const prev = new client_1.Prisma.Decimal(stockBy.get(productId)?.current_quantity ?? 0);
+                    ops.push(client_2.prisma.stock.upsert({
+                        where: { product_id_branch_id: { product_id: productId, branch_id: sale.branch_id } },
+                        update: { current_quantity: { increment: qty } },
+                        create: { product_id: productId, branch_id: sale.branch_id, current_quantity: qty },
+                    }), client_2.prisma.stockMovement.create({
+                        data: {
+                            product_id: productId,
+                            branch_id: sale.branch_id,
+                            movement_type: 'RETURN',
+                            reference_id: sale.id,
+                            reference_type: 'delete',
+                            quantity_change: qty,
+                            previous_qty: prev,
+                            new_qty: prev.plus(qty),
+                            notes: `Delete of ${sale.invoice_number || sale.sale_number}`,
+                            created_by: opts.userId ?? null,
+                        },
+                    }));
+                }
+            }
+        }
+        if (ops.length)
+            await client_2.prisma.$transaction(ops);
+        await loyaltyService.reverseForSale(sale.id, opts.userId).catch(() => undefined);
+        await giftCardService.refundForSale(sale.id, opts.userId).catch(() => undefined);
+        await client_2.prisma.journalVoucher.deleteMany({
+            where: { reference: { in: [`SALE:${saleId}`, `SALE-RTN:${saleId}`] } },
+        });
         await client_2.prisma.sale.delete({ where: { id: saleId } });
         return { id: saleId, deleted: true };
     }
@@ -498,6 +725,8 @@ class SaleService {
                     include: saleItemProductInclude,
                 },
                 customer: true,
+                salesperson: { select: { id: true, name: true, employee_code: true } },
+                payments: { select: { id: true, method: true, amount: true, reference: true } },
                 branch: {
                     select: {
                         id: true,
@@ -565,6 +794,8 @@ class SaleService {
         if (!branch) {
             throw new apiError_1.AppError(400, 'Invalid branch');
         }
+        (0, register_sale_guard_1.assertBranchCanSell)(branch);
+        await (0, register_sale_guard_1.assertCashRegisterOpenForSale)(branchId);
         const normalizedItems = items.map((item) => ({
             id: item.id,
             productId: item.productId,
@@ -648,7 +879,40 @@ class SaleService {
         }
         await client_2.prisma.holdSale.delete({ where: { id: holdSaleId } });
     }
-    async createSale({ branchId, customerId, paymentMethod, items, discountAmount, createdBy, }) {
+    /**
+     * Lifetime loyalty/giveaway-winner discount: fixed %, capped per transaction,
+     * limited to N uses/month, cash-only, valid at one registered branch only.
+     * Computed server-side (not trusted from the client) so the cap/limit/branch/
+     * cash rules can't be bypassed or combined with another discount.
+     */
+    async computeLoyaltyDiscount(customer, branchId, paymentMethod, subtotalAmt) {
+        if (!customer?.is_loyalty_winner)
+            return { amount: 0, applied: false };
+        if (!customer.loyalty_branch_id || customer.loyalty_branch_id !== branchId) {
+            return { amount: 0, applied: false };
+        }
+        if (paymentMethod !== client_1.PaymentMethod.CASH)
+            return { amount: 0, applied: false };
+        const monthlyLimit = customer.loyalty_monthly_limit ?? 4;
+        const monthStart = new Date();
+        monthStart.setDate(1);
+        monthStart.setHours(0, 0, 0, 0);
+        const usedThisMonth = await client_2.prisma.sale.count({
+            where: {
+                customer_id: customer.id,
+                loyalty_discount_applied: true,
+                status: { notIn: [client_1.SaleStatus.CANCELLED, client_1.SaleStatus.REFUNDED] },
+                sale_date: { gte: monthStart },
+            },
+        });
+        if (usedThisMonth >= monthlyLimit)
+            return { amount: 0, applied: false };
+        const percent = Number(customer.loyalty_discount_percent ?? 25);
+        const cap = Number(customer.loyalty_discount_cap ?? 3000);
+        const amount = Math.min((subtotalAmt * percent) / 100, cap);
+        return { amount: Math.max(0, amount), applied: amount > 0 };
+    }
+    async createSale({ branchId, customerId, salespersonId, paymentMethod, payments, items, discountAmount, createdBy, promotionCode, applyPromotions, loyaltyPoints, giftCards, }) {
         // 1) Validate OUTSIDE any interactive transaction
         const [customer, branch] = await Promise.all([
             customerId ? client_2.prisma.customer.findUnique({ where: { id: customerId } }) : null,
@@ -658,16 +922,34 @@ class SaleService {
             throw new apiError_1.AppError(400, 'Invalid customer');
         if (!branch)
             throw new apiError_1.AppError(400, 'Invalid branch');
+        (0, register_sale_guard_1.assertBranchCanSell)(branch);
         if (!items.length)
             throw new apiError_1.AppError(400, 'No items provided');
+        await (0, register_sale_guard_1.assertCashRegisterOpenForSale)(branchId);
+        if (salespersonId) {
+            const salesperson = await client_2.prisma.employee.findUnique({
+                where: { id: salespersonId },
+                select: { id: true, is_active: true },
+            });
+            if (!salesperson)
+                throw new apiError_1.AppError(400, 'Selected salesperson was not found');
+        }
         // 2) Validate that all products exist
         const productIds = items.map(i => i.productId);
         const uniqueProductIds = [...new Set(productIds)]; // Remove duplicates
         const products = await client_2.prisma.product.findMany({
             where: { id: { in: uniqueProductIds } },
-            select: { id: true },
+            select: {
+                id: true,
+                name: true,
+                purchase_rate: true,
+                tax: { select: { percentage: true, is_active: true } },
+            },
         });
         const foundProductIds = new Set(products.map(p => p.id));
+        const nameOf = new Map(products.map((p) => [p.id, p.name]));
+        const taxRateOf = new Map(products.map((p) => [p.id, p.tax?.is_active ? Number(p.tax.percentage) || 0 : 0]));
+        const costOf = new Map(products.map((p) => [p.id, Number(p.purchase_rate) || 0]));
         const missingProductIds = uniqueProductIds.filter(id => !foundProductIds.has(id));
         if (missingProductIds.length > 0) {
             throw new apiError_1.AppError(400, `Products not found: ${missingProductIds.join(', ')}`);
@@ -691,7 +973,15 @@ class SaleService {
             const prev = new client_1.Prisma.Decimal(existing?.current_quantity ?? 0);
             const change = gp.qty.mul(-1); // sale => decrement
             const next = prev.plus(change);
-            // allow negative stock per your testing; add a check here if you want to block it
+            if (!pos_rules_1.ALLOW_NEGATIVE_STOCK_SALE && prev.lt(gp.qty)) {
+                const name = nameOf.get(gp.productId) || 'Product';
+                const available = Number(prev);
+                const requested = Number(gp.qty);
+                if (available <= 0) {
+                    throw new apiError_1.AppError(400, `${name} is not available in stock`);
+                }
+                throw new apiError_1.AppError(400, `Insufficient stock for ${name}. Available: ${available}, requested: ${requested}`);
+            }
             movements.push({
                 product_id: gp.productId,
                 previous_qty: prev,
@@ -707,29 +997,117 @@ class SaleService {
         }
         // 5) Prepare all writes as a single non-interactive transaction (prevents P2028)
         const subtotalAmt = items.reduce((s, it) => s + it.price * it.quantity, 0);
-        const finalDiscount = discountAmount ?? 0;
-        const finalTotal = Math.max(0, subtotalAmt - finalDiscount);
+        const loyalty = await this.computeLoyaltyDiscount(customer, branchId, paymentMethod, subtotalAmt);
+        // A registered loyalty winner's discount is computed and validated here,
+        // on the server, and replaces whatever discount the client sent — this is
+        // the only place the cap/monthly-limit/branch/cash rules are enforced.
+        const manualDiscount = customer?.is_loyalty_winner ? loyalty.amount : Math.max(0, discountAmount ?? 0);
+        // Promotions are worked out here, never trusted from the till.
+        const promo = applyPromotions === false
+            ? { discount: 0, applied: [] }
+            : await promotionService.evaluate({ lines: items, branchId, code: promotionCode });
+        if (promotionCode?.trim() && !promo.applied.some((a) => a.code)) {
+            throw new apiError_1.AppError(400, `Coupon ${promotionCode.trim().toUpperCase()} is not valid for this bill`);
+        }
+        const promoDiscount = money2(Math.min(promo.discount, Math.max(0, subtotalAmt - manualDiscount)));
+        // Loyalty points redeemed as a discount.
+        let loyaltyDiscount = 0;
+        const redeemPoints = Math.max(0, Math.floor(Number(loyaltyPoints) || 0));
+        if (redeemPoints > 0) {
+            if (!customerId)
+                throw new apiError_1.AppError(400, 'Select the customer to redeem points');
+            loyaltyDiscount = await (0, loyalty_service_1.redemptionValue)(customerId, redeemPoints, Math.max(0, subtotalAmt - manualDiscount - promoDiscount));
+        }
+        const finalDiscount = money2(manualDiscount + promoDiscount + loyaltyDiscount);
+        const finalTotal = Math.max(0, money2(subtotalAmt - finalDiscount));
+        // Gift cards pay part (or all) of the bill; the rest goes through the normal tenders.
+        const cards = giftCards?.length ? await (0, gift_card_service_1.validateGiftCardTenders)(giftCards) : [];
+        const giftTotal = money2(cards.reduce((t, c) => t + c.amount, 0));
+        if (giftTotal > finalTotal + 0.005)
+            throw new apiError_1.AppError(400, 'Gift card amount is more than the bill');
+        const tender = resolveTenders({
+            total: money2(finalTotal - giftTotal),
+            paymentMethod: String(paymentMethod || 'CASH'),
+            payments: giftTotal > 0 && finalTotal - giftTotal <= 0.005 ? [] : payments,
+            hasCustomer: Boolean(customerId),
+        });
+        const tenderRows = [
+            ...cards.map((c) => ({ method: 'GIFT_CARD', amount: new client_1.Prisma.Decimal(c.amount), reference: c.code })),
+            ...tender.rows,
+        ];
+        const paidTotal = money2(tender.paid + giftTotal);
+        const primaryMethod = (tender.paid <= 0.005 && giftTotal > 0 ? 'GIFT_CARD' : tender.primary);
+        const paymentStatus = (finalTotal - paidTotal > 0.005 ? (paidTotal > 0.005 ? 'PARTIAL' : 'PENDING') : 'PAID');
+        // Points are earned on what was actually paid (not on credit).
+        const loyaltyOn = customerId ? (await (0, loyalty_service_1.loyaltySettings)()).enabled : false;
+        const earnPoints = customerId && loyaltyOn ? await (0, loyalty_service_1.pointsToEarn)(customerId, Math.min(finalTotal, paidTotal)) : 0;
+        const pointValue = loyaltyOn ? (await (0, loyalty_service_1.loyaltySettings)()).pointValue : 0;
+        // Tax is included in the selling price: record the tax portion per line for the tax report.
+        const netFactor = subtotalAmt > 0 ? finalTotal / subtotalAmt : 1;
+        const lineTax = (productId, gross) => {
+            const rate = taxRateOf.get(productId) || 0;
+            return { rate, amount: rate > 0 ? money2((gross * netFactor * rate) / (100 + rate)) : 0 };
+        };
         const ops = [];
+        const saleNumber = await (0, saleNumber_1.allocateSaleNumber)('SALE');
         // (a) Sale + items
         ops.push(client_2.prisma.sale.create({
             data: {
-                sale_number: `SALE-${Date.now()}`,
+                sale_number: saleNumber,
                 branch_id: branchId,
                 customer_id: customerId,
+                salesperson_id: salespersonId || null,
                 total_amount: new client_1.Prisma.Decimal(finalTotal),
                 subtotal: new client_1.Prisma.Decimal(subtotalAmt),
                 discount_amount: new client_1.Prisma.Decimal(finalDiscount),
-                payment_method: paymentMethod,
-                payment_status: 'PAID',
+                loyalty_discount_applied: loyalty.applied,
+                promotion_discount: new client_1.Prisma.Decimal(promoDiscount),
+                applied_promotions: promo.applied.length ? promo.applied : undefined,
+                loyalty_points_redeemed: redeemPoints,
+                loyalty_discount: new client_1.Prisma.Decimal(loyaltyDiscount),
+                loyalty_points_earned: earnPoints,
+                payment_method: primaryMethod,
+                payment_status: paymentStatus,
+                payment_received: new client_1.Prisma.Decimal(paidTotal),
+                change_amount: new client_1.Prisma.Decimal(tender.change),
+                payments: { create: tenderRows },
                 status: 'COMPLETED',
                 created_by: createdBy,
+                ...(customerId && (redeemPoints > 0 || earnPoints > 0)
+                    ? {
+                        loyalty_transactions: {
+                            create: [
+                                ...(redeemPoints > 0
+                                    ? [{ customer_id: customerId, type: 'REDEEM', points: -redeemPoints, value: new client_1.Prisma.Decimal(-loyaltyDiscount), note: 'Redeemed at checkout', created_by: createdBy }]
+                                    : []),
+                                ...(earnPoints > 0
+                                    ? [{ customer_id: customerId, type: 'EARN', points: earnPoints, value: new client_1.Prisma.Decimal(money2(earnPoints * pointValue)), note: 'Earned on purchase', created_by: createdBy }]
+                                    : []),
+                            ],
+                        },
+                    }
+                    : {}),
+                ...(cards.length
+                    ? {
+                        gift_card_transactions: {
+                            create: cards.map((c) => ({ card_id: c.id, type: 'REDEEM', amount: new client_1.Prisma.Decimal(-c.amount), note: 'Spent at checkout', created_by: createdBy })),
+                        },
+                    }
+                    : {}),
                 sale_items: {
-                    create: items.map((item) => ({
-                        product: { connect: { id: item.productId } },
-                        quantity: new client_1.Prisma.Decimal(item.quantity),
-                        unit_price: new client_1.Prisma.Decimal(item.price),
-                        line_total: new client_1.Prisma.Decimal(item.price).mul(item.quantity),
-                    })),
+                    create: items.map((item) => {
+                        const gross = item.price * item.quantity;
+                        const tax = lineTax(item.productId, gross);
+                        return {
+                            product: { connect: { id: item.productId } },
+                            quantity: new client_1.Prisma.Decimal(item.quantity),
+                            unit_price: new client_1.Prisma.Decimal(item.price),
+                            unit_cost: new client_1.Prisma.Decimal(costOf.get(item.productId) ?? 0),
+                            line_total: new client_1.Prisma.Decimal(item.price).mul(item.quantity),
+                            tax_rate: new client_1.Prisma.Decimal(tax.rate),
+                            tax_amount: new client_1.Prisma.Decimal(tax.amount),
+                        };
+                    }),
                 },
             },
             include: { sale_items: true },
@@ -771,15 +1149,24 @@ class SaleService {
                 },
             }));
         }
+        for (const c of cards) {
+            ops.push(client_2.prisma.giftCard.update({ where: { id: c.id }, data: { balance: { decrement: c.amount } } }));
+        }
         const [sale] = await client_2.prisma.$transaction(ops);
         const saleResult = sale;
+        if (cards.length) {
+            await client_2.prisma.giftCard.updateMany({ where: { id: { in: cards.map((c) => c.id) }, balance: { lte: 0 }, status: 'ACTIVE' }, data: { status: 'USED' } });
+        }
+        if (promo.applied.length)
+            await promotionService.markUsed(promo.applied);
+        // Cash → Cash In Hand, card/bank → Bank — keep CoA in sync with the till.
+        await sale_accounting_service_1.saleAccountingService.postForSale(saleResult.id, { userId: createdBy }).catch((err) => {
+            console.error('[sale-accounting] post sale failed', saleResult.sale_number, err);
+        });
         return saleResult;
     }
     async getTodaySales({ branchId }) {
-        const start = new Date();
-        start.setHours(0, 0, 0, 0);
-        const end = new Date();
-        end.setHours(23, 59, 59, 999);
+        const { start, end } = (0, timezone_1.businessTodayRange)();
         return client_2.prisma.sale.findMany({
             where: {
                 branch_id: branchId,
@@ -793,6 +1180,27 @@ class SaleService {
             },
             orderBy: { sale_date: 'desc' },
         });
+    }
+    /**
+     * When the register was opened on a prior business day and is still open,
+     * returns/exchanges after midnight belong to that till day — not the new calendar day.
+     */
+    async resolveReturnSaleDate(branchId) {
+        const now = new Date();
+        const open = await client_2.prisma.cashFlow.findFirst({
+            where: { branch_id: branchId, status: 'OPEN' },
+            select: { opened_at: true },
+            orderBy: { opened_at: 'desc' },
+        });
+        if (!open)
+            return now;
+        const sessionDay = (0, timezone_1.toBusinessYmd)(open.opened_at);
+        const today = (0, timezone_1.businessTodayYmd)();
+        if (sessionDay !== today) {
+            const { end } = (0, timezone_1.businessDayRange)(sessionDay, sessionDay);
+            return end;
+        }
+        return now;
     }
     // async createExchangeOrReturnSale({
     //     originalSaleId,
@@ -921,7 +1329,7 @@ class SaleService {
     //         return sale;
     //     });
     // }
-    async createExchangeOrReturnSale({ originalSaleId, branchId, customerId, returnedItems, exchangedItems, notes, createdBy, transactionType, returnScope, returnReason, refundMethod, exchangeBalanceAction, }) {
+    async createExchangeOrReturnSale({ originalSaleId, branchId, customerId, returnedItems, exchangedItems, notes, createdBy, transactionType, returnScope, returnReason, refundMethod, exchangeBalanceAction, exchangeDiscountAmount, returnCreditOverride, }) {
         if (!returnedItems.length && !exchangedItems.length) {
             throw new apiError_1.AppError(400, 'No return or exchange items provided');
         }
@@ -940,6 +1348,11 @@ class SaleService {
         });
         if (!originalSale)
             throw new apiError_1.AppError(400, 'Original sale not found');
+        const costProducts = await client_2.prisma.product.findMany({
+            where: { id: { in: uniqueProductIds } },
+            select: { id: true, purchase_rate: true },
+        });
+        const productCostOf = new Map(costProducts.map((p) => [p.id, Number(p.purchase_rate) || 0]));
         if (originalSale.status === client_1.SaleStatus.CANCELLED) {
             throw new apiError_1.AppError(400, 'Cancelled sales cannot be returned');
         }
@@ -981,6 +1394,9 @@ class SaleService {
             throw new apiError_1.AppError(400, 'Invalid branch');
         if (customerId && !customer)
             throw new apiError_1.AppError(400, 'Invalid customer');
+        if (exchangedItems.length > 0) {
+            await (0, register_sale_guard_1.assertCashRegisterOpenForSale)(resolvedBranchId);
+        }
         const foundExchangeProductIds = new Set(exchangeProducts.map((product) => product.id));
         const missingExchangeProductIds = uniqueExchangeProductIds.filter((productId) => !foundExchangeProductIds.has(productId));
         if (missingExchangeProductIds.length > 0) {
@@ -1029,10 +1445,8 @@ class SaleService {
         if (!originalNetSubtotal.greaterThan(0)) {
             originalNetSubtotal = originalSale.sale_items.reduce((sum, item) => sum.plus(new client_1.Prisma.Decimal(item.line_total)), new client_1.Prisma.Decimal(0));
         }
-        const originalOrderDiscount = new client_1.Prisma.Decimal(originalSale.discount_amount || 0);
-        const discountFactor = originalNetSubtotal.greaterThan(0) && originalOrderDiscount.greaterThan(0)
-            ? originalNetSubtotal.minus(originalOrderDiscount).div(originalNetSubtotal)
-            : new client_1.Prisma.Decimal(1);
+        const paidFactor = (0, saleReturnPricing_1.computeOriginalSalePaidFactor)(originalSale);
+        const discountFactor = new client_1.Prisma.Decimal(paidFactor);
         for (const ret of returnedItems) {
             const originalItem = originalSale.sale_items.find((item) => item.product_id === ret.productId);
             if (!originalItem) {
@@ -1063,6 +1477,11 @@ class SaleService {
                 product_id: ret.productId,
                 quantity: returnQuantity.mul(-1),
                 unit_price: perUnitPaid,
+                // Reverse the same cost frozen on the original sale line (not today's rate).
+                unit_cost: new client_1.Prisma.Decimal((0, product_cost_service_1.lineUnitCost)({
+                    unit_cost: originalItem.unit_cost,
+                    product: { purchase_rate: productCostOf.get(ret.productId) ?? 0 },
+                })),
                 tax_rate: originalItem.tax_rate,
                 discount_rate: originalItem.discount_rate,
                 tax_amount: new client_1.Prisma.Decimal(0),
@@ -1074,7 +1493,16 @@ class SaleService {
         }
         for (const item of exchangedItems) {
             const exchangeQuantity = new client_1.Prisma.Decimal(item.quantity);
+            const listUnit = item.listPrice != null && !Number.isNaN(item.listPrice)
+                ? new client_1.Prisma.Decimal(item.listPrice)
+                : new client_1.Prisma.Decimal(item.price);
             const unitPrice = new client_1.Prisma.Decimal(item.price);
+            const perUnitDiscount = listUnit.minus(unitPrice);
+            const lineDiscount = perUnitDiscount.greaterThan(0) && exchangeQuantity.greaterThan(0)
+                ? perUnitDiscount.mul(exchangeQuantity)
+                : item.discountAmount != null && item.discountAmount > 0
+                    ? new client_1.Prisma.Decimal(item.discountAmount).mul(exchangeQuantity)
+                    : new client_1.Prisma.Decimal(0);
             const lineTotal = unitPrice.mul(exchangeQuantity);
             total = total.plus(lineTotal);
             exchangeValue = exchangeValue.plus(lineTotal);
@@ -1088,14 +1516,65 @@ class SaleService {
             saleItems.push({
                 product_id: item.productId,
                 quantity: exchangeQuantity,
-                unit_price: unitPrice,
+                unit_price: listUnit.greaterThan(0) ? listUnit : unitPrice,
+                unit_cost: new client_1.Prisma.Decimal(productCostOf.get(item.productId) ?? 0),
                 tax_rate: new client_1.Prisma.Decimal(0),
                 discount_rate: new client_1.Prisma.Decimal(0),
                 tax_amount: new client_1.Prisma.Decimal(0),
-                discount_amount: new client_1.Prisma.Decimal(0),
+                discount_amount: lineDiscount,
                 line_total: lineTotal,
                 item_type: client_1.SaleItemType.EXCHANGE,
             });
+        }
+        const exchangeOrderDiscount = new client_1.Prisma.Decimal(Math.max(0, Number(exchangeDiscountAmount) || 0));
+        if (exchangeOrderDiscount.greaterThan(exchangeValue)) {
+            throw new apiError_1.AppError(400, 'Exchange discount cannot exceed new items subtotal');
+        }
+        if (returnCreditOverride != null &&
+            !Number.isNaN(Number(returnCreditOverride)) &&
+            returnedItems.length > 0) {
+            const targetCredit = new client_1.Prisma.Decimal(Math.max(0, returnCreditOverride));
+            let grossReturnList = new client_1.Prisma.Decimal(0);
+            for (const ret of returnedItems) {
+                const originalItem = originalSale.sale_items.find((item) => item.product_id === ret.productId);
+                if (!originalItem)
+                    continue;
+                const originalQty = new client_1.Prisma.Decimal(originalItem.quantity);
+                const perUnitList = originalQty.greaterThan(0)
+                    ? new client_1.Prisma.Decimal(originalItem.line_total).div(originalQty)
+                    : new client_1.Prisma.Decimal(originalItem.unit_price);
+                grossReturnList = grossReturnList.plus(perUnitList.mul(ret.quantity));
+            }
+            if (targetCredit.greaterThan(grossReturnList.plus(0.005))) {
+                throw new apiError_1.AppError(400, 'Return credit cannot exceed the list value of returned items');
+            }
+            if (returnValue.greaterThan(0) && targetCredit.minus(returnValue).abs().greaterThan(0.005)) {
+                const ratio = targetCredit.div(returnValue);
+                for (const line of saleItems) {
+                    if (line.item_type !== client_1.SaleItemType.RETURN)
+                        continue;
+                    const unit = line.unit_price instanceof client_1.Prisma.Decimal
+                        ? line.unit_price
+                        : new client_1.Prisma.Decimal(line.unit_price);
+                    const lineTotal = line.line_total instanceof client_1.Prisma.Decimal
+                        ? line.line_total
+                        : new client_1.Prisma.Decimal(line.line_total);
+                    line.unit_price = unit.mul(ratio);
+                    line.line_total = lineTotal.mul(ratio);
+                    line.discount_amount = new client_1.Prisma.Decimal(0);
+                }
+                returnValue = targetCredit;
+            }
+        }
+        total = saleItems.reduce((sum, line) => {
+            const lineTotal = line.line_total instanceof client_1.Prisma.Decimal
+                ? line.line_total
+                : new client_1.Prisma.Decimal(line.line_total);
+            return sum.plus(lineTotal);
+        }, new client_1.Prisma.Decimal(0));
+        if (exchangeOrderDiscount.greaterThan(0)) {
+            total = total.minus(exchangeOrderDiscount);
+            exchangeValue = exchangeValue.minus(exchangeOrderDiscount);
         }
         const balanceDue = total.toNumber();
         const inferredScope = returnScope ||
@@ -1137,6 +1616,10 @@ class SaleService {
             returnReason: returnReason || null,
             refundMethod: refundMethod || null,
             exchangeBalanceAction: exchangeBalanceAction || null,
+            exchangeDiscountAmount: exchangeOrderDiscount.toNumber(),
+            returnCreditOverride: returnCreditOverride != null && !Number.isNaN(Number(returnCreditOverride))
+                ? Number(returnCreditOverride)
+                : null,
             status: 'COMPLETED',
             returnValue: returnValue.toNumber(),
             exchangeValue: exchangeValue.toNumber(),
@@ -1145,20 +1628,25 @@ class SaleService {
         };
         const structuredNotes = `__META__${JSON.stringify(meta)}__ENDMETA__\n${notes || ''}`.trim();
         const childStatus = resolvedType === 'EXCHANGE' ? client_1.SaleStatus.EXCHANGED : client_1.SaleStatus.REFUNDED;
+        const returnNumber = await (0, saleNumber_1.allocateSaleNumber)('RTN');
+        const returnSaleDate = await this.resolveReturnSaleDate(resolvedBranchId);
         const ops = [];
         ops.push(client_2.prisma.sale.create({
             data: {
-                sale_number: `RTN-${Date.now()}`,
+                sale_number: returnNumber,
                 branch_id: resolvedBranchId,
                 customer_id: customerId || originalSale.customer_id,
                 original_sale_id: originalSaleId,
                 notes: structuredNotes,
                 subtotal: total,
                 total_amount: total,
+                discount_amount: exchangeOrderDiscount,
                 payment_method: mapRefundMethod(refundMethod),
                 payment_status: 'PAID',
                 status: childStatus,
                 created_by: createdBy,
+                salesperson_id: originalSale.salesperson_id ?? null,
+                sale_date: returnSaleDate,
                 sale_items: {
                     create: saleItems,
                 },
@@ -1229,7 +1717,15 @@ class SaleService {
             }));
         }
         const [sale] = await client_2.prisma.$transaction(ops);
-        return sale;
+        const created = sale;
+        const refundValue = created.sale_items
+            .filter((it) => it.item_type === 'RETURN')
+            .reduce((t, it) => t + Math.abs(Number(it.line_total)), 0);
+        await loyaltyService.clawbackForReturn(originalSaleId, created.id, refundValue, createdBy).catch(() => undefined);
+        await sale_accounting_service_1.saleAccountingService.postForSale(created.id, { userId: createdBy }).catch((err) => {
+            console.error('[sale-accounting] post return failed', created.sale_number, err);
+        });
+        return created;
     }
     /**
      * Most recent sales (one row per sale, not per line item) so the dashboard

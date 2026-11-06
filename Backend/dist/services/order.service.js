@@ -145,9 +145,10 @@ class OrderService {
             timeout: 15000,
         });
     }
-    async getOrders(status, page = 1, pageSize = 10) {
+    async getOrders(status, page = 1, pageSize = 10, branchId) {
         const where = {
             status: status ? status : undefined,
+            ...(branchId ? { branch_id: branchId } : {}),
         };
         const [orders, total] = await Promise.all([
             client_2.prisma.order.findMany({

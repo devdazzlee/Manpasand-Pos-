@@ -1,21 +1,54 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 const express_1 = require("express");
+const permission_middleware_1 = require("../middleware/permission.middleware");
 const auth_middleware_1 = require("../middleware/auth.middleware");
 const validation_middleware_1 = require("../middleware/validation.middleware");
+const branch_ownership_middleware_1 = require("../middleware/branch-ownership.middleware");
+const client_1 = require("../prisma/client");
 const sale_controller_1 = require("../controllers/sale.controller");
 const sale_validation_1 = require("../validations/sale.validation");
+const promotion_service_1 = require("../services/promotion.service");
+const loyalty_service_1 = require("../services/loyalty.service");
 const router = (0, express_1.Router)();
 const holdSaleRoles = [
     "SUPER_ADMIN",
     "ADMIN",
     "BRANCH_MANAGER",
+    "CASHIER",
     "WAREHOUSE_MANAGER",
     "PURCHASE_MANAGER",
 ];
-const saleManagementRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER"];
+const saleManagementRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER", "CASHIER"];
 const metadataRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER", "WAREHOUSE_MANAGER", "PURCHASE_MANAGER"];
 const adminRoles = ["SUPER_ADMIN", "ADMIN"];
+/** Discount and credit (pay-later) at checkout need their own permission or a manager's approval. */
+const promotionService = new promotion_service_1.PromotionService();
+const saleCheckoutPermissions = async (req) => {
+    const body = req.body || {};
+    const keys = [];
+    // Only the cashier's own discount needs approval; promotions, points and gift cards are checked by the server.
+    if (Number(body.discountAmount) > 0)
+        keys.push("sales.discount");
+    const items = Array.isArray(body.items) ? body.items : [];
+    let total = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0) - (Number(body.discountAmount) || 0);
+    if (body.applyPromotions !== false && items.length) {
+        const promo = await promotionService
+            .evaluate({ lines: items.map((i) => ({ productId: i.productId, price: Number(i.price), quantity: Number(i.quantity) })), branchId: req.user?.branch_id, code: body.promotionCode })
+            .catch(() => ({ discount: 0 }));
+        total -= promo.discount;
+    }
+    if (Number(body.loyaltyPoints) > 0)
+        total -= Number(body.loyaltyPoints) * (await (0, loyalty_service_1.loyaltySettings)()).pointValue;
+    if (Array.isArray(body.giftCards))
+        total -= body.giftCards.reduce((s, g) => s + Number(g.amount || 0), 0);
+    const paid = Array.isArray(body.payments) && body.payments.length ? body.payments.reduce((s, p) => s + Number(p.amount || 0), 0) : null;
+    if (body.paymentMethod === "CREDIT" || (paid !== null && paid < total - 0.005))
+        keys.push("sales.credit");
+    return keys;
+};
+// A branch user may only open / refund / void / edit sales of their own branch.
+router.param("saleId", (0, branch_ownership_middleware_1.branchOwnershipParam)((id) => client_1.prisma.sale.findUnique({ where: { id }, select: { branch_id: true } }).then((s) => s && [s.branch_id])));
 router.use(auth_middleware_1.authenticate);
 router.use("/hold", (0, auth_middleware_1.authorize)(holdSaleRoles));
 // Hold-sale operations should be available to any authenticated staff role.
@@ -30,10 +63,12 @@ router.get("/for-returns", sale_controller_1.getSalesForReturnsController);
 router.get("/return-transactions", sale_controller_1.getReturnTransactionsController);
 router.get("/", sale_controller_1.getSalesController);
 router.get("/:saleId", sale_controller_1.getSaleByIdController);
-router.post("/", (0, validation_middleware_1.validate)(sale_validation_1.createSaleSchema), sale_controller_1.createSaleController);
-router.patch("/:saleId/refund", (0, validation_middleware_1.validate)(sale_validation_1.refundSaleSchema), sale_controller_1.refundSaleController);
-router.patch("/:saleId/cancel", (0, auth_middleware_1.authorize)(adminRoles), sale_controller_1.cancelSaleController);
-router.patch("/:saleId", sale_controller_1.updateSaleController);
-router.delete("/:saleId", sale_controller_1.deleteSaleController);
+router.post("/", (0, validation_middleware_1.validate)(sale_validation_1.createSaleSchema), (0, permission_middleware_1.requirePermission)(saleCheckoutPermissions), sale_controller_1.createSaleController);
+router.patch("/:saleId/refund", (0, validation_middleware_1.validate)(sale_validation_1.refundSaleSchema), (0, permission_middleware_1.requirePermission)("sales.refund"), sale_controller_1.refundSaleController);
+router.patch("/:saleId/cancel", (0, permission_middleware_1.requirePermission)("sales.void"), sale_controller_1.cancelSaleController);
+router.patch("/:saleId", (0, permission_middleware_1.requirePermission)("sales.edit"), sale_controller_1.updateSaleController);
+// Deleting a bill needs "Delete bills" permission, or approval from someone who has it
+// (owner / admin login typed into the manager-approval popup). Logged in the audit trail.
+router.delete("/:saleId", (0, permission_middleware_1.requirePermission)("sales.delete"), sale_controller_1.deleteSaleController);
 exports.default = router;
 //# sourceMappingURL=sale.routes.js.map

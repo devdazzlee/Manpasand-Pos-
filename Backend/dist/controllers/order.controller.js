@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteOrder = exports.reopenOrder = exports.cancelOrderByCustomer = exports.cancelOrderByAdmin = exports.updateOrderStatus = exports.getMyOrderById = exports.getMyOrders = exports.getOrder = exports.getOrders = exports.createOrder = void 0;
+const resolveBranchId_1 = require("../utils/resolveBranchId");
 const order_service_1 = require("../services/order.service");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
@@ -15,7 +16,7 @@ const createOrder = (0, asyncHandler_1.default)(async (req, res) => {
 exports.createOrder = createOrder;
 const getOrders = (0, asyncHandler_1.default)(async (req, res) => {
     const { status, page = '1', pageSize = '10' } = req.query;
-    const orders = await orderService.getOrders(status ? status : undefined, parseInt(page, 10), parseInt(pageSize, 10));
+    const orders = await orderService.getOrders(status ? status : undefined, parseInt(page, 10), parseInt(pageSize, 10), (0, resolveBranchId_1.resolveBranchId)(req));
     new apiResponse_1.ApiResponse(orders, 'Orders retrieved successfully').send(res);
 });
 exports.getOrders = getOrders;

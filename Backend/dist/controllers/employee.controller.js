@@ -3,13 +3,18 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteEmployeeType = exports.toggleEmployeeType = exports.updateEmployeeType = exports.getEmployeeTypeById = exports.getEmployeeTypes = exports.createEmployeeType = exports.importEmployees = exports.deleteDepartment = exports.updateDepartment = exports.listDepartments = exports.createDepartment = exports.deleteEmployee = exports.reactivateEmployee = exports.deactivateEmployee = exports.updateEmployee = exports.getEmployeeById = exports.listEmployees = exports.createEmployee = void 0;
+exports.deleteEmployeeType = exports.toggleEmployeeType = exports.updateEmployeeType = exports.getEmployeeTypeById = exports.getEmployeeTypes = exports.createEmployeeType = exports.importEmployees = exports.deleteDepartment = exports.updateDepartment = exports.listDepartments = exports.createDepartment = exports.deleteEmployee = exports.reactivateEmployee = exports.deactivateEmployee = exports.updateEmployee = exports.getEmployeeById = exports.listEmployees = exports.createEmployee = exports.listPosUsers = void 0;
+const resolveBranchId_1 = require("../utils/resolveBranchId");
 const employee_service_1 = require("../services/employee.service");
 const employeeType_service_1 = require("../services/employeeType.service");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const employeeService = new employee_service_1.EmployeeService();
 const employeeTypeService = new employeeType_service_1.EmployeeTypeService();
+exports.listPosUsers = (0, asyncHandler_1.default)(async (_req, res) => {
+    const users = await employeeService.listPosUsers();
+    new apiResponse_1.ApiResponse(users, 'POS users fetched successfully').send(res);
+});
 exports.createEmployee = (0, asyncHandler_1.default)(async (req, res) => {
     const employee = await employeeService.createEmployee(req.body, req.user?.branch_id);
     new apiResponse_1.ApiResponse(employee, 'Employee created successfully', 201).send(res);
@@ -17,7 +22,7 @@ exports.createEmployee = (0, asyncHandler_1.default)(async (req, res) => {
 exports.listEmployees = (0, asyncHandler_1.default)(async (req, res) => {
     const { page = 1, limit = 10, search, status, department_id, employee_type_id, employment_type, fetch_all, } = req.query;
     const result = await employeeService.listEmployees({
-        branch_id: req.user?.branch_id,
+        branch_id: (0, resolveBranchId_1.resolveBranchId)(req),
         page: Number(page),
         limit: Number(limit),
         search: search,

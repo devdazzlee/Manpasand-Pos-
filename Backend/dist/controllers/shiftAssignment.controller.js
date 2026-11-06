@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteShift = exports.updateShift = exports.getAllShifts = exports.endShiftById = exports.endCurrentShift = exports.getShiftHistory = exports.getCurrentShift = exports.assignShift = void 0;
+const resolveBranchId_1 = require("../utils/resolveBranchId");
 const shiftAssignment_service_1 = require("../services/shiftAssignment.service");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
@@ -54,6 +55,7 @@ exports.getAllShifts = (0, asyncHandler_1.default)(async (req, res) => {
         date_from: typeof q.date_from === 'string' ? q.date_from : undefined,
         date_to: typeof q.date_to === 'string' ? q.date_to : undefined,
         period: q.period,
+        branch_id: (0, resolveBranchId_1.resolveBranchId)(req),
     });
     new apiResponse_1.ApiResponse(result.data, 'All shifts fetched successfully', 200, true, result.meta).send(res);
 });

@@ -75,7 +75,7 @@ class SubcategoryService {
         }, catalog_defaults_service_1.catalogDeleteOptions);
         return { message: 'Subcategory deleted successfully' };
     }
-    async listSubcategories({ page = 1, limit = 10, search, is_active = true, display_on_pos = true, }) {
+    async listSubcategories({ page = 1, limit = 10, search, is_active, display_on_pos, }) {
         const where = {};
         if (search) {
             where.OR = [

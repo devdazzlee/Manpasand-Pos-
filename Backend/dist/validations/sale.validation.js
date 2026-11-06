@@ -10,9 +10,26 @@ const saleItemSchema = zod_1.z.object({
 const createSaleSchema = zod_1.z.object({
     body: zod_1.z.object({
         customerId: zod_1.z.string().optional(),
+        salespersonId: zod_1.z.string().uuid().nullable().optional(),
         paymentMethod: zod_1.z.enum(["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER", "CREDIT"]),
+        /** Split tenders. When omitted the whole bill is paid with `paymentMethod`. */
+        payments: zod_1.z
+            .array(zod_1.z.object({
+            method: zod_1.z.enum(["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER"]),
+            amount: zod_1.z.number().positive("Payment amount must be greater than 0"),
+            reference: zod_1.z.string().max(120).nullable().optional(),
+        }))
+            .max(10)
+            .optional(),
         items: zod_1.z.array(saleItemSchema).min(1),
         discountAmount: zod_1.z.number().nonnegative("Discount amount must be non-negative").optional().default(0),
+        promotionCode: zod_1.z.string().trim().max(24).nullable().optional(),
+        applyPromotions: zod_1.z.boolean().optional(),
+        loyaltyPoints: zod_1.z.number().int().nonnegative().optional(),
+        giftCards: zod_1.z
+            .array(zod_1.z.object({ code: zod_1.z.string().trim().min(3).max(30), amount: zod_1.z.number().positive() }))
+            .max(5)
+            .optional(),
     }),
 });
 exports.createSaleSchema = createSaleSchema;
@@ -42,6 +59,10 @@ const refundSaleSchema = zod_1.z.object({
         returnReason: returnReasonSchema.optional(),
         refundMethod: refundMethodSchema.optional(),
         exchangeBalanceAction: zod_1.z.enum(["collect", "refund", "store_credit"]).optional(),
+        /** Order-level discount on replacement items (Rs). */
+        exchangeDiscountAmount: zod_1.z.number().nonnegative().optional(),
+        /** Override return credit (Rs) applied toward exchange; cannot exceed list value of returns. */
+        returnCreditOverride: zod_1.z.number().nonnegative().optional(),
         returnedItems: zod_1.z
             .array(zod_1.z.object({
             productId: zod_1.z.string().min(1, "Product ID is required"),
@@ -55,6 +76,8 @@ const refundSaleSchema = zod_1.z.object({
             productId: zod_1.z.string().min(1, "Product ID is required"),
             quantity: zod_1.z.number().positive("Quantity must be positive"),
             price: zod_1.z.number().nonnegative("Price must be non-negative"),
+            listPrice: zod_1.z.number().nonnegative("List price must be non-negative").optional(),
+            discountAmount: zod_1.z.number().nonnegative("Discount must be non-negative").optional(),
         }))
             .optional()
             .default([]),

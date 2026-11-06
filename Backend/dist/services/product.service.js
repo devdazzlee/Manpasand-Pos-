@@ -11,14 +11,17 @@ const crypto_1 = require("crypto");
 const helpers_1 = require("../utils/helpers");
 const numericBarcodeSku_1 = require("../utils/numericBarcodeSku");
 const pagination_1 = require("../utils/pagination");
+const product_filters_1 = require("../utils/product-filters");
 class ProductService {
     async getProductsForExcelExport(filters) {
-        const where = {};
+        const where = { ...(0, product_filters_1.productFilterWhere)(filters?.catalog) };
         if (filters?.search) {
             where.OR = [
                 { name: { contains: filters.search, mode: 'insensitive' } },
                 { sku: { contains: filters.search, mode: 'insensitive' } },
                 { code: { contains: filters.search, mode: 'insensitive' } },
+                { label_barcode: { contains: filters.search, mode: 'insensitive' } },
+                { custom_code: { contains: filters.search, mode: 'insensitive' } },
             ];
         }
         if (filters?.category_id)
@@ -288,6 +291,17 @@ class ProductService {
         if (data.description !== undefined) {
             productData.description = data.description;
         }
+        if (data.collection !== undefined) {
+            productData.collection = data.collection?.trim() || null;
+        }
+        if (data.stitch_type !== undefined)
+            productData.stitch_type = data.stitch_type || null;
+        const lb = data.label_barcode?.trim();
+        if (lb)
+            productData.label_barcode = lb;
+        const cc = data.custom_code?.trim();
+        if (cc)
+            productData.custom_code = cc;
         return productData;
     }
     buildUpdateProductData(data) {
@@ -329,6 +343,18 @@ class ProductService {
             updateData.is_deal = data.is_deal;
         if (data.is_featured !== undefined)
             updateData.is_featured = data.is_featured;
+        if (data.collection !== undefined)
+            updateData.collection = data.collection?.trim() || null;
+        if (data.stitch_type !== undefined)
+            updateData.stitch_type = data.stitch_type || null;
+        if (data.label_barcode !== undefined) {
+            const lb = data.label_barcode?.trim();
+            updateData.label_barcode = lb ? lb : null;
+        }
+        if (data.custom_code !== undefined) {
+            const cc = data.custom_code?.trim();
+            updateData.custom_code = cc ? cc : null;
+        }
         return updateData;
     }
     buildRelationIncludes(data) {
@@ -343,17 +369,34 @@ class ProductService {
         });
         return includes;
     }
+    /**
+     * Next internal product `code`. Legacy rows use text codes (PA-123, ZWU-31…);
+     * `parseInt` on those becomes NaN and used to write code "NaN", then every
+     * create collided on that unique value. Allocate from max all-digit code.
+     */
+    async allocateNextProductCode(db = client_2.prisma) {
+        const rows = await db.$queryRaw `
+            SELECT MAX(CASE WHEN code ~ '^[0-9]+$' THEN code::bigint END) AS max_num
+            FROM "Product"
+        `;
+        let next = Number(rows[0]?.max_num ?? 999) + 1;
+        if (!Number.isFinite(next) || next < 1000)
+            next = 1000;
+        for (let i = 0; i < 50; i++) {
+            const candidate = String(next + i);
+            const exists = await db.product.findUnique({ where: { code: candidate }, select: { id: true } });
+            if (!exists)
+                return candidate;
+        }
+        return `P-${Date.now().toString(36)}-${(0, crypto_1.randomUUID)().slice(0, 6)}`;
+    }
     async createProduct(data) {
         // Step 1: Resolve the next product code and all "Unknown" fallback
         // entries OUTSIDE the transaction. These are idempotent lookups that
         // don't need to be atomic with the insert, and pulling them out of the
         // transaction is what stops Prisma's P2028 timeout on a slow remote
         // Postgres (each query was a fresh round-trip costing ~1s).
-        const lastProduct = await client_2.prisma.product.findFirst({
-            orderBy: { created_at: 'desc' },
-            select: { code: true }
-        });
-        const newCode = lastProduct ? (parseInt(lastProduct.code) + 1).toString() : '1000';
+        const newCode = await this.allocateNextProductCode(client_2.prisma);
         const unknownEntries = await this.ensureUnknownEntriesExist(client_2.prisma);
         console.log('✅ Unknown entries ensured:', unknownEntries);
         const verifiedRelations = await this.verifyAndFixRelationsForCreate(data, this.buildRelationsWithUnknownEntries(data, unknownEntries), client_2.prisma);
@@ -363,7 +406,11 @@ class ProductService {
         return await client_2.prisma.$transaction(async (tx) => {
             console.log('🚀 Starting transaction for product creation...');
             const sku = await this.resolveSkuForCreate(data, tx);
-            const productData = this.buildProductData(data, newCode);
+            // Re-check code inside the tx in case another create raced.
+            const code = (await tx.product.findUnique({ where: { code: newCode }, select: { id: true } }))
+                ? await this.allocateNextProductCode(tx)
+                : newCode;
+            const productData = this.buildProductData(data, code);
             const finalData = {
                 ...productData,
                 sku,
@@ -538,7 +585,7 @@ class ProductService {
         }
         return verifiedRelations;
     }
-    /** Stores uploaded images under the product's name (local storage), e.g. products/ajwa-dates-2.jpg */
+    /** Stores uploaded images under the product's name (local storage), e.g. products/ajwa-dates-3f9a1c2b.jpg */
     async nameProductImages(productId, urls) {
         if (urls.length === 0)
             return urls;
@@ -742,9 +789,43 @@ class ProductService {
         }
         return product;
     }
-    async updateProduct(id, data) {
+    /** Manual price edits plus purchase cost history (newest first). */
+    async getProductPriceHistory(id) {
+        const [changes, purchases] = await Promise.all([
+            client_2.prisma.productPriceHistory.findMany({ where: { product_id: id }, orderBy: { created_at: 'desc' }, take: 200 }),
+            client_2.prisma.purchase.findMany({
+                where: { product_id: id },
+                orderBy: { purchase_date: 'desc' },
+                take: 100,
+                select: { purchase_date: true, cost_price: true, quantity: true, invoice_ref: true, supplier: { select: { name: true } } },
+            }),
+        ]);
+        const userIds = [...new Set(changes.map((c) => c.changed_by).filter((v) => !!v))];
+        const users = userIds.length ? await client_2.prisma.user.findMany({ where: { id: { in: userIds } }, select: { id: true, email: true } }) : [];
+        const email = new Map(users.map((u) => [u.id, u.email]));
+        return {
+            changes: changes.map((c) => ({
+                ...c,
+                old_value: Number(c.old_value),
+                new_value: Number(c.new_value),
+                changed_by_email: c.changed_by ? email.get(c.changed_by) ?? null : null,
+            })),
+            purchases: purchases.map((p) => ({
+                date: p.purchase_date,
+                unit_cost: Number(p.cost_price),
+                quantity: Number(p.quantity),
+                supplier: p.supplier?.name ?? null,
+                reference: p.invoice_ref,
+            })),
+        };
+    }
+    async updateProduct(id, data, userId) {
         // Verify product exists
         const product = await this.getProductById(id);
+        const priceBefore = await client_2.prisma.product.findUnique({
+            where: { id },
+            select: { purchase_rate: true, sales_rate_exc_dis_and_tax: true, sales_rate_inc_dis_and_tax: true, discount_amount: true },
+        });
         if (data.sku !== undefined && data.sku !== null && String(data.sku).trim() !== '') {
             const nextSku = String(data.sku).trim();
             if (!(0, numericBarcodeSku_1.isNineDigitNumericSku)(nextSku)) {
@@ -781,7 +862,7 @@ class ProductService {
         }
         console.log('📦 Product update payload:', JSON.stringify(updateData, null, 2));
         try {
-            return await client_2.prisma.product.update({
+            const updated = await client_2.prisma.product.update({
                 where: { id },
                 data: updateData,
                 include: {
@@ -796,6 +877,23 @@ class ProductService {
                     ProductImage: { select: { id: true, image: true } },
                 },
             });
+            // Price-change history (cost, selling price, discount)
+            if (priceBefore) {
+                const fields = ['purchase_rate', 'sales_rate_exc_dis_and_tax', 'sales_rate_inc_dis_and_tax', 'discount_amount'];
+                const changes = fields
+                    .map((field) => ({
+                    field,
+                    old_value: Number(priceBefore[field] ?? 0),
+                    new_value: Number(updated[field] ?? 0),
+                }))
+                    .filter((c) => Math.abs(c.old_value - c.new_value) > 0.0001);
+                if (changes.length) {
+                    await client_2.prisma.productPriceHistory.createMany({
+                        data: changes.map((c) => ({ ...c, product_id: id, changed_by: userId ?? null, source: 'MANUAL' })),
+                    });
+                }
+            }
+            return updated;
         }
         catch (error) {
             // If FK constraint fails, give a friendly message
@@ -805,6 +903,16 @@ class ProductService {
             }
             if (error?.code === 'P2025') {
                 throw new apiError_1.AppError(404, 'Product not found');
+            }
+            if (error?.code === 'P2002') {
+                const target = String(error?.meta?.target ?? '');
+                if (target.includes('label_barcode')) {
+                    throw new apiError_1.AppError(409, 'This barcode is already saved on another product. Use a different code or clear it on the other product first.');
+                }
+                if (target.includes('sku')) {
+                    throw new apiError_1.AppError(409, 'This SKU is already used on another product.');
+                }
+                throw new apiError_1.AppError(409, 'This value is already used on another product.');
             }
             throw error;
         }
@@ -872,13 +980,15 @@ class ProductService {
         }, { maxWait: 20000, timeout: 30000 });
         return product;
     }
-    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, display_on_website, is_featured, stock_status, branch_id, fetchAll = false, }) {
-        const where = {};
+    async listProducts({ page = 1, limit = 10, search, category_id, subcategory_id, is_active, display_on_pos, display_on_website, is_featured, stock_status, branch_id, fetchAll = false, filters, }) {
+        const where = { ...(0, product_filters_1.productFilterWhere)(filters) };
         if (search) {
             where.OR = [
                 { name: { contains: search, mode: 'insensitive' } },
                 { sku: { contains: search, mode: 'insensitive' } },
                 { code: { contains: search, mode: 'insensitive' } },
+                { label_barcode: { contains: search, mode: 'insensitive' } },
+                { custom_code: { contains: search, mode: 'insensitive' } },
                 { description: { contains: search, mode: 'insensitive' } },
             ];
         }
@@ -918,6 +1028,8 @@ class ProductService {
             name: true,
             sku: true,
             code: true,
+            custom_code: true,
+            label_barcode: true,
             pct_or_hs_code: true,
             purchase_rate: true,
             sales_rate_exc_dis_and_tax: true,
@@ -927,6 +1039,7 @@ class ProductService {
             display_on_pos: true,
             display_on_website: true,
             is_featured: true,
+            stitch_type: true,
             created_at: true,
             updated_at: true,
             category: {
@@ -1083,7 +1196,9 @@ class ProductService {
                 id: true,
                 name: true,
                 code: true,
+                custom_code: true,
                 sku: true,
+                label_barcode: true,
                 purchase_rate: true,
                 sales_rate_exc_dis_and_tax: true,
                 sales_rate_inc_dis_and_tax: true,
@@ -1098,6 +1213,8 @@ class ProductService {
                 is_featured: true,
                 is_loose_item: true,
                 updated_at: true,
+                supplier_id: true,
+                stitch_type: true,
                 category: { select: { id: true, name: true } },
                 subcategory: { select: { id: true, name: true } },
                 unit: { select: { id: true, name: true } },

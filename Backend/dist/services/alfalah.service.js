@@ -241,7 +241,6 @@ class AlfalahService {
         const cutoff = new Date(Date.now() - minutes * 60 * 1000);
         await client_2.prisma.order.updateMany({
             where: {
-                customer_id: null,
                 payment_method: 'CARD',
                 payment_status: 'PENDING',
                 status: 'PENDING',
@@ -254,8 +253,12 @@ class AlfalahService {
         });
     }
     async findOrderByNumber(orderNumber) {
+        // order_number is globally unique, so this already pins a single order —
+        // filtering on customer_id here used to assume guest orders had none,
+        // but createGuestOrder always links a (find-or-create) customer record,
+        // which made every card-checkout lookup fail with "Order not found".
         const order = await client_2.prisma.order.findFirst({
-            where: { order_number: orderNumber, customer_id: null },
+            where: { order_number: orderNumber },
             include: {
                 items: { include: { product: { include: { unit: true } } } },
             },

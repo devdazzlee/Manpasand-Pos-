@@ -428,13 +428,24 @@ export function Dashboard({ onLogout }: DashboardProps) {
 
       <main
         id="app-main-scroll"
-        className="flex w-full min-w-0 flex-1 flex-col pt-14 sm:pt-16 lg:min-h-0 lg:overflow-y-auto lg:pt-0"
+        className={
+          activeTab === "new-sale"
+            ? "flex w-full min-w-0 flex-1 flex-col pt-14 sm:pt-16 lg:min-h-0 lg:overflow-hidden lg:pt-0"
+            : "flex w-full min-w-0 flex-1 flex-col pt-14 sm:pt-16 lg:min-h-0 lg:overflow-y-auto lg:pt-0"
+        }
       >
         <div className="sticky top-0 z-20 hidden h-14 shrink-0 items-center justify-end gap-3 border-b border-slate-200 bg-white/90 px-6 backdrop-blur supports-[backdrop-filter]:bg-white/75 lg:flex">
           <span className="text-xs font-medium uppercase tracking-wider text-slate-400">Viewing</span>
           <BranchScopeSwitcher />
         </div>
-        <div key={scopeKey} className="flex min-w-0 flex-1 flex-col">
+        <div
+          key={scopeKey}
+          className={
+            activeTab === "new-sale"
+              ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden"
+              : "flex min-w-0 flex-1 flex-col"
+          }
+        >
           {renderContent()}
         </div>
       </main>

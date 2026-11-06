@@ -11,7 +11,7 @@ const crypto_1 = __importDefault(require("crypto"));
 const sharp_1 = __importDefault(require("sharp"));
 // Images are stored on the server's disk and served by nginx from UPLOADS_PUBLIC_URL.
 // New uploads land in tmp/ first (the product/category doesn't exist yet), then
-// finalizeImage() renames them after the product/category name, e.g. products/ajwa-dates-2.jpg
+// finalizeImage() renames them after the product/category name, e.g. products/ajwa-dates-3f9a1c2b.jpg
 exports.UPLOADS_DIR = path_1.default.resolve(process.env.UPLOADS_DIR || path_1.default.join(process.cwd(), 'uploads'));
 exports.UPLOADS_PUBLIC_URL = (process.env.UPLOADS_PUBLIC_URL || '/uploads').replace(/\/+$/, '');
 const TMP_FOLDER = 'tmp';
@@ -76,6 +76,17 @@ class LocalImageService {
         console.log(`Local image upload successful: ${url}`);
         return url;
     }
+    /** Receipts / bills: images are resized like other uploads, PDFs are stored as-is. */
+    async uploadDocument(file, options) {
+        const folder = slugify(options?.folder || 'documents');
+        if (file.mimetype !== 'application/pdf') {
+            const { data, ext } = await normalizeImage(file.buffer);
+            const name = await writeUnique(path_1.default.join(exports.UPLOADS_DIR, folder), `${slugify(path_1.default.parse(file.originalname || 'receipt').name)}-${crypto_1.default.randomBytes(4).toString('hex')}`, ext, data);
+            return `${exports.UPLOADS_PUBLIC_URL}/${folder}/${name}`;
+        }
+        const name = await writeUnique(path_1.default.join(exports.UPLOADS_DIR, folder), `${slugify(path_1.default.parse(file.originalname || 'receipt').name)}-${crypto_1.default.randomBytes(4).toString('hex')}`, 'pdf', file.buffer);
+        return `${exports.UPLOADS_PUBLIC_URL}/${folder}/${name}`;
+    }
     async uploadBase64Image(base64Data) {
         const b64 = base64Data.includes(',') ? base64Data.split(',')[1] : base64Data;
         return this.saveTemp(Buffer.from(b64, 'base64'));
@@ -92,7 +103,12 @@ class LocalImageService {
             results.push(await this.uploadBase64Image(b64));
         return results;
     }
-    /** Moves a tmp upload to <folder>/<name-slug>[-n].<ext>. Other URLs are returned unchanged. */
+    /**
+     * Moves a tmp upload to <folder>/<name-slug>-<hash>.<ext>. Other URLs are returned unchanged.
+     * The hash makes every upload a new URL: replacing an image deletes the old file first, so
+     * without it the new file reused the old name and browsers/nginx/Next.js kept serving the
+     * cached old picture.
+     */
     async finalizeImage(url, folder, name) {
         const src = urlToPath(url);
         if (!src || path_1.default.basename(path_1.default.dirname(src)) !== TMP_FOLDER)
@@ -100,7 +116,8 @@ class LocalImageService {
         try {
             const data = await promises_1.default.readFile(src);
             const ext = path_1.default.extname(src).slice(1) || 'jpg';
-            const fileName = await writeUnique(path_1.default.join(exports.UPLOADS_DIR, folder), slugify(name), ext, data);
+            const hash = crypto_1.default.createHash('sha1').update(data).digest('hex').slice(0, 8);
+            const fileName = await writeUnique(path_1.default.join(exports.UPLOADS_DIR, folder), `${slugify(name)}-${hash}`, ext, data);
             await promises_1.default.unlink(src).catch(() => undefined);
             return `${exports.UPLOADS_PUBLIC_URL}/${folder}/${fileName}`;
         }

@@ -7,6 +7,7 @@ exports.getTodayStockMovementsController = exports.getStockMovementsController =
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
 const stock_service_1 = require("../services/stock.service");
+const product_filters_1 = require("../utils/product-filters");
 const stockService = new stock_service_1.StockService();
 const createStockController = (0, asyncHandler_1.default)(async (req, res) => {
     console.log("User ID:", req.user?.id, req.user?.role);
@@ -34,7 +35,7 @@ const getStocksController = (0, asyncHandler_1.default)(async (req, res) => {
     const supplierId = req.query.supplierId;
     const stockStatus = req.query.stockStatus;
     const userRole = req.user?.role;
-    const result = await stockService.getStockByBranch(branchId || "", page, limit, search, userRole, categoryId, brandId, supplierId, stockStatus);
+    const result = await stockService.getStockByBranch(branchId || "", page, limit, search, userRole, categoryId, brandId, supplierId, stockStatus, (0, product_filters_1.parseProductFilters)(req.query));
     new apiResponse_1.ApiResponse(result.data, "Stocks retrieved successfully", 200, true, result.meta).send(res);
 });
 exports.getStocksController = getStocksController;
@@ -48,18 +49,24 @@ const getStockByProductBranchController = (0, asyncHandler_1.default)(async (req
     new apiResponse_1.ApiResponse(stock, "Stock retrieved").send(res);
 });
 exports.getStockByProductBranchController = getStockByProductBranchController;
+const movementQuery = (req) => ({
+    branchId: req.query.branchId || undefined,
+    userRole: req.user?.role,
+    page: req.query.page ? Number(req.query.page) : undefined,
+    limit: req.query.limit ? Number(req.query.limit) : undefined,
+    search: req.query.search || undefined,
+    categoryId: req.query.categoryId || undefined,
+    movementType: req.query.movementType || undefined,
+    filters: (0, product_filters_1.parseProductFilters)(req.query),
+});
 const getStockMovementsController = (0, asyncHandler_1.default)(async (req, res) => {
-    const branchId = req.query.branchId;
-    const userRole = req.user?.role;
-    const movements = await stockService.getStockMovements(branchId || "", userRole);
-    new apiResponse_1.ApiResponse(movements, "Stock movement history retrieved").send(res);
+    const result = await stockService.getStockMovements(movementQuery(req));
+    new apiResponse_1.ApiResponse(result.data, "Stock movement history retrieved", 200, true, result.meta).send(res);
 });
 exports.getStockMovementsController = getStockMovementsController;
 const getTodayStockMovementsController = (0, asyncHandler_1.default)(async (req, res) => {
-    const branchId = req.query.branchId;
-    const userRole = req.user?.role;
-    const movements = await stockService.getTodayStockMovements(branchId || undefined, userRole);
-    new apiResponse_1.ApiResponse(movements, "Today's stock movements retrieved").send(res);
+    const result = await stockService.getTodayStockMovements(movementQuery(req));
+    new apiResponse_1.ApiResponse(result.data, "Today's stock movements retrieved", 200, true, result.meta).send(res);
 });
 exports.getTodayStockMovementsController = getTodayStockMovementsController;
 const removeStockController = (0, asyncHandler_1.default)(async (req, res) => {

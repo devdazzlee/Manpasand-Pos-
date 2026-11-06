@@ -1,0 +1,1 @@
+{"version":3,"file":"receipt-policy.js","sourceRoot":"","sources":["../../src/config/receipt-policy.ts"],"names":[],"mappings":";;;AAKA,4EAIC;AATD,2EAA2E;AAC9D,QAAA,6BAA6B,GAAG,iBAAiB,CAAC;AAC/D,+EAA+E;AAClE,QAAA,6BAA6B,GAAsB,EAAE,CAAC;AAEnE,SAAgB,gCAAgC,CAAC,WAEhD;IACC,OAAO,qCAA6B,CAAC,MAAM,GAAG,CAAC,IAAI,CAAC,WAAW,CAAC,aAAa,EAAE,IAAI,EAAE,CAAC;AACxF,CAAC"}

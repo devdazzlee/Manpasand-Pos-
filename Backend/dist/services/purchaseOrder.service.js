@@ -6,6 +6,8 @@ const client_2 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const helpers_1 = require("../utils/helpers");
 const pagination_1 = require("../utils/pagination");
+const timezone_1 = require("../utils/timezone");
+const product_cost_service_1 = require("./product-cost.service");
 const PO_INCLUDE = {
     supplier: { select: { id: true, name: true, code: true } },
     branch: { select: { id: true, name: true } },
@@ -42,16 +44,13 @@ class PurchaseOrderService {
         if (q.status && q.status in client_1.PurchaseOrderStatus) {
             where.status = q.status;
         }
-        const from = q.from ? new Date(q.from) : null;
-        const to = q.to ? new Date(q.to) : null;
-        if (from || to) {
+        const { start, end } = (0, timezone_1.parseOptionalDateRange)(q.from, q.to);
+        if (start || end) {
             where.order_date = {};
-            if (from && !Number.isNaN(from.getTime()))
-                where.order_date.gte = from;
-            if (to && !Number.isNaN(to.getTime())) {
-                to.setHours(23, 59, 59, 999);
-                where.order_date.lte = to;
-            }
+            if (start)
+                where.order_date.gte = start;
+            if (end)
+                where.order_date.lte = end;
         }
         const [rows, total, statusAgg] = await Promise.all([
             client_2.prisma.purchaseOrder.findMany({
@@ -281,6 +280,15 @@ class PurchaseOrderService {
                 });
                 const previousQty = stock ? (0, helpers_1.asNumber)(stock.current_quantity) : 0;
                 const newQty = previousQty + l.quantity;
+                const onHandBefore = await (0, product_cost_service_1.productOnHandQty)(tx, it.product_id);
+                await (0, product_cost_service_1.applyWeightedAverageCost)(tx, {
+                    productId: it.product_id,
+                    onHandBefore,
+                    incomingQty: l.quantity,
+                    unitCost,
+                    userId,
+                    source: 'PO_RECEIVE',
+                });
                 if (stock) {
                     await tx.stock.update({
                         where: {

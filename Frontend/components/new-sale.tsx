@@ -1927,10 +1927,13 @@ export function NewSale() {
     await refreshHoldSales();
     setShowHeldSales(true);
     setIsViewingHeldSales(false);
-    const element = document.getElementById('held-sales-list');
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth' });
-    }
+    // Defer scroll until the held list is in the DOM.
+    requestAnimationFrame(() => {
+      document.getElementById("held-sales-list")?.scrollIntoView({
+        behavior: "smooth",
+        block: "nearest",
+      });
+    });
   };
 
   // Printer loading is handled globally by usePrinterSettings hook
@@ -2980,7 +2983,7 @@ export function NewSale() {
   }, [cart, total, paymentDialogOpen, paymentMethodPending, startPayment, isScanning]);
 
   return (
-    <div className="relative flex min-h-full flex-col lg:h-full lg:min-h-0 lg:flex-row">
+    <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden lg:h-full lg:flex-row">
       {mobileCartOpen && cart.length > 0 && (
         <button
           type="button"
@@ -2995,64 +2998,78 @@ export function NewSale() {
       <div
         ref={productScrollRef}
         className={cn(
-          "min-h-0 flex-1 overflow-auto p-3 sm:p-4 md:p-6 [overflow-anchor:none]",
+          "min-h-0 flex-1 overflow-y-auto overscroll-contain p-3 sm:p-4 md:p-6 [overflow-anchor:none]",
           cart.length > 0 && "pb-28 sm:pb-40 lg:pb-6",
           mobileCartOpen && cart.length > 0 && "max-lg:overflow-hidden max-lg:pointer-events-none",
         )}
       >
         <div className="mb-2 sm:mb-4 md:mb-6">
-          <div className="mb-2 hidden flex-col gap-3 sm:mb-4 sm:flex sm:flex-row sm:items-center sm:justify-between sm:gap-4">
-            <div className="min-w-0 pl-10 lg:pl-0">
-              <h1 className="text-lg font-bold text-gray-900 sm:text-xl">New Sale</h1>
+          <div className="mb-2 hidden flex-col gap-3 sm:mb-4 sm:flex sm:flex-row sm:items-start sm:justify-between sm:gap-3">
+            <div className="min-w-0 shrink-0 pl-10 lg:pl-0">
+              <h1 className="text-lg font-bold leading-10 text-gray-900 sm:text-xl">New Sale</h1>
               {lastTransactionId && (
                 <p className="text-sm text-green-600">
                   Last transaction: {lastTransactionId}
                 </p>
               )}
             </div>
-            <div className="hidden flex-wrap items-center gap-2 sm:flex">
-              <PosBranchBar
-                adminMode={adminMode}
-                branches={posBranches}
-                selectedBranchId={selectedBranchId}
-                branchName={branchInfo.name}
-                loading={branchLoading}
-                disabled={paymentLoading || (hasBranch && cart.length > 0)}
-                onSelect={handleSelectBranch}
-                error={branchError}
-                className="sm:w-[240px]"
-              />
-              <RepeatSaleCombobox
-                branchId={selectedBranchId}
-                disabled={paymentLoading || branchLoading || !hasBranch}
-                onRepeat={handleRepeatSale}
-              />
-              {cart.length > 0 && (
-                <Button
-                  variant="outline"
-                  onClick={holdCurrentSale}
-                  disabled={isHoldingSale || branchLoading || (!adminMode && !hasBranch)}
-                >
-                  {isHoldingSale ? "Saving..." : "Hold Sale"}
-                </Button>
-              )}
-              {holdSales.length > 0 && (
-                <div className="flex items-center">
-                  <Badge
-                    variant="secondary"
-                    className="mr-2 bg-blue-100 text-blue-800"
-                  >
-                    {holdSales.length} held
-                  </Badge>
+            <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:items-end">
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                <PosBranchBar
+                  adminMode={adminMode}
+                  branches={posBranches}
+                  selectedBranchId={selectedBranchId}
+                  branchName={branchInfo.name}
+                  loading={branchLoading}
+                  disabled={paymentLoading || (hasBranch && cart.length > 0)}
+                  onSelect={handleSelectBranch}
+                  error={branchError}
+                  className="w-[200px] shrink-0"
+                />
+                <RepeatSaleCombobox
+                  branchId={selectedBranchId}
+                  disabled={paymentLoading || branchLoading || !hasBranch}
+                  className="h-10 shrink-0"
+                  onRepeat={handleRepeatSale}
+                />
+                {cart.length > 0 && (
                   <Button
                     variant="outline"
+                    className="h-10 shrink-0"
+                    onClick={holdCurrentSale}
+                    disabled={isHoldingSale || branchLoading || (!adminMode && !hasBranch)}
+                  >
+                    {isHoldingSale ? "Saving..." : "Hold Sale"}
+                  </Button>
+                )}
+                {holdSales.length > 0 && (
+                  <Button
+                    variant={showHeldSales ? "default" : "outline"}
+                    className="h-10 shrink-0 gap-2"
                     onClick={handleViewHeldSales}
                     disabled={isViewingHeldSales || holdSalesLoading || branchLoading || !hasBranch}
                   >
-                    {isViewingHeldSales || holdSalesLoading ? "Loading..." : "View Held Sales"}
+                    {isViewingHeldSales || holdSalesLoading ? (
+                      "Loading…"
+                    ) : (
+                      <>
+                        Held sales
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            "h-5 min-w-5 justify-center rounded-full px-1.5 text-[11px] font-semibold tabular-nums",
+                            showHeldSales
+                              ? "bg-white/20 text-white hover:bg-white/20"
+                              : "bg-blue-100 text-blue-800 hover:bg-blue-100",
+                          )}
+                        >
+                          {holdSales.length}
+                        </Badge>
+                      </>
+                    )}
                   </Button>
-                </div>
-              )}
+                )}
+              </div>
             </div>
           </div>
           <div className="mb-3 grid grid-cols-1 gap-2.5 sm:mb-4 sm:grid-cols-2 sm:gap-4">
@@ -3535,7 +3552,7 @@ export function NewSale() {
       {/* Cart Section */}
       <div
         className={cn(
-          "flex w-full min-h-0 flex-col overflow-hidden bg-white lg:h-full lg:w-[360px] lg:shrink-0 lg:border-l lg:border-slate-200",
+          "flex w-full min-h-0 flex-col overflow-hidden bg-white lg:h-full lg:max-h-full lg:w-[360px] lg:shrink-0 lg:self-stretch lg:border-l lg:border-slate-200",
           cart.length === 0
             ? "max-lg:hidden"
             : cn(
@@ -3727,13 +3744,13 @@ export function NewSale() {
 
         <div
           className={cn(
-            "min-h-0 flex-1 overflow-hidden",
+            "flex min-h-0 flex-1 flex-col overflow-hidden",
             !mobileCartOpen && "max-lg:hidden",
           )}
         >
           <div
             ref={cartScrollContainerRef}
-            className="h-full min-h-0 overflow-y-auto overscroll-contain px-2 py-2 touch-pan-y [-webkit-overflow-scrolling:touch]"
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-2 py-2 touch-pan-y [-webkit-overflow-scrolling:touch]"
             onWheel={(event) => event.stopPropagation()}
             onTouchMove={(event) => event.stopPropagation()}
           >

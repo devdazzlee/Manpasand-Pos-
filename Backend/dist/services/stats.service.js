@@ -2,7 +2,16 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.StatsService = void 0;
 const client_1 = require("../prisma/client");
+const client_2 = require("@prisma/client");
+const timezone_1 = require("../utils/timezone");
+/** Completed checkout bills only — refunds/exchanges are tracked separately. */
+const TODAY_SALE_STATUSES = [client_2.SaleStatus.COMPLETED];
+const TODAY_REFUND_STATUSES = [client_2.SaleStatus.REFUNDED, client_2.SaleStatus.EXCHANGED];
 class StatsService {
+    todayBounds() {
+        const ymd = (0, timezone_1.businessTodayYmd)();
+        return (0, timezone_1.businessDayRange)(ymd, ymd);
+    }
     async totalCustomers(branchId) {
         if (branchId) {
             // Customers aren't branch-owned in the schema, so "this branch's
@@ -17,9 +26,8 @@ class StatsService {
         return client_1.prisma.customer.count();
     }
     async newCustomersToday() {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        return client_1.prisma.customer.count({ where: { created_at: { gte: today } } });
+        const { start } = this.todayBounds();
+        return client_1.prisma.customer.count({ where: { created_at: { gte: start } } });
     }
     async lowStockProducts(branchId) {
         const where = {
@@ -50,9 +58,11 @@ class StatsService {
         return lowStock;
     }
     async todaySales(branchId) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const where = { created_at: { gte: today } };
+        const { start, end } = this.todayBounds();
+        const where = {
+            sale_date: { gte: start, lte: end },
+            status: { in: TODAY_SALE_STATUSES },
+        };
         if (branchId)
             where.branch_id = branchId;
         const sales = await client_1.prisma.sale.findMany({
@@ -63,16 +73,19 @@ class StatsService {
                 sale_number: true,
                 status: true,
                 created_at: true,
+                sale_date: true,
                 branch: { select: { id: true, name: true } },
             },
-            orderBy: { created_at: "desc" },
+            orderBy: { sale_date: "desc" },
         });
         return sales;
     }
     async paymentBreakdownToday(branchId) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const where = { created_at: { gte: today } };
+        const { start, end } = this.todayBounds();
+        const where = {
+            sale_date: { gte: start, lte: end },
+            status: { in: TODAY_SALE_STATUSES },
+        };
         if (branchId)
             where.branch_id = branchId;
         const grouped = await client_1.prisma.sale.groupBy({
@@ -88,11 +101,10 @@ class StatsService {
         }));
     }
     async todaySalesAggregate(branchId) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
+        const { start, end } = this.todayBounds();
         const saleWhere = {
-            created_at: { gte: today },
-            status: { notIn: ["CANCELLED"] },
+            sale_date: { gte: start, lte: end },
+            status: { in: TODAY_SALE_STATUSES },
         };
         if (branchId)
             saleWhere.branch_id = branchId;
@@ -124,14 +136,34 @@ class StatsService {
             itemsSoldToday: Number(itemsSold._sum.quantity || 0),
         };
     }
+    async todayRefundsAggregate(branchId) {
+        const { start, end } = this.todayBounds();
+        const where = {
+            sale_date: { gte: start, lte: end },
+            status: { in: TODAY_REFUND_STATUSES },
+            original_sale_id: { not: null },
+        };
+        if (branchId)
+            where.branch_id = branchId;
+        const totals = await client_1.prisma.sale.aggregate({
+            where,
+            _sum: { total_amount: true },
+            _count: { id: true },
+        });
+        return {
+            refundsCount: totals._count.id,
+            refundsTotal: Number(totals._sum.total_amount || 0),
+        };
+    }
     async getDashboardStats(branchId) {
-        const [totalCustomers, newCustomersToday, lowStockProducts, todaySales, paymentBreakdown, todayAgg, branch,] = await Promise.all([
+        const [totalCustomers, newCustomersToday, lowStockProducts, todaySales, paymentBreakdown, todayAgg, todayRefunds, branch,] = await Promise.all([
             this.totalCustomers(branchId),
             this.newCustomersToday(),
             this.lowStockProducts(branchId),
             this.todaySales(branchId),
             this.paymentBreakdownToday(branchId),
             this.todaySalesAggregate(branchId),
+            this.todayRefundsAggregate(branchId),
             branchId
                 ? client_1.prisma.branch.findUnique({ where: { id: branchId }, select: { id: true, name: true } })
                 : Promise.resolve(null),
@@ -152,6 +184,9 @@ class StatsService {
             itemsSoldToday: todayAgg.itemsSoldToday,
             discountToday: todayAgg.discountToday,
             taxToday: todayAgg.taxToday,
+            todayRefundsCount: todayRefunds.refundsCount,
+            todayRefundsTotal: todayRefunds.refundsTotal,
+            todayNetRevenue: todaySalesTotal + todayRefunds.refundsTotal,
         };
     }
 }

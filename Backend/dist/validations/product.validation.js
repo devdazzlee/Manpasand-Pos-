@@ -18,6 +18,20 @@ const productBaseSchema = zod_1.z.object({
         val === null ||
         String(val).trim() === '' ||
         /^\d{9}$/.test(String(val).trim()), { message: 'SKU must be exactly 9 digits (numbers only), or omit to auto-generate' }),
+    custom_code: zod_1.z
+        .string()
+        .trim()
+        .max(64)
+        .regex(/^[\x20-\x7E]+$/, 'Custom code must be printable ASCII')
+        .nullable()
+        .optional(),
+    label_barcode: zod_1.z
+        .string()
+        .trim()
+        .max(64)
+        .regex(/^[\x20-\x7E]+$/, 'Label barcode must be printable ASCII')
+        .nullable()
+        .optional(),
     discount_amount: zod_1.z.number().min(0).optional(),
     tax_id: zod_1.z.string().optional(),
     subcategory_id: zod_1.z.string().optional(),
@@ -25,6 +39,8 @@ const productBaseSchema = zod_1.z.object({
     max_qty: zod_1.z.number().int().min(0).optional().default(10),
     supplier_id: zod_1.z.string().optional(),
     brand_id: zod_1.z.string().optional(),
+    collection: zod_1.z.string().trim().max(80).nullable().optional(),
+    stitch_type: zod_1.z.enum(['STITCHED', 'UNSTITCHED']).nullable().optional(),
     color_id: zod_1.z.string().optional(),
     size_id: zod_1.z.string().optional(),
     is_active: zod_1.z.boolean().optional().default(true),
@@ -62,6 +78,10 @@ exports.listProductsSchema = zod_1.z.object({
         search: zod_1.z.string().optional(),
         category_id: zod_1.z.string().optional(),
         subcategory_id: zod_1.z.string().optional(),
+        categoryIds: zod_1.z.string().optional(),
+        subcategoryIds: zod_1.z.string().optional(),
+        supplierIds: zod_1.z.string().optional(),
+        stitchTypes: zod_1.z.string().optional(),
         is_active: zod_1.z.string().optional(),
         display_on_pos: zod_1.z.string().optional(),
         display_on_website: zod_1.z.string().optional(),

@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.deleteSalary = exports.markSalaryUnpaid = exports.markSalaryPaid = exports.updateSalary = exports.getSalaryById = exports.listSalaries = exports.createSalary = void 0;
+const resolveBranchId_1 = require("../utils/resolveBranchId");
 const salary_service_1 = require("../services/salary.service");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const apiResponse_1 = require("../utils/apiResponse");
@@ -13,9 +14,9 @@ exports.createSalary = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(salary, 'Salary record created successfully', 201).send(res);
 });
 exports.listSalaries = (0, asyncHandler_1.default)(async (req, res) => {
-    const { page = 1, limit = 20, employee_id, month, year, is_paid, search, fetch_all, } = req.query;
+    const { page = 1, limit = 20, employee_id, month, year, is_paid, search, fetch_all, paid_from, paid_to, } = req.query;
     const result = await salaryService.listSalaries({
-        branch_id: req.user?.branch_id || undefined,
+        branch_id: (0, resolveBranchId_1.resolveBranchId)(req),
         page: Number(page),
         limit: Number(limit),
         employee_id: employee_id,
@@ -24,6 +25,8 @@ exports.listSalaries = (0, asyncHandler_1.default)(async (req, res) => {
         is_paid: is_paid === 'true' ? true : is_paid === 'false' ? false : undefined,
         search: search,
         fetch_all: String(fetch_all) === 'true',
+        paid_from: paid_from ? String(paid_from) : undefined,
+        paid_to: paid_to ? String(paid_to) : undefined,
     });
     new apiResponse_1.ApiResponse(result.data, 'Salaries fetched successfully', 200, true, result.meta).send(res);
 });
@@ -36,7 +39,11 @@ exports.updateSalary = (0, asyncHandler_1.default)(async (req, res) => {
     new apiResponse_1.ApiResponse(salary, 'Salary record updated successfully').send(res);
 });
 exports.markSalaryPaid = (0, asyncHandler_1.default)(async (req, res) => {
-    const salary = await salaryService.markPaid(req.params.id, req.body?.paid_date);
+    const salary = await salaryService.markPaid(req.params.id, req.body?.paid_date, {
+        payment_method: req.body?.payment_method,
+        paid_from_account_id: req.body?.paid_from_account_id,
+        userId: req.user?.id,
+    });
     new apiResponse_1.ApiResponse(salary, 'Salary marked as paid').send(res);
 });
 exports.markSalaryUnpaid = (0, asyncHandler_1.default)(async (req, res) => {

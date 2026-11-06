@@ -4,6 +4,8 @@ exports.StockService = void 0;
 const client_1 = require("../prisma/client");
 const apiError_1 = require("../utils/apiError");
 const helpers_1 = require("../utils/helpers");
+const timezone_1 = require("../utils/timezone");
+const product_filters_1 = require("../utils/product-filters");
 class StockService {
     async createStock({ productId, branchId, quantity, supplierId, unitCost, invoiceRef, notes, createdBy }) {
         return client_1.prisma.$transaction(async (tx) => {
@@ -260,7 +262,7 @@ class StockService {
         }
         return stock;
     }
-    async getStockByBranch(branchId, page = 1, limit = 20, search, userRole, categoryId, brandId, supplierId, stockStatus) {
+    async getStockByBranch(branchId, page = 1, limit = 20, search, userRole, categoryId, brandId, supplierId, stockStatus, filters) {
         const skip = (page - 1) * limit;
         const where = {};
         if (branchId && branchId.trim() !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
@@ -285,6 +287,10 @@ class StockService {
         }
         if (supplierId && supplierId !== 'all') {
             productWhere.supplier_id = supplierId;
+        }
+        // Multi-select vendor / category / subcategory / stitch.
+        if ((0, product_filters_1.hasProductFilters)(filters)) {
+            productWhere.AND = [(0, product_filters_1.productFilterWhere)(filters)];
         }
         if (Object.keys(productWhere).length > 0) {
             where.product = productWhere;
@@ -379,38 +385,66 @@ class StockService {
             },
         };
     }
-    async getStockMovements(branchId, userRole) {
+    /**
+     * Paginated movement log. Previously this returned every movement ever
+     * recorded in one response (and ignored the branch filter for admins).
+     * Without `page` it keeps the old array shape but is capped for safety.
+     */
+    async getStockMovements(params) {
         const where = {};
-        // Only filter by branch if branchId is provided AND user is not admin
-        if (branchId && branchId.trim() !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
-            where.branch_id = branchId;
+        if (params.branchId && params.branchId.trim() !== "") {
+            where.branch_id = params.branchId;
         }
-        return client_1.prisma.stockMovement.findMany({
-            where,
-            include: { product: true, branch: true, user: { select: { email: true } } },
-            orderBy: { created_at: "desc" },
-        });
-    }
-    async getTodayStockMovements(branchId, userRole) {
-        const today = new Date();
-        today.setHours(0, 0, 0, 0);
-        const tomorrow = new Date(today);
-        tomorrow.setDate(tomorrow.getDate() + 1);
-        const whereClause = {
-            created_at: {
-                gte: today,
-                lt: tomorrow,
-            }
+        if (params.todayOnly) {
+            const { start, end } = (0, timezone_1.businessTodayRange)();
+            where.created_at = { gte: start, lte: end };
+        }
+        if (params.movementType) {
+            where.movement_type = params.movementType;
+        }
+        const search = params.search?.trim();
+        if (search || params.categoryId) {
+            where.product = {
+                ...(params.categoryId ? { category_id: params.categoryId } : {}),
+                ...(search
+                    ? {
+                        OR: search.split(/\s+/).filter(Boolean).flatMap((term) => [
+                            { name: { contains: term, mode: "insensitive" } },
+                            { sku: { contains: term, mode: "insensitive" } },
+                            { code: { contains: term, mode: "insensitive" } },
+                        ]),
+                    }
+                    : {}),
+            };
+        }
+        if ((0, product_filters_1.hasProductFilters)(params.filters)) {
+            where.product = { ...(where.product || {}), AND: [(0, product_filters_1.productFilterWhere)(params.filters)] };
+        }
+        const paged = Boolean(params.page);
+        const limit = Math.min(Math.max(Number(params.limit) || 25, 1), 200);
+        const page = Math.max(Number(params.page) || 1, 1);
+        const [data, total] = await Promise.all([
+            client_1.prisma.stockMovement.findMany({
+                where,
+                include: { product: true, branch: true, user: { select: { email: true } } },
+                orderBy: { created_at: "desc" },
+                skip: paged ? (page - 1) * limit : 0,
+                take: paged ? limit : 500,
+            }),
+            client_1.prisma.stockMovement.count({ where }),
+        ]);
+        return {
+            data,
+            meta: {
+                page: paged ? page : 1,
+                limit: paged ? limit : data.length,
+                total,
+                totalPages: paged ? Math.max(1, Math.ceil(total / limit)) : 1,
+            },
         };
-        // Only filter by branch if branchId is provided AND user is not admin
-        if (branchId && branchId !== "" && userRole !== "ADMIN" && userRole !== "SUPER_ADMIN") {
-            whereClause.branch_id = branchId;
-        }
-        return client_1.prisma.stockMovement.findMany({
-            where: whereClause,
-            include: { product: true, branch: true, user: { select: { email: true } } },
-            orderBy: { created_at: "desc" },
-        });
+    }
+    async getTodayStockMovements(params) {
+        return this.getStockMovements({ ...params, todayOnly: true });
     }
 }
 exports.StockService = StockService;

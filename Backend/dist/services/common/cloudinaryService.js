@@ -124,6 +124,19 @@ class CloudinaryService {
     async finalizeImages(urls, _folder, _name) {
         return urls;
     }
+    /** Receipts / bills (images or PDF). */
+    async uploadDocument(file, options) {
+        if (file.mimetype !== 'application/pdf')
+            return this.uploadImage(file, { folder: options?.folder ?? 'documents' });
+        return new Promise((resolve, reject) => {
+            const stream = cloudinary_1.v2.uploader.upload_stream({ folder: options?.folder ?? 'documents', resource_type: 'raw' }, (error, result) => {
+                if (error)
+                    return reject(error);
+                resolve(result.secure_url);
+            });
+            stream.end(file.buffer);
+        });
+    }
     /** True for URLs this service stored (only these are deleted from Cloudinary). */
     ownsUrl(url) {
         return url.includes('cloudinary.com');

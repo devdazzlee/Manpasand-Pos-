@@ -36,6 +36,8 @@ exports.createExpenseSchema = zod_1.z.object({
         particular: zod_1.z.string().trim().min(1, 'Description is required').max(200),
         amount: money,
         category_id: zod_1.z.string().uuid().nullable().optional(),
+        account_id: zod_1.z.string().uuid().nullable().optional(),
+        paid_from_account_id: zod_1.z.string().uuid().nullable().optional(),
         payment_method: zod_1.z.enum(PAYMENT_METHODS).optional(),
         bank_account: zod_1.z.string().trim().max(120).nullable().optional(),
         reference: zod_1.z.string().trim().max(120).nullable().optional(),
@@ -43,6 +45,8 @@ exports.createExpenseSchema = zod_1.z.object({
         notes: zod_1.z.string().trim().max(500).nullable().optional(),
         expense_date: optionalDate,
         branch_id: zod_1.z.string().uuid().nullable().optional(),
+        /** Record in the open cash register (any payment method; only cash reduces the drawer). */
+        from_drawer: zod_1.z.boolean().optional(),
     }),
 });
 exports.updateExpenseSchema = zod_1.z.object({
@@ -52,9 +56,12 @@ exports.updateExpenseSchema = zod_1.z.object({
 exports.listExpensesSchema = zod_1.z.object({
     query: zod_1.z.object({
         page: zod_1.z.coerce.number().int().positive().optional(),
-        limit: zod_1.z.coerce.number().int().positive().max(200).optional(),
+        limit: zod_1.z.coerce.number().int().positive().max(5000).optional(),
+        fetch_all: zod_1.z.enum(['true', 'false']).optional(),
         search: zod_1.z.string().trim().optional(),
         category_id: zod_1.z.string().uuid().optional(),
+        account_id: zod_1.z.string().uuid().optional(),
+        paid_from_account_id: zod_1.z.string().uuid().optional(),
         payment_method: zod_1.z.enum(PAYMENT_METHODS).optional(),
         status: zod_1.z.enum(STATUSES).optional(),
         branch_id: zod_1.z.string().uuid().optional(),
@@ -79,6 +86,8 @@ exports.createRecurringExpenseSchema = zod_1.z.object({
         particular: zod_1.z.string().trim().min(1).max(200),
         amount: money,
         category_id: zod_1.z.string().uuid().nullable().optional(),
+        account_id: zod_1.z.string().uuid().nullable().optional(),
+        paid_from_account_id: zod_1.z.string().uuid().nullable().optional(),
         payment_method: zod_1.z.enum(PAYMENT_METHODS).optional(),
         bank_account: zod_1.z.string().trim().max(120).nullable().optional(),
         vendor: zod_1.z.string().trim().max(120).nullable().optional(),

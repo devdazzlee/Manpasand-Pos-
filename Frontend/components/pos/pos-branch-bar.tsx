@@ -48,7 +48,7 @@ export function PosBranchBar({
   if (loading) {
     return (
       <div
-        className={cn("h-10 w-full animate-pulse rounded-md bg-gray-100 sm:w-[240px]", className)}
+        className={cn("h-10 w-full animate-pulse rounded-md bg-gray-100 sm:w-[200px]", className)}
         aria-hidden
       />
     );
@@ -92,7 +92,7 @@ export function PosBranchBar({
       <Select value={selectedBranchId || undefined} onValueChange={onSelect} disabled={disabled}>
         <SelectTrigger
           className={cn(
-            "h-10 w-full gap-0 sm:w-[240px] [&>span]:flex-1 [&>span]:text-left",
+            "h-10 w-full gap-0 [&>span]:flex-1 [&>span]:text-left",
             showError
               ? "border-red-500 bg-red-50 text-red-900 ring-2 ring-red-300"
               : unselected

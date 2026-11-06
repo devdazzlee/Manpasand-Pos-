@@ -36,9 +36,10 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.deleteAllProducts = exports.bulkUploadProducts = exports.importProductRow = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.exportProductsToExcel = exports.getPosCatalog = exports.listProducts = exports.deleteProduct = exports.toggleProductStatus = exports.updateProduct = exports.getProductCostHistory = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
+exports.deleteAllProducts = exports.bulkUploadProducts = exports.importProductRow = exports.getBestSellingProducts = exports.getFeaturedProducts = exports.exportProductsToExcel = exports.getPosCatalog = exports.listProducts = exports.deleteProduct = exports.toggleProductStatus = exports.updateProduct = exports.getProductCostHistory = exports.getProductPriceHistory = exports.getProduct = exports.createProduct = exports.uploadProductImage = void 0;
 const product_service_1 = require("../services/product.service");
 const reports_service_1 = require("../services/reports.service");
+const timezone_1 = require("../utils/timezone");
 const apiResponse_1 = require("../utils/apiResponse");
 const asyncHandler_1 = __importDefault(require("../middleware/asyncHandler"));
 const resolveBranchId_1 = require("../utils/resolveBranchId");
@@ -46,6 +47,7 @@ const webCache_1 = require("../utils/webCache");
 const sync_1 = require("csv-parse/sync");
 const xlsx_1 = __importDefault(require("xlsx"));
 const path_1 = __importDefault(require("path"));
+const product_filters_1 = require("../utils/product-filters");
 const productService = new product_service_1.ProductService();
 const reportsService = new reports_service_1.ReportsService();
 /**
@@ -78,6 +80,10 @@ exports.getProduct = (0, asyncHandler_1.default)(async (req, res) => {
     const product = await productService.getProductById(req.params.id);
     new apiResponse_1.ApiResponse(product, 'Product retrieved successfully').send(res);
 });
+exports.getProductPriceHistory = (0, asyncHandler_1.default)(async (req, res) => {
+    const data = await productService.getProductPriceHistory(req.params.id);
+    new apiResponse_1.ApiResponse(data, 'Product price history retrieved').send(res);
+});
 exports.getProductCostHistory = (0, asyncHandler_1.default)(async (req, res) => {
     const data = await productService.getProductCostHistory(req.params.id);
     new apiResponse_1.ApiResponse(data, 'Product cost history retrieved').send(res);
@@ -85,7 +91,7 @@ exports.getProductCostHistory = (0, asyncHandler_1.default)(async (req, res) => 
 exports.updateProduct = (0, asyncHandler_1.default)(async (req, res) => {
     // Separate image fields from product data
     const { new_images, existing_images, images, ...updateData } = req.body;
-    const product = await productService.updateProduct(req.params.id, updateData);
+    const product = await productService.updateProduct(req.params.id, updateData, req.user?.id);
     new apiResponse_1.ApiResponse(product, 'Product updated successfully').send(res);
     void (0, webCache_1.invalidateWebCatalogCache)();
     // Process images in the background AFTER response is sent
@@ -140,6 +146,12 @@ exports.listProducts = (0, asyncHandler_1.default)(async (req, res) => {
         stock_status: stockStatus,
         branch_id: branch_id,
         fetchAll: fetch_all ? fetch_all === 'true' : false,
+        filters: (0, product_filters_1.parseProductFilters)({
+            categoryIds: req.query.categoryIds,
+            subcategoryIds: req.query.subcategoryIds,
+            supplierIds: req.query.supplierIds,
+            stitchTypes: req.query.stitchTypes,
+        }),
     });
     new apiResponse_1.ApiResponse(result.data, 'Products retrieved successfully', 200, true, result.meta).send(res);
 });
@@ -159,6 +171,7 @@ exports.exportProductsToExcel = (0, asyncHandler_1.default)(async (req, res) => 
         is_active: is_active ? is_active === 'true' : undefined,
         display_on_pos: display_on_pos ? display_on_pos === 'true' : undefined,
         display_on_website: display_on_website ? display_on_website === 'true' : undefined,
+        catalog: (0, product_filters_1.parseProductFilters)({ stitchTypes: req.query.stitchTypes }),
     });
     const requestedColumnsRaw = typeof req.query.columns === 'string' ? req.query.columns : '';
     const requestedColumns = requestedColumnsRaw
@@ -183,6 +196,7 @@ exports.exportProductsToExcel = (0, asyncHandler_1.default)(async (req, res) => 
         subcategory_id: 'Subcategory ID',
         subcategory_name: 'Subcategory',
         subcategory_code: 'Subcategory Code',
+        stitch_type: 'Stitched / Unstitched',
         unit_id: 'Unit ID',
         unit_name: 'Unit',
         unit_code: 'Unit Code',
@@ -249,6 +263,7 @@ exports.exportProductsToExcel = (0, asyncHandler_1.default)(async (req, res) => 
             subcategory_id: product.subcategory_id || '',
             subcategory_name: product.subcategory?.name || '',
             subcategory_code: product.subcategory?.code || '',
+            stitch_type: product.stitch_type === 'STITCHED' ? 'Stitched' : product.stitch_type === 'UNSTITCHED' ? 'Unstitched' : '',
             unit_id: product.unit_id,
             unit_name: product.unit?.name || '',
             unit_code: product.unit?.code || '',
@@ -308,13 +323,23 @@ exports.getFeaturedProducts = (0, asyncHandler_1.default)(async (req, res) => {
     const featuredProducts = await productService.getFeaturedProducts();
     new apiResponse_1.ApiResponse(featuredProducts, 'Featured products retrieved successfully', 200).send(res);
 });
+/** Ranking window for best sellers, in business-timezone days (null = all time). */
+const BEST_SELLING_PERIODS = { today: 0, '7d': 6, '30d': 29, all: null };
 exports.getBestSellingProducts = (0, asyncHandler_1.default)(async (req, res) => {
     const branchId = (0, resolveBranchId_1.resolveBranchId)(req);
     const limit = req.query.limit ? Number(req.query.limit) : 10;
+    // ?period=today|7d|30d|all (default 30d). Ranking all-time history makes
+    // a long-gone bestseller outrank what is actually selling now.
+    const requested = String(req.query.period || '30d');
+    const period = requested in BEST_SELLING_PERIODS ? requested : '30d';
+    const back = BEST_SELLING_PERIODS[period];
+    const to = (0, timezone_1.businessTodayYmd)();
+    const from = back === null ? undefined : (0, timezone_1.shiftBusinessYmd)(to, -back);
     const bestSellingProducts = await reportsService.getBestSellingProducts({
         branchId,
         userRole: req.user?.role,
         limit,
+        ...(from ? { from, to } : {}),
     });
     new apiResponse_1.ApiResponse(bestSellingProducts, 'Best selling products retrieved successfully', 200).send(res);
 });
@@ -339,6 +364,19 @@ function parseExcelBoolean(value, fallback) {
     if (['false', 'no', '0', 'n'].includes(normalized))
         return false;
     return fallback;
+}
+/** "Stitched" / "Unstitched" (also "Un-Stitched", "S", "U"); blank or unknown → not set. */
+function parseStitchType(value) {
+    if (value === undefined || value === null)
+        return undefined;
+    const text = String(value).trim().toLowerCase();
+    if (!text)
+        return undefined;
+    if (/un[\s_-]*stitch/.test(text) || text === 'u')
+        return 'UNSTITCHED';
+    if (/stitch/.test(text) || text === 's')
+        return 'STITCHED';
+    return undefined;
 }
 function mapBulkUploadRow(prod) {
     const nameRaw = pickCell(prod, 'Product Name', 'product name', 'Name', 'name', 'PRODUCT NAME');
@@ -408,6 +446,7 @@ function mapBulkUploadRow(prod) {
         brand_name: pickCell(prod, 'brand_name', 'brand', 'Brand'),
         color_name: pickCell(prod, 'color_name', 'color', 'Color'),
         size_name: pickCell(prod, 'size_name', 'size', 'Size'),
+        stitch_type: parseStitchType(pickCell(prod, 'Stitched / Unstitched', 'stitch_type', 'Stitch Type', 'Stitched/Unstitched', 'Stitching')),
     };
 }
 // Per-row import — used by the live-progress upload dialog. Accepts one
