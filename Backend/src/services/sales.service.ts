@@ -1125,6 +1125,7 @@ class SaleService {
     payments,
     items,
     discountAmount,
+    waiveBranchDiscount,
     createdBy,
     promotionCode,
     applyPromotions,
@@ -1138,6 +1139,8 @@ class SaleService {
     paymentMethod: Prisma.SaleCreateInput['payment_method'];
     items: Array<{ productId: string; quantity: number; price: number }>;
     discountAmount?: number;
+    /** Skip the branch auto-discount on this bill (permission checked in the route). */
+    waiveBranchDiscount?: boolean;
     createdBy: string;
     promotionCode?: string | null;
     applyPromotions?: boolean;
@@ -1255,7 +1258,10 @@ class SaleService {
     // cashiers without sales.discount, offline sync, and API clients cannot
     // skip it. Loyalty winners still replace manual/branch discount entirely.
     const branchPolicy = getBranchAutoDiscount(branchId);
-    const policyDiscount = branchAutoDiscountAmount(branchId, subtotalAmt);
+    const fullPolicyDiscount = branchAutoDiscountAmount(branchId, subtotalAmt);
+    // Removed for this bill by someone allowed to (route enforces sales.discount / approval).
+    const branchDiscountWaived = waiveBranchDiscount === true && fullPolicyDiscount > 0;
+    const policyDiscount = branchDiscountWaived ? 0 : fullPolicyDiscount;
     const clientManual = Math.max(0, discountAmount ?? 0);
 
     let manualDiscount: number;
@@ -1291,6 +1297,16 @@ class SaleService {
     const appliedPromotions: AppliedPromotion[] = [
       ...promo.applied,
       ...(branchPolicyApplied ? [branchPolicyApplied] : []),
+      // Audit trail: the branch discount was deliberately removed on this bill.
+      ...(branchDiscountWaived && branchPolicy
+        ? [{
+            id: `branch-auto-waived:${branchId}`,
+            name: `${branchPolicy.label} ${branchPolicy.percent}% removed for this bill`,
+            code: null,
+            type: 'BRANCH_AUTO_WAIVED',
+            amount: 0,
+          } as AppliedPromotion]
+        : []),
     ];
 
     // Loyalty points redeemed as a discount.

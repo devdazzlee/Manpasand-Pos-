@@ -838,6 +838,8 @@ export function NewSale() {
   const branchAutoDiscountPercent = Number(
     branchInfo.pos_policy?.auto_bill_discount_percent || 0,
   );
+  // Branch auto-discount removed for THIS bill (manager decision; resets on the next bill).
+  const [branchDiscountWaived, setBranchDiscountWaived] = useState(false);
   const branchAutoDiscountLabel =
     branchInfo.pos_policy?.label?.trim() || null;
 
@@ -2058,6 +2060,7 @@ export function NewSale() {
     if (branchAutoDiscountPercent > 0) {
       setGlobalDiscountType("percentage");
       setGlobalDiscountValue(String(branchAutoDiscountPercent));
+      setBranchDiscountWaived(false);
       setShowDiscountRow(true);
     } else {
       setGlobalDiscountValue("");
@@ -2089,16 +2092,19 @@ export function NewSale() {
   useEffect(() => {
     if (isLoyaltyWinnerCustomer) return;
     if (branchAutoDiscountPercent <= 0) return;
+    if (branchDiscountWaived) return; // removed for this bill on purpose
     if (subtotal <= 0) return;
     const floorAmount = roundMoney((subtotal * branchAutoDiscountPercent) / 100);
     if (globalDiscountAmount + 0.005 < floorAmount) {
       setGlobalDiscountType("percentage");
       setGlobalDiscountValue(String(branchAutoDiscountPercent));
+      setBranchDiscountWaived(false);
       setShowDiscountRow(true);
     }
   }, [
     isLoyaltyWinnerCustomer,
     branchAutoDiscountPercent,
+    branchDiscountWaived,
     subtotal,
     globalDiscountAmount,
     branchInfo.pos_policy,
@@ -2234,6 +2240,7 @@ export function NewSale() {
     if (branchAutoDiscountPercent > 0) {
       setGlobalDiscountType("percentage");
       setGlobalDiscountValue(String(branchAutoDiscountPercent));
+      setBranchDiscountWaived(false);
       setShowDiscountRow(true);
     } else {
       setGlobalDiscountValue("");
@@ -2437,6 +2444,8 @@ export function NewSale() {
           paymentMethod: method === "Cash" ? "CASH" : "CARD",
           branchId,
           discountAmount: globalDiscountAmount,
+          // Server skips the branch auto-discount only with this flag + permission/approval.
+          waiveBranchDiscount: branchDiscountWaived || undefined,
           // This screen has no promotions UI, so the server must not add any:
           // the bill must match what the cashier sees.
           applyPromotions: false,
@@ -2484,6 +2493,7 @@ export function NewSale() {
               timestamp: Date.now(),
               synced: false,
               discountAmount: globalDiscountAmount,
+              waiveBranchDiscount: branchDiscountWaived || undefined,
             });
             // Synced later by syncManager.syncSales() — do NOT also queue via
             // offlineAPIClient.post, that made every offline sale post twice.
@@ -2514,6 +2524,7 @@ export function NewSale() {
             timestamp: Date.now(),
             synced: false,
             discountAmount: globalDiscountAmount,
+            waiveBranchDiscount: branchDiscountWaived || undefined,
           });
           // Synced later by syncManager.syncSales() — do NOT also queue via
           // offlineAPIClient.post, that made every offline sale post twice.
@@ -2602,6 +2613,7 @@ export function NewSale() {
           if (branchAutoDiscountPercent > 0) {
             setGlobalDiscountType("percentage");
             setGlobalDiscountValue(String(branchAutoDiscountPercent));
+            setBranchDiscountWaived(false);
             setShowDiscountRow(true);
           } else {
             setGlobalDiscountValue("");
@@ -4363,10 +4375,45 @@ export function NewSale() {
                     role="status"
                     aria-live="polite"
                   >
-                    <span className="font-semibold">Auto discount</span>
-                    {" — "}
-                    {branchAutoDiscountLabel || "This branch"}: {branchAutoDiscountPercent}% applied to the bill (set
-                    by server; cart preview matches).
+                    {branchDiscountWaived ? (
+                      <div className="flex items-center justify-between gap-2">
+                        <span>
+                          <span className="font-semibold">Branch discount removed</span> for this bill. Needs
+                          discount permission or a manager&apos;s approval at checkout.
+                        </span>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded px-1.5 py-0.5 font-semibold text-sky-700 underline-offset-2 hover:bg-sky-100 hover:underline"
+                          onClick={() => {
+                            setBranchDiscountWaived(false);
+                            setGlobalDiscountType("percentage");
+                            setGlobalDiscountValue(String(branchAutoDiscountPercent));
+                            setShowDiscountRow(true);
+                          }}
+                        >
+                          Undo
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center justify-between gap-2">
+                        <span>
+                          <span className="font-semibold">Auto discount</span>
+                          {" — "}
+                          {branchAutoDiscountLabel || "This branch"}: {branchAutoDiscountPercent}% applied to the bill.
+                        </span>
+                        <button
+                          type="button"
+                          className="shrink-0 rounded px-1.5 py-0.5 font-semibold text-sky-700 underline-offset-2 hover:bg-sky-100 hover:underline"
+                          onClick={() => {
+                            discountTouchedRef.current = true;
+                            setBranchDiscountWaived(true);
+                            setGlobalDiscountValue("");
+                          }}
+                        >
+                          Remove
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -4387,6 +4434,7 @@ export function NewSale() {
                       Discount
                       {!isLoyaltyWinnerCustomer &&
                       branchAutoDiscountPercent > 0 &&
+                      !branchDiscountWaived &&
                       globalDiscountType === "percentage" &&
                       Math.abs(
                         (Number.parseFloat(globalDiscountValue) || 0) - branchAutoDiscountPercent,

@@ -156,6 +156,8 @@ class OfflineSyncManager {
           // Branch auto-discount is also enforced server-side; still forward the
           // till amount so higher cashier discounts survive offline sync.
           discountAmount: Number((sale as any).discountAmount) || 0,
+          // Branch discount removed at the till for this bill (permission re-checked by the server).
+          waiveBranchDiscount: (sale as any).waiveBranchDiscount === true || undefined,
           applyPromotions: false,
         };
         

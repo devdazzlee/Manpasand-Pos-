@@ -50,9 +50,13 @@ const saleCheckoutPermissions = async (req: Request) => {
     const clientDiscount = Math.max(0, Number(body.discountAmount) || 0);
     // Branch auto-discount (e.g. Dhoraji 15%) is a server policy — cashiers may
     // send that amount without sales.discount. Anything above the floor still needs approval.
+    // Removing the auto-discount for a bill (waiveBranchDiscount) is itself a discount
+    // decision, so it needs "Give discounts" or a manager's approval too.
     const branchId = resolveBranchId(req) || (req.user?.branch_id as string | undefined);
-    const policyFloor = branchAutoDiscountAmount(branchId, subtotal);
-    if (clientDiscount > policyFloor + 0.005) keys.push("sales.discount");
+    const fullFloor = branchAutoDiscountAmount(branchId, subtotal);
+    const waive = body.waiveBranchDiscount === true && fullFloor > 0;
+    const policyFloor = waive ? 0 : fullFloor;
+    if (waive || clientDiscount > policyFloor + 0.005) keys.push("sales.discount");
     let total = subtotal - Math.max(clientDiscount, policyFloor);
     if (body.applyPromotions !== false && items.length) {
         const promo = await promotionService
