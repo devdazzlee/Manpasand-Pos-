@@ -742,6 +742,8 @@ export function NewSale() {
   // Track when user is actively interacting with other inputs (prevent auto-refocus)
   const userInteractionTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const isUserInteractingRef = useRef<boolean>(false);
+  /** True while any quantity field (cart or quick bar) owns focus — blocks search steal. */
+  const quantityInputFocusedRef = useRef(false);
   const customerSearchTimerRef = useRef<number | null>(null);
   const [lastTransactionId, setLastTransactionId] = useState<string | null>(
     null
@@ -1012,10 +1014,22 @@ export function NewSale() {
         clearTimeout(userInteractionTimeoutRef.current);
         userInteractionTimeoutRef.current = null;
       }
-      // Reset interaction flag after a short delay
+      // Reset interaction flag after a short delay — but never while qty is focused
+      // (slow typing was losing focus to search and committing partial "123" of "1234").
       setTimeout(() => {
+        if (quantityInputFocusedRef.current) return;
         isUserInteractingRef.current = false;
       }, INTERACTION_TIMEOUT);
+    };
+
+    const isQuantityFieldFocused = () => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el) return quantityInputFocusedRef.current;
+      return (
+        quantityInputFocusedRef.current ||
+        el.getAttribute("data-quantity-input") === "true" ||
+        el.closest('[data-quick-qty="true"]') !== null
+      );
     };
 
     const isInteractiveElement = (element: HTMLElement | null): boolean => {
@@ -1058,6 +1072,7 @@ export function NewSale() {
 
     const scheduleRefocus = () => {
       if (isTouchUi()) return;
+      if (isQuantityFieldFocused()) return;
 
       // Clear any existing timeout
       if (userInteractionTimeoutRef.current) {
@@ -1067,6 +1082,7 @@ export function NewSale() {
       // Only refocus if user is not actively interacting
       if (!isUserInteractingRef.current && searchInputRef.current && !paymentDialogOpen) {
         userInteractionTimeoutRef.current = setTimeout(() => {
+          if (isQuantityFieldFocused()) return;
           const activeElement = document.activeElement as HTMLElement;
           
           // Don't refocus if user is still on an interactive element
@@ -1472,7 +1488,7 @@ export function NewSale() {
     // Commit any in-progress qty on the previous line before switching.
     const previousLineId = activeCartLineIdRef.current;
     if (previousLineId) {
-      applyTypedOverlayToCart(previousLineId);
+      applyTypedOverlayToCart(previousLineId, { force: true });
       clearQuantityOverlay(previousLineId);
     }
 
@@ -1740,6 +1756,14 @@ export function NewSale() {
     return parsed;
   };
 
+  const isIncompleteQuantityDraft = (raw: string) => {
+    const t = raw.trim();
+    if (!t) return true;
+    if (t === "." || t === "-") return true;
+    if (t.endsWith(".") || t.endsWith("-")) return true;
+    return false;
+  };
+
   const clearQuantityOverlay = (lineId: string) => {
     setQuantityInputs((prev) => {
       if (!(lineId in prev)) return prev;
@@ -1750,9 +1774,13 @@ export function NewSale() {
     });
   };
 
-  const applyTypedOverlayToCart = (lineId: string) => {
+  const applyTypedOverlayToCart = (
+    lineId: string,
+    opts?: { force?: boolean },
+  ) => {
     const pending = quantityInputsRef.current[lineId];
     if (pending === undefined || pending.trim() === "") return;
+    if (!opts?.force && isIncompleteQuantityDraft(pending)) return;
     const line = cartRef.current.find((l) => l.id === lineId);
     if (!line) return;
     const product = line.productId
@@ -1777,6 +1805,7 @@ export function NewSale() {
   const bumpQuantity = (id: string, direction: 1 | -1) => {
     activeCartLineIdRef.current = id;
     setActiveCartLineId(id);
+    applyTypedOverlayToCart(id, { force: true });
     clearQuantityOverlay(id);
     setCartSync((prev) =>
       prev.map((line) => {
@@ -2925,7 +2954,7 @@ export function NewSale() {
     const id = lineId ?? quantityFocusLineIdRef.current ?? activeCartLineIdRef.current;
     if (id) {
       quantityEnterConfirmedRef.current = id;
-      applyTypedOverlayToCart(id);
+      applyTypedOverlayToCart(id, { force: true });
       clearQuantityOverlay(id);
     }
     quantityFocusLineIdRef.current = null;
@@ -3412,6 +3441,7 @@ export function NewSale() {
                         quickAdjustLine?.id;
                       if (!lineId) return;
                       quantityFocusLineIdRef.current = lineId;
+                      quantityInputFocusedRef.current = true;
                       isUserInteractingRef.current = true;
                       switchActiveCartLine(lineId);
                     }}
@@ -3431,25 +3461,35 @@ export function NewSale() {
                       // Commit quantity on Enter/blur only — avoids rewriting
                       // "50" into "0.05" while the user is still typing.
                     }}
-                    onBlur={() => {
+                    onBlur={(e) => {
                       const lineId = quantityFocusLineIdRef.current;
                       if (!lineId) return;
+                      const next = e.relatedTarget as HTMLElement | null;
+                      if (
+                        next?.closest('[data-quick-qty="true"]') ||
+                        next?.getAttribute("data-quantity-input") === "true"
+                      ) {
+                        return;
+                      }
                       if (quantityEnterConfirmedRef.current === lineId) {
                         quantityEnterConfirmedRef.current = null;
                         quantityFocusLineIdRef.current = null;
+                        quantityInputFocusedRef.current = false;
                         setTimeout(() => {
                           isUserInteractingRef.current = false;
                         }, 300);
                         return;
                       }
-                      applyTypedOverlayToCart(lineId);
+                      applyTypedOverlayToCart(lineId, { force: true });
                       clearQuantityOverlay(lineId);
                       quantityFocusLineIdRef.current = null;
+                      quantityInputFocusedRef.current = false;
                       setTimeout(() => {
                         isUserInteractingRef.current = false;
                       }, 300);
                     }}
                     onKeyDown={(e) => {
+                      isUserInteractingRef.current = true;
                       const lineId =
                         activeCartLineIdRef.current ??
                         lastAddedProductId.current ??
@@ -3878,27 +3918,41 @@ export function NewSale() {
                             value={qtyDisplay}
                             onClick={(e) => e.stopPropagation()}
                             onFocus={(e) => {
+                              quantityInputFocusedRef.current = true;
+                              isUserInteractingRef.current = true;
                               switchActiveCartLine(item.id);
                               e.currentTarget.select();
                             }}
                             onChange={(e) => {
                               const value = e.target.value;
+                              isUserInteractingRef.current = true;
                               setQuantityInputs((prev) => {
                                 const next = { ...prev, [item.id]: value };
                                 quantityInputsRef.current = next;
                                 return next;
                               });
                             }}
-                            onBlur={() => {
-                              applyTypedOverlayToCart(item.id);
+                            onBlur={(e) => {
+                              const next = e.relatedTarget as HTMLElement | null;
+                              if (
+                                next?.closest('[data-quick-qty="true"]') ||
+                                (next?.getAttribute("data-quantity-input") === "true" &&
+                                  next !== e.currentTarget)
+                              ) {
+                                return;
+                              }
+                              quantityInputFocusedRef.current = false;
+                              applyTypedOverlayToCart(item.id, { force: true });
                               clearQuantityOverlay(item.id);
                             }}
                             onKeyDown={(e) => {
                               e.stopPropagation();
+                              isUserInteractingRef.current = true;
                               if (e.key === "Enter") {
                                 e.preventDefault();
-                                applyTypedOverlayToCart(item.id);
+                                applyTypedOverlayToCart(item.id, { force: true });
                                 clearQuantityOverlay(item.id);
+                                quantityInputFocusedRef.current = false;
                                 (e.currentTarget as HTMLInputElement).blur();
                               }
                             }}
