@@ -97,9 +97,9 @@ export const formatReceiptQtyParts = (
 ): { quantity: number; unit?: string; converted?: boolean } => {
   const qty = Number(quantity);
   const safeQty = Number.isFinite(qty) ? Math.abs(qty) : 0;
-  const displayQty = Number.isInteger(safeQty)
-    ? safeQty
-    : parseFloat(safeQty.toFixed(3));
+  // Same precision as the POS cart: show exactly what was typed (no rounding to 0.01 / 3 dp).
+  const exact = (v: number) => parseFloat(v.toFixed(6));
+  const displayQty = Number.isInteger(safeQty) ? safeQty : exact(safeQty);
 
   const raw = typeof unitName === "string" ? unitName.trim() : "";
   if (!raw) return { quantity: displayQty };
@@ -109,7 +109,7 @@ export const formatReceiptQtyParts = (
   if (unitLower.includes("kg") || unitLower.includes("kilogram")) {
     if (safeQty > 0 && safeQty < 1) {
       return {
-        quantity: Math.round(safeQty * 1000),
+        quantity: exact(safeQty * 1000),
         unit: "g",
         converted: true,
       };
@@ -120,16 +120,15 @@ export const formatReceiptQtyParts = (
     if (safeQty >= 1000) {
       const kg = safeQty / 1000;
       return {
-        quantity: Number.isInteger(kg) ? kg : parseFloat(kg.toFixed(3)),
+        quantity: Number.isInteger(kg) ? kg : exact(kg),
         unit: "Kg",
         converted: true,
       };
     }
-    return { quantity: Math.round(safeQty) || displayQty, unit: "g" };
+    return { quantity: displayQty, unit: "g" };
   }
   if (unitLower.includes("pc") || unitLower.includes("piece")) {
-    const whole = Number.isInteger(safeQty) ? safeQty : parseFloat(safeQty.toFixed(3));
-    return { quantity: whole, unit: "Pcs" };
+    return { quantity: displayQty, unit: "Pcs" };
   }
 
   const short = raw.length > 4 ? raw.replace(/s$/i, "").slice(0, 3) : raw;

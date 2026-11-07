@@ -1455,7 +1455,7 @@ export function NewSale() {
     if (customPrice !== undefined && originalProductPrice > 0) {
       // Calculate quantity: barcodePrice / originalPrice
       finalQuantity = customPrice / originalProductPrice;
-      const minFromUnit = isWeightUnit(product.unitName) ? 0.01 : 1;
+      const minFromUnit = isWeightUnit(product.unitName) ? 0.001 : 1;
       finalQuantity = Math.max(minFromUnit, finalQuantity);
       
       // Show the scanned price (barcode price) in the price field for display
@@ -1544,15 +1544,42 @@ export function NewSale() {
 
   const formatMoney = (value: number) => formatMoneyDisplay(value);
 
-  const formatQuantityValue = (value: number) => {
-    if (Number.isInteger(value)) return String(value);
-    return Number(value.toFixed(3)).toString();
+  /**
+   * Quantity rules (the server accepts any positive quantity and stores it exactly):
+   *  - A quantity the cashier TYPES is kept as typed. 0.005 stays 0.005 — it is never
+   *    rounded up to 0.01 or raised to 1. Only floating-point noise is trimmed
+   *    (QTY_PRECISION decimals, far below 1 g / 1 ml).
+   *  - The only rule for typed values is "above 0"; anything else is rejected with a
+   *    message and the line keeps its previous quantity (see updateQuantityManual).
+   *  - The − / + buttons have a floor so a tap can't zero a line: 1 for pieces,
+   *    1 g (0.001 kg) for weight, 0.001 otherwise.
+   */
+  const QTY_PRECISION = 6;
+  const trimQty = (value: number) => Number(value.toFixed(QTY_PRECISION));
+
+  /** Exact typed quantity, or null when it is not a usable (positive) number. */
+  const exactTypedQuantity = (value: number): number | null => {
+    if (!Number.isFinite(value) || value <= 0) return null;
+    const exact = trimQty(value);
+    return exact > 0 ? exact : null;
   };
 
-  const normalizeStoredQuantity = (value: number) => {
+  const bumpFloorForUnit = (unitName?: string) => {
+    if (isWeightUnit(unitName)) return 0.001;
+    if (isPieceUnit(unitName)) return 1;
+    return 0.001;
+  };
+
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const formatQuantityValue = (value: number, _unitName?: string) =>
+    String(trimQty(Number(value) || 0));
+
+  /** For −/+ steps only: keeps the step result at or above the unit's floor. */
+  const normalizeStoredQuantity = (value: number, unitName?: string) => {
     const parsed = Number(value);
-    if (Number.isNaN(parsed)) return 0.01;
-    return Math.max(0.01, Number(parsed.toFixed(3)));
+    const floor = bumpFloorForUnit(unitName);
+    if (Number.isNaN(parsed) || parsed <= 0) return floor;
+    return Math.max(floor, trimQty(parsed));
   };
 
   const isWeightUnit = (unitName?: string): boolean => {
@@ -1652,7 +1679,7 @@ export function NewSale() {
       targetQuantity = currentQuantity + (direction > 0 ? increment : -increment);
     }
 
-    const normalizedQuantity = normalizeStoredQuantity(targetQuantity);
+    const normalizedQuantity = normalizeStoredQuantity(targetQuantity, unitName);
     return normalizedQuantity;
   };
 
@@ -1711,17 +1738,26 @@ export function NewSale() {
     setCart(
       cart.map((item) => {
         if (item.id === id) {
-          return { ...item, quantity: normalizeStoredQuantity(targetQuantity) };
+          const unitName = item.unitName || item.unit;
+          return {
+            ...item,
+            quantity: normalizeStoredQuantity(targetQuantity, unitName),
+          };
         }
         return item;
       })
     );
   };
 
+  /** A typed quantity: kept exactly as entered; rejected (line unchanged) if not above 0. */
   const updateQuantityManual = (id: string, newQuantity: number) => {
-    const validQuantity = normalizeStoredQuantity(newQuantity);
+    const exact = exactTypedQuantity(newQuantity);
+    if (exact === null) {
+      toast.error("Enter a quantity above 0", { description: "The line keeps its previous quantity." });
+      return;
+    }
     setCartSync((prev) =>
-      prev.map((line) => (line.id === id ? { ...line, quantity: validQuantity } : line)),
+      prev.map((l) => (l.id === id ? { ...l, quantity: exact } : l)),
     );
   };
 
@@ -1761,7 +1797,23 @@ export function NewSale() {
     if (!t) return true;
     if (t === "." || t === "-") return true;
     if (t.endsWith(".") || t.endsWith("-")) return true;
+    // Still typing decimals after "0." (e.g. "0.00" before "0.005") — don't commit on line switch.
+    if (/^0\.0*$/.test(t)) return true;
     return false;
+  };
+
+  /** Cart line qty for totals: live draft when parseable (e.g. 0.005 kg, not clamped to 0.01). */
+  const quantityForCalculations = (item: CartItem): number => {
+    const unitName = item.unitName || item.unit;
+    const draft = quantityInputs[item.id];
+    if (draft !== undefined && draft.trim() !== "") {
+      if (!isIncompleteQuantityDraft(draft)) {
+        const parsed = parseCustomQuantityInput(draft.trim(), unitName);
+        const exact = parsed === null ? null : exactTypedQuantity(parsed);
+        if (exact !== null) return exact;
+      }
+    }
+    return item.quantity;
   };
 
   const clearQuantityOverlay = (lineId: string) => {
@@ -1788,7 +1840,10 @@ export function NewSale() {
       : undefined;
     const unitName = line.unitName || line.unit || product?.unitName;
     const parsed = parseCustomQuantityInput(pending.trim(), unitName);
-    if (parsed === null || parsed <= 0) return;
+    if (parsed === null || parsed <= 0) {
+      toast.error("Enter a quantity above 0", { description: "The line keeps its previous quantity." });
+      return;
+    }
     updateQuantityManual(lineId, parsed);
   };
 
@@ -2014,7 +2069,9 @@ export function NewSale() {
   };
 
   const subtotal = sumMoney(
-    ...cart.map((item) => lineTotal(getSellingPrice(item), item.quantity)),
+    ...cart.map((item) =>
+      lineTotal(getSellingPrice(item), quantityForCalculations(item)),
+    ),
   );
 
   const parsedDiscount = parseFloat(globalDiscountValue) || 0;
@@ -3428,7 +3485,10 @@ export function NewSale() {
                     value={
                       quickAdjustLine
                         ? quantityInputs[quickAdjustLine.id] ??
-                          formatQuantityValue(quickAdjustLine.quantity)
+                          formatQuantityValue(
+                            quickAdjustLine.quantity,
+                            quickAdjustLine.unitName || quickAdjustLine.unit,
+                          )
                         : ""
                     }
                     onFocus={() => {
@@ -3856,10 +3916,14 @@ export function NewSale() {
                 {cart.map((item) => {
                   const unitName = item.unitName || item.unit;
                   const effectiveUnitPrice = getSellingPrice(item);
-                  const lineAmount = lineTotal(effectiveUnitPrice, item.quantity);
+                  const lineAmount = lineTotal(
+                    effectiveUnitPrice,
+                    quantityForCalculations(item),
+                  );
                   const isActive = activeCartLineId === item.id;
                   const qtyDisplay =
-                    quantityInputs[item.id] ?? formatQuantityValue(item.quantity);
+                    quantityInputs[item.id] ??
+                    formatQuantityValue(item.quantity, unitName);
 
                   return (
                     <li
@@ -3904,11 +3968,13 @@ export function NewSale() {
                             onClick={(e) => {
                               e.stopPropagation();
                               switchActiveCartLine(item.id);
-                              setQtySheetValue(formatQuantityValue(item.quantity));
+                              setQtySheetValue(
+                                formatQuantityValue(item.quantity, unitName),
+                              );
                               setQtySheetLineId(item.id);
                             }}
                           >
-                            {formatQuantityValue(item.quantity)}
+                            {formatQuantityValue(item.quantity, unitName)}
                           </button>
                           <Input
                             type="text"
@@ -4178,7 +4244,7 @@ export function NewSale() {
                 const current =
                   parseCustomQuantityInput(qtySheetValue, unitName) ?? sheetLine.quantity;
                 const next = computeQuantityAfterChange(current, direction, unitName, "custom");
-                setQtySheetValue(formatQuantityValue(next));
+                setQtySheetValue(formatQuantityValue(next, unitName));
               };
               return (
                 <>
@@ -4229,7 +4295,9 @@ export function NewSale() {
                           type="button"
                           variant="outline"
                           className="h-11"
-                          onClick={() => setQtySheetValue(formatQuantityValue(preset.quantity))}
+                          onClick={() =>
+                            setQtySheetValue(formatQuantityValue(preset.quantity, unitName))
+                          }
                         >
                           {preset.label}
                         </Button>

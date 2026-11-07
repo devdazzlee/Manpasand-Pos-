@@ -873,9 +873,10 @@ app.post('/print-receipt', async (req, res) => {
     const printItemRow = (it) => {
       const name = String(it.name || '');
       const qtyNumber = Number(it.quantity || 0);
+      // Print the quantity exactly as sold (same 6-dp precision as the POS cart).
       const qtyText = Number.isInteger(qtyNumber)
         ? String(qtyNumber)
-        : String(parseFloat(qtyNumber.toFixed(3)));
+        : String(parseFloat(qtyNumber.toFixed(6)));
       const qty = qtyText + (it.unit ? ` ${it.unit}` : '');
       const rate = formatItemRate(it);
 
