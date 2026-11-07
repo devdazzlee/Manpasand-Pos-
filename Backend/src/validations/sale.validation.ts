@@ -24,7 +24,7 @@ const createSaleSchema = z.object({
             .optional(),
         items: z.array(saleItemSchema).min(1),
         discountAmount: z.number().nonnegative("Discount amount must be non-negative").optional().default(0),
-        /** Skip the branch auto-discount (e.g. Dhoraji 15%) on this bill — needs "Give discounts" or a manager's approval. */
+        /** Skip the branch default discount (e.g. Dhoraji 15%) on this bill. No special permission. */
         waiveBranchDiscount: z.boolean().optional(),
         promotionCode: z.string().trim().max(24).nullable().optional(),
         applyPromotions: z.boolean().optional(),

@@ -43,6 +43,20 @@ const productBaseSchema = z.object({
     brand_id: z.string().optional(),
     collection: z.string().trim().max(80).nullable().optional(),
     stitch_type: z.enum(['STITCHED', 'UNSTITCHED']).nullable().optional(),
+    // Website quantity choices in the product's unit. Form data sends it as a string.
+    website_quantity_options: z
+        .preprocess((v) => {
+            if (v === undefined || v === null || v === '') return v === '' ? [] : v;
+            if (Array.isArray(v)) return v.map(Number);
+            if (typeof v === 'string') {
+                const t = v.trim();
+                if (!t) return [];
+                try { const j = JSON.parse(t); if (Array.isArray(j)) return j.map(Number); } catch { /* comma list */ }
+                return t.split(',').map((x) => Number(x.trim())).filter((x) => !Number.isNaN(x));
+            }
+            return v;
+        }, z.array(z.number().positive('Each website quantity must be above 0')).max(20, 'At most 20 website quantities'))
+        .optional(),
     color_id: z.string().optional(),
     size_id: z.string().optional(),
     is_active: z.boolean().optional().default(true),

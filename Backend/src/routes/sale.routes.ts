@@ -24,7 +24,6 @@ import {
 import { createSaleSchema, refundSaleSchema } from "../validations/sale.validation";
 import { PromotionService } from "../services/promotion.service";
 import { loyaltySettings } from "../services/loyalty.service";
-import { branchAutoDiscountAmount } from "../config/branch-discount-policy";
 import { resolveBranchId } from "../utils/resolveBranchId";
 
 const router = Router();
@@ -40,7 +39,7 @@ const saleManagementRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER", "CASHIER"
 const metadataRoles = ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER", "WAREHOUSE_MANAGER", "PURCHASE_MANAGER"];
 const adminRoles = ["SUPER_ADMIN", "ADMIN"];
 
-/** Discount and credit (pay-later) at checkout need their own permission or a manager's approval. */
+/** Credit (pay-later) at checkout needs permission or a manager's approval. Bill discounts do not. */
 const promotionService = new PromotionService();
 const saleCheckoutPermissions = async (req: Request) => {
     const body = req.body || {};
@@ -48,16 +47,8 @@ const saleCheckoutPermissions = async (req: Request) => {
     const items: { productId: string; price: number; quantity: number }[] = Array.isArray(body.items) ? body.items : [];
     const subtotal = items.reduce((s, it) => s + Number(it.price) * Number(it.quantity), 0);
     const clientDiscount = Math.max(0, Number(body.discountAmount) || 0);
-    // Branch auto-discount (e.g. Dhoraji 15%) is a server policy — cashiers may
-    // send that amount without sales.discount. Anything above the floor still needs approval.
-    // Removing the auto-discount for a bill (waiveBranchDiscount) is itself a discount
-    // decision, so it needs "Give discounts" or a manager's approval too.
     const branchId = resolveBranchId(req) || (req.user?.branch_id as string | undefined);
-    const fullFloor = branchAutoDiscountAmount(branchId, subtotal);
-    const waive = body.waiveBranchDiscount === true && fullFloor > 0;
-    const policyFloor = waive ? 0 : fullFloor;
-    if (waive || clientDiscount > policyFloor + 0.005) keys.push("sales.discount");
-    let total = subtotal - Math.max(clientDiscount, policyFloor);
+    let total = subtotal - clientDiscount;
     if (body.applyPromotions !== false && items.length) {
         const promo = await promotionService
             .evaluate({ lines: items.map((i) => ({ productId: i.productId, price: Number(i.price), quantity: Number(i.quantity) })), branchId, code: body.promotionCode })

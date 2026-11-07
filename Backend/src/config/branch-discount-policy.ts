@@ -1,12 +1,9 @@
 /**
- * Branch-level automatic bill discounts.
+ * Branch-level default bill discounts (e.g. Dhoraji opening 15%).
  *
  * Keyed by stable Branch.id (UUID). Branch APIs attach this as `pos_policy`
- * so the till can preview totals — enforcement stays in createSale.
- *
- * Applied server-side in SaleService.createSale so cashiers without
- * sales.discount, offline sync, and API clients all get the same rule.
- * The till UI only mirrors this for the cart total preview.
+ * so the till can pre-fill the discount field. Cashiers may clear, lower, or
+ * raise it freely — no sales.discount permission on checkout.
  */
 export type BranchAutoDiscount = {
   /** Percent of subtotal (0–100). */

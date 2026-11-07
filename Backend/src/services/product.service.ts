@@ -337,6 +337,8 @@ export class ProductService {
             productData.collection = (data as any).collection?.trim() || null;
         }
         if (data.stitch_type !== undefined) productData.stitch_type = data.stitch_type || null;
+        if (data.website_quantity_options !== undefined)
+            productData.website_quantity_options = [...new Set(data.website_quantity_options)].sort((a, b) => a - b);
         const lb = data.label_barcode?.trim();
         if (lb) productData.label_barcode = lb;
         const cc = data.custom_code?.trim();
@@ -369,6 +371,8 @@ export class ProductService {
         if (data.is_featured !== undefined) updateData.is_featured = data.is_featured;
         if ((data as any).collection !== undefined) updateData.collection = (data as any).collection?.trim() || null;
         if (data.stitch_type !== undefined) updateData.stitch_type = data.stitch_type || null;
+        if (data.website_quantity_options !== undefined)
+            updateData.website_quantity_options = [...new Set(data.website_quantity_options)].sort((a, b) => a - b);
         if (data.label_barcode !== undefined) {
             const lb = data.label_barcode?.trim();
             updateData.label_barcode = lb ? lb : null;
@@ -1178,6 +1182,7 @@ export class ProductService {
             display_on_website: true,
             is_featured: true,
             stitch_type: true,
+            website_quantity_options: true,
             created_at: true,
             updated_at: true,
             category: {

@@ -1139,7 +1139,7 @@ class SaleService {
     paymentMethod: Prisma.SaleCreateInput['payment_method'];
     items: Array<{ productId: string; quantity: number; price: number }>;
     discountAmount?: number;
-    /** Skip the branch auto-discount on this bill (permission checked in the route). */
+    /** Skip / lower the branch default discount on this bill (no special permission). */
     waiveBranchDiscount?: boolean;
     createdBy: string;
     promotionCode?: string | null;
@@ -1254,35 +1254,36 @@ class SaleService {
       subtotalAmt,
     );
 
-    // Branch opening / auto bill discount (e.g. Dhoraji 15%). Enforced here so
-    // cashiers without sales.discount, offline sync, and API clients cannot
-    // skip it. Loyalty winners still replace manual/branch discount entirely.
+    // Branch opening / auto bill discount (e.g. Dhoraji 15%) is a till default
+    // only — the amount the cashier sends is what we charge (including 0 when
+    // they clear it). Loyalty winners still replace manual/branch discount.
     const branchPolicy = getBranchAutoDiscount(branchId);
     const fullPolicyDiscount = branchAutoDiscountAmount(branchId, subtotalAmt);
-    // Removed for this bill by someone allowed to (route enforces sales.discount / approval).
-    const branchDiscountWaived = waiveBranchDiscount === true && fullPolicyDiscount > 0;
-    const policyDiscount = branchDiscountWaived ? 0 : fullPolicyDiscount;
     const clientManual = Math.max(0, discountAmount ?? 0);
+    // Explicit waive flag, or simply sending less than the default (cleared input).
+    const branchDiscountWaived =
+      fullPolicyDiscount > 0 &&
+      (waiveBranchDiscount === true || clientManual + 0.005 < fullPolicyDiscount);
 
     let manualDiscount: number;
     let branchPolicyApplied: AppliedPromotion | null = null;
     if (customer?.is_loyalty_winner) {
       // Cap/monthly-limit/branch/cash rules are only enforced in computeLoyaltyDiscount.
       manualDiscount = loyalty.amount;
-    } else if (policyDiscount > 0) {
-      // Floor at the branch policy; cashiers with permission may give more.
-      manualDiscount = money2(Math.max(clientManual, policyDiscount));
-      if (manualDiscount <= policyDiscount + 0.005 && branchPolicy) {
-        branchPolicyApplied = {
-          id: `branch-auto:${branchId}`,
-          name: `${branchPolicy.label} opening ${branchPolicy.percent}%`,
-          code: null,
-          type: 'BRANCH_AUTO_PERCENT',
-          amount: policyDiscount,
-        };
-      }
     } else {
-      manualDiscount = clientManual;
+      manualDiscount = money2(clientManual);
+      if (branchPolicy && fullPolicyDiscount > 0 && !branchDiscountWaived) {
+        // Default % kept (or a higher approved discount) — tag when it matches the policy.
+        if (manualDiscount <= fullPolicyDiscount + 0.005) {
+          branchPolicyApplied = {
+            id: `branch-auto:${branchId}`,
+            name: `${branchPolicy.label} opening ${branchPolicy.percent}%`,
+            code: null,
+            type: 'BRANCH_AUTO_PERCENT',
+            amount: fullPolicyDiscount,
+          };
+        }
+      }
     }
 
     // Promotions are worked out here, never trusted from the till.

@@ -843,9 +843,23 @@ export function NewSale() {
   const branchAutoDiscountLabel =
     branchInfo.pos_policy?.label?.trim() || null;
 
-  // Customer default % only when this branch has no server policy (preview).
-  // Branch floor is applied in a separate effect so sleep / "touched" ref
-  // cannot hide the mandatory minimum.
+  // Soft-fill the branch default % (e.g. Dhoraji 15%). Never re-applies after
+  // the cashier edits or clears the field — that would fight the input.
+  useEffect(() => {
+    if (discountTouchedRef.current || isLoyaltyWinnerCustomer) return;
+    if (branchDiscountWaived) return;
+    if (branchAutoDiscountPercent <= 0) return;
+    setGlobalDiscountType("percentage");
+    setGlobalDiscountValue(String(branchAutoDiscountPercent));
+    setShowDiscountRow(true);
+  }, [
+    branchAutoDiscountPercent,
+    branchDiscountWaived,
+    isLoyaltyWinnerCustomer,
+    branchInfo.pos_policy,
+  ]);
+
+  // Customer default % only when this branch has no server default discount.
   useEffect(() => {
     if (discountTouchedRef.current || isLoyaltyWinnerCustomer) return;
     if (branchAutoDiscountPercent > 0) return;
@@ -2086,29 +2100,28 @@ export function NewSale() {
 
   const total = Math.max(0, subtractMoney(subtotal, globalDiscountAmount));
 
-  // Mandatory branch bill discount preview (≥ server floor in rupees). Runs even
-  // if discountTouchedRef is true — that ref must not block policy. Also picks
-  // up after sleep once pos_policy is refetched (usePosBranch visibility handler).
-  useEffect(() => {
-    if (isLoyaltyWinnerCustomer) return;
-    if (branchAutoDiscountPercent <= 0) return;
-    if (branchDiscountWaived) return; // removed for this bill on purpose
-    if (subtotal <= 0) return;
-    const floorAmount = roundMoney((subtotal * branchAutoDiscountPercent) / 100);
-    if (globalDiscountAmount + 0.005 < floorAmount) {
-      setGlobalDiscountType("percentage");
-      setGlobalDiscountValue(String(branchAutoDiscountPercent));
-      setBranchDiscountWaived(false);
-      setShowDiscountRow(true);
+  /**
+   * Branch % is only a default. Clearing or lowering the input marks it waived
+   * for this bill so the banner updates — no permission, no forced re-apply.
+   */
+  const syncBranchDiscountWaiver = (
+    nextType: "percentage" | "fixed",
+    nextValue: string,
+  ) => {
+    if (branchAutoDiscountPercent <= 0 || isLoyaltyWinnerCustomer) return;
+    const parsed = Number.parseFloat(nextValue);
+    const empty = nextValue.trim() === "" || !Number.isFinite(parsed);
+    if (empty) {
+      setBranchDiscountWaived(true);
+      return;
     }
-  }, [
-    isLoyaltyWinnerCustomer,
-    branchAutoDiscountPercent,
-    branchDiscountWaived,
-    subtotal,
-    globalDiscountAmount,
-    branchInfo.pos_policy,
-  ]);
+    if (nextType === "percentage") {
+      setBranchDiscountWaived(parsed + 0.005 < branchAutoDiscountPercent);
+      return;
+    }
+    const defaultAmount = roundMoney((subtotal * branchAutoDiscountPercent) / 100);
+    setBranchDiscountWaived(roundMoney(parsed) + 0.005 < defaultAmount);
+  };
 
   // Lifetime loyalty-winner discount: 25% of the subtotal, capped at a fixed
   // Rs amount — recomputed as the cart changes so the preview always matches
@@ -2444,7 +2457,7 @@ export function NewSale() {
           paymentMethod: method === "Cash" ? "CASH" : "CARD",
           branchId,
           discountAmount: globalDiscountAmount,
-          // Server skips the branch auto-discount only with this flag + permission/approval.
+          // Tell the server the default branch % was cleared/lowered (no permission needed).
           waiveBranchDiscount: branchDiscountWaived || undefined,
           // This screen has no promotions UI, so the server must not add any:
           // the bill must match what the cashier sees.
@@ -4378,28 +4391,30 @@ export function NewSale() {
                     {branchDiscountWaived ? (
                       <div className="flex items-center justify-between gap-2">
                         <span>
-                          <span className="font-semibold">Branch discount removed</span> for this bill. Needs
-                          discount permission or a manager&apos;s approval at checkout.
+                          <span className="font-semibold">Default discount cleared</span>
+                          {" — "}
+                          you can type a % again anytime, or restore the default.
                         </span>
                         <button
                           type="button"
                           className="shrink-0 rounded px-1.5 py-0.5 font-semibold text-sky-700 underline-offset-2 hover:bg-sky-100 hover:underline"
                           onClick={() => {
+                            discountTouchedRef.current = false;
                             setBranchDiscountWaived(false);
                             setGlobalDiscountType("percentage");
                             setGlobalDiscountValue(String(branchAutoDiscountPercent));
                             setShowDiscountRow(true);
                           }}
                         >
-                          Undo
+                          Restore {branchAutoDiscountPercent}%
                         </button>
                       </div>
                     ) : (
                       <div className="flex items-center justify-between gap-2">
                         <span>
-                          <span className="font-semibold">Auto discount</span>
+                          <span className="font-semibold">Default discount</span>
                           {" — "}
-                          {branchAutoDiscountLabel || "This branch"}: {branchAutoDiscountPercent}% applied to the bill.
+                          {branchAutoDiscountLabel || "This branch"}: {branchAutoDiscountPercent}% (clear the box to remove).
                         </span>
                         <button
                           type="button"
@@ -4410,7 +4425,7 @@ export function NewSale() {
                             setGlobalDiscountValue("");
                           }}
                         >
-                          Remove
+                          Clear
                         </button>
                       </div>
                     )}
@@ -4449,7 +4464,9 @@ export function NewSale() {
                         value={globalDiscountType}
                         onValueChange={(value) => {
                           discountTouchedRef.current = true;
-                          setGlobalDiscountType(value as "percentage" | "fixed");
+                          const nextType = value as "percentage" | "fixed";
+                          setGlobalDiscountType(nextType);
+                          syncBranchDiscountWaiver(nextType, globalDiscountValue);
                         }}
                       >
                         <SelectTrigger
@@ -4474,7 +4491,11 @@ export function NewSale() {
                         value={globalDiscountValue}
                         onChange={(e) => {
                           discountTouchedRef.current = true;
-                          setGlobalDiscountValue(e.target.value);
+                          const next = e.target.value;
+                          setGlobalDiscountValue(next);
+                          // Clearing / lowering below the branch floor must waive
+                          // auto-discount, otherwise the floor effect restores "15".
+                          syncBranchDiscountWaiver(globalDiscountType, next);
                         }}
                         data-amount-input="true"
                         className="h-8 flex-1 rounded-none border-0 bg-transparent px-2.5 text-right text-xs font-medium tabular-nums shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"

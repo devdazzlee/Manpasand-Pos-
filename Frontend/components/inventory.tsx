@@ -1,6 +1,7 @@
 "use client"
 
 import { SHOW_STITCH_TYPE } from "@/config/constants";
+import { WebsiteQuantityOptions } from "@/components/inventory/website-quantity-options"
 import { ProductPriceHistory } from "@/components/inventory/product-price-history"
 import { useState, useEffect, useRef, useMemo, useCallback } from "react"
 import { Button } from "@/components/ui/button"
@@ -380,6 +381,8 @@ interface ProductFormData {
   is_active?: boolean
   display_on_pos?: boolean
   display_on_website?: boolean
+  /** Website quantity choices in the product's unit; [] = website default list. */
+  website_quantity_options?: number[]
   is_batch?: boolean
   auto_fill_on_demand_sheet?: boolean
   non_inventory_item?: boolean
@@ -1370,6 +1373,13 @@ const ProductForm = ({
         <p className="text-xs text-muted-foreground">
           Turn off Show on website to keep the product on POS only (back inventory).
         </p>
+        {(formData.display_on_website ?? true) && (
+          <WebsiteQuantityOptions
+            value={formData.website_quantity_options ?? []}
+            onChange={(next) => updateFormData("website_quantity_options", next)}
+            unitName={units.find((u) => u.id === formData.unit_id)?.name}
+          />
+        )}
       </div>
 
       {/* Submit Button */}
@@ -2209,6 +2219,9 @@ export default function Inventory() {
         is_active: fresh.is_active ?? true,
         display_on_pos: fresh.display_on_pos ?? true,
         display_on_website: fresh.display_on_website ?? true,
+        website_quantity_options: Array.isArray(fresh.website_quantity_options)
+          ? fresh.website_quantity_options.map(Number)
+          : [],
         is_batch: fresh.is_batch ?? false,
         auto_fill_on_demand_sheet: fresh.auto_fill_on_demand_sheet ?? false,
         non_inventory_item: fresh.non_inventory_item ?? false,
@@ -2340,6 +2353,9 @@ export default function Inventory() {
         is_active: fresh.is_active ?? true,
         display_on_pos: fresh.display_on_pos ?? true,
         display_on_website: fresh.display_on_website ?? true,
+        website_quantity_options: Array.isArray(fresh.website_quantity_options)
+          ? fresh.website_quantity_options.map(Number)
+          : [],
         is_batch: fresh.is_batch ?? false,
         auto_fill_on_demand_sheet: fresh.auto_fill_on_demand_sheet ?? false,
         non_inventory_item: fresh.non_inventory_item ?? false,

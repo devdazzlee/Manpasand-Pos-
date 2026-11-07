@@ -6,7 +6,7 @@ export interface BranchOption {
   /** "BRANCH" (a shop that sells) or "WAREHOUSE". */
   branch_type?: string | null;
   /**
-   * From backend branch-discount-policy (read-only preview; server enforces on sale).
+   * From backend branch-discount-policy — till default only; cashier may clear it.
    */
   pos_policy?: {
     auto_bill_discount_percent: number;

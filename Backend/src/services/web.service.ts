@@ -386,6 +386,7 @@ export class WebService {
           brand: { select: { id: true, name: true } },
           subcategory: { select: { id: true, name: true } },
           stock: { select: { current_quantity: true, reserved_quantity: true } },
+          website_quantity_options: true,
         },
       });
 
@@ -407,6 +408,8 @@ export class WebService {
         subcategory: product.subcategory,
         in_stock: totalStock > 0,
         available_stock: totalStock,
+        // Product's own website quantity choices (product unit); empty = website default list.
+        website_quantity_options: product.website_quantity_options ?? [],
       };
     });
   }
