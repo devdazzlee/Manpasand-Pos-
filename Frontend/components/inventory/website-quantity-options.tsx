@@ -54,6 +54,20 @@ export function formatWebsiteQuantity(q: number, unitName?: string): string {
   return `${trim(q)}${unitName ? ` ${unitName}` : ""}`;
 }
 
+/**
+ * The website's standard choices per unit (keep in step with
+ * Manpasand-Website app/products/[id]/page.tsx → quantityOptions).
+ */
+export function standardWebsiteQuantities(unitName?: string): number[] {
+  const kind = unitKind(unitName);
+  if (kind === "kg") return [0.05, 0.1, 0.125, 0.2, 0.25, 0.375, 0.5, 1];
+  if (kind === "g") return [100, 200, 250, 500, 1000];
+  return [];
+}
+
+const sameSet = (a: number[], b: number[]) =>
+  a.length === b.length && [...a].sort((x, y) => x - y).every((v, i) => v === [...b].sort((x, y) => x - y)[i]);
+
 const EXAMPLE: Record<ReturnType<typeof unitKind>, string> = {
   kg: "250g, 500g, 1kg",
   g: "100g, 250g, 500g",
@@ -74,6 +88,16 @@ export function WebsiteQuantityOptions({
   const [draft, setDraft] = useState("");
   const [error, setError] = useState("");
   const kind = unitKind(unitName);
+  const standard = standardWebsiteQuantities(unitName);
+  const usingStandard = value.length === 0;
+  // What the customer sees right now: the product's own list, or the standard one.
+  const shown = usingStandard ? standard : value;
+
+  /** Save a change. A list identical to the standard one is stored as "standard" (empty). */
+  const commit = (next: number[]) => {
+    const sorted = [...new Set(next)].sort((a, b) => a - b);
+    onChange(standard.length && sameSet(sorted, standard) ? [] : sorted);
+  };
 
   const add = () => {
     const parts = draft.split(",").map((p) => p.trim()).filter(Boolean);
@@ -87,12 +111,12 @@ export function WebsiteQuantityOptions({
       }
       parsed.push(q);
     }
-    const next = [...new Set([...value, ...parsed])].sort((a, b) => a - b);
+    const next = [...new Set([...shown, ...parsed])].sort((a, b) => a - b);
     if (next.length > 20) {
       setError("At most 20 website quantities.");
       return;
     }
-    onChange(next);
+    commit(next);
     setDraft("");
     setError("");
   };
@@ -101,8 +125,8 @@ export function WebsiteQuantityOptions({
     if (e.key === "Enter" || e.key === ",") {
       e.preventDefault();
       add();
-    } else if (e.key === "Backspace" && !draft && value.length) {
-      onChange(value.slice(0, -1));
+    } else if (e.key === "Backspace" && !draft && shown.length > 1) {
+      commit(shown.slice(0, -1));
     }
   };
 
@@ -113,36 +137,54 @@ export function WebsiteQuantityOptions({
           Website quantity options
         </Label>
         <p className="mt-0.5 text-xs text-muted-foreground">
-          The choices customers see on this product&apos;s website page. Leave empty to use the standard choices
-          for the unit.
+          The choices customers see on this product&apos;s website page. Remove any you don&apos;t have, or add
+          your own.
         </p>
       </div>
 
-      {value.length > 0 && (
-        <div className="flex flex-wrap gap-1.5" aria-label="Website quantity options">
-          {value.map((q) => (
+      {shown.length > 0 && (
+        <div className="flex flex-wrap items-center gap-1.5" aria-label="Website quantity options">
+          {shown.map((q) => (
             <span
               key={q}
-              className="inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 py-0.5 pl-2.5 pr-1 text-xs font-medium text-blue-900"
+              className={
+                usingStandard
+                  ? "inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white py-0.5 pl-2.5 pr-1 text-xs font-medium text-slate-700"
+                  : "inline-flex items-center gap-1 rounded-full border border-blue-200 bg-blue-50 py-0.5 pl-2.5 pr-1 text-xs font-medium text-blue-900"
+              }
             >
               {formatWebsiteQuantity(q, unitName)}
-              <button
-                type="button"
-                aria-label={`Remove ${formatWebsiteQuantity(q, unitName)}`}
-                className="rounded-full p-0.5 text-blue-500 hover:bg-blue-100 hover:text-blue-800"
-                onClick={() => onChange(value.filter((x) => x !== q))}
-              >
-                <X className="h-3 w-3" />
-              </button>
+              {shown.length > 1 && (
+                <button
+                  type="button"
+                  aria-label={`Remove ${formatWebsiteQuantity(q, unitName)}`}
+                  title="Not available — remove from the website"
+                  className="rounded-full p-0.5 text-slate-400 hover:bg-red-50 hover:text-red-600"
+                  onClick={() => commit(shown.filter((x) => x !== q))}
+                >
+                  <X className="h-3 w-3" />
+                </button>
+              )}
             </span>
           ))}
-          <button
-            type="button"
-            className="text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
-            onClick={() => onChange([])}
-          >
-            Clear all
-          </button>
+          {!usingStandard && standard.length > 0 && (
+            <button
+              type="button"
+              className="ml-1 text-xs font-medium text-blue-700 underline-offset-2 hover:underline"
+              onClick={() => onChange([])}
+            >
+              Reset to standard
+            </button>
+          )}
+          {!usingStandard && standard.length === 0 && (
+            <button
+              type="button"
+              className="ml-1 text-xs font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+              onClick={() => onChange([])}
+            >
+              Clear all
+            </button>
+          )}
         </div>
       )}
 
@@ -166,9 +208,11 @@ export function WebsiteQuantityOptions({
       </div>
       <p id="website-qty-help" className={error ? "text-xs font-medium text-red-600" : "text-xs text-muted-foreground"}>
         {error ||
-          (value.length
-            ? "Only these quantities will show on the website for this product."
-            : "Empty: the website shows its standard choices for this unit.")}
+          (usingStandard
+            ? standard.length
+              ? "Showing the standard choices. Remove any that aren't available — this product then keeps its own list."
+              : "No choices set: customers pick the quantity with − / + on the website."
+            : "Only these quantities show on the website for this product.")}
       </p>
     </div>
   );
