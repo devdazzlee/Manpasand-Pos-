@@ -105,6 +105,35 @@ router.get(
   }),
 );
 
+/** Past closed registers for reprinting the closing receipt (any date range). */
+const closedSessionsSchema = z.object({
+  from: ymd.optional(),
+  to: ymd.optional(),
+  branchId: z.string().uuid().optional(),
+  page: z.coerce.number().int().min(1).optional(),
+  pageSize: z.coerce.number().int().min(1).max(100).optional(),
+});
+
+router.get(
+  '/closed-sessions',
+  wrap(async (req, res) => {
+    const q = parse(closedSessionsSchema, req.query);
+    const today = businessTodayYmd();
+    send(
+      res,
+      200,
+      await service.closedSessions(actor(req), {
+        from: q.from || '2000-01-01',
+        to: q.to || today,
+        branchId: q.branchId,
+        page: q.page,
+        pageSize: q.pageSize,
+      }),
+      'Closed register sessions',
+    );
+  }),
+);
+
 router.get(
   '/sessions/:id',
   wrap(async (req, res) => send(res, 200, await service.detail(req.params.id), 'Register session')),

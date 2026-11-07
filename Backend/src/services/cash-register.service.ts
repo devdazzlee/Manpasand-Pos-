@@ -960,6 +960,82 @@ export class CashRegisterService {
     return this.detail(s.id);
   }
 
+  /* ------------------------ closed sessions (reprint) ------------------------ */
+
+  /**
+   * Lightweight list of closed registers for reprinting closing receipts.
+   * Does not recompute sales/expenses — only what the reprint picker needs.
+   */
+  async closedSessions(
+    actor: Actor,
+    q: { from: string; to: string; branchId?: string; page?: number; pageSize?: number },
+  ) {
+    const isAdmin = ADMIN_ROLES.has(actor.role || '');
+    const branchId = isAdmin ? q.branchId : actor.branchId || undefined;
+    const { start, end } = localRange(q.from, q.to);
+    const pageSize = Math.min(100, Math.max(1, Math.floor(q.pageSize || 50)));
+    const page = Math.max(1, Math.floor(q.page || 1));
+    const where: Prisma.CashFlowWhereInput = {
+      status: 'CLOSED',
+      closed_at: { not: null, gte: start, lte: end },
+      ...(branchId ? { branch_id: branchId } : {}),
+    };
+    const [total, rows] = await Promise.all([
+      prisma.cashFlow.count({ where }),
+      prisma.cashFlow.findMany({
+        where,
+        select: {
+          id: true,
+          opened_at: true,
+          closed_at: true,
+          opening: true,
+          closing: true,
+          expected_cash: true,
+          variance: true,
+          branch: { select: { id: true, name: true, code: true } },
+          user: { select: { email: true } },
+          closer: { select: { email: true } },
+        },
+        orderBy: { closed_at: 'desc' },
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+    ]);
+    return {
+      period: { from: q.from, to: q.to },
+      page,
+      pageSize,
+      total,
+      pageCount: Math.max(1, Math.ceil(total / pageSize)),
+      sessions: rows.map((s) => {
+        const variance = s.variance == null ? null : num(s.variance);
+        const varianceLabel =
+          variance == null
+            ? null
+            : Math.abs(variance) < 0.005
+              ? ('Balanced' as const)
+              : variance > 0
+                ? ('Over' as const)
+                : ('Short' as const);
+        return {
+          id: s.id,
+          registerName: s.branch?.name || 'Register',
+          registerNumber: s.branch?.code || '—',
+          branchId: s.branch?.id || null,
+          cashierName: short(s.user?.email),
+          closedBy: s.closer?.email ? short(s.closer.email) : null,
+          openedAt: s.opened_at.toISOString(),
+          closedAt: s.closed_at!.toISOString(),
+          opening: num(s.opening),
+          closing: s.closing == null ? null : num(s.closing),
+          expectedCash: s.expected_cash == null ? null : num(s.expected_cash),
+          variance,
+          varianceLabel,
+        };
+      }),
+    };
+  }
+
   /* ------------------------------ closing slip ------------------------------ */
 
   /**

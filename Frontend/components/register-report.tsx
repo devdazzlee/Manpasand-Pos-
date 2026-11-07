@@ -82,6 +82,7 @@ import apiClient from "@/lib/apiClient";
 import { printClosingSlip } from "@/lib/register-closing-slip";
 import { usePrinterSettings } from "@/hooks/use-printer-settings";
 import { PrintClosingSlipButton } from "@/components/register-hub/print-closing-slip-button";
+import { ReprintClosingReceiptDialog } from "@/components/register-hub/reprint-closing-receipt-dialog";
 import { cn } from "@/lib/utils";
 import { ymd, rangeForPreset } from "@/lib/business-timezone";
 import { downloadRegisterReportPdf } from "@/lib/register-report-pdf";
@@ -241,6 +242,7 @@ export function RegisterReport() {
   const [closeTarget, setCloseTarget] = useState<SessionRow | null>(null);
   const [countedCash, setCountedCash] = useState("");
   const [savingClose, setSavingClose] = useState(false);
+  const [reprintOpen, setReprintOpen] = useState(false);
   const role = typeof window !== "undefined" ? localStorage.getItem("role") : null;
   const isAdmin = role === "SUPER_ADMIN" || role === "ADMIN";
   const { getReceiptPrinterObj } = usePrinterSettings();
@@ -319,7 +321,7 @@ export function RegisterReport() {
           toast({
             variant: "destructive",
             title: "Closing slip not printed",
-            description: `${err?.message || "Printer did not respond"}. Use "Print slip" to try again.`,
+            description: `${err?.message || "Printer did not respond"}. Use "Reprint closing receipt" to try again.`,
           }),
         );
       setCloseTarget(null);
@@ -793,9 +795,17 @@ export function RegisterReport() {
             <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
             Refresh
           </Button>
+          <Button
+            variant="outline"
+            className="h-9 bg-white shadow-sm"
+            onClick={() => setReprintOpen(true)}
+          >
+            <Receipt className="mr-2 h-4 w-4" />
+            Reprint closing receipt
+          </Button>
           <Button variant="outline" className="h-9 bg-white shadow-sm" onClick={printReport} disabled={!report}>
             <Printer className="mr-2 h-4 w-4" />
-            Print
+            Print report
           </Button>
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
@@ -1072,8 +1082,16 @@ export function RegisterReport() {
         <PanelHeader
           icon={<Clock className="h-4 w-4" />}
           title="Register sessions"
-          description="Every drawer opened in this period and how it closed"
-          action={<CountPill>{report?.sessions.length || 0} sessions</CountPill>}
+          description="Every drawer opened in this period — use Print closing receipt to reprint any past close slip"
+          action={
+            <div className="flex flex-wrap items-center gap-2">
+              <Button size="sm" variant="outline" className="h-8" onClick={() => setReprintOpen(true)}>
+                <Printer className="mr-1.5 h-3.5 w-3.5" />
+                Reprint closing receipt
+              </Button>
+              <CountPill>{report?.sessions.length || 0} sessions</CountPill>
+            </div>
+          }
         />
         <RefreshOverlay show={isRefreshing} />
         {isFirstLoad ? (
@@ -1151,7 +1169,11 @@ export function RegisterReport() {
                           </Button>
                         ) : (
                           <div className="flex justify-end gap-2">
-                            <PrintClosingSlipButton sessionId={session.id} label="Print slip" className="h-8" />
+                            <PrintClosingSlipButton
+                              sessionId={session.id}
+                              label="Print closing receipt"
+                              className="h-8"
+                            />
                             {isAdmin ? (
                               <Button size="sm" variant="outline" className="h-8" onClick={() => setReopenTarget(session)}>
                                 <RotateCcw className="mr-1.5 h-3.5 w-3.5" />
@@ -1589,6 +1611,12 @@ export function RegisterReport() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <ReprintClosingReceiptDialog
+        open={reprintOpen}
+        onOpenChange={setReprintOpen}
+        branchId={branchId}
+      />
     </div>
   );
 }
