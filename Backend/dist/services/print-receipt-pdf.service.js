@@ -45,7 +45,6 @@ const pdfkit_1 = __importDefault(require("pdfkit"));
 const pdf_to_printer_1 = require("pdf-to-printer");
 const bwipjs = __importStar(require("bwip-js"));
 const receipt_policy_1 = require("../config/receipt-policy");
-const ACE_STUDIOS_CONTACT = '+92 342 3344040';
 function mm(n) { return n * 2.83464567; }
 const money = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 async function printReceiptPDF(input) {
@@ -313,7 +312,7 @@ async function printReceiptPDF(input) {
         }
     }
     const footerLines = [
-        'Call / WhatsApp: +92 342 3344040',
+        'WhatsApp: +92 342 3344040',
         'Website: manpasandstore.com',
     ];
     if (receiptData.footerMessage)
@@ -322,15 +321,6 @@ async function printReceiptPDF(input) {
         const usedF = drawFit(line, margins.left, y, W, { maxSize: 9.8, minSize: 8.0, align: 'center' });
         y += lineH(usedF) - 1;
     }
-    const footerAddr = drawWrapped(addr, margins.left, y, W, { maxSize: 9.8, align: 'center' });
-    y += footerAddr.height + 1;
-    y += lineH(8) - 1;
-    const usedAce1 = drawFit('Powered by Ace Studios', margins.left, y, W, { maxSize: 8.5, minSize: 7.0, align: 'center' });
-    y += lineH(usedAce1) - 1;
-    const aceSite = drawWrapped('Website: acestudiosus.com', margins.left, y, W, { maxSize: 8.0, align: 'center' });
-    y += aceSite.height;
-    const aceContact = drawWrapped(`Contact: ${ACE_STUDIOS_CONTACT}`, margins.left, y, W, { maxSize: 8.0, align: 'center' });
-    y += aceContact.height + 1;
     // Trim height with safety buffer to avoid bottom cut
     const needed = y + margins.bottom + 16;
     if (needed < doc.page.height)

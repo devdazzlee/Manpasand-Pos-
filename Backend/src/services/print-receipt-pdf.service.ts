@@ -11,8 +11,6 @@ import {
   shouldPrintReceiptExchangePolicy,
 } from '../config/receipt-policy';
 
-const ACE_STUDIOS_CONTACT = '+92 342 3344040';
-
 type PrintJobInput = {
   printer: { name: string; columns?: { fontA: number; fontB: number } };
   job?: { copies?: number };
@@ -370,7 +368,7 @@ export async function printReceiptPDF(input: PrintJobInput) {
   }
 
   const footerLines = [
-    'Call / WhatsApp: +92 342 3344040',
+    'WhatsApp: +92 342 3344040',
     'Website: manpasandstore.com',
   ];
   if (receiptData.footerMessage) footerLines.unshift(receiptData.footerMessage);
@@ -378,15 +376,6 @@ export async function printReceiptPDF(input: PrintJobInput) {
     const usedF = drawFit(line, margins.left, y, W, { maxSize: 9.8, minSize: 8.0, align: 'center' });
     y += lineH(usedF) - 1;
   }
-  const footerAddr = drawWrapped(addr, margins.left, y, W, { maxSize: 9.8, align: 'center' });
-  y += footerAddr.height + 1;
-  y += lineH(8) - 1;
-  const usedAce1 = drawFit('Powered by Ace Studios', margins.left, y, W, { maxSize: 8.5, minSize: 7.0, align: 'center' });
-  y += lineH(usedAce1) - 1;
-  const aceSite = drawWrapped('Website: acestudiosus.com', margins.left, y, W, { maxSize: 8.0, align: 'center' });
-  y += aceSite.height;
-  const aceContact = drawWrapped(`Contact: ${ACE_STUDIOS_CONTACT}`, margins.left, y, W, { maxSize: 8.0, align: 'center' });
-  y += aceContact.height + 1;
 
   // Trim height with safety buffer to avoid bottom cut
   const needed = y + margins.bottom + 16;

@@ -10,8 +10,6 @@ const bwipjs = require('bwip-js');
 const app = express();
 const PORT = 3001; // Local print server port
 
-const ACE_STUDIOS_CONTACT = '+92 342 3344040';
-
 const RECEIPT_EXCHANGE_POLICY_TITLE = 'EXCHANGE POLICY';
 // Manpasand prints no exchange policy; add lines here to show one on receipts.
 const RECEIPT_EXCHANGE_POLICY_LINES = [];
@@ -1042,11 +1040,10 @@ app.post('/print-receipt', async (req, res) => {
 
     } // end sale-receipt layout
 
-    // Closing / report slips stay short — no shop contact or Ace Studios footer.
+    // Closing / report slips stay short — no shop contact footer.
     if (!isReport) {
-    const footerAddress = normalizeReceiptAddress(receiptData.address);
     const footerLines = [
-      'Call / WhatsApp: +92 342 3344040',
+      'WhatsApp: +92 342 3344040',
       'Website: manpasandstore.com'
     ];
     for (const line of footerLines) {
@@ -1057,41 +1054,10 @@ app.post('/print-receipt', async (req, res) => {
       });
       y += lineH(usedF) - 1;
     }
-    const footerAddr = drawWrapped(footerAddress, margins.left, y, W, {
-      maxSize: 9.8,
-      align: 'center',
-      font: baseFont
-    });
-    y += footerAddr.height + 1;
-
-    // Powered by credit (Ace Studios)
-    y += hr(y, 'dotted', 0.5) + 3;
-
-    const poweredBy = drawFit('Powered by Ace Studios', margins.left, y, W, {
-      maxSize: 8.5,
-      minSize: 7.0,
-      align: 'center',
-      font: baseFont
-    });
-    y += lineH(poweredBy) + 1;
-
-    const aceLines = [
-      'Website: acestudiosus.com',
-      `Contact: ${ACE_STUDIOS_CONTACT}`
-    ];
-    for (const line of aceLines) {
-      const aceBlock = drawWrapped(line, margins.left, y, W, {
-        maxSize: 8.0,
-        align: 'center',
-        font: baseFont
-      });
-      y += aceBlock.height + 1;
-    }
-    } // end shop / Ace Studios footer (sale receipts only)
+    } // end shop contact footer (sale receipts only)
 
     // Trim height with safety buffer to avoid bottom cut (same as backend)
-    // Increased buffer to ensure Ace Studios section is included
-    const needed = y + margins.bottom + (isReport ? 10 : 30);
+    const needed = y + margins.bottom + (isReport ? 10 : 16);
     if (needed < doc.page.height) {
       doc.page.height = needed;
     } else {

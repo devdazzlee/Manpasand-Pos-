@@ -5,13 +5,10 @@ export const API_BASE = "https://api.manpasandstore.com/api/v1";
 // For Development
 // export const API_BASE = "http://localhost:9000/api/v1";
 
-/** Ace Studios footer on thermal receipts (not the store WhatsApp line). */
-export const ACE_STUDIOS_CONTACT = "+92 342 3344040";
-
 /** Used only when a branch has no address; empty = print just the branch name. */
 export const PEHNAWA_DEFAULT_STORE_ADDRESS = "";
 
-/** Number printed on receipts as "Call / WhatsApp". */
+/** Number printed on receipts as "WhatsApp". */
 export const RECEIPT_WHATSAPP = "+92 342 3344040";
 
 /** Shown on product barcode labels before the product name (e.g. MANPASAND DATES). */

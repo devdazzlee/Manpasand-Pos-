@@ -5,7 +5,6 @@
 import { type ReceiptData, type ReceiptItem, type ReceiptSection, type ReceiptSummaryLine } from "@/lib/print-server";
 import { parseReturnNotes, formatSettlementLabel } from "@/components/returns/utils";
 import {
-  ACE_STUDIOS_CONTACT,
   PEHNAWA_DEFAULT_STORE_ADDRESS,
   RECEIPT_WHATSAPP,
   RECEIPT_EXCHANGE_POLICY_LINES,
@@ -506,19 +505,11 @@ export const generateReceiptHtml = (data: ReceiptData, logoDataUri = ""): string
   const docTitleHtml = data.documentTitle
     ? `<div class="doc-title">${data.documentTitle}</div>`
     : "";
-  const storeAddress =
-    (data.address && data.address.trim()) || PEHNAWA_DEFAULT_STORE_ADDRESS;
   const footerLines = [
-    `Call / WhatsApp: ${RECEIPT_WHATSAPP}`,
+    `WhatsApp: ${RECEIPT_WHATSAPP}`,
     "Website: manpasandstore.com",
-    storeAddress,
   ].filter(Boolean);
   const footerHtml = footerLines.map((line) => `<div class="footer-line">${line}</div>`).join("");
-  const aceHtml = `
-<div class="divider-thin"></div>
-<div class="powered-by">Powered by Ace Studios</div>
-<div class="ace-line">Website: acestudiosus.com</div>
-<div class="ace-line">Contact: ${ACE_STUDIOS_CONTACT}</div>`;
   const logoSrc = logoDataUri || (typeof window !== "undefined" ? `${window.location.origin}/logo.png` : "/logo.png");
 
   return `
@@ -575,7 +566,6 @@ ${footerHtml}
   <svg id="barcode-svg"></svg>
   <div class="barcode-number" id="barcode-number">${data.transactionId}</div>
 </div>
-${aceHtml}
 </div>
 `;
 };
@@ -902,15 +892,8 @@ export const buildReceiptPdfBlob = async (
       }
     }
   }
-  writeCentered(`Call / WhatsApp: ${RECEIPT_WHATSAPP}`, { size: 8 });
+  writeCentered(`WhatsApp: ${RECEIPT_WHATSAPP}`, { size: 8 });
   writeCentered("Website: manpasandstore.com", { size: 8 });
-  const footerAddrLines: string[] = pdfAddress ? doc.splitTextToSize(pdfAddress, usable) : [];
-  for (const line of footerAddrLines) {
-    writeCentered(line, { size: 8 });
-  }
-  writeCentered("Powered by Ace Studios", { size: 8 });
-  writeCentered("Website: acestudiosus.com", { size: 8 });
-  writeCentered(`Contact: ${ACE_STUDIOS_CONTACT}`, { size: 8 });
 
   const blob = doc.output("blob");
   const filename = `receipt-${receiptData.transactionId || "sale"}.pdf`;

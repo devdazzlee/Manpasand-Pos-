@@ -433,9 +433,8 @@ class BarcodeService {
         await tp.newLine();
         await tp.alignCenter();
         await tp.println(receiptData.thankYouMessage || 'Thank you for shopping with us!');
-        await tp.println('Call / WhatsApp: +92 342 3344040');
+        await tp.println('WhatsApp: +92 342 3344040');
         await tp.println('Website: manpasandstore.com');
-        await tp.println('Karachi, Pakistan');
         if (receiptData.footerMessage)
             await tp.println(receiptData.footerMessage);
         if (receiptData.transactionId) {
