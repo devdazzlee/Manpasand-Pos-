@@ -2,11 +2,18 @@ import { Prisma } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { withCache, WEB_CACHE_TTL, WEB_CACHE_PREFIXES } from '../utils/webCache';
-import { startOfMonth } from 'date-fns';
+import { subDays } from 'date-fns';
 
-type SortKey = 'newest' | 'oldest' | 'price-asc' | 'price-desc' | 'name-asc' | 'name-desc';
+type SortKey =
+  | 'newest'
+  | 'oldest'
+  | 'price-asc'
+  | 'price-desc'
+  | 'name-asc'
+  | 'name-desc'
+  | 'best-selling';
 
-const SORT_MAP: Record<SortKey, Prisma.ProductOrderByWithRelationInput> = {
+const SORT_MAP: Record<Exclude<SortKey, 'best-selling'>, Prisma.ProductOrderByWithRelationInput> = {
   newest: { created_at: 'desc' },
   oldest: { created_at: 'asc' },
   'price-asc': { sales_rate_inc_dis_and_tax: 'asc' },
@@ -14,6 +21,9 @@ const SORT_MAP: Record<SortKey, Prisma.ProductOrderByWithRelationInput> = {
   'name-asc': { name: 'asc' },
   'name-desc': { name: 'desc' },
 };
+
+/** Rolling window for “most selling” — long enough to be stable, short enough to stay current. */
+const BEST_SELLING_WINDOW_DAYS = 90;
 
 const PRODUCT_CARD_SELECT = {
   id: true,
@@ -105,17 +115,19 @@ function clampPage(value: unknown): number {
 export class WebService {
   async getHome(opts: { featuredLimit?: number; bestLimit?: number; categoriesLimit?: number } = {}) {
     const featuredLimit = clampLimit(opts.featuredLimit, 8, 24);
-    // bestLimit defaults to 0 — homepage does not render best sellers; skip the heavy join.
+    // Homepage “Manpasand Favorites” uses best sellers. Pass best_limit=0 to skip.
     const bestLimit =
-      opts.bestLimit === 0 ? 0 : clampLimit(opts.bestLimit ?? 0, 0, 24);
+      opts.bestLimit === 0 ? 0 : clampLimit(opts.bestLimit ?? featuredLimit, 0, 24);
     const categoriesLimit = clampLimit(opts.categoriesLimit, 24, 50);
-    const cacheKey = `${WEB_CACHE_PREFIXES.HOME}v5:f${featuredLimit}:b${bestLimit}:c${categoriesLimit}`;
+    const cacheKey = `${WEB_CACHE_PREFIXES.HOME}v6:f${featuredLimit}:b${bestLimit}:c${categoriesLimit}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.HOME, async () => {
-      const [featured, bestSellers, categories, productCount, featuredTotal, categoriesTotal] =
+      const [featured, bestPack, categories, productCount, featuredTotal, categoriesTotal] =
         await Promise.all([
           this.loadFeatured(featuredLimit),
-          bestLimit > 0 ? this.loadBestSellers(bestLimit) : Promise.resolve([]),
+          bestLimit > 0
+            ? this.loadBestSellers(bestLimit)
+            : Promise.resolve({ products: [] as ReturnType<typeof shapeProduct>[], total: 0 }),
           this.loadHomeCategories(categoriesLimit),
           prisma.product.count({ where: { is_active: true, display_on_website: true } }),
           prisma.product.count({ where: { is_active: true, display_on_website: true, is_featured: true } }),
@@ -124,13 +136,88 @@ export class WebService {
 
       return {
         featuredProducts: featured,
-        bestSellingProducts: bestSellers,
+        bestSellingProducts: bestPack.products,
         categories,
         product_count: productCount,
         featured_total: featuredTotal,
+        best_selling_total: bestPack.total,
         categories_total: categoriesTotal,
       };
     });
+  }
+
+  /**
+   * Rank website products by units sold in the last N days.
+   * Primary signal: POS completed sales (SaleItem). Secondary: paid/processing web orders.
+   * Returns product ids sorted most → least sold.
+   */
+  private async rankBestSellingIds(opts: {
+    take: number;
+    skip?: number;
+    /** Extra ProductWhere filters (category, search, price…). */
+    productWhere?: Prisma.ProductWhereInput;
+  }): Promise<{ ids: string[]; totalWithSales: number }> {
+    const since = subDays(new Date(), BEST_SELLING_WINDOW_DAYS);
+    const productFilter: Prisma.ProductWhereInput = {
+      is_active: true,
+      display_on_website: true,
+      ...(opts.productWhere || {}),
+    };
+
+    const [posRows, webRows] = await Promise.all([
+      prisma.saleItem.groupBy({
+        by: ['product_id'],
+        where: {
+          item_type: 'ORIGINAL',
+          quantity: { gt: 0 },
+          created_at: { gte: since },
+          sale: { status: 'COMPLETED' },
+          product: productFilter,
+        },
+        _sum: { quantity: true },
+      }),
+      prisma.orderItem.groupBy({
+        by: ['product_id'],
+        where: {
+          quantity: { gt: 0 },
+          created_at: { gte: since },
+          order: { status: { in: ['COMPLETED', 'PROCESSING'] } },
+          product: productFilter,
+        },
+        _sum: { quantity: true },
+      }),
+    ]);
+
+    const scores = new Map<string, number>();
+    for (const row of posRows) {
+      const qty = Number(row._sum.quantity ?? 0);
+      if (qty > 0) scores.set(row.product_id, qty);
+    }
+    for (const row of webRows) {
+      const qty = Number(row._sum.quantity ?? 0);
+      if (qty <= 0) continue;
+      scores.set(row.product_id, (scores.get(row.product_id) || 0) + qty);
+    }
+
+    const ranked = [...scores.entries()].sort((a, b) => {
+      if (b[1] !== a[1]) return b[1] - a[1];
+      return a[0].localeCompare(b[0]);
+    });
+
+    const skip = Math.max(0, opts.skip ?? 0);
+    const ids = ranked.slice(skip, skip + opts.take).map(([id]) => id);
+    return { ids, totalWithSales: ranked.length };
+  }
+
+  /** Fetch product cards and keep the caller’s id order (Prisma findMany does not). */
+  private async productsInOrder(ids: string[]) {
+    if (!ids.length) return [] as ReturnType<typeof shapeProduct>[];
+    const rows = await prisma.product.findMany({
+      where: { id: { in: ids } },
+      select: PRODUCT_CARD_SELECT,
+    });
+    const byId = new Map(rows.map((p) => [p.id, shapeProduct(p)]));
+    return ids.map((id) => byId.get(id)).filter(Boolean) as ReturnType<typeof shapeProduct>[];
   }
 
   private async loadFeatured(limit: number) {
@@ -160,36 +247,52 @@ export class WebService {
   }
 
   private async loadBestSellers(limit: number) {
-    const startDate = startOfMonth(new Date());
-    const endDate = new Date();
+    const { ids, totalWithSales } = await this.rankBestSellingIds({ take: limit });
+    let products = await this.productsInOrder(ids);
 
-    const bestSellers = await prisma.product.findMany({
-      where: {
-        is_active: true,
-        display_on_website: true,
-        order_items: { some: { created_at: { gte: startDate, lte: endDate } } },
-      },
-      orderBy: { order_items: { _count: 'desc' } },
-      take: limit,
-      select: PRODUCT_CARD_SELECT,
+    // Not enough sales history yet — fill with featured, then newest active SKUs.
+    if (products.length < limit) {
+      const exclude = new Set(products.map((p) => p.id));
+      const need = limit - products.length;
+      const featuredFill = await prisma.product.findMany({
+        where: {
+          is_featured: true,
+          is_active: true,
+          display_on_website: true,
+          id: exclude.size ? { notIn: [...exclude] } : undefined,
+        },
+        orderBy: { created_at: 'desc' },
+        take: need,
+        select: PRODUCT_CARD_SELECT,
+      });
+      for (const p of featuredFill) {
+        products.push(shapeProduct(p));
+        exclude.add(p.id);
+      }
+      if (products.length < limit) {
+        const stillNeed = limit - products.length;
+        const newestFill = await prisma.product.findMany({
+          where: {
+            is_active: true,
+            display_on_website: true,
+            id: exclude.size ? { notIn: [...exclude] } : undefined,
+          },
+          orderBy: { created_at: 'desc' },
+          take: stillNeed,
+          select: PRODUCT_CARD_SELECT,
+        });
+        products = [...products, ...newestFill.map(shapeProduct)];
+      }
+    }
+
+    // Load-more total: products with real sales in the window (not filler-only SKUs).
+    // If nothing has sold yet, expose website catalog size so the grid can still paginate.
+    const websiteTotal = await prisma.product.count({
+      where: { is_active: true, display_on_website: true },
     });
+    const total = totalWithSales > 0 ? Math.max(totalWithSales, products.length) : websiteTotal;
 
-    if (bestSellers.length >= limit) return bestSellers.map(shapeProduct);
-
-    const need = limit - bestSellers.length;
-    const excludeIds = bestSellers.map((p) => p.id);
-    const fillers = await prisma.product.findMany({
-      where: {
-        is_active: true,
-        display_on_website: true,
-        id: excludeIds.length ? { notIn: excludeIds } : undefined,
-      },
-      orderBy: { created_at: 'desc' },
-      take: need,
-      select: PRODUCT_CARD_SELECT,
-    });
-
-    return [...bestSellers, ...fillers].map(shapeProduct);
+    return { products, total };
   }
 
   private async loadHomeCategories(limit: number) {
@@ -250,7 +353,8 @@ export class WebService {
 
     const limit = clampLimit(opts.limit, 12, 48);
     const page = clampPage(opts.page);
-    const sort: SortKey = opts.sort && SORT_MAP[opts.sort] ? opts.sort : 'newest';
+    const sort: SortKey =
+      opts.sort === 'best-selling' || (opts.sort && opts.sort in SORT_MAP) ? (opts.sort as SortKey) : 'newest';
     const cacheKey = `${WEB_CACHE_PREFIXES.CATEGORY_DETAIL}${trimmed}:p${page}:l${limit}:s${sort}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.CATEGORY_DETAIL, async () => {
@@ -268,6 +372,15 @@ export class WebService {
         is_active: true,
         display_on_website: true,
       };
+
+      if (sort === 'best-selling') {
+        const ranked = await this.listByBestSelling(productsWhere, page, limit);
+        return {
+          category: shapeCategory(category),
+          products: ranked.data,
+          meta: { ...ranked.meta, sort },
+        };
+      }
 
       const [products, total] = await Promise.all([
         prisma.product.findMany({
@@ -294,6 +407,51 @@ export class WebService {
     });
   }
 
+  /** Page through best sellers while preserving rank order and optional filters. */
+  private async listByBestSelling(productWhere: Prisma.ProductWhereInput, page: number, limit: number) {
+    const skip = (page - 1) * limit;
+    const { ids, totalWithSales } = await this.rankBestSellingIds({
+      take: limit,
+      skip,
+      productWhere: {
+        // productWhere already includes is_active / display_on_website for callers that set them;
+        // strip duplicates by spreading after base flags in rankBestSellingIds.
+        ...productWhere,
+      },
+    });
+
+    let data = await this.productsInOrder(ids);
+
+    // Later pages / cold catalogs: fill remaining slots with newest matching products.
+    if (data.length < limit && page === 1) {
+      const exclude = data.map((p) => p.id);
+      const fillers = await prisma.product.findMany({
+        where: {
+          ...productWhere,
+          id: exclude.length ? { notIn: exclude } : undefined,
+        },
+        orderBy: { created_at: 'desc' },
+        take: limit - data.length,
+        select: PRODUCT_CARD_SELECT,
+      });
+      data = [...data, ...fillers.map(shapeProduct)];
+    }
+
+    const filteredTotal = await prisma.product.count({ where: productWhere });
+    const total = totalWithSales > 0 ? Math.min(filteredTotal, Math.max(totalWithSales, data.length)) : filteredTotal;
+
+    return {
+      data,
+      meta: {
+        total,
+        page,
+        limit,
+        totalPages: Math.max(1, Math.ceil(total / limit)),
+        sort: 'best-selling' as const,
+      },
+    };
+  }
+
   async listProducts(opts: {
     page?: number;
     limit?: number;
@@ -308,7 +466,8 @@ export class WebService {
   }) {
     const limit = clampLimit(opts.limit, 12, 48);
     const page = clampPage(opts.page);
-    const sort: SortKey = opts.sort && SORT_MAP[opts.sort] ? opts.sort : 'newest';
+    const sort: SortKey =
+      opts.sort === 'best-selling' || (opts.sort && opts.sort in SORT_MAP) ? (opts.sort as SortKey) : 'newest';
     const search = (opts.search ?? '').trim();
 
     const where: Prisma.ProductWhereInput = { is_active: true, display_on_website: true };
@@ -340,11 +499,15 @@ export class WebService {
       };
     }
 
-    const cacheKey = `${WEB_CACHE_PREFIXES.PRODUCT_LIST}p${page}:l${limit}:s${sort}:q${search.toLowerCase()}:c${
+    const cacheKey = `${WEB_CACHE_PREFIXES.PRODUCT_LIST}v2:p${page}:l${limit}:s${sort}:q${search.toLowerCase()}:c${
       opts.category_id ?? opts.category_slug ?? ''
     }:sc${opts.subcategory_id ?? ''}:min${min ?? ''}:max${max ?? ''}:f${opts.featured ? 1 : 0}`;
 
     return withCache(cacheKey, WEB_CACHE_TTL.PRODUCT_LIST, async () => {
+      if (sort === 'best-selling') {
+        return this.listByBestSelling(where, page, limit);
+      }
+
       const [rows, total] = await Promise.all([
         prisma.product.findMany({
           where,

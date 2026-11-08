@@ -367,9 +367,8 @@ export class ExpenseService {
     async update(id: string, data: UpdateExpenseInput) {
         const existing = await prisma.expense.findUnique({ where: { id } });
         if (!existing) throw new AppError(404, 'Expense not found');
-        if (existing.status === 'REJECTED') {
-            throw new AppError(400, 'Rejected expenses cannot be edited');
-        }
+        // Register open or closed does not matter — real expenses are always editable.
+        // (Supplier / salary / commission drawer copies are edited from those modules.)
         assertNotPaymentCopy(existing);
         await assertPeriodOpen(existing.expense_date, 'an expense');
         if (data.expense_date) await assertPeriodOpen(parseDateInput(data.expense_date), 'an expense');
@@ -402,23 +401,39 @@ export class ExpenseService {
                 ? { connect: { id: data.branch_id } }
                 : { disconnect: true };
         }
+        // Editing a rejected row brings it back into the books.
+        if (existing.status === 'REJECTED') {
+            patch.status = existing.cashflow_id ? 'APPROVED' : 'PENDING';
+            patch.rejection_reason = null;
+            patch.approved_at = existing.cashflow_id ? new Date() : null;
+            if (!existing.cashflow_id) patch.approver = { disconnect: true };
+        }
 
         const updated = await prisma.expense.update({
             where: { id },
             data: patch,
             include: EXPENSE_INCLUDE,
         });
+        // Open registers recompute live from expenses; closed ones need a recount
+        // so expected cash / closing slip / CoA cash movement stay correct.
         await refreshClosedRegister(existing.cashflow_id);
+        if (updated.cashflow_id && updated.cashflow_id !== existing.cashflow_id) {
+            await refreshClosedRegister(updated.cashflow_id);
+        }
         return { ...updated, amount: asNumber(updated.amount) };
     }
 
     async remove(id: string) {
         const existing = await prisma.expense.findUnique({ where: { id } });
         if (!existing) throw new AppError(404, 'Expense not found');
+        // Deletable whether the linked register is still open or already closed.
         assertNotPaymentCopy(existing);
         await assertPeriodOpen(existing.expense_date, 'an expense');
+        const cashflowId = existing.cashflow_id;
         await prisma.expense.delete({ where: { id } });
-        await refreshClosedRegister(existing.cashflow_id);
+        // Drawer expected cash + accounts follow the deletion (closed sessions only;
+        // open sessions pick it up on the next live compute).
+        await refreshClosedRegister(cashflowId);
         return { id };
     }
 

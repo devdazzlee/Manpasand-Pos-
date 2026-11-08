@@ -45,7 +45,7 @@ const pdfkit_1 = __importDefault(require("pdfkit"));
 const pdf_to_printer_1 = require("pdf-to-printer");
 const bwipjs = __importStar(require("bwip-js"));
 const receipt_policy_1 = require("../config/receipt-policy");
-const ACE_STUDIOS_CONTACT = '+92 336 2500357';
+const ACE_STUDIOS_CONTACT = '+92 342 3344040';
 function mm(n) { return n * 2.83464567; }
 const money = (n) => Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 async function printReceiptPDF(input) {
@@ -313,7 +313,7 @@ async function printReceiptPDF(input) {
         }
     }
     const footerLines = [
-        'Call / WhatsApp: +92 336 2500357',
+        'Call / WhatsApp: +92 342 3344040',
         'Website: manpasandstore.com',
     ];
     if (receiptData.footerMessage)

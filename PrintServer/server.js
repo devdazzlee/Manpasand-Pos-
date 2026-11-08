@@ -10,7 +10,7 @@ const bwipjs = require('bwip-js');
 const app = express();
 const PORT = 3001; // Local print server port
 
-const ACE_STUDIOS_CONTACT = '+92 336 2500357';
+const ACE_STUDIOS_CONTACT = '+92 342 3344040';
 
 const RECEIPT_EXCHANGE_POLICY_TITLE = 'EXCHANGE POLICY';
 // Manpasand prints no exchange policy; add lines here to show one on receipts.
@@ -670,39 +670,44 @@ app.post('/print-receipt', async (req, res) => {
     // ===== HEADER =====
     let y = margins.top;
 
-    // Wide wordmark. Size the box to the printable width and advance by the
-    // fitted height so a short logo does not leave a large blank gap.
-    if (logoToUse && fs.existsSync(logoToUse)) {
-      const maxW = Math.min(mm(62), W);
-      const maxH = mm(16);
-      const x = (pageWidth - maxW) / 2;
-      doc.save();
-      doc.image(logoToUse, x, y, { fit: [maxW, maxH], align: 'center', valign: 'center' });
-      doc.restore();
-      y += maxH + mm(2);
+    // Register closing / report slips: title only — no logo, store line or tagline.
+    const isReport = receiptData.layout === 'report';
+
+    if (!isReport) {
+      // Wide wordmark. Size the box to the printable width and advance by the
+      // fitted height so a short logo does not leave a large blank gap.
+      if (logoToUse && fs.existsSync(logoToUse)) {
+        const maxW = Math.min(mm(62), W);
+        const maxH = mm(16);
+        const x = (pageWidth - maxW) / 2;
+        doc.save();
+        doc.image(logoToUse, x, y, { fit: [maxW, maxH], align: 'center', valign: 'center' });
+        doc.restore();
+        y += maxH + mm(2);
+      }
+
+      // Address + Tagline
+      doc.font(boldFont);
+      const branchAddress = buildReceiptBranchLine(
+        receiptData.storeName,
+        receiptData.address
+      );
+      const addrTop = drawWrapped(branchAddress, margins.left, y, W, {
+        maxSize: 11,
+        align: 'center',
+        font: boldFont
+      });
+      y += addrTop.height + 2;
+
+      doc.font(baseFont);
+      const tg = receiptData.tagline || 'Quality • Service • Value';
+      const usedTg = drawFit(tg, margins.left, y, W, {
+        maxSize: BODY_MAX,
+        minSize: BODY_MIN,
+        align: 'center'
+      });
+      y += lineH(usedTg) - 2;
     }
-
-    // Address + Tagline
-    doc.font(boldFont);
-    const branchAddress = buildReceiptBranchLine(
-      receiptData.storeName,
-      receiptData.address
-    );
-    const addrTop = drawWrapped(branchAddress, margins.left, y, W, {
-      maxSize: 11,
-      align: 'center',
-      font: boldFont
-    });
-    y += addrTop.height + 2;
-
-    doc.font(baseFont);
-    const tg = receiptData.tagline || 'Quality • Service • Value';
-    const usedTg = drawFit(tg, margins.left, y, W, {
-      maxSize: BODY_MAX,
-      minSize: BODY_MIN,
-      align: 'center'
-    });
-    y += lineH(usedTg) - 2;
 
     if (receiptData.documentTitle) {
       const usedDoc = drawFit(String(receiptData.documentTitle), margins.left, y, W, {
@@ -714,7 +719,7 @@ app.post('/print-receipt', async (req, res) => {
       y += lineH(usedDoc) - 1;
     }
 
-    if (receiptData.strn) {
+    if (!isReport && receiptData.strn) {
       const usedStrn = drawFit(receiptData.strn, margins.left, y, W, {
         maxSize: BODY_MAX,
         minSize: BODY_MIN,
@@ -731,7 +736,6 @@ app.post('/print-receipt', async (req, res) => {
     //   metaLines:      [{ label, value }]
     //   reportSections: [{ title, rows: [{ label, value, emphasis? }], emptyText? }]
     //   summaryLines:   [{ label, value, emphasis? }]
-    const isReport = receiptData.layout === 'report';
     if (isReport) {
       const reportRow = (label, value, emphasis) => {
         // Long labels wrap on the left; the amount stays right-aligned on the first line.
@@ -1038,9 +1042,11 @@ app.post('/print-receipt', async (req, res) => {
 
     } // end sale-receipt layout
 
+    // Closing / report slips stay short — no shop contact or Ace Studios footer.
+    if (!isReport) {
     const footerAddress = normalizeReceiptAddress(receiptData.address);
     const footerLines = [
-      'Call / WhatsApp: +92 336 2500357',
+      'Call / WhatsApp: +92 342 3344040',
       'Website: manpasandstore.com'
     ];
     for (const line of footerLines) {
@@ -1081,10 +1087,11 @@ app.post('/print-receipt', async (req, res) => {
       });
       y += aceBlock.height + 1;
     }
+    } // end shop / Ace Studios footer (sale receipts only)
 
     // Trim height with safety buffer to avoid bottom cut (same as backend)
     // Increased buffer to ensure Ace Studios section is included
-    const needed = y + margins.bottom + 30;
+    const needed = y + margins.bottom + (isReport ? 10 : 30);
     if (needed < doc.page.height) {
       doc.page.height = needed;
     } else {

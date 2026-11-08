@@ -3,7 +3,6 @@ import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
 import { CreateProductInput, UpdateProductInput } from '../validations/product.validation';
 import { Decimal } from 'decimal.js';
-import { startOfMonth } from 'date-fns';
 import { imageService } from './common/cloudinaryService';
 import { randomUUID } from 'crypto';
 import { addDecimal, asNumber } from '../utils/helpers';
@@ -1542,45 +1541,73 @@ export class ProductService {
     }
 
     async getBestSellingProducts(limit = 10) {
-        const startDate = startOfMonth(new Date());
-        const endDate = new Date();
+        const since = new Date();
+        since.setDate(since.getDate() - 90);
 
-        const bestSellingActiveProductsThisMonth = await prisma.product.findMany({
-            where: {
-                is_active: true,
-                display_on_website: true,
-                order_items: {
-                    some: {
-                        created_at: {
-                            gte: startDate,
-                            lte: endDate,
-                        },
-                    },
+        // Rank by POS units sold (primary), then web order units — same idea as /web/home.
+        const [posRows, webRows] = await Promise.all([
+            prisma.saleItem.groupBy({
+                by: ['product_id'],
+                where: {
+                    item_type: 'ORIGINAL',
+                    quantity: { gt: 0 },
+                    created_at: { gte: since },
+                    sale: { status: 'COMPLETED' },
+                    product: { is_active: true, display_on_website: true },
                 },
-            },
+                _sum: { quantity: true },
+            }),
+            prisma.orderItem.groupBy({
+                by: ['product_id'],
+                where: {
+                    quantity: { gt: 0 },
+                    created_at: { gte: since },
+                    order: { status: { in: ['COMPLETED', 'PROCESSING'] } },
+                    product: { is_active: true, display_on_website: true },
+                },
+                _sum: { quantity: true },
+            }),
+        ]);
+
+        const scores = new Map<string, number>();
+        for (const row of posRows) {
+            const qty = Number(row._sum.quantity ?? 0);
+            if (qty > 0) scores.set(row.product_id, qty);
+        }
+        for (const row of webRows) {
+            const qty = Number(row._sum.quantity ?? 0);
+            if (qty <= 0) continue;
+            scores.set(row.product_id, (scores.get(row.product_id) || 0) + qty);
+        }
+
+        const rankedIds = [...scores.entries()]
+            .sort((a, b) => (b[1] !== a[1] ? b[1] - a[1] : a[0].localeCompare(b[0])))
+            .slice(0, limit)
+            .map(([id]) => id);
+
+        if (!rankedIds.length) {
+            return prisma.product.findMany({
+                where: { is_active: true, display_on_website: true },
+                orderBy: { created_at: 'desc' },
+                take: limit,
+                include: {
+                    ProductImage: { select: { image: true } },
+                    category: { select: { name: true } },
+                    subcategory: { select: { name: true } },
+                },
+            });
+        }
+
+        const products = await prisma.product.findMany({
+            where: { id: { in: rankedIds } },
             include: {
-                _count: {
-                    select: {
-                        order_items: {
-                            where: {
-                                created_at: {
-                                    gte: startDate,
-                                    lte: endDate,
-                                },
-                            },
-                        },
-                    },
-                },
+                ProductImage: { select: { image: true } },
+                category: { select: { name: true } },
+                subcategory: { select: { name: true } },
             },
-            orderBy: {
-                order_items: {
-                    _count: 'desc',
-                },
-            },
-            take: limit,
         });
-
-        return bestSellingActiveProductsThisMonth;
+        const byId = new Map(products.map((p) => [p.id, p]));
+        return rankedIds.map((id) => byId.get(id)).filter(Boolean);
     }
 
     async getProductByNameSearch(name: string, limit?: number) {

@@ -11,7 +11,7 @@ import {
   shouldPrintReceiptExchangePolicy,
 } from '../config/receipt-policy';
 
-const ACE_STUDIOS_CONTACT = '+92 336 2500357';
+const ACE_STUDIOS_CONTACT = '+92 342 3344040';
 
 type PrintJobInput = {
   printer: { name: string; columns?: { fontA: number; fontB: number } };
@@ -370,7 +370,7 @@ export async function printReceiptPDF(input: PrintJobInput) {
   }
 
   const footerLines = [
-    'Call / WhatsApp: +92 336 2500357',
+    'Call / WhatsApp: +92 342 3344040',
     'Website: manpasandstore.com',
   ];
   if (receiptData.footerMessage) footerLines.unshift(receiptData.footerMessage);

@@ -465,17 +465,15 @@ function ExpensesTab({ toast }: { toast: Toast }) {
                                 </Button>
                               </>
                             )}
-                            {e.status !== "REJECTED" && (
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8"
-                                title="Edit"
-                                onClick={() => { setEditing(e); setFormOpen(true); }}
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </Button>
-                            )}
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              className="h-8 w-8"
+                              title="Edit"
+                              onClick={() => { setEditing(e); setFormOpen(true); }}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
                             <Button
                               size="icon"
                               variant="ghost"

@@ -77,7 +77,9 @@ export function buildClosingReceipt(slip: ClosingSlip): ReceiptData {
 
   return {
     layout: "report",
-    storeName: "MANPASAND",
+    // No store logo / Karachi line / contact footer on closing slips (print server skips brand chrome for layout:"report").
+    storeName: "",
+    address: "",
     documentTitle: slip.status === "CLOSED" ? "REGISTER CLOSING" : "REGISTER SUMMARY (OPEN)",
     transactionId: slipNo,
     timestamp: closedAt.toISOString(),
@@ -86,7 +88,8 @@ export function buildClosingReceipt(slip: ClosingSlip): ReceiptData {
       { label: "Branch", value: branchName },
       {
         label: slip.status === "CLOSED" ? "Closing Time" : "Printed At",
-        value: format(closedAt, "dd MMM yyyy, hh:mm a"),
+        // Time only — date is already on the Date line above.
+        value: format(closedAt, "hh:mm a"),
       },
       {
         label: "Closed By",

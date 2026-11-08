@@ -20,6 +20,7 @@ import {
   RefreshCw,
   Search,
   ShieldCheck,
+  Trash2,
   Wallet,
   X,
   Download,
@@ -36,6 +37,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import {
   Select,
   SelectContent,
@@ -70,8 +81,10 @@ import {
   EXPENSE_PAYMENT_METHODS,
   approveExpense,
   createExpense,
+  deleteExpense,
   fetchExpenseById,
   updateExpense,
+  type Expense,
   type ExpensePaymentMethod,
 } from "@/lib/api/expenses";
 import {
@@ -219,8 +232,11 @@ export function DayReports({
   const [addOpen, setAddOpen] = useState(false);
   const [editingExpenseId, setEditingExpenseId] = useState<string | null>(null);
   const [editingExpenseApproved, setEditingExpenseApproved] = useState(false);
+  const [editingOnRegister, setEditingOnRegister] = useState(false);
   const [loadingEditExpenseId, setLoadingEditExpenseId] = useState<string | null>(null);
   const [savingExpense, setSavingExpense] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<DayReportData["rows"][number] | null>(null);
+  const [deletingExpense, setDeletingExpense] = useState(false);
   const { accounts: expenseAccounts, setAccounts: setExpenseAccounts, loading: expenseAccountsLoading } =
     useExpenseAccounts(addOpen);
   const moneyAccounts = useMoneyAccounts(addOpen);
@@ -460,10 +476,12 @@ export function DayReports({
   // and overlay a loader until fresh data arrives.
   const isRefreshing = loading && !isInitialLoad;
   const tableCols = view === "expenses" ? 5 : 6;
+  // Expenses actions: edit + delete icons need a bit more width.
 
   const resetExpenseDialog = () => {
     setEditingExpenseId(null);
     setEditingExpenseApproved(false);
+    setEditingOnRegister(false);
     setExpenseForm(emptyExpenseForm());
   };
 
@@ -477,33 +495,29 @@ export function DayReports({
     setAddOpen(true);
   };
 
+  const fillExpenseForm = (expense: Expense) => {
+    setEditingExpenseId(expense.id);
+    setEditingExpenseApproved(expense.status === "APPROVED");
+    setEditingOnRegister(Boolean(expense.cashflow_id));
+    setExpenseForm({
+      particular: expense.particular,
+      amount: String(expense.amount),
+      category_id: expense.category?.id ?? "",
+      account_id: expense.account?.id ?? "",
+      paid_from_account_id: expense.paid_from?.id ?? "",
+      payment_method: expense.payment_method,
+      vendor: expense.vendor ?? "",
+      notes: expense.notes ?? "",
+      expense_date: formatExpenseDateField(expense.expense_date),
+    });
+  };
+
   const openEditExpenseDialog = async (expenseId: string) => {
     setLoadingEditExpenseId(expenseId);
     try {
       const expense = await fetchExpenseById(expenseId);
-      if (expense.status === "REJECTED") {
-        sonnerToast.error("Rejected expenses cannot be edited.");
-        return;
-      }
-      if (expense.cashflow_id) {
-        sonnerToast.error(
-          "This expense is tied to the cash register drawer and cannot be edited here.",
-        );
-        return;
-      }
-      setEditingExpenseId(expense.id);
-      setEditingExpenseApproved(expense.status === "APPROVED");
-      setExpenseForm({
-        particular: expense.particular,
-        amount: String(expense.amount),
-        category_id: expense.category?.id ?? "",
-        account_id: expense.account?.id ?? "",
-        paid_from_account_id: expense.paid_from?.id ?? "",
-        payment_method: expense.payment_method,
-        vendor: expense.vendor ?? "",
-        notes: expense.notes ?? "",
-        expense_date: formatExpenseDateField(expense.expense_date),
-      });
+      // Editable whether the cash register is open or already closed.
+      fillExpenseForm(expense);
       setAddOpen(true);
     } catch (error: any) {
       sonnerToast.error(
@@ -511,6 +525,26 @@ export function DayReports({
       );
     } finally {
       setLoadingEditExpenseId(null);
+    }
+  };
+
+  const confirmDeleteExpense = async () => {
+    if (!deleteTarget) return;
+    setDeletingExpense(true);
+    try {
+      await deleteExpense(deleteTarget.id);
+      toast({
+        title: "Expense deleted",
+        description: "Register cash and accounts will reflect this change.",
+      });
+      setDeleteTarget(null);
+      await load();
+    } catch (error: any) {
+      sonnerToast.error(
+        error?.response?.data?.message || error?.message || "Could not delete expense",
+      );
+    } finally {
+      setDeletingExpense(false);
     }
   };
 
@@ -540,7 +574,12 @@ export function DayReports({
     try {
       if (editingExpenseId) {
         await updateExpense(editingExpenseId, payload);
-        toast({ title: "Expense updated" });
+        toast({
+          title: "Expense updated",
+          description: editingOnRegister
+            ? "Cash register and Chart of Accounts totals were refreshed."
+            : "Accounts and reports will use the new amount.",
+        });
       } else {
         const created = await createExpense(payload);
         try {
@@ -888,7 +927,7 @@ export function DayReports({
                       <TableHead className={thClass}>Particular</TableHead>
                       <TableHead className={thClass}>Description</TableHead>
                       <TableHead className={cn(thClass, "pr-5 text-right")}>Amount</TableHead>
-                      <TableHead className={cn(thClass, "w-[72px] pr-5 text-right")}>Actions</TableHead>
+                      <TableHead className={cn(thClass, "w-[108px] pr-5 text-right")}>Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -903,22 +942,36 @@ export function DayReports({
                               {money(row.amount)}
                             </TableCell>
                             <TableCell className="py-3 pr-5 text-right">
-                              <Button
-                                type="button"
-                                size="icon"
-                                variant="ghost"
-                                className="h-8 w-8 text-slate-600 hover:text-slate-900"
-                                title="Edit expense"
-                                aria-label="Edit expense"
-                                disabled={loadingEditExpenseId === row.id}
-                                onClick={() => void openEditExpenseDialog(row.id)}
-                              >
-                                {loadingEditExpenseId === row.id ? (
-                                  <Loader2 className="h-4 w-4 animate-spin" />
-                                ) : (
-                                  <Pencil className="h-4 w-4" />
-                                )}
-                              </Button>
+                              <div className="inline-flex items-center justify-end gap-0.5">
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-slate-600 hover:text-slate-900"
+                                  title="Edit expense"
+                                  aria-label="Edit expense"
+                                  disabled={loadingEditExpenseId === row.id || deletingExpense}
+                                  onClick={() => void openEditExpenseDialog(row.id)}
+                                >
+                                  {loadingEditExpenseId === row.id ? (
+                                    <Loader2 className="h-4 w-4 animate-spin" />
+                                  ) : (
+                                    <Pencil className="h-4 w-4" />
+                                  )}
+                                </Button>
+                                <Button
+                                  type="button"
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-8 w-8 text-rose-600 hover:text-rose-700"
+                                  title="Delete expense"
+                                  aria-label="Delete expense"
+                                  disabled={deletingExpense}
+                                  onClick={() => setDeleteTarget(row)}
+                                >
+                                  <Trash2 className="h-4 w-4" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         ))}
@@ -1086,9 +1139,13 @@ export function DayReports({
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
             <DialogTitle>{editingExpenseId ? "Edit Expense" : "Add Expense"}</DialogTitle>
-            {editingExpenseId && editingExpenseApproved ? (
+            {editingExpenseId ? (
               <DialogDescription>
-                This expense is already approved. Saving will update reports and totals.
+                {editingOnRegister
+                  ? "This expense is on the cash register. Saving updates the drawer, closing slip, and Chart of Accounts."
+                  : editingExpenseApproved
+                    ? "This expense is already approved. Saving updates reports, cash, and accounts."
+                    : "Saving updates reports and accounts."}
               </DialogDescription>
             ) : null}
           </DialogHeader>
@@ -1203,6 +1260,39 @@ export function DayReports({
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog open={!!deleteTarget} onOpenChange={(open) => !open && !deletingExpense && setDeleteTarget(null)}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this expense?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteTarget
+                ? `"${deleteTarget.particular || deleteTarget.reference}" — ${money(deleteTarget.amount)}. This removes it from Today's Expenses, the cash register (if linked), and Chart of Accounts. This cannot be undone.`
+                : "This cannot be undone."}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={deletingExpense}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-rose-600 hover:bg-rose-700 focus:ring-rose-600"
+              disabled={deletingExpense}
+              onClick={(event) => {
+                event.preventDefault();
+                void confirmDeleteExpense();
+              }}
+            >
+              {deletingExpense ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Deleting…
+                </>
+              ) : (
+                "Delete expense"
+              )}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }
