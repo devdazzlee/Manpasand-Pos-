@@ -1667,7 +1667,7 @@ export default function BarcodeGenerator() {
                 ) : null}
                 {previewItem?.netWeight ? (
                   <p className="text-[10px] font-semibold text-slate-800">
-                    NET {formatWeightDisplay(previewItem.netWeight)}
+                    {formatWeightDisplay(previewItem.netWeight)}
                   </p>
                 ) : null}
                 {includePrice && (

@@ -1106,13 +1106,11 @@ app.post('/print-receipt', async (req, res) => {
 // ZPL helper functions
 const BARCODE_LABEL_BRAND_PREFIX = 'MANPASAND';
 
+// Labels start with the product name; a saved / sent shop-name prefix is dropped.
 function formatBarcodeLabelTitle(productName) {
-  const name = String(productName || '').trim();
-  if (!name) return BARCODE_LABEL_BRAND_PREFIX;
-  const upper = name.toUpperCase();
-  if (upper.startsWith(`${BARCODE_LABEL_BRAND_PREFIX} `)) return upper;
-  if (upper.startsWith('PEHNAVA ')) return `${BARCODE_LABEL_BRAND_PREFIX} ${upper.slice(8)}`;
-  return `${BARCODE_LABEL_BRAND_PREFIX} ${upper}`;
+  const upper = String(productName || '').trim().toUpperCase();
+  const prefix = `${BARCODE_LABEL_BRAND_PREFIX} `;
+  return upper.startsWith(prefix) ? upper.slice(prefix.length).trim() : upper;
 }
 
 function escapeZPL(text) {
@@ -1479,7 +1477,7 @@ function generateEPLForLabel(item, options) {
 }
 
 // Generate ZPL for 58mm x 40mm labels (landscape, horizontal barcode)
-/** Full 58 x 40 mm sticker: brand, product, price, then a large scannable barcode. */
+/** Full 58 x 40 mm sticker: product name, weight and price, then a large scannable barcode. */
 function generateZPLForLargeLabel(item, options, width, height) {
   const dpi = options.dpi || 203;
   const px = (n) => Math.round((n * dpi) / 203);
@@ -1488,10 +1486,8 @@ function generateZPLForLargeLabel(item, options, width, height) {
   const centered = (y, size, text) =>
     `^FO${marginX},${y}^A0N,${size},${size}^FB${inner},1,0,C,0^FD${escapeZPL(text)}^FS\n`;
 
-  const brandSize = px(34);
-  const priceSize = px(46);
   const hriSize = px(26);
-  const { brand, product } = splitPehnawaLabelTitle(item.name || '');
+  const { product } = splitPehnawaLabelTitle(item.name || '');
   // Fill two full lines; only a name too long for both is cut, and it shows "..".
   const lines = [];
   const maxChars = 30;
@@ -1510,7 +1506,8 @@ function generateZPLForLargeLabel(item, options, width, height) {
     }
   }
   if (current) lines.push(current);
-  const nameSize = px(lines.some((l) => l.length > 24) ? 24 : 28);
+  const longest = Math.max(0, ...lines.map((l) => l.length));
+  const nameSize = px(longest > 26 ? 24 : longest > 21 ? 28 : 34);
   const gap = px(4);
 
   const price = Number(item.price);
@@ -1518,8 +1515,11 @@ function generateZPLForLargeLabel(item, options, width, height) {
     item.price !== undefined && item.price !== null && Number.isFinite(price)
       ? `Rs ${price.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
       : '';
-  const weightText = item.netWeight ? `NET WT: ${item.netWeight}` : '';
+  const weightText = item.netWeight ? String(item.netWeight) : '';
   const hasRow = Boolean(priceText || weightText);
+  // Weight and price share a row, so the price steps down a little to leave the weight room.
+  const priceSize = px(priceText && weightText ? 40 : 46);
+  const weightSize = px(30);
 
   const data = item.barcode ? String(item.barcode) : '';
   // Default Code 128 mode is one symbol per character; pick the widest bars that fit.
@@ -1528,7 +1528,7 @@ function generateZPLForLargeLabel(item, options, width, height) {
   while (narrow > 1 && barsWidth(narrow) > inner) narrow -= 1;
   const showHri = options.humanReadable !== false && data;
 
-  const textH = brandSize + gap + lines.length * (nameSize + gap) + (hasRow ? priceSize + gap : 0);
+  const textH = lines.length * (nameSize + gap) + (hasRow ? priceSize + gap : 0);
   const hriH = showHri ? hriSize + gap : 0;
   const edge = px(14);
   const room = height - edge * 2 - textH - hriH - px(8);
@@ -1539,8 +1539,6 @@ function generateZPLForLargeLabel(item, options, width, height) {
   let zpl = '^XA\n';
   zpl += `^PW${width}\n^LL${height}\n^LH0,0\n^CI28\n`;
 
-  zpl += centered(y, brandSize, brand);
-  y += brandSize + gap;
   for (const line of lines) {
     zpl += centered(y, nameSize, line);
     y += nameSize + gap;
@@ -1548,7 +1546,7 @@ function generateZPLForLargeLabel(item, options, width, height) {
 
   if (hasRow) {
     if (priceText && weightText) {
-      zpl += `^FO${marginX},${y + px(14)}^A0N,${px(26)},${px(26)}^FD${escapeZPL(weightText)}^FS\n`;
+      zpl += `^FO${marginX},${y + priceSize - weightSize}^A0N,${weightSize},${weightSize}^FD${escapeZPL(weightText)}^FS\n`;
       zpl += `^FO${marginX},${y}^A0N,${priceSize},${priceSize}^FB${inner},1,0,R,0^FD${escapeZPL(priceText)}^FS\n`;
     } else {
       zpl += centered(y, priceSize, priceText || weightText);
