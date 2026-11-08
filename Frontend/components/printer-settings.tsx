@@ -82,6 +82,18 @@ export function PrinterSettings() {
       toast({ variant: "destructive", title: "No receipt printer selected" });
       return;
     }
+    const labelHint = deriveLabelLanguageHint(
+      printerObj.name,
+      printerObj.languageHint,
+    );
+    if (labelHint === "epl" || labelHint === "zpl") {
+      toast({
+        variant: "destructive",
+        title: "Wrong printer for receipts",
+        description: `"${printerObj.name}" is a barcode label printer. Pick a thermal receipt (ESC/POS) printer for sale receipts — use Zebra UPS 2844 / BlackCopper under Barcode Label Printer.`,
+      });
+      return;
+    }
     setTestingReceipt(true);
     try {
       const result = await printReceiptViaServer(
@@ -141,7 +153,7 @@ export function PrinterSettings() {
       );
       if (languageHint !== "epl" && languageHint !== "zpl") {
         throw new Error(
-          `"${barcodePrinter}" is not a label printer (EPL/ZPL). Select Zebra UPS 2844 or another label printer.`,
+          `"${barcodePrinter}" is not a label printer (EPL/ZPL). Select Zebra UPS 2844, BlackCopper BC-LP1300, or another label printer.`,
         );
       }
       const result = await printBarcodeLabelsViaServer({
@@ -318,15 +330,42 @@ export function PrinterSettings() {
               Test Print
             </Button>
           </div>
-          {receiptPrinter && (
-            <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 rounded-lg px-3 py-2">
-              <CheckCircle2 className="h-4 w-4" />
-              <span>
-                <strong>{receiptPrinter}</strong> will be used for all receipt
-                printing.
-              </span>
-            </div>
-          )}
+          {receiptPrinter && (() => {
+            const hint = deriveLabelLanguageHint(
+              receiptPrinter,
+              getReceiptPrinterObj()?.languageHint,
+            );
+            const isLabel = hint === "epl" || hint === "zpl";
+            return (
+              <div
+                className={`flex items-center gap-2 text-sm rounded-lg px-3 py-2 ${
+                  isLabel
+                    ? "text-amber-900 bg-amber-50"
+                    : "text-green-700 bg-green-50"
+                }`}
+              >
+                {isLabel ? (
+                  <XCircle className="h-4 w-4 shrink-0" />
+                ) : (
+                  <CheckCircle2 className="h-4 w-4 shrink-0" />
+                )}
+                <span>
+                  {isLabel ? (
+                    <>
+                      <strong>{receiptPrinter}</strong> is a barcode label
+                      printer — sale receipts need a thermal ESC/POS receipt
+                      printer. Move this device to Barcode Label Printer.
+                    </>
+                  ) : (
+                    <>
+                      <strong>{receiptPrinter}</strong> will be used for all
+                      receipt printing.
+                    </>
+                  )}
+                </span>
+              </div>
+            );
+          })()}
         </CardContent>
       </Card>
 
@@ -397,14 +436,32 @@ export function PrinterSettings() {
                   label printing.
                 </span>
               </div>
-              {getBarcodePrinterObj()?.languageHint === "epl" && (
-                <p className="text-xs text-gray-600 leading-relaxed px-1">
-                  Detected <strong>Eltron LP 2844 (EPL)</strong>: labels print
-                  directly at <strong>58×40 mm</strong> (3 mm gap), 203 DPI — no browser
-                  dialog. Use EPL driver in Windows (not ZPL). See{" "}
-                  <code className="text-[11px]">PrintServer/LP2844-SETUP.txt</code>.
-                </p>
-              )}
+              {(() => {
+                const hint = deriveLabelLanguageHint(
+                  barcodePrinter,
+                  getBarcodePrinterObj()?.languageHint,
+                );
+                if (hint === "epl") {
+                  return (
+                    <p className="text-xs text-gray-600 leading-relaxed px-1">
+                      Detected <strong>Eltron LP 2844 (EPL)</strong>: labels print
+                      directly at <strong>58×40 mm</strong> (3 mm gap), 203 DPI — no
+                      browser dialog. Use EPL driver in Windows (not ZPL). See{" "}
+                      <code className="text-[11px]">PrintServer/LP2844-SETUP.txt</code>.
+                    </p>
+                  );
+                }
+                if (hint === "zpl") {
+                  return (
+                    <p className="text-xs text-gray-600 leading-relaxed px-1">
+                      Detected <strong>ZPL label printer</strong> (e.g. BlackCopper
+                      BC-LP1300): Test Print sends raw ZPL — keep the Print Server
+                      running on this PC.
+                    </p>
+                  );
+                }
+                return null;
+              })()}
             </div>
           )}
         </CardContent>

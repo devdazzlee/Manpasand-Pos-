@@ -27,12 +27,17 @@ export interface PrinterInfo {
   [key: string]: any; // extra fields the server may return
 }
 
-function isLp2844OrEplPrinter(p: PrinterInfo): boolean {
+function isLabelPrinter(p: PrinterInfo): boolean {
   const s = `${p.name || ''} ${p.driver?.name || ''}`.toLowerCase();
   return (
     p.languageHint === 'epl' ||
-    /\(epl\)|eltron|\blp\s*2844\b|lp2844|ups lp/.test(s)
+    p.languageHint === 'zpl' ||
+    /\(epl\)|eltron|\blp\s*2844\b|lp2844|ups lp|blackcopper|bc-?lp\s*\d+|zebra|zdesigner/.test(s)
   );
+}
+
+function isReceiptPrinter(p: PrinterInfo): boolean {
+  return !isLabelPrinter(p) && (p.languageHint === 'escpos' || p.languageHint === 'generic' || !p.languageHint);
 }
 
 export interface PrinterSettings {
@@ -92,10 +97,16 @@ export function usePrinterSettings() {
           const barcodeStillValid =
             !!prev.barcodePrinter && list.some((p) => p.name === prev.barcodePrinter);
 
-          if (!receiptStillValid && defaultP) updated.receiptPrinter = defaultP.name;
+          if (!receiptStillValid) {
+            const receipt =
+              list.find(isReceiptPrinter) ||
+              list.find((p) => p.languageHint === 'escpos') ||
+              defaultP;
+            if (receipt) updated.receiptPrinter = receipt.name;
+          }
           if (!barcodeStillValid) {
             const labelPrinter =
-              list.find(isLp2844OrEplPrinter) ||
+              list.find(isLabelPrinter) ||
               list.find((p) => p.languageHint === 'epl' || p.languageHint === 'zpl') ||
               defaultP;
             if (labelPrinter) updated.barcodePrinter = labelPrinter.name;

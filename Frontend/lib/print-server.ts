@@ -346,7 +346,8 @@ export function deriveLabelLanguageHint(
   if (/\(epl\)|\bepl\b|eltron|\blp\s*2844\b|lp2844|ups\s*lp|\bups\s*2844\b|\b2844\b/.test(s)) {
     return 'epl';
   }
-  if (/zebra|zdesigner|\bzpl\b/.test(s)) {
+  // BlackCopper BC-LP1300 is a desktop barcode label printer (ZPL/EPL/TSPL).
+  if (/blackcopper|bc-?lp\s*\d+|tspl|zebra|zdesigner|\bzpl\b/.test(s)) {
     return 'zpl';
   }
   return hint || 'generic';

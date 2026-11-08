@@ -185,8 +185,15 @@ function deriveLanguageHint(p: Partial<PrinterInfo>) {
   ) {
     return 'epl';
   }
-  if (s.includes('zebra') || s.includes('zdesigner')) return 'zpl';
-  if (s.includes('generic') || s.includes('escpos') || s.includes('blackcopper') || s.includes('80mm') || s.includes('58mm')) return 'escpos';
+  // BlackCopper BC-LP1300 etc. are label printers (ZPL/EPL/TSPL), not ESC/POS.
+  if (
+    /blackcopper|bc-?lp\s*\d+|tspl|\bzpl\b/.test(s) ||
+    s.includes('zebra') ||
+    s.includes('zdesigner')
+  ) {
+    return 'zpl';
+  }
+  if (s.includes('generic') || s.includes('escpos') || s.includes('80mm') || s.includes('58mm')) return 'escpos';
   return 'generic';
 }
 
