@@ -56,7 +56,11 @@ import {
   X,
   Plus,
   Minus,
+  Landmark,
+  Smartphone,
+  Split,
 } from "lucide-react";
+import { SplitPaymentDialog, type CheckoutMethod, type TenderResult } from "@/components/pos/split-payment-dialog";
 import { toast } from "sonner";
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
 import {
@@ -662,7 +666,7 @@ export function NewSale() {
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [searchTerm, setSearchTerm] = useState("");
   const [paymentDialogOpen, setPaymentDialogOpen] = useState(false);
-  const [paymentMethodPending, setPaymentMethodPending] = useState<"Cash" | "Card" | null>(null);
+  const [paymentMethodPending, setPaymentMethodPending] = useState<CheckoutMethod | null>(null);
   const [tenderedAmount, setTenderedAmount] = useState("");
   const [calculatedChange, setCalculatedChange] = useState(0);
   const [paymentError, setPaymentError] = useState("");
@@ -2197,7 +2201,7 @@ export function NewSale() {
 
   const buildReceiptDataForServer = (
     transactionId: string,
-    method: "Cash" | "Card",
+    method: string,
     cartSnapshot: CartItem[],
     amountPaid: number,
     changeAmount: number,
@@ -2233,7 +2237,7 @@ export function NewSale() {
     subtotal,
     discount: globalDiscountAmount > 0 ? globalDiscountAmount : undefined,
     total,
-    paymentMethod: method === "Cash" ? "CASH" : "CARD",
+    paymentMethod: method === "Cash" ? "CASH" : method === "Card" ? "CARD" : method.toUpperCase(),
     amountPaid,
     changeAmount: changeAmount > 0 ? changeAmount : undefined,
     thankYouMessage: "Thank you for shopping!",
@@ -2350,7 +2354,7 @@ export function NewSale() {
     resetPaymentState();
   };
 
-  const startPayment = (method: "Cash" | "Card") => {
+  const startPayment = (method: CheckoutMethod) => {
     if (!requireBranch()) {
       return;
     }
@@ -2364,11 +2368,11 @@ export function NewSale() {
       autoDiscountCustomerRef.current === selectedCustomer &&
       globalDiscountAmount > 0;
     let effectiveTotal = total;
-    if (method === "Card" && loyaltyDiscountActive) {
+    if (method !== "Cash" && loyaltyDiscountActive) {
       setGlobalDiscountValue("");
       setShowDiscountRow(false);
       autoDiscountCustomerRef.current = null;
-      toast.warning("Lifetime discount is cash-only — removed for this card payment.");
+      toast.warning("Lifetime discount is cash-only — removed for this payment.");
       effectiveTotal = subtotal; // state update above hasn't re-rendered yet
     }
 
@@ -2412,9 +2416,10 @@ export function NewSale() {
   };
 
   const handlePayment = async (
-    method: "Cash" | "Card",
+    method: string,
     amountPaid: number,
-    changeAmount: number
+    changeAmount: number,
+    tender?: TenderResult
   ) => {
     // Block re-entry synchronously — a stuck Enter / scanner can call this
     // several times before `paymentLoading` re-renders the buttons disabled.
@@ -2454,7 +2459,7 @@ export function NewSale() {
         // Prepare payload
         const payload: any = {
           items: saleItems,
-          paymentMethod: method === "Cash" ? "CASH" : "CARD",
+          paymentMethod: tender?.primary ?? (method === "Cash" ? "CASH" : "CARD"),
           branchId,
           discountAmount: globalDiscountAmount,
           // Tell the server the default branch % was cleared/lowered (no permission needed).
@@ -2465,6 +2470,9 @@ export function NewSale() {
         };
         if (selectedCustomer) {
           payload.customerId = selectedCustomer;
+        }
+        if (tender) {
+          payload.payments = tender.payments;
         }
 
         // Check if online
@@ -2497,7 +2505,8 @@ export function NewSale() {
               total: total,
               customer: selectedCustomer ? { id: selectedCustomer } : null,
               payment: {
-                method: method === "Cash" ? "CASH" : "CARD",
+                method: tender?.primary ?? (method === "Cash" ? "CASH" : "CARD"),
+                payments: tender?.payments,
                 amountPaid,
                 changeAmount
               },
@@ -2528,7 +2537,8 @@ export function NewSale() {
             total: total,
             customer: selectedCustomer ? { id: selectedCustomer } : null,
             payment: {
-              method: method === "Cash" ? "CASH" : "CARD",
+              method: tender?.primary ?? (method === "Cash" ? "CASH" : "CARD"),
+              payments: tender?.payments,
               amountPaid,
               changeAmount
             },
@@ -3783,6 +3793,16 @@ export function NewSale() {
                 <CreditCard className="mr-1.5 h-3.5 w-3.5" />
                 Card
               </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => startPayment("Split")}
+                disabled={paymentLoading || branchLoading || (!adminMode && !hasBranch)}
+                className="col-span-2 h-8 text-xs"
+              >
+                <Split className="mr-1.5 h-3.5 w-3.5" />
+                Bank · Wallet · Split payment
+              </Button>
             </div>
           )}
 
@@ -4541,94 +4561,43 @@ export function NewSale() {
                 Card
               </Button>
             </div>
+            <div className="mt-1.5 grid grid-cols-3 gap-1.5 sm:gap-2">
+              {([
+                ["Bank", Landmark],
+                ["Wallet", Smartphone],
+                ["Split", Split],
+              ] as const).map(([method, Icon]) => (
+                <Button
+                  key={method}
+                  size="sm"
+                  variant="outline"
+                  onClick={() => startPayment(method)}
+                  disabled={paymentLoading || branchLoading || (!adminMode && !hasBranch)}
+                  className="h-8 text-xs font-medium text-slate-600"
+                >
+                  <Icon className="mr-1.5 h-3.5 w-3.5" />
+                  {method}
+                </Button>
+              ))}
+            </div>
           </div>
         )}
       </div>
 
-      <Dialog
+      <SplitPaymentDialog
         open={paymentDialogOpen}
-        onOpenChange={handlePaymentDialogOpenChange}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {paymentMethodPending ? `${paymentMethodPending} Payment` : "Payment"}
-            </DialogTitle>
-            <DialogDescription>
-              Enter the amount received to calculate the change due.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div
-              className={cn(
-                "flex items-center justify-between rounded-lg border px-3 py-2 text-sm",
-                adminMode ? "border-blue-200 bg-blue-50 text-blue-900" : "border-slate-200 bg-white text-slate-700"
-              )}
-            >
-              <span>Recorded in branch</span>
-              <span className="font-semibold">{branchInfo.name || "—"}</span>
-            </div>
-            <div className="rounded-lg bg-slate-50 p-3 text-sm">
-              <div className="flex items-center justify-between text-gray-600">
-                <span>Payable Amount</span>
-                <span className="font-semibold text-gray-900">
-                  Rs {formatMoney(total)}
-                </span>
-              </div>
-              <div className="mt-2 flex items-center justify-between text-green-600 font-semibold">
-                <span>Change Due</span>
-                <span>Rs {calculatedChange.toFixed(2)}</span>
-              </div>
-            </div>
-            <div>
-              <label className="text-xs font-semibold uppercase tracking-wide text-gray-500">
-                Amount Received
-              </label>
-              <Input
-                type="text"
-                inputMode="decimal"
-                autoFocus
-                value={tenderedAmount}
-                onChange={(e) => handleTenderedInputChange(e.target.value)}
-                onKeyDown={(e) => {
-                  // Enter: Confirm payment
-                  if (e.key === "Enter") {
-                    e.preventDefault();
-                    confirmPayment();
-                  }
-                  // Escape: Cancel payment
-                  if (e.key === "Escape") {
-                    e.preventDefault();
-                    resetPaymentState();
-                  }
-                }}
-                className="mt-1"
-                data-amount-input="true"
-              />
-            </div>
-            {paymentError && (
-              <p className="text-sm text-red-600">{paymentError}</p>
-            )}
-          </div>
-          <DialogFooter className="pt-2">
-            <Button
-              variant="outline"
-              onClick={resetPaymentState}
-              disabled={paymentLoading}
-            >
-              Cancel
-            </Button>
-            <Button
-              onClick={confirmPayment}
-              disabled={paymentLoading || !paymentMethodPending}
-            >
-              {paymentLoading
-                ? "Processing..."
-                : `Confirm ${paymentMethodPending ?? "Payment"}`}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        total={total}
+        initialMethod={paymentMethodPending}
+        // Manpasand takes full payment at the counter (no credit from New Sale).
+        customerName={null}
+        loading={paymentLoading}
+        error={paymentError}
+        onCancel={resetPaymentState}
+        onConfirm={(result) => {
+          setPaymentError("");
+          void handlePayment(result.label, result.amountPaid, result.change, result);
+        }}
+      />
 
       <Dialog
         open={saleSuccessOpen}
