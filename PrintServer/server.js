@@ -196,8 +196,17 @@ function deriveLanguageHint(p) {
   ) {
     return 'epl';
   }
-  if (s.includes('zebra') || s.includes('zdesigner')) return 'zpl';
-  if (s.includes('generic') || s.includes('escpos') || s.includes('blackcopper') || s.includes('80mm') || s.includes('58mm')) return 'escpos';
+  // BlackCopper BC-LP1300 (and similar LP desktop units) are barcode label
+  // printers with ZPL/EPL/TSPL — NOT ESC/POS receipt printers. Older code
+  // mapped "blackcopper" → escpos, which made barcode Test Print reject them.
+  if (
+    /blackcopper|bc-?lp\s*\d+|tspl|\bzpl\b/.test(s) ||
+    s.includes('zebra') ||
+    s.includes('zdesigner')
+  ) {
+    return 'zpl';
+  }
+  if (s.includes('generic') || s.includes('escpos') || s.includes('80mm') || s.includes('58mm')) return 'escpos';
   return 'generic';
 }
 
@@ -1470,12 +1479,103 @@ function generateEPLForLabel(item, options) {
 }
 
 // Generate ZPL for 58mm x 40mm labels (landscape, horizontal barcode)
+/** Full 58 x 40 mm sticker: brand, product, price, then a large scannable barcode. */
+function generateZPLForLargeLabel(item, options, width, height) {
+  const dpi = options.dpi || 203;
+  const px = (n) => Math.round((n * dpi) / 203);
+  const marginX = px(16);
+  const inner = width - marginX * 2;
+  const centered = (y, size, text) =>
+    `^FO${marginX},${y}^A0N,${size},${size}^FB${inner},1,0,C,0^FD${escapeZPL(text)}^FS\n`;
+
+  const brandSize = px(34);
+  const priceSize = px(46);
+  const hriSize = px(26);
+  const { brand, product } = splitPehnawaLabelTitle(item.name || '');
+  // Fill two full lines; only a name too long for both is cut, and it shows "..".
+  const lines = [];
+  const maxChars = 30;
+  const words = product.split(/\s+/).filter(Boolean);
+  let current = '';
+  for (let i = 0; i < words.length; i += 1) {
+    const next = current ? `${current} ${words[i]}` : words[i];
+    if (next.length <= maxChars) {
+      current = next;
+    } else if (lines.length === 0) {
+      lines.push(current || words[i].slice(0, maxChars));
+      current = current ? words[i] : '';
+    } else {
+      current = `${current.slice(0, maxChars - 2).trimEnd()}..`;
+      break;
+    }
+  }
+  if (current) lines.push(current);
+  const nameSize = px(lines.some((l) => l.length > 24) ? 24 : 28);
+  const gap = px(4);
+
+  const price = Number(item.price);
+  const priceText =
+    item.price !== undefined && item.price !== null && Number.isFinite(price)
+      ? `Rs ${price.toLocaleString('en-US', { maximumFractionDigits: 2 })}`
+      : '';
+  const weightText = item.netWeight ? `NET WT: ${item.netWeight}` : '';
+  const hasRow = Boolean(priceText || weightText);
+
+  const data = item.barcode ? String(item.barcode) : '';
+  // Default Code 128 mode is one symbol per character; pick the widest bars that fit.
+  const barsWidth = (narrow) => (11 * (data.length + 2) + 13) * narrow;
+  let narrow = dpi >= 300 ? 4 : 3;
+  while (narrow > 1 && barsWidth(narrow) > inner) narrow -= 1;
+  const showHri = options.humanReadable !== false && data;
+
+  const textH = brandSize + gap + lines.length * (nameSize + gap) + (hasRow ? priceSize + gap : 0);
+  const hriH = showHri ? hriSize + gap : 0;
+  const edge = px(14);
+  const room = height - edge * 2 - textH - hriH - px(8);
+  const barsH = data ? Math.max(px(56), Math.min(px(124), room)) : 0;
+  // Split any spare height so the design sits in the middle of the sticker.
+  let y = edge + Math.max(0, Math.floor((room - barsH) / 2));
+
+  let zpl = '^XA\n';
+  zpl += `^PW${width}\n^LL${height}\n^LH0,0\n^CI28\n`;
+
+  zpl += centered(y, brandSize, brand);
+  y += brandSize + gap;
+  for (const line of lines) {
+    zpl += centered(y, nameSize, line);
+    y += nameSize + gap;
+  }
+
+  if (hasRow) {
+    if (priceText && weightText) {
+      zpl += `^FO${marginX},${y + px(14)}^A0N,${px(26)},${px(26)}^FD${escapeZPL(weightText)}^FS\n`;
+      zpl += `^FO${marginX},${y}^A0N,${priceSize},${priceSize}^FB${inner},1,0,R,0^FD${escapeZPL(priceText)}^FS\n`;
+    } else {
+      zpl += centered(y, priceSize, priceText || weightText);
+    }
+    y += priceSize + gap;
+  }
+
+  if (data) {
+    y += px(8);
+    const x = Math.max(0, Math.round((width - barsWidth(narrow)) / 2));
+    zpl += `^BY${narrow}\n^FO${x},${y}^BCN,${barsH},N,N,N\n^FD${escapeZPL(data)}^FS\n`;
+    y += barsH + gap;
+    if (showHri) zpl += centered(y, hriSize, data);
+  }
+
+  zpl += '^XZ\n';
+  return zpl;
+}
+
 function generateZPLForLabel(item, options) {
   const dpi = options.dpi || 203;
   const humanReadable = options.humanReadable;
   const { w, h } = labelDimensionsMM(options.paperSize || '50x25mm');
   const width = Math.round((w * dpi) / 25.4);
   const height = Math.round((h * dpi) / 25.4);
+
+  if (w >= 50 && h >= 38) return generateZPLForLargeLabel(item, options, width, height);
   
   // Generous margins to prevent cutting on all printers
   const marginX = dpi === 300 ? 50 : 40;  // Left/Right margin (~4mm)
