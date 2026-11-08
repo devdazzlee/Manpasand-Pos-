@@ -159,7 +159,7 @@ export function PrinterSettings() {
             ).toISOString(),
           },
         ],
-        paperSize: "50x25mm",
+        paperSize: "58x40mm",
         labelGapMM: 3,
         copies: 1,
         dpi: 203,
@@ -400,7 +400,7 @@ export function PrinterSettings() {
               {getBarcodePrinterObj()?.languageHint === "epl" && (
                 <p className="text-xs text-gray-600 leading-relaxed px-1">
                   Detected <strong>Eltron LP 2844 (EPL)</strong>: labels print
-                  directly at <strong>50×25 mm</strong> (3 mm gap), 203 DPI — no browser
+                  directly at <strong>58×40 mm</strong> (3 mm gap), 203 DPI — no browser
                   dialog. Use EPL driver in Windows (not ZPL). See{" "}
                   <code className="text-[11px]">PrintServer/LP2844-SETUP.txt</code>.
                 </p>

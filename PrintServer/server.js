@@ -205,13 +205,13 @@ function deriveLabelProfile(p) {
   const hint = deriveLanguageHint(p);
   if (hint === 'epl' || hint === 'zpl') {
     return {
-      paperSize: '50x25mm',
-      widthMM: 50,
-      heightMM: 25,
+      paperSize: '58x40mm',
+      widthMM: 58,
+      heightMM: 40,
       gapMM: 3,
       dpi: 203,
       language: hint,
-      model: hint === 'epl' ? 'Eltron LP 2844 (EPL, 50×25 mm)' : 'Zebra (ZPL)',
+      model: hint === 'epl' ? 'Eltron LP 2844 (EPL, 58×40 mm)' : 'Zebra (ZPL)',
     };
   }
   return null;
@@ -1606,7 +1606,7 @@ app.post('/print-barcode-labels', async (req, res) => {
       mode === 'raw' ||
       (mode === 'auto' && (languageHint === 'epl' || languageHint === 'zpl'));
 
-    const paper = paperSize || (languageHint === 'epl' ? '50x25mm' : '3x2inch');
+    const paper = paperSize || (languageHint === 'epl' ? '58x40mm' : '3x2inch');
     const copiesCount = Math.max(1, copies || 1);
     const human = !!humanReadable;
     const dpi = dpiBody || 203;

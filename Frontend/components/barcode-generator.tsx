@@ -145,16 +145,17 @@ const LABEL_SIZES: Record<string, { label: string; w: number; h: number; css: st
     h: 25,
     css: "50mm 25mm",
   },
-  "58x40mm": { label: "58 × 40 mm", w: 58, h: 40, css: "58mm 40mm" },
+  "58x40mm": { label: "58 × 40 mm (3 mm gap)", w: 58, h: 40, css: "58mm 40mm" },
   "50x30mm": { label: "50 × 30 mm", w: 50, h: 30, css: "50mm 30mm" },
   "60x40mm": { label: "60 × 40 mm", w: 60, h: 40, css: "60mm 40mm" },
   "40x25mm": { label: "40 × 25 mm (small)", w: 40, h: 25, css: "40mm 25mm" },
   "3x2inch": { label: "3 × 2 in (Zebra)", w: 76.2, h: 50.8, css: "3in 2in" },
   "76x51mm": { label: "76 × 51 mm", w: 76, h: 51, css: "76mm 51mm" },
 };
-/** Must match physical roll (LP 2844: 50×25 mm, 3 mm gap). */
-const DEFAULT_LABEL_SIZE = "50x25mm";
-const SETTINGS_KEY = "barcode-generator-settings";
+/** Must match the physical roll (Manpasand: 58×40 mm, 3 mm gap, 1 across). */
+const DEFAULT_LABEL_SIZE = "58x40mm";
+// New key: browsers had 50×25 auto-saved under the old one, which is not this shop's roll.
+const SETTINGS_KEY = "barcode-generator-settings-v2";
 
 function BarcodeSourceToggle({
   value,
@@ -236,9 +237,7 @@ export default function BarcodeGenerator() {
       const raw = localStorage.getItem(SETTINGS_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
-        if (saved.paperSize === "58x40mm") {
-          setSelectedPaperSize("50x25mm");
-        } else if (saved.paperSize && LABEL_SIZES[saved.paperSize]) {
+        if (saved.paperSize && LABEL_SIZES[saved.paperSize]) {
           setSelectedPaperSize(saved.paperSize);
         }
         if (typeof saved.includeProductName === "boolean") setIncludeProductName(saved.includeProductName);
@@ -988,7 +987,7 @@ export default function BarcodeGenerator() {
     if ((allowed as readonly string[]).includes(key)) {
       return key as (typeof allowed)[number];
     }
-    return "50x25mm" as const;
+    return "58x40mm" as const;
   };
 
   const buildBarcodeLabelItems = (): BarcodeLabelItem[] => {
@@ -1089,7 +1088,7 @@ export default function BarcodeGenerator() {
         description:
           result.message ||
           (languageHint === "epl"
-            ? "Eltron LP 2844 (EPL, 50×25 mm)"
+            ? `${barcodePrinter} (EPL, ${labelSize.w}×${labelSize.h} mm)`
             : `Printer: ${barcodePrinter}`),
       });
     } catch (error: any) {
@@ -1998,7 +1997,7 @@ export default function BarcodeGenerator() {
                     </SelectContent>
                   </Select>
                   <p className="text-[11px] leading-snug text-slate-500">
-                    LP 2844 roll: <strong>50×25 mm</strong>, gap <strong>3 mm</strong>. Wrong size clips text.
+                    Label roll: <strong>58×40 mm</strong>, gap <strong>3 mm</strong>. Wrong size clips text.
                   </p>
                 </div>
                 <div className="space-y-1.5">
