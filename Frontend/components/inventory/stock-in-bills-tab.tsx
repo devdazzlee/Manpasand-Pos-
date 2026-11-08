@@ -537,7 +537,7 @@ export function StockInBillsTab({
                     lines={addLines}
                     onLinesChange={setAddLines}
                     showUnitCost
-                    unitCostLabel="Cost / unit"
+                    unitCostLabel="Cost price"
                     quantityLabel="Qty"
                     catalogTitle="Add to this bill"
                     cartTitle="New lines"

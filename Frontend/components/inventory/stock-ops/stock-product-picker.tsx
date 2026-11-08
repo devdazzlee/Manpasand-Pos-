@@ -130,7 +130,7 @@ export function StockProductPicker({
   quantityLabel = "Quantity",
   quantityPlaceholder = "0",
   showUnitCost = false,
-  unitCostLabel = "Unit cost",
+  unitCostLabel = "Cost price",
   showSalePrice = false,
   showCurrentQty = false,
   allowSignedQuantity = false,
@@ -642,7 +642,8 @@ export function StockProductPicker({
           />
           {Number(line.unitCost) > 0 && Number(line.quantity) > 0 ? (
             <p className="mt-0.5 text-[10px] tabular-nums text-slate-500">
-              Line total Rs {fmtNum((Number(line.unitCost) || 0) * (Number(line.quantity) || 0))}
+              Cost {fmtNum(Number(line.unitCost) || 0)} × {fmtNum(Number(line.quantity) || 0)} = Rs{" "}
+              {fmtNum((Number(line.unitCost) || 0) * (Number(line.quantity) || 0))}
             </p>
           ) : null}
         </div>
@@ -650,7 +651,7 @@ export function StockProductPicker({
 
       {showSalePrice ? (
         <div>
-          <Label className="text-[10px] uppercase tracking-wide text-slate-400">Sell price</Label>
+          <Label className="text-[10px] uppercase tracking-wide text-slate-400">Selling price</Label>
           <Input
             type="number"
             min={0}
@@ -695,9 +696,9 @@ export function StockProductPicker({
           return (
             <div
               key={line.productId}
-              className="flex items-center gap-2 bg-white px-2.5 py-1.5"
+              className="flex items-end gap-2 bg-white px-2.5 py-2"
             >
-              <div className="min-w-0 flex-1">
+              <div className="min-w-0 flex-1 self-center">
                 <p className="truncate text-[13px] font-semibold leading-tight text-slate-900">
                   {line.productName}
                 </p>
@@ -726,8 +727,13 @@ export function StockProductPicker({
                     </span>
                   ) : null}
                   {showUnitCost && qty > 0 && cost > 0 ? (
-                    <span className="tabular-nums text-slate-400">
-                      {" · "}Rs {fmtNum(qty * cost)}
+                    <span className="tabular-nums text-slate-600">
+                      {" · "}
+                      <span className="font-medium text-slate-500">Cost</span>{" "}
+                      <span className="font-medium text-slate-700">
+                        {fmtNum(cost)} × {fmtNum(qty)}
+                      </span>
+                      {" = "}Rs {fmtNum(qty * cost)}
                     </span>
                   ) : null}
                   {salePriceChanged(line) ? (
@@ -738,76 +744,93 @@ export function StockProductPicker({
                 </p>
               </div>
 
-              <div className="flex shrink-0 items-center gap-1">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={disabled}
-                  onClick={() => adjustLineQty(line.productId, -1)}
-                >
-                  <Minus className="h-3 w-3" />
-                </Button>
-                <Input
-                  type="number"
-                  placeholder={quantityPlaceholder}
-                  value={line.quantity}
-                  disabled={disabled}
-                  onChange={(e) =>
-                    updateLine(line.productId, { quantity: e.target.value })
-                  }
-                  className="h-7 w-12 px-1 text-center text-xs tabular-nums text-slate-900"
-                  title={quantityLabel}
-                />
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="icon"
-                  className="h-7 w-7"
-                  disabled={disabled}
-                  onClick={() => adjustLineQty(line.productId, 1)}
-                >
-                  <Plus className="h-3 w-3" />
-                </Button>
+              <div className="flex shrink-0 flex-col gap-0.5">
+                <span className="text-[9px] font-medium uppercase tracking-wide text-slate-400">
+                  Qty
+                </span>
+                <div className="flex items-center gap-1">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={disabled}
+                    onClick={() => adjustLineQty(line.productId, -1)}
+                  >
+                    <Minus className="h-3 w-3" />
+                  </Button>
+                  <Input
+                    type="number"
+                    placeholder={quantityPlaceholder}
+                    value={line.quantity}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      updateLine(line.productId, { quantity: e.target.value })
+                    }
+                    className="h-7 w-12 px-1 text-center text-xs tabular-nums text-slate-900"
+                    title={quantityLabel}
+                    aria-label={`Quantity for ${line.productName}`}
+                  />
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="icon"
+                    className="h-7 w-7"
+                    disabled={disabled}
+                    onClick={() => adjustLineQty(line.productId, 1)}
+                  >
+                    <Plus className="h-3 w-3" />
+                  </Button>
+                </div>
               </div>
 
               {showUnitCost ? (
-                <Input
-                  type="number"
-                  placeholder="Cost"
-                  value={line.unitCost ?? ""}
-                  disabled={disabled}
-                  onChange={(e) =>
-                    updateLine(line.productId, { unitCost: e.target.value })
-                  }
-                  className="h-7 w-[4.5rem] shrink-0 px-1.5 text-xs tabular-nums text-slate-900"
-                  title={unitCostLabel}
-                />
+                <div className="flex w-[5.25rem] shrink-0 flex-col gap-0.5">
+                  <span className="whitespace-nowrap text-[9px] font-medium uppercase tracking-wide text-slate-400">
+                    Cost price
+                  </span>
+                  <Input
+                    type="number"
+                    placeholder="0"
+                    value={line.unitCost ?? ""}
+                    disabled={disabled}
+                    onChange={(e) =>
+                      updateLine(line.productId, { unitCost: e.target.value })
+                    }
+                    className="h-7 px-1.5 text-xs tabular-nums text-slate-900"
+                    title={unitCostLabel}
+                    aria-label={`Cost price for ${line.productName}`}
+                  />
+                </div>
               ) : null}
 
               {showSalePrice ? (
-                <Input
-                  type="number"
-                  min={0}
-                  placeholder="Sell"
-                  value={line.salePrice ?? ""}
-                  disabled={disabled}
-                  onChange={(e) => updateLine(line.productId, { salePrice: e.target.value })}
-                  className={cn(
-                    "h-7 w-[4.5rem] shrink-0 px-1.5 text-xs tabular-nums text-slate-900",
-                    salePriceChanged(line) && "border-amber-400 bg-amber-50",
-                  )}
-                  title="Selling price — change it to update the product's price when you save"
-                  aria-label={`Selling price for ${line.productName}`}
-                />
+                <div className="flex w-[5.25rem] shrink-0 flex-col gap-0.5">
+                  <span className="whitespace-nowrap text-[9px] font-medium uppercase tracking-wide text-slate-400">
+                    Selling price
+                  </span>
+                  <Input
+                    type="number"
+                    min={0}
+                    placeholder="0"
+                    value={line.salePrice ?? ""}
+                    disabled={disabled}
+                    onChange={(e) => updateLine(line.productId, { salePrice: e.target.value })}
+                    className={cn(
+                      "h-7 px-1.5 text-xs tabular-nums text-slate-900",
+                      salePriceChanged(line) && "border-amber-400 bg-amber-50",
+                    )}
+                    title="Selling price — change it to update the product's price when you save"
+                    aria-label={`Selling price for ${line.productName}`}
+                  />
+                </div>
               ) : null}
 
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="h-7 w-7 shrink-0 text-slate-400 hover:text-rose-600"
+                className="mb-0.5 h-7 w-7 shrink-0 text-slate-400 hover:text-rose-600"
                 disabled={disabled}
                 onClick={() => removeLine(line.productId)}
               >

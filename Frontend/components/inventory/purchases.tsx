@@ -2724,7 +2724,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             onLinesChange={onPickerLinesChange}
             quantityLabel="Qty received"
             showUnitCost
-            unitCostLabel="Cost / unit"
+            unitCostLabel="Cost price"
             showSalePrice
             showCurrentQty
             previewMode="add"
