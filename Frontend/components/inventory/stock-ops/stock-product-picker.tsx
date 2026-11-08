@@ -52,6 +52,10 @@ export interface StockLineItem {
   quantity: string | number;
   unitCost?: string | number;
   currentQty?: number | null;
+  /** New selling price typed on the line (Stock In). */
+  salePrice?: string | number;
+  /** The product's selling price when the line was added — to show what changes. */
+  currentSalePrice?: number | null;
 }
 
 interface StockProductPickerProps {
@@ -64,6 +68,8 @@ interface StockProductPickerProps {
   quantityPlaceholder?: string;
   showUnitCost?: boolean;
   unitCostLabel?: string;
+  /** Stock In: editable selling price per line, prefilled with the current price. */
+  showSalePrice?: boolean;
   showCurrentQty?: boolean;
   allowSignedQuantity?: boolean;
   getCurrentQty?: (productId: string) => number | null;
@@ -125,6 +131,7 @@ export function StockProductPicker({
   quantityPlaceholder = "0",
   showUnitCost = false,
   unitCostLabel = "Unit cost",
+  showSalePrice = false,
   showCurrentQty = false,
   allowSignedQuantity = false,
   getCurrentQty,
@@ -250,6 +257,9 @@ export function StockProductPicker({
             // Prefill with the product's purchase rate; still editable per line.
             unitCost: showUnitCost && product.cost ? String(product.cost) : "",
             currentQty,
+            ...(showSalePrice
+              ? { salePrice: product.price ? String(product.price) : "", currentSalePrice: product.price ?? null }
+              : {}),
           },
         ]);
       }
@@ -260,7 +270,7 @@ export function StockProductPicker({
         searchRef.current?.focus();
       }
     },
-    [disabled, lockAdd, onAddBlocked, lineMap, getCurrentQty, onLinesChange, lines, showUnitCost, initialQuantity],
+    [disabled, lockAdd, onAddBlocked, lineMap, getCurrentQty, onLinesChange, lines, showUnitCost, showSalePrice, initialQuantity],
   );
 
   const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -285,7 +295,7 @@ export function StockProductPicker({
 
   const updateLine = (
     productId: string,
-    patch: Partial<Pick<StockLineItem, "quantity" | "unitCost">>,
+    patch: Partial<Pick<StockLineItem, "quantity" | "unitCost" | "salePrice">>,
   ) => {
     onLinesChange(
       lines.map((l) => (l.productId === productId ? { ...l, ...patch } : l)),
@@ -319,6 +329,13 @@ export function StockProductPicker({
   };
   const fmtNum = (n: number) =>
     n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  /** True when the line's selling price differs from the product's current price. */
+  const salePriceChanged = (line: StockLineItem) => {
+    if (!showSalePrice || line.salePrice === undefined || String(line.salePrice).trim() === "") return false;
+    const next = Number(line.salePrice);
+    return Number.isFinite(next) && Math.abs(next - (line.currentSalePrice ?? 0)) >= 0.005;
+  };
+  const priceChangeCount = showSalePrice ? lines.filter(salePriceChanged).length : 0;
 
   const catalogToolbar = (
     <>
@@ -630,6 +647,29 @@ export function StockProductPicker({
           ) : null}
         </div>
       ) : null}
+
+      {showSalePrice ? (
+        <div>
+          <Label className="text-[10px] uppercase tracking-wide text-slate-400">Sell price</Label>
+          <Input
+            type="number"
+            min={0}
+            placeholder="0.00"
+            value={line.salePrice ?? ""}
+            disabled={disabled}
+            onChange={(e) => updateLine(line.productId, { salePrice: e.target.value })}
+            className={cn(
+              "mt-0.5 h-8 text-sm text-slate-900",
+              salePriceChanged(line) && "border-amber-400 bg-amber-50",
+            )}
+          />
+          {salePriceChanged(line) ? (
+            <p className="mt-0.5 text-[10px] tabular-nums text-amber-700">
+              Was Rs {fmtNum(line.currentSalePrice ?? 0)}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
     </div>
   );
 
@@ -690,6 +730,11 @@ export function StockProductPicker({
                       {" · "}Rs {fmtNum(qty * cost)}
                     </span>
                   ) : null}
+                  {salePriceChanged(line) ? (
+                    <span className="font-semibold tabular-nums text-amber-700">
+                      {" · "}Sell Rs {fmtNum(line.currentSalePrice ?? 0)} → {fmtNum(Number(line.salePrice))}
+                    </span>
+                  ) : null}
                 </p>
               </div>
 
@@ -738,6 +783,23 @@ export function StockProductPicker({
                   }
                   className="h-7 w-[4.5rem] shrink-0 px-1.5 text-xs tabular-nums text-slate-900"
                   title={unitCostLabel}
+                />
+              ) : null}
+
+              {showSalePrice ? (
+                <Input
+                  type="number"
+                  min={0}
+                  placeholder="Sell"
+                  value={line.salePrice ?? ""}
+                  disabled={disabled}
+                  onChange={(e) => updateLine(line.productId, { salePrice: e.target.value })}
+                  className={cn(
+                    "h-7 w-[4.5rem] shrink-0 px-1.5 text-xs tabular-nums text-slate-900",
+                    salePriceChanged(line) && "border-amber-400 bg-amber-50",
+                  )}
+                  title="Selling price — change it to update the product's price when you save"
+                  aria-label={`Selling price for ${line.productName}`}
                 />
               ) : null}
 
@@ -808,6 +870,13 @@ export function StockProductPicker({
           ))}
         </div>
       )}
+
+      {priceChangeCount > 0 ? (
+        <div className="shrink-0 border-t border-amber-200 bg-amber-50 px-3 py-1.5 text-[11px] text-amber-900">
+          Selling price will update for <span className="font-semibold">{priceChangeCount}</span> product
+          {priceChangeCount === 1 ? "" : "s"} when you save.
+        </div>
+      ) : null}
 
       {cartFooter ? (
         <div className="shrink-0 border-t border-slate-200 bg-white p-2">

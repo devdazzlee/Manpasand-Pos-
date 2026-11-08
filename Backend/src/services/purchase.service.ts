@@ -1,4 +1,5 @@
 import { prisma } from '../prisma/client';
+import { invalidateWebCatalogCache } from '../utils/webCache';
 import { AppError } from '../utils/apiError';
 import { addDecimal, asNumber } from '../utils/helpers';
 import { Prisma } from '@prisma/client';
@@ -985,7 +986,56 @@ export class PurchaseService {
         notes: data.paymentNotes || data.invoiceRef || null,
       }).catch(() => undefined);
     }
+    // New selling prices entered on the receipt (route already checked "Change prices").
+    await this.applyStockInSellingPrices(data.lines, data.createdBy).catch((err) =>
+      console.error('[stock-in] selling price update failed', (err as Error).message),
+    );
     return result;
+  }
+
+  /**
+   * Stock In can set a product's selling price (a new delivery often comes with a
+   * new price). Only lines whose price actually differs are touched; both sale-rate
+   * fields move together (as in the product form) and each change is written to the
+   * product's price history with source STOCK_IN.
+   */
+  async applyStockInSellingPrices(
+    lines: Array<{ productId: string; salePrice?: number }>,
+    userId?: string,
+  ) {
+    const wanted = new Map<string, number>();
+    for (const l of lines) {
+      if (l.salePrice === undefined || l.salePrice === null) continue;
+      const v = Number(l.salePrice);
+      if (Number.isFinite(v) && v >= 0) wanted.set(l.productId, Math.round(v * 100) / 100);
+    }
+    if (!wanted.size) return { updated: 0 };
+    const products = await prisma.product.findMany({
+      where: { id: { in: [...wanted.keys()] } },
+      select: { id: true, sales_rate_exc_dis_and_tax: true, sales_rate_inc_dis_and_tax: true },
+    });
+    let updated = 0;
+    for (const p of products) {
+      const next = wanted.get(p.id)!;
+      const oldInc = Number(p.sales_rate_inc_dis_and_tax);
+      const oldExc = Number(p.sales_rate_exc_dis_and_tax);
+      if (Math.abs(oldInc - next) < 0.005 && Math.abs(oldExc - next) < 0.005) continue;
+      await prisma.$transaction([
+        prisma.product.update({
+          where: { id: p.id },
+          data: { sales_rate_inc_dis_and_tax: next, sales_rate_exc_dis_and_tax: next },
+        }),
+        prisma.productPriceHistory.createMany({
+          data: [
+            { product_id: p.id, field: 'sales_rate_inc_dis_and_tax', old_value: oldInc, new_value: next, source: 'STOCK_IN', changed_by: userId ?? null },
+            { product_id: p.id, field: 'sales_rate_exc_dis_and_tax', old_value: oldExc, new_value: next, source: 'STOCK_IN', changed_by: userId ?? null },
+          ],
+        }),
+      ]);
+      updated += 1;
+    }
+    if (updated) await invalidateWebCatalogCache().catch(() => undefined);
+    return { updated };
   }
 
   private buildListWhere(params: {

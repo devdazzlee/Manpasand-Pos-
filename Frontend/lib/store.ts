@@ -3,6 +3,29 @@ import { persist } from 'zustand/middleware'
 import apiClient from './apiClient'
 import { offlineDB } from './offline-db'
 import { syncManager } from './offline-sync'
+import { getActiveBranchScope } from './branch-scope'
+
+/**
+ * Stock on a product is per branch, so cached product lists are only valid for
+ * the branch they were loaded for. The key covers the user's own branch and the
+ * admin's header branch switch.
+ */
+const PRODUCTS_SCOPE_STORAGE = 'products_cache_scope'
+function productsScopeKey(): string {
+  try {
+    return `${localStorage.getItem('role') || ''}|${localStorage.getItem('branch') || ''}|${getActiveBranchScope() ?? 'all'}`
+  } catch {
+    return ''
+  }
+}
+let productsMemoryScope: string | null = null
+function offlineProductsMatchScope(): boolean {
+  try {
+    return localStorage.getItem(PRODUCTS_SCOPE_STORAGE) === productsScopeKey()
+  } catch {
+    return false
+  }
+}
 
 interface Product {
   id: string
@@ -309,6 +332,7 @@ export const useStore = create<StoreState>()(
 
         if (!hasFilters && !force) {
           if (
+            productsMemoryScope === productsScopeKey() &&
             state.products.length > 0 &&
             state.lastProductsFetch &&
             now - state.lastProductsFetch < CACHE_DURATION
@@ -322,7 +346,7 @@ export const useStore = create<StoreState>()(
         try {
           const isOnline = syncManager.canMakeRequest()
           
-          if (!isOnline) {
+          if (!isOnline && offlineProductsMatchScope()) {
             const offlineProducts = await offlineDB.getProducts()
             if (offlineProducts.length > 0) {
               const mappedProducts = offlineProducts.map(p => mapApiProductToStoreProduct(p.data || p))
@@ -389,8 +413,12 @@ export const useStore = create<StoreState>()(
 
           if (apiProducts.length > 0) {
             await offlineDB.saveProducts(rawProducts)
+            try {
+              localStorage.setItem(PRODUCTS_SCOPE_STORAGE, productsScopeKey())
+            } catch {}
           }
 
+          productsMemoryScope = productsScopeKey()
           set({
             products: apiProducts,
             productsMeta: meta,
@@ -400,7 +428,7 @@ export const useStore = create<StoreState>()(
         } catch (error) {
           console.log('Failed to fetch products:', error)
           
-          if (syncManager.canMakeRequest()) {
+          if (syncManager.canMakeRequest() && offlineProductsMatchScope()) {
             try {
               const offlineProducts = await offlineDB.getProducts()
               if (offlineProducts.length > 0) {

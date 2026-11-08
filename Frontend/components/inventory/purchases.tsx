@@ -177,6 +177,17 @@ interface DraftLine {
   sku?: string;
   quantity: number;
   costPrice: number;
+  /** Selling price typed on the receipt; saved to the product if it changed. */
+  salePrice?: string;
+  /** Product's selling price when the line was added. */
+  currentSalePrice?: number | null;
+}
+
+/** Number to send as the line's new selling price, or undefined to leave the price alone. */
+function lineSalePrice(l: DraftLine): number | undefined {
+  if (l.salePrice === undefined || l.salePrice.trim() === "") return undefined;
+  const v = Number(l.salePrice);
+  return Number.isFinite(v) && v >= 0 ? v : undefined;
 }
 
 /** One supplier bill bucket — lines share the same bill_group_id when saved. */
@@ -1056,6 +1067,8 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
         quantity: l.quantity,
         unitCost: l.costPrice,
         currentQty: stockMap[l.productId] ?? 0,
+        salePrice: l.salePrice,
+        currentSalePrice: l.currentSalePrice,
       })),
     [lines, stockMap],
   );
@@ -1073,6 +1086,8 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             sku: l.sku,
             quantity: Number(l.quantity) || 0,
             costPrice: Number(l.unitCost) || 0,
+            salePrice: l.salePrice === undefined ? undefined : String(l.salePrice),
+            currentSalePrice: l.currentSalePrice ?? null,
           })),
         };
       }),
@@ -1184,6 +1199,8 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
           sku: l.sku,
           quantity: l.quantity,
           costPrice: l.costPrice,
+          salePrice: l.salePrice,
+          currentSalePrice: l.currentSalePrice,
         })),
       })),
       activeBillId,
@@ -1285,6 +1302,9 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                     sku: l.sku,
                     quantity: Number(l.quantity) || 0,
                     costPrice: Number(l.costPrice) || 0,
+                    salePrice: typeof (l as any).salePrice === "string" ? (l as any).salePrice : undefined,
+                    currentSalePrice:
+                      typeof (l as any).currentSalePrice === "number" ? (l as any).currentSalePrice : null,
                   }))
                 : [],
             }))
@@ -1380,11 +1400,15 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             paymentMode === "CREDIT"
               ? undefined
               : settleReference.trim() || undefined,
-          lines: bill.lines.map((l) => ({
-            productId: l.productId,
-            quantity: l.quantity,
-            costPrice: l.costPrice,
-          })),
+          lines: bill.lines.map((l) => {
+            const salePrice = lineSalePrice(l);
+            return {
+              productId: l.productId,
+              quantity: l.quantity,
+              costPrice: l.costPrice,
+              ...(salePrice !== undefined ? { salePrice } : {}),
+            };
+          }),
         });
         savedBills += 1;
         if (billsWithLines.length === 1) {
@@ -2701,7 +2725,9 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             quantityLabel="Qty received"
             showUnitCost
             unitCostLabel="Cost / unit"
+            showSalePrice
             showCurrentQty
+            previewMode="add"
             lockAdd={!detailsReady}
             onAddBlocked={() => {
               setPulseDetails(true);
