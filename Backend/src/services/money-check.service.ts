@@ -376,7 +376,7 @@ export class MoneyCheckService {
     if (cashId) {
       const recent = new Date(Date.now() - 14 * 86400_000);
       const pays = await prisma.supplierPayment.findMany({
-        where: { type: { in: ['PAYMENT', 'ADVANCE'] }, method: 'CASH', paid_from_account_id: cashId, payment_date: { gte: recent } },
+        where: { type: { in: ['PAYMENT', 'ADVANCE'] }, method: 'CASH', bill_group_id: null, paid_from_account_id: cashId, payment_date: { gte: recent } },
         include: { supplier: { select: { name: true } } },
         orderBy: { payment_date: 'desc' },
         take: 30,
@@ -465,6 +465,7 @@ export class MoneyCheckService {
     const p = await prisma.supplierPayment.findUnique({ where: { id: paymentId }, include: { supplier: { select: { name: true } } } });
     if (!p) throw new AppError(404, 'Supplier payment not found');
     if (p.method !== 'CASH') throw new AppError(400, 'Only cash payments come out of a drawer');
+    if (p.bill_group_id && fromDrawer) throw new AppError(400, 'Stock In is paid by the warehouse and cannot come out of a branch register');
     const copy = await prisma.expense.findFirst({ where: { reference: p.id, particular: { startsWith: 'Purchase payment' }, cashflow_id: { not: null } }, select: { id: true } });
     // Once the owner has answered, the question leaves the problem list.
     await this.dismiss(`drawer-source:${p.id}`);

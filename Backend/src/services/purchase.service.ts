@@ -6,7 +6,6 @@ import { Prisma } from '@prisma/client';
 import { startOfBusinessMonth } from '../utils/timezone';
 import { randomUUID } from 'crypto';
 import {
-  recordCashPayOnOpenRegister,
   reverseCashPayOnRegisterByPaymentRefs,
 } from './register-cash-out.helper';
 import { ChartOfAccountsService } from './chart-of-accounts.service';
@@ -536,20 +535,9 @@ export class PurchaseService {
       };
     }, PURCHASE_TX_OPTIONS);
 
-    // Cash drawer: reverse old cash-outs tied to prior payments, then post new if needed
+    // Stock In is paid by the warehouse and never touches a branch register.
+    // This only clears cash-outs left on a register by older versions of a bill.
     await reverseCashPayOnRegisterByPaymentRefs(priorCashPaymentIds).catch(() => 0);
-
-    const method = String(result.paymentMethod || 'CASH').toUpperCase();
-    if (result.paidAmount > 0.005 && method === 'CASH' && result.paymentId) {
-      await recordCashPayOnOpenRegister({
-        particular: `Purchase payment · ${supplier.name || 'Supplier'}`,
-        amount: result.paidAmount,
-        branchId: result.warehouseBranchId,
-        userId: data.updatedBy,
-        reference: result.paymentId,
-        notes: data.paymentReference || data.invoiceRef || null,
-      }).catch(() => undefined);
-    }
 
     // Anchor may have been deleted if that line was removed — resolve any remaining line.
     const surviving = await prisma.purchase.findFirst({
@@ -971,21 +959,6 @@ export class PurchaseService {
       };
     }, PURCHASE_TX_OPTIONS);
 
-    const method = String(data.paymentMethod || 'CASH').toUpperCase();
-    if (result.paidAmount > 0 && method === 'CASH') {
-      const supplier = await prisma.supplier.findUnique({
-        where: { id: data.supplierId },
-        select: { name: true },
-      });
-      await recordCashPayOnOpenRegister({
-        particular: `Purchase payment · ${supplier?.name || 'Supplier'}`,
-        amount: result.paidAmount,
-        branchId: data.warehouseBranchId,
-        userId: data.createdBy,
-        reference: result.paymentId,
-        notes: data.paymentNotes || data.invoiceRef || null,
-      }).catch(() => undefined);
-    }
     // New selling prices entered on the receipt (route already checked "Change prices").
     await this.applyStockInSellingPrices(data.lines, data.createdBy).catch((err) =>
       console.error('[stock-in] selling price update failed', (err as Error).message),

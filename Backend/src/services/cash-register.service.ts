@@ -151,6 +151,7 @@ export class CashRegisterService {
           payment_date: { gte: s.opened_at, lte: end },
           method: { equals: 'CASH', mode: 'insensitive' },
           type: { in: ['PAYMENT', 'ADVANCE'] },
+          bill_group_id: null, // Stock In is paid by the warehouse, not a branch till
         },
         include: { supplier: { select: { name: true } } },
       }),
