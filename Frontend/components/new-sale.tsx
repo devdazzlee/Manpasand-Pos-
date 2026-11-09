@@ -61,6 +61,7 @@ import {
   Split,
 } from "lucide-react";
 import { SplitPaymentDialog, type CheckoutMethod, type TenderResult } from "@/components/pos/split-payment-dialog";
+import { parseScannedLabel, type ScannedLabel } from "@/lib/labelWeight";
 import { toast } from "sonner";
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
 import {
@@ -1483,8 +1484,8 @@ export function NewSale() {
       // But keep actualUnitPrice as original for calculations
       actualUnitPrice = originalProductPrice; // Always use original price for line total
     } else {
-      // If no custom price, ensure minimum quantity of 1
-      finalQuantity = Math.max(1, quantity);
+      // Weighed stickers pass part of a unit (250g = 0.25 kg); anything else adds one.
+      finalQuantity = quantity > 0 ? quantity : 1;
     }
 
     const affectedLineId = `${product.id}_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
@@ -2840,28 +2841,11 @@ export function NewSale() {
     
     // Process immediately - zero delays, zero async operations
     
-    // Ultra-fast parsing - single pass extraction
-    const dashIndex = trimmedValue.indexOf('-');
-    let productCode: string;
-    let customPrice: number | undefined = undefined;
-    
-    if (dashIndex > 0) {
-      // Extract code and price in one operation
-      productCode = trimmedValue.substring(0, dashIndex).trim();
-      const priceStr = trimmedValue.substring(dashIndex + 1).trim();
-      // Parse price - handle both integer and decimal values
-      // Remove any non-numeric characters except decimal point
-      const cleanPriceStr = priceStr.replace(/[^\d.]/g, '');
-      const parsedPrice = parseFloat(cleanPriceStr);
-      if (!isNaN(parsedPrice) && parsedPrice >= 0 && isFinite(parsedPrice)) {
-        customPrice = parsedPrice;
-        console.log('Barcode scan - Code:', productCode, 'Raw price string:', priceStr, 'Parsed price:', customPrice);
-      } else {
-        console.error('Failed to parse price from:', priceStr, 'Cleaned:', cleanPriceStr, 'Parsed:', parsedPrice);
-      }
-    } else {
-      productCode = trimmedValue.trim();
-    }
+    // A code that really ends in -123 is that code, not a price.
+    const wholeValueIsCode = barcodeMap.has(trimmedValue.toLowerCase());
+    const scanned = wholeValueIsCode ? { code: trimmedValue } as ScannedLabel : parseScannedLabel(trimmedValue);
+    const productCode = scanned.code;
+    const customPrice = scanned.legacyPrice;
 
     // Product lookup - use exact code first, then fallback to best match
     const codeLower = productCode.toLowerCase().trim();
@@ -2941,7 +2925,7 @@ export function NewSale() {
         productBarcode: product.barcode,
         productPrice: product.price
       });
-      addToCart(product, 1, customPrice);
+      addToCart(product, scanned.quantity ?? 1, customPrice);
     } else {
       console.error('Product not found for code:', productCode);
     }

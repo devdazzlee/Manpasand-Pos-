@@ -83,6 +83,7 @@ import {
   initialManualBarcodeForProduct,
   formatBarcodeLabelTitle,
 } from "@/lib/labelBarcode";
+import { labelQuantityFromWeight, withLabelQuantity } from "@/lib/labelWeight";
 import {
   checkPrintServer,
   deriveLabelLanguageHint,
@@ -156,6 +157,33 @@ const LABEL_SIZES: Record<string, { label: string; w: number; h: number; css: st
 const DEFAULT_LABEL_SIZE = "58x40mm";
 // New key: browsers had 50×25 auto-saved under the old one, which is not this shop's roll.
 const SETTINGS_KEY = "barcode-generator-settings-v2";
+
+/** Lets the box be cleared while typing; an empty or zero value goes back to the last valid number. */
+function CopiesInput({ value, onChange }: { value: number; onChange: (next: number) => void }) {
+  const [draft, setDraft] = useState(String(value));
+
+  useEffect(() => {
+    setDraft(String(value));
+  }, [value]);
+
+  return (
+    <input
+      type="text"
+      inputMode="numeric"
+      aria-label="Copies"
+      value={draft}
+      onFocus={(e) => e.target.select()}
+      onChange={(e) => {
+        const digits = e.target.value.replace(/\D/g, "");
+        setDraft(digits);
+        const next = parseInt(digits, 10);
+        if (next > 0) onChange(next);
+      }}
+      onBlur={() => setDraft(String(value))}
+      className="h-8 w-10 border-x border-slate-200 bg-white text-center text-sm font-semibold tabular-nums focus:outline-none"
+    />
+  );
+}
 
 function BarcodeSourceToggle({
   value,
@@ -505,61 +533,14 @@ export default function BarcodeGenerator() {
     return weight;
   };
 
-  const calculatePriceByWeight = (netWeightInput: any, basePrice: any) => {
+  const calculatePriceByWeight = (netWeightInput: any, basePrice: any, unitName?: string) => {
     if (!netWeightInput || !basePrice) return basePrice || 0;
-
-    const input = netWeightInput.toLowerCase().trim();
-    const numberMatch = input.match(/(\d+\.?\d*)/);
-    if (!numberMatch) return basePrice;
-
-    const weightValue = Number.parseFloat(numberMatch[1]);
-    if (weightValue <= 0) return basePrice;
-
-    let multiplier = 1;
-
-    if (input.includes("kg") || input.includes("kilo")) {
-      multiplier = weightValue;
-    } else if (
-      input.includes("g") &&
-      !input.includes("kg") &&
-      !input.includes("mg")
-    ) {
-      multiplier = weightValue / 1000;
-    } else if (input.includes("mg")) {
-      multiplier = weightValue / 1000000;
-    } else if (input.includes("lb") || input.includes("pound")) {
-      multiplier = weightValue * 0.453592;
-    } else if (input.includes("oz") && !input.includes("fl")) {
-      multiplier = weightValue * 0.0283495;
-    } else if (
-      input.includes("l") &&
-      !input.includes("ml") &&
-      !input.includes("fl")
-    ) {
-      multiplier = weightValue;
-    } else if (input.includes("ml") || input.includes("milliliter")) {
-      multiplier = weightValue / 1000;
-    } else if (input.includes("ser") || input.includes("seer")) {
-      multiplier = weightValue * 0.933105;
-    } else if (input.includes("maund")) {
-      multiplier = weightValue * 37.3242;
-    } else if (
-      input.includes("pc") ||
-      input.includes("piece") ||
-      input.includes("pcs")
-    ) {
-      multiplier = weightValue;
-    } else if (input.includes("dozen")) {
-      multiplier = weightValue * 12;
-    } else {
-      multiplier = weightValue / 1000;
-    }
-
-    const finalPrice = basePrice * multiplier;
-    return finalPrice.toFixed(2);
+    const quantity = labelQuantityFromWeight(netWeightInput, unitName);
+    if (quantity === null) return basePrice;
+    return (basePrice * quantity).toFixed(2);
   };
 
-  const formatWeightDisplay = (netWeightInput: any) => {
+  const formatWeightDisplay = (netWeightInput: any, unitName?: string) => {
     if (!netWeightInput) return "Not specified";
 
     // CRITICAL: Preserve the exact input string to avoid any conversion errors
@@ -595,6 +576,7 @@ export default function BarcodeGenerator() {
     const numberMatch = input.match(/(\d+\.?\d*)/);
     if (numberMatch) {
       const number = Number.parseFloat(numberMatch[1]);
+      if (!isWeightUnit(unitName)) return `${number} pcs`;
       return `${number}g`; // Default to grams
     }
 
@@ -946,11 +928,10 @@ export default function BarcodeGenerator() {
   // Printer detection is now handled globally in Printer Settings page
 
 
+  // Not rounded to whole rupees: the sticker must match what New Sale charges.
   const labelPriceForItem = (sp: SelectedProductItem) =>
-    Math.round(
-      Number(
-        calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax),
-      ),
+    Number(
+      calculatePriceByWeight(sp.netWeight, sp.product.sales_rate_exc_dis_and_tax, sp.product.unitName),
     );
 
   const labelBarcodeForItem = (sp: SelectedProductItem) =>
@@ -961,6 +942,13 @@ export default function BarcodeGenerator() {
       code: sp.product.code,
       calculatedPriceInt: labelPriceForItem(sp),
     });
+
+  /** What is actually printed: the product's barcode plus the label's quantity. */
+  const printedBarcodeForItem = (sp: SelectedProductItem) =>
+    withLabelQuantity(
+      labelBarcodeForItem(sp),
+      labelQuantityFromWeight(sp.netWeight, sp.product.unitName),
+    );
 
   /** Save Custom-mode barcodes so New Sale scan/search matches the sticker. */
   const persistCustomBarcodesForPosScan = async (): Promise<boolean> => {
@@ -996,9 +984,9 @@ export default function BarcodeGenerator() {
       .flatMap((sp) => {
         const n = Math.max(1, sp.copies || 1);
         const price = labelPriceForItem(sp);
-        const barcodeValue = labelBarcodeForItem(sp);
+        const barcodeValue = printedBarcodeForItem(sp);
         const netWeight = sp.netWeight
-          ? formatWeightDisplay(sp.netWeight)
+          ? formatWeightDisplay(sp.netWeight, sp.product.unitName)
           : undefined;
         const base: BarcodeLabelItem = {
           id: sp.id,
@@ -1126,7 +1114,7 @@ export default function BarcodeGenerator() {
   const previewItem = selectedProducts[safePreviewIndex];
   const previewPrice = previewItem ? labelPriceForItem(previewItem) : 0;
   const previewBarcodeValue = previewItem
-    ? labelBarcodeForItem(previewItem)
+    ? printedBarcodeForItem(previewItem)
     : "000000000";
   const previewAutoBarcode = previewItem
     ? previewAutoBarcodeValue(
@@ -1667,7 +1655,7 @@ export default function BarcodeGenerator() {
                 ) : null}
                 {previewItem?.netWeight ? (
                   <p className="text-[10px] font-semibold text-slate-800">
-                    {formatWeightDisplay(previewItem.netWeight)}
+                    {formatWeightDisplay(previewItem.netWeight, previewItem.product.unitName)}
                   </p>
                 ) : null}
                 {includePrice && (
@@ -1775,16 +1763,9 @@ export default function BarcodeGenerator() {
                             >
                               <Minus className="h-3.5 w-3.5" />
                             </button>
-                            <input
-                              type="number"
-                              inputMode="numeric"
-                              min={1}
+                            <CopiesInput
                               value={item.copies}
-                              onChange={(e) => {
-                                const n = parseInt(e.target.value, 10);
-                                updateProductData(item.id, "copies", Number.isFinite(n) && n > 0 ? n : 1);
-                              }}
-                              className="h-8 w-10 border-x border-slate-200 bg-white text-center text-sm font-semibold tabular-nums outline-none [appearance:textfield] [&::-webkit-inner-spin-button]:appearance-none [&::-webkit-outer-spin-button]:appearance-none"
+                              onChange={(next) => updateProductData(item.id, "copies", next)}
                             />
                             <button
                               type="button"
@@ -1843,13 +1824,7 @@ export default function BarcodeGenerator() {
                       {itemBarcodeMode(item) === "auto" ? (
                         <p className="text-[10px] text-slate-500">
                           Will print:{" "}
-                          <span className="font-mono">
-                            {previewAutoBarcodeValue(
-                              item.product.sku,
-                              item.product.code,
-                              labelPriceForItem(item),
-                            )}
-                          </span>
+                          <span className="font-mono">{printedBarcodeForItem(item)}</span>
                         </p>
                       ) : null}
                       {itemBarcodeMode(item) === "manual" ? (
