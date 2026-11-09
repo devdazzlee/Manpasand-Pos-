@@ -1,3 +1,4 @@
+import { assertReceivesAtWarehouse } from '../utils/stock-in-location';
 import { prisma } from '../prisma/client';
 import { invalidateWebCatalogCache } from '../utils/webCache';
 import { AppError } from '../utils/apiError';
@@ -233,6 +234,7 @@ export class PurchaseService {
     const oldBranchId = existingLines[0].warehouse_branch_id;
     const nextSupplierId = data.supplierId || oldSupplierId;
     const nextBranchId = data.warehouseBranchId || oldBranchId;
+    if (nextBranchId !== oldBranchId) await assertReceivesAtWarehouse(nextBranchId);
 
     const supplier = await prisma.supplier.findUnique({ where: { id: nextSupplierId } });
     if (!supplier) throw new AppError(404, 'Supplier not found');
@@ -641,15 +643,7 @@ export class PurchaseService {
     deliveryStatus?: 'PARTIAL' | 'COMPLETE';
     createdBy: string;
   }) {
-    const warehouse = await prisma.branch.findFirst({
-      where: { id: data.warehouseBranchId, branch_type: 'WAREHOUSE' },
-    });
-    if (!warehouse) {
-      const anyBranch = await prisma.branch.findUnique({
-        where: { id: data.warehouseBranchId },
-      });
-      if (!anyBranch) throw new AppError(404, 'Warehouse branch not found');
-    }
+    await assertReceivesAtWarehouse(data.warehouseBranchId);
 
     return prisma.$transaction(async (tx) => {
       const billGroupId = randomUUID();
@@ -778,7 +772,7 @@ export class PurchaseService {
     const branch = await prisma.branch.findUnique({
       where: { id: data.warehouseBranchId },
     });
-    if (!branch) throw new AppError(404, 'Warehouse branch not found');
+    await assertReceivesAtWarehouse(data.warehouseBranchId);
 
     const supplier = await prisma.supplier.findUnique({
       where: { id: data.supplierId },
@@ -1752,6 +1746,8 @@ export class PurchaseService {
     if (!Number.isFinite(sale) || sale < 0) {
       throw new AppError(400, 'Sale price must be >= 0');
     }
+
+    await assertReceivesAtWarehouse(anchor.warehouse_branch_id);
 
     let billGroupId = anchor.bill_group_id;
     if (!billGroupId) {

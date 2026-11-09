@@ -12,7 +12,7 @@ import {
 import { catalogDefaults, catalogDeleteOptions } from './catalog-defaults.service';
 import { PurchaseInvoiceService } from './purchaseInvoice.service';
 import { assertPeriodOpen } from './period-lock.service';
-import { recordCashPayOnOpenRegister, syncSupplierPaymentDrawerCopy } from './register-cash-out.helper';
+import { syncSupplierPaymentDrawerCopy } from './register-cash-out.helper';
 import {
     SUPPLIER_CASH_TYPES,
     SUPPLIER_INVOICE_TYPES,
@@ -802,22 +802,7 @@ export class SupplierService {
             include: { user: { select: { email: true } }, purchase_invoice: { select: { invoice_number: true } } },
         });
         if (invoiceId) await PurchaseInvoiceService.recompute(invoiceId);
-        // Only cash taken from today's open drawer lowers that register — not cash
-        // already taken out on an earlier day (e.g. yesterday's takings paid today).
-        if (SUPPLIER_CASH_TYPES.has(type) && method === 'CASH' && data.fromDrawer !== false) {
-            const supplier = await prisma.supplier.findUnique({
-                where: { id: supplierId },
-                select: { name: true },
-            });
-            await recordCashPayOnOpenRegister({
-                particular: `Purchase payment · ${supplier?.name || 'Supplier'}`,
-                amount: Number(data.amount),
-                userId: createdBy,
-                reference: payment.id,
-                notes: data.notes || data.reference || null,
-                paidFromAccountId: paidFrom,
-            }).catch(() => undefined);
-        }
+        // Supplier payments are made by the warehouse / head office and never touch a branch till.
         return this.serializePayment(payment);
     }
 

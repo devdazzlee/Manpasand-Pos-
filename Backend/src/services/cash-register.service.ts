@@ -128,7 +128,7 @@ export class CashRegisterService {
       [...byId.values()].map((o) => `${o.particular.trim().toLowerCase()}|${o.amount}`),
     );
 
-    const [salaries, commissions, supplierPays] = await Promise.all([
+    const [salaries, commissions] = await Promise.all([
       prisma.salary.findMany({
         where: {
           is_paid: true,
@@ -144,16 +144,6 @@ export class CashRegisterService {
           OR: [{ payment_method: null }, { payment_method: { equals: 'CASH', mode: 'insensitive' } }],
         },
         include: { employee: { select: { name: true } } },
-      }),
-      // Shown in the expenses modal; not auto-deducted (many purchase pays are not till cash).
-      prisma.supplierPayment.findMany({
-        where: {
-          payment_date: { gte: s.opened_at, lte: end },
-          method: { equals: 'CASH', mode: 'insensitive' },
-          type: { in: ['PAYMENT', 'ADVANCE'] },
-          bill_group_id: null, // Stock In is paid by the warehouse, not a branch till
-        },
-        include: { supplier: { select: { name: true } } },
       }),
     ]);
 
@@ -207,25 +197,7 @@ export class CashRegisterService {
     }
     const deducted = [...byId.values()];
     const purchases: Outflow[] = [];
-    for (const pay of supplierPays) {
-      const label = `Purchase payment · ${pay.supplier?.name || 'Supplier'}`;
-      const amt = num(pay.amount);
-      const key = `${label.trim().toLowerCase()}|${amt}`;
-      // Already on the drawer as an expense (cash stock-in / supplier pay) — don't list twice.
-      if (linkedKeys.has(key)) continue;
-      purchases.push({
-        id: `purchase:${pay.id}`,
-        kind: 'PURCHASE',
-        particular: label,
-        amount: amt,
-        date: pay.payment_date.toISOString(),
-        paymentMethod: 'CASH',
-        status: 'APPROVED',
-        cashierId: pay.created_by,
-        cashierName: null,
-        branchId: s.branch_id,
-      });
-    }
+    // Supplier payments belong to the warehouse / head office, so none appear on a branch till.
 
     return { deducted, purchases };
   }

@@ -5,7 +5,7 @@ import { ChartOfAccountsService } from './chart-of-accounts.service';
 import { CashRegisterService } from './cash-register.service';
 import { ExpenseService } from './expense.service';
 import { SupplierService } from './supplier.service';
-import { drawerDate, recordCashPayOnOpenRegister, refreshClosedRegister, syncSupplierPaymentDrawerCopy } from './register-cash-out.helper';
+import { drawerDate, refreshClosedRegister, syncSupplierPaymentDrawerCopy } from './register-cash-out.helper';
 
 /* ============================================================
  * Money Check — lets the owner find and fix money mistakes without a
@@ -372,36 +372,6 @@ export class MoneyCheckService {
       });
     }
 
-    // e) cash supplier payments made while a register was open — confirm drawer vs kept cash
-    if (cashId) {
-      const recent = new Date(Date.now() - 14 * 86400_000);
-      const pays = await prisma.supplierPayment.findMany({
-        where: { type: { in: ['PAYMENT', 'ADVANCE'] }, method: 'CASH', bill_group_id: null, paid_from_account_id: cashId, payment_date: { gte: recent } },
-        include: { supplier: { select: { name: true } } },
-        orderBy: { payment_date: 'desc' },
-        take: 30,
-      });
-      for (const p of pays) {
-        const session = await prisma.cashFlow.findFirst({
-          where: { opened_at: { lte: p.payment_date }, OR: [{ closed_at: null }, { closed_at: { gte: p.payment_date } }] },
-          select: { id: true, opened_at: true },
-        });
-        if (!session) continue;
-        const copy = await prisma.expense.findFirst({ where: { reference: p.id, particular: { startsWith: 'Purchase payment' }, cashflow_id: { not: null } }, select: { id: true } });
-        out.push({
-          id: `drawer-source:${p.id}`,
-          kind: 'DRAWER_SOURCE',
-          severity: 'low',
-          title: `${p.supplier?.name ?? 'Supplier'} cash payment ${Math.round(num(p.amount))} — ${copy ? "taken from that day's drawer" : 'from cash already taken out'}`,
-          detail: copy
-            ? "It lowered the register's expected cash. If it was really paid from earlier days' cash (owner / safe), switch it."
-            : "It did not touch the register. If the cashier paid it from the till, switch it.",
-          date: toBusinessYmd(p.payment_date),
-          amount: num(p.amount),
-          action: { type: 'DRAWER_SOURCE', paymentId: p.id, fromDrawer: !!copy },
-        });
-      }
-    }
 
     const order = { high: 0, medium: 1, low: 2 };
     return out
@@ -465,42 +435,12 @@ export class MoneyCheckService {
     const p = await prisma.supplierPayment.findUnique({ where: { id: paymentId }, include: { supplier: { select: { name: true } } } });
     if (!p) throw new AppError(404, 'Supplier payment not found');
     if (p.method !== 'CASH') throw new AppError(400, 'Only cash payments come out of a drawer');
-    if (p.bill_group_id && fromDrawer) throw new AppError(400, 'Stock In is paid by the warehouse and cannot come out of a branch register');
+    if (fromDrawer) throw new AppError(400, 'Supplier payments never come out of a branch register');
     const copy = await prisma.expense.findFirst({ where: { reference: p.id, particular: { startsWith: 'Purchase payment' }, cashflow_id: { not: null } }, select: { id: true } });
     // Once the owner has answered, the question leaves the problem list.
     await this.dismiss(`drawer-source:${p.id}`);
-    if (!fromDrawer) {
-      if (copy) await syncSupplierPaymentDrawerCopy(p.id, null);
-      return { paymentId, fromDrawer: false };
-    }
-    if (copy) return { paymentId, fromDrawer: true };
-    const session = await prisma.cashFlow.findFirst({
-      where: { opened_at: { lte: p.payment_date }, OR: [{ closed_at: null }, { closed_at: { gte: p.payment_date } }] },
-      select: { id: true, branch_id: true, status: true, opened_at: true },
-    });
-    if (!session) throw new AppError(400, 'No register was open when this payment was made');
-    if (session.status === 'OPEN') {
-      await recordCashPayOnOpenRegister({ particular: `Purchase payment · ${p.supplier?.name || 'Supplier'}`, amount: num(p.amount), userId, reference: p.id, paidFromAccountId: p.paid_from_account_id });
-    } else {
-      await prisma.expense.create({
-        data: {
-          particular: `Purchase payment · ${p.supplier?.name || 'Supplier'}`,
-          amount: num(p.amount),
-          payment_method: 'CASH',
-          reference: p.id,
-          expense_date: drawerDate(session.opened_at, p.payment_date),
-          created_at: p.payment_date,
-          branch_id: session.branch_id,
-          cashflow_id: session.id,
-          status: 'APPROVED',
-          approved_by: userId ?? null,
-          approved_at: new Date(),
-          created_by: userId ?? null,
-        },
-      });
-      await refreshClosedRegister(session.id);
-    }
-    return { paymentId, fromDrawer: true };
+    if (copy) await syncSupplierPaymentDrawerCopy(p.id, null);
+    return { paymentId, fromDrawer: false };
   }
 
   /* ------------------------------ 4. day book ------------------------------ */
