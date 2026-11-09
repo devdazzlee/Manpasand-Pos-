@@ -1005,9 +1005,12 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     });
 
   useEffect(() => {
-    // New stock is always received at the warehouse; branches get it by Transfer.
-    const warehouse = branches.find((b) => (b.branch_type || "").toUpperCase() === "WAREHOUSE");
-    if (warehouse && warehouseBranchId !== warehouse.id) setWarehouseBranchId(warehouse.id);
+    if (!warehouseBranchId && branches.length > 0) {
+      const warehouse =
+        branches.find((b) => (b.branch_type || "").toUpperCase() === "WAREHOUSE") ||
+        branches[0];
+      if (warehouse) setWarehouseBranchId(warehouse.id);
+    }
   }, [branches, warehouseBranchId]);
 
   const [stockMap, setStockMap] = useState<Record<string, number>>({});
@@ -1255,6 +1258,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
       }
       const p = held.payload || {};
       if (p.supplierId) setSupplierId(p.supplierId);
+      if (p.warehouseBranchId) setWarehouseBranchId(p.warehouseBranchId);
       if (p.purchaseDate) {
         const d = new Date(p.purchaseDate);
         if (!Number.isNaN(d.getTime())) setPurchaseDate(d);
@@ -2471,14 +2475,36 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
 
                 <div className="space-y-1">
                   <Label className="text-xs text-slate-600">
-                    Receive into
+                    Receive into branch <span className="text-red-500">*</span>
                   </Label>
                   {metaLoading ? (
                     <StockSelectSkeleton label="Loading branches" className="h-9" />
                   ) : (
-                    <div className="flex h-9 items-center rounded-md border border-slate-200 bg-slate-50 px-3 text-sm font-medium text-black">
-                      {branches.find((b) => b.id === warehouseBranchId)?.name || "Warehouse not found"}
-                    </div>
+                    <Select
+                      value={warehouseBranchId}
+                      onValueChange={(v) => {
+                        setWarehouseBranchId(v);
+                        clearError("warehouseBranchId");
+                        setPulseDetails(false);
+                      }}
+                    >
+                      <SelectTrigger
+                        className={cn(
+                          "h-9 text-sm text-black",
+                          formErrors.warehouseBranchId && "border-red-500",
+                          pulseDetails && !warehouseBranchId && "border-amber-500 ring-2 ring-amber-200",
+                        )}
+                      >
+                        <SelectValue placeholder="Select branch" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {branches.map((b) => (
+                          <SelectItem key={b.id} value={b.id} className="text-sm">
+                            {b.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   )}
                   {formErrors.warehouseBranchId ? (
                     <p className="text-[11px] text-red-600">
@@ -2712,10 +2738,10 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             }}
             disabledHint={
               !supplierId && !warehouseBranchId
-                ? "Choose a supplier above"
+                ? "Choose a supplier and branch above"
                 : !supplierId
                   ? "Choose a supplier above"
-                  : "No warehouse is set up"
+                  : "Choose which branch receives this stock"
             }
             catalogTitle="Products"
             catalogSubtitle={
@@ -3151,13 +3177,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                             <SelectValue placeholder="Select branch" />
                           </SelectTrigger>
                           <SelectContent>
-                            {branches
-                              .filter(
-                                (b) =>
-                                  (b.branch_type || "").toUpperCase() === "WAREHOUSE" ||
-                                  b.id === (purchaseDetail as any)?.warehouse_branch_id,
-                              )
-                              .map((b) => (
+                            {branches.map((b) => (
                               <SelectItem key={b.id} value={b.id}>
                                 {b.name}
                               </SelectItem>

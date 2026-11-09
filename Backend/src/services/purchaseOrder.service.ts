@@ -1,4 +1,3 @@
-import { assertReceivesAtWarehouse } from '../utils/stock-in-location';
 import { Prisma, PurchaseOrderStatus } from '@prisma/client';
 import { prisma } from '../prisma/client';
 import { AppError } from '../utils/apiError';
@@ -295,8 +294,6 @@ export class PurchaseOrderService {
                 );
             }
         }
-
-        await assertReceivesAtWarehouse(po.branch_id);
 
         await prisma.$transaction(async (tx) => {
             for (const l of lines) {
