@@ -205,16 +205,16 @@ export function OpenRegisterDialog({
       >
         <DialogHeader>
           <DialogTitle>Open register{branchName ? ` — ${branchName}` : ""}</DialogTitle>
-          <DialogDescription>Count the cash in the drawer before the first bill. It's checked against last night's closing.</DialogDescription>
+          <DialogDescription>Every day starts with 0 opening cash, because the drawer is emptied at closing. Enter an amount only if cash was left in the drawer.</DialogDescription>
         </DialogHeader>
         {expectedLoading ? (
           <div className="flex items-center gap-2 rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">
             <Loader2 className="h-4 w-4 animate-spin" />
-            Loading last closing amount…
+            Loading expected opening…
           </div>
         ) : expected ? (
           <div className="rounded-lg border border-stone-200 bg-[#fcf8f2] px-3 py-2 text-sm text-stone-700">
-            Last closing cash: <b>{rs(expected.amount)}</b>
+            Expected opening cash: <b>{rs(expected.amount)}</b>
             <button type="button" className="ml-2 text-xs font-medium text-[#a67c2e] underline" onClick={() => setAmount(String(expected.amount))}>
               use this
             </button>
@@ -223,7 +223,7 @@ export function OpenRegisterDialog({
           <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-2 text-sm text-stone-600">No previous closing found — enter the float you're starting with.</div>
         )}
         <CashCount amount={amount} setAmount={setAmount} counts={counts} setCounts={setCounts} label="Opening cash" />
-        {expected && <DiffBanner expected={expected.amount} actual={value} label="Last closing" />}
+        {expected && <DiffBanner expected={expected.amount} actual={value} label="Expected opening" />}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel

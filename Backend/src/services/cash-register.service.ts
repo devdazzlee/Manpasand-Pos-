@@ -640,13 +640,14 @@ export class CashRegisterService {
 
   /* ------------------------------ previews (for approval checks) ------------------------------ */
 
+  /** Every day starts with an empty drawer (the cash is taken out at closing), so the expected opening is 0. */
   async expectedOpening(branchId: string) {
     const last = await prisma.cashFlow.findFirst({
-      where: { branch_id: branchId, status: 'CLOSED', closing: { not: null } },
+      where: { branch_id: branchId, status: 'CLOSED' },
       orderBy: { closed_at: 'desc' },
-      select: { closing: true, closed_at: true },
+      select: { closed_at: true },
     });
-    return last ? { amount: num(last.closing), at: last.closed_at } : null;
+    return { amount: 0, at: last?.closed_at ?? null };
   }
 
   async openNeedsApproval(actor: Actor, body: { branchId?: string; opening: number }) {

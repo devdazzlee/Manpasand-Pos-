@@ -719,7 +719,7 @@ function LiveRegister({
 
       {session.openingVariance != null && Math.abs(session.openingVariance) >= 0.5 && (
         <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          Opening cash differed from last closing ({rs(session.expectedOpening)}) by <b>{signedRs(session.openingVariance)}</b>
+          Opening cash differed from the expected opening ({rs(session.expectedOpening)}) by <b>{signedRs(session.openingVariance)}</b>
           {session.openingNote ? ` — ${session.openingNote}` : ""}.
         </div>
       )}

@@ -9,8 +9,8 @@ import { BUSINESS_TIMEZONE, businessTodayYmd, localRange, zonedLocalToUtc } from
  *  - 07:55  Any register still open from a previous day is closed automatically.
  *           Nobody counted the cash, so the close uses the system's expected cash,
  *           is marked "Auto-closed", and is left PENDING for a manager to review.
- *  - 08:00  Every active shop branch without a register gets one opened, with the
- *           opening float carried over from the last closing.
+ *  - 08:00  Every active shop branch without a register gets one opened with
+ *           0 opening cash (the drawer is emptied at every closing).
  *
  * Staff still close the register by hand at the end of the day as normal; the
  * 07:55 run only catches registers that were forgotten.
@@ -119,11 +119,11 @@ export async function autoOpenRegisters() {
         console.warn(`[register-scheduler] no user to open ${b.name} under — skipped`);
         continue;
       }
-      const expected = await registers.expectedOpening(b.id);
-      const opening = Math.max(0, expected?.amount ?? 0);
+      // Every day starts with an empty drawer: the cash is taken out at closing.
+      const opening = 0;
       const s: any = await registers.open(
         { userId: opener.id, role: opener.role, branchId: b.id },
-        { branchId: b.id, opening, note: 'Opened automatically at 8:00 AM. Opening float carried over from the last closing.' },
+        { branchId: b.id, opening, note: 'Opened automatically at 8:00 AM with 0 opening cash.' },
       );
       opened += 1;
       await audit('register.auto_open', b.id, s?.id ?? b.id, `Register auto-opened (${b.name}) at 8:00 AM`, { opening });
