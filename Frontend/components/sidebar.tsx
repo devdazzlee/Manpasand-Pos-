@@ -95,6 +95,7 @@ const PURCHASE_ROLES: UserRole[] = [
   "SUPER_ADMIN",
   "ADMIN",
   "PURCHASE_MANAGER",
+  "WAREHOUSE_MANAGER",
 ];
 const TRANSFER_ROLES: UserRole[] = [
   "SUPER_ADMIN",

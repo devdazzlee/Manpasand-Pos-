@@ -112,7 +112,7 @@ type QuickAction = {
 };
 
 const QUICK_ACTIONS: QuickAction[] = [
-  { label: "Stock In", description: "Receive purchases", tab: "purchases", icon: ShoppingBag, tone: "bg-emerald-50 text-emerald-600", roles: ["SUPER_ADMIN", "ADMIN", "PURCHASE_MANAGER"] },
+  { label: "Stock In", description: "Receive purchases", tab: "purchases", icon: ShoppingBag, tone: "bg-emerald-50 text-emerald-600", roles: ["SUPER_ADMIN", "ADMIN", "PURCHASE_MANAGER", "WAREHOUSE_MANAGER"] },
   { label: "Transfers", description: "Move between branches", tab: "transfers", icon: Truck, tone: "bg-blue-50 text-blue-600" },
   { label: "Stock Out", description: "Damage, loss, return", tab: "stock-out", icon: PackageMinus, tone: "bg-rose-50 text-rose-600", roles: ["SUPER_ADMIN", "ADMIN"] },
   { label: "Adjustments", description: "Correct stock levels", tab: "stock-adjustment", icon: ClipboardList, tone: "bg-amber-50 text-amber-600" },
@@ -1166,7 +1166,7 @@ export function InventoryDashboard({ onNavigate }: { onNavigate?: (tab: string) 
           ) : (
             <EmptyBlock icon={ShoppingBag} message="No purchases received this month" />
           )}
-          {(!userRole || ["SUPER_ADMIN", "ADMIN", "PURCHASE_MANAGER"].includes(userRole)) && (
+          {(!userRole || ["SUPER_ADMIN", "ADMIN", "PURCHASE_MANAGER", "WAREHOUSE_MANAGER"].includes(userRole)) && (
             <div className="border-t border-slate-100 bg-slate-50/50 px-5 py-3">
               <Button size="sm" className="h-8" onClick={() => goTo("purchases")}>
                 Open Stock In
