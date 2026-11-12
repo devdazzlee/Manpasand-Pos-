@@ -43,25 +43,32 @@ function suppressMobileAutofill(el: HTMLElement) {
   }
 }
 
+function shouldKeepKeyboard(el: HTMLElement) {
+  // Never dismiss mid-edit sale / search fields — blur closes the phone keyboard
+  // and would also commit half-typed qty/price values.
+  return Boolean(
+    el.closest('[data-quantity-input="true"]') ||
+      el.closest('[data-price-input="true"]') ||
+      el.closest('[data-amount-input="true"]') ||
+      el.closest('[data-quick-qty="true"]') ||
+      el.closest('[data-discount-select="true"]') ||
+      el.closest('[data-product-search="true"]') ||
+      el.closest('[data-keep-keyboard="true"]'),
+  )
+}
+
 function blurActiveField() {
   const active = document.activeElement
   if (!isTextField(active)) return
-  // Never dismiss mid-edit sale fields — blur would commit a half-typed qty/price.
-  if (
-    active.closest('[data-quantity-input="true"]') ||
-    active.closest('[data-price-input="true"]') ||
-    active.closest('[data-amount-input="true"]') ||
-    active.closest('[data-quick-qty="true"]') ||
-    active.closest('[data-discount-select="true"]')
-  ) {
-    return
-  }
+  if (shouldKeepKeyboard(active)) return
   active.blur()
 }
 
 /**
- * Phones only: hide the keyboard (and Chrome autofill chips) when the user
- * starts scrolling. Desktop focus, autofill, and keyboard behavior are untouched.
+ * Phones only: hide the keyboard when the user intentionally swipes away from
+ * a field. Do NOT listen to generic scroll / visualViewport events — product
+ * search reflow and scrollIntoView fire those on every keystroke and would
+ * close the keyboard after each character.
  */
 export function useDismissKeyboardOnScroll() {
   useEffect(() => {
@@ -77,11 +84,6 @@ export function useDismissKeyboardOnScroll() {
       if (target instanceof HTMLElement && isTextField(target)) {
         suppressMobileAutofill(target)
       }
-    }
-
-    const dismissIfScrolling = () => {
-      if (!isTouchUi() || Date.now() < ignoreUntil) return
-      blurActiveField()
     }
 
     const onTouchStart = (event: TouchEvent) => {
@@ -112,19 +114,13 @@ export function useDismissKeyboardOnScroll() {
     }
 
     document.addEventListener("focusin", onFocusIn, true)
-    document.addEventListener("scroll", dismissIfScrolling, true)
-    window.addEventListener("scroll", dismissIfScrolling, true)
     document.addEventListener("touchstart", onTouchStart, { capture: true, passive: true })
     document.addEventListener("touchmove", onTouchMove, { capture: true, passive: true })
-    window.visualViewport?.addEventListener("scroll", dismissIfScrolling)
 
     return () => {
       document.removeEventListener("focusin", onFocusIn, true)
-      document.removeEventListener("scroll", dismissIfScrolling, true)
-      window.removeEventListener("scroll", dismissIfScrolling, true)
       document.removeEventListener("touchstart", onTouchStart, true)
       document.removeEventListener("touchmove", onTouchMove, true)
-      window.visualViewport?.removeEventListener("scroll", dismissIfScrolling)
     }
   }, [])
 }

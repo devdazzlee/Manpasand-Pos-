@@ -1377,6 +1377,9 @@ export function NewSale() {
 
   useEffect(() => {
     if (!productSearchOpen) return;
+    // While typing on mobile, scrollIntoView on a changing results list scrolls
+    // ancestors and used to blur the search field (keyboard closed every key).
+    if (document.activeElement === searchInputRef.current) return;
     const highlightedEl = searchDropdownItemRefs.current[highlightedProductIndex];
     if (!highlightedEl) return;
     highlightedEl.scrollIntoView({ block: "nearest" });
@@ -3317,6 +3320,8 @@ export function NewSale() {
                   ref={searchInputRef}
                   type="text"
                   name="pos-product-search"
+                  data-product-search="true"
+                  data-keep-keyboard="true"
                   placeholder={isScanning ? "Scanning…" : "Scan or search…"}
                   value={searchTerm}
                   {...searchFieldDomProps}
