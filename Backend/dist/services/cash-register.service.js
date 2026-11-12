@@ -945,7 +945,12 @@ class CashRegisterService {
             cashExpense,
             cashInHand: r2(cashRevenue - cashExpense),
             cashInBank: r2(cardRevenue + bankRevenue + walletRevenue - nonCashExpense),
+            // Drawer count at close: expected (system), counted (typed), difference (counted − expected).
+            expectedCash: s.expected_cash == null ? live.expectedCash : num(s.expected_cash),
             countedCash: s.closing == null ? null : num(s.closing),
+            cashDifference: s.closing == null
+                ? null
+                : r2(num(s.closing) - (s.expected_cash == null ? live.expectedCash : num(s.expected_cash))),
         };
     }
     /* ------------------------------ review / reopen ------------------------------ */

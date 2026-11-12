@@ -23,7 +23,12 @@ export interface ClosingSlip {
   cashExpense: number;
   cashInHand: number;
   cashInBank: number;
+  /** System cash that should be in the drawer at close. */
+  expectedCash: number;
+  /** Cash amount typed when closing the register. */
   countedCash: number | null;
+  /** Counted − expected (positive = over, negative = short). Null if not counted. */
+  cashDifference: number | null;
 }
 
 export async function fetchClosingSlip(sessionId: string): Promise<ClosingSlip> {
@@ -69,10 +74,42 @@ export function buildClosingReceipt(slip: ClosingSlip): ReceiptData {
       : []),
   ];
 
+  const expectedCash = Number(slip.expectedCash ?? slip.cashInHand ?? 0);
+  const countedCash = slip.countedCash == null ? null : Number(slip.countedCash);
+  const cashDifference =
+    slip.cashDifference != null
+      ? Number(slip.cashDifference)
+      : countedCash == null
+        ? null
+        : countedCash - expectedCash;
+  const differenceLabel =
+    cashDifference == null
+      ? null
+      : Math.abs(cashDifference) < 0.005
+        ? "Difference (Match)"
+        : cashDifference > 0
+          ? "Difference (Over)"
+          : "Difference (Short)";
+
   const summaryLines = [
     { label: "Total Expense", value: pkr(slip.totalExpense) },
     { label: "Cash In Hand", value: pkr(slip.cashInHand), emphasis: true },
     { label: "Cash In Bank", value: pkr(slip.cashInBank), emphasis: true },
+    { label: "Expected Cash", value: pkr(expectedCash), emphasis: true },
+    {
+      label: "Counted Cash",
+      value: countedCash == null ? "Not counted" : pkr(countedCash),
+      emphasis: true,
+    },
+    ...(differenceLabel != null && cashDifference != null
+      ? [
+          {
+            label: differenceLabel,
+            value: pkr(Math.abs(cashDifference)),
+            emphasis: true,
+          },
+        ]
+      : []),
   ];
 
   return {
