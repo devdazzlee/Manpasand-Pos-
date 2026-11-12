@@ -40,6 +40,7 @@ import {
   CreditCard,
   DollarSign,
   Scan,
+  Camera,
   Pencil,
   ChevronDown,
   ChevronUp,
@@ -63,6 +64,7 @@ import {
 import { SplitPaymentDialog, type CheckoutMethod, type TenderResult } from "@/components/pos/split-payment-dialog";
 import { parseScannedLabel, type ScannedLabel } from "@/lib/labelWeight";
 import { toast } from "sonner";
+import { CameraBarcodeScanner, primeScannerAudio, type ScanOutcome } from "@/components/camera-barcode-scanner";
 import { useLogoDataUri } from "@/hooks/use-logo-data-uri";
 import {
   downloadReceiptPdf,
@@ -765,6 +767,8 @@ export function NewSale() {
     useLoading();
   const [scanLoading, setScanLoading] = useState(false);
   const [isScanning, setIsScanning] = useState(false);
+  // Phone camera scanner (adds each scanned barcode to the cart).
+  const [cameraScanOpen, setCameraScanOpen] = useState(false);
   const [selectedCustomer, setSelectedCustomer] = useState<string | null>(null);
   const [pinnedCustomer, setPinnedCustomer] = useState<PosCustomer | null>(null);
   const [saleDraftReady, setSaleDraftReady] = useState(false);
@@ -2829,13 +2833,16 @@ export function NewSale() {
     void processScannerInput(scannedValue);
   };
 
-  const processScannerInput = async (scannedValue: string) => {
+  const processScannerInput = async (
+    scannedValue: string,
+    opts: { fromCamera?: boolean } = {},
+  ): Promise<Product | null> => {
     // Prevent duplicate processing of the same scan
     const trimmedValue = scannedValue.trim();
     
     // Skip if already processing or if this is the same value we just processed
     if (isProcessingScanRef.current || lastProcessedScanRef.current === trimmedValue) {
-      return;
+      return null;
     }
     
     // Mark as processing and store the value
@@ -2914,7 +2921,7 @@ export function NewSale() {
       // Reset processing flag to allow next scan
       isProcessingScanRef.current = false;
       lastProcessedScanRef.current = '';
-      return; // Exit early - don't add to cart
+      return null; // Exit early - don't add to cart
     }
     // Add to cart immediately if found (synchronous, no delays)
     if (product) {
@@ -2933,9 +2940,12 @@ export function NewSale() {
       console.error('Product not found for code:', productCode);
     }
     
-    // Clear input instantly via direct DOM manipulation (fastest method)
-    const input = searchInputRef.current;
-    if (input) {
+    // Clear input instantly via direct DOM manipulation (fastest method).
+    // Camera scans leave the search box alone so the phone keyboard stays down.
+    const input = opts.fromCamera ? null : searchInputRef.current;
+    if (opts.fromCamera) {
+      // nothing typed into the search box
+    } else if (input) {
       input.value = '';
       // Reset interaction flag and refocus search input after processing scan
       isUserInteractingRef.current = false;
@@ -2963,6 +2973,14 @@ export function NewSale() {
         lastProcessedScanRef.current = '';
       }, 100);
     }, 50);
+    return product;
+  };
+
+  const handleCameraScan = async (code: string): Promise<ScanOutcome> => {
+    const product = await processScannerInput(code, { fromCamera: true });
+    return product
+      ? { ok: true, name: product.name }
+      : { ok: false, message: "No product with this barcode" };
   };
 
   const selectProductForSale = (product: Product) => {
@@ -3302,6 +3320,7 @@ export function NewSale() {
               Product search
             </label>
             <div className="flex w-full flex-col gap-2 sm:flex-row sm:items-stretch sm:gap-2">
+              <div className="flex min-w-0 flex-1 items-stretch gap-2">
               <div className="relative min-w-0 flex-1">
                 <Search className={`pointer-events-none absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 ${isScanning ? 'text-blue-500 animate-pulse' : 'text-gray-400'}`} />
                 {isScanning && (
@@ -3462,6 +3481,28 @@ export function NewSale() {
                     )}
                   </div>
                 )}
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  primeScannerAudio();
+                  (document.activeElement as HTMLElement | null)?.blur?.();
+                  setProductSearchOpen(false);
+                  setCameraScanOpen(true);
+                }}
+                disabled={paymentLoading || branchLoading || !hasBranch}
+                className="flex h-11 shrink-0 items-center gap-1.5 rounded-md bg-blue-600 px-3 text-sm font-semibold text-white shadow-sm active:scale-95 disabled:opacity-50 sm:h-10 lg:hidden"
+                aria-label="Scan barcodes with the camera"
+              >
+                <Camera className="h-5 w-5" />
+                <span>Scan</span>
+              </button>
+              <CameraBarcodeScanner
+                open={cameraScanOpen}
+                onOpenChange={setCameraScanOpen}
+                onDetected={handleCameraScan}
+                title="Scan to cart"
+              />
               </div>
 
               <div
