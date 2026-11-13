@@ -53,34 +53,45 @@ export function primeScannerAudio() {
     const Ctx = window.AudioContext || (window as any).webkitAudioContext;
     if (!Ctx) return;
     audioCtx = audioCtx ?? new Ctx();
-    void audioCtx.resume();
+    if (audioCtx.state === "suspended") void audioCtx.resume();
   } catch {
     // no sound available
   }
 }
 
+/** Retail-scanner style chirp — short high beep on detect, low buzz on miss. */
 function beep(ok: boolean) {
   try {
     if (!audioCtx) primeScannerAudio();
     const ctx = audioCtx;
     if (!ctx) return;
-    const osc = ctx.createOscillator();
-    const gain = ctx.createGain();
-    osc.type = ok ? "sine" : "square";
-    osc.frequency.value = ok ? 1650 : 220;
+    if (ctx.state === "suspended") void ctx.resume();
     const t = ctx.currentTime;
-    const len = ok ? 0.09 : 0.28;
-    gain.gain.setValueAtTime(0.0001, t);
-    gain.gain.exponentialRampToValueAtTime(0.25, t + 0.01);
-    gain.gain.exponentialRampToValueAtTime(0.0001, t + len);
-    osc.connect(gain).connect(ctx.destination);
-    osc.start(t);
-    osc.stop(t + len + 0.02);
+    const playTone = (freq: number, start: number, dur: number, type: OscillatorType, vol: number) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = type;
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t + start);
+      gain.gain.exponentialRampToValueAtTime(vol, t + start + 0.008);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + start + dur);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t + start);
+      osc.stop(t + start + dur + 0.02);
+    };
+    if (ok) {
+      // Classic handheld scanner: two quick high chirps.
+      playTone(1800, 0, 0.07, "square", 0.45);
+      playTone(2200, 0.08, 0.08, "square", 0.4);
+    } else {
+      playTone(280, 0, 0.18, "square", 0.35);
+      playTone(180, 0.2, 0.22, "square", 0.3);
+    }
   } catch {
     // ignore
   }
   try {
-    navigator.vibrate?.(ok ? 60 : [80, 60, 80]);
+    navigator.vibrate?.(ok ? [40, 30, 40] : [80, 60, 80]);
   } catch {
     // ignore
   }
@@ -193,6 +204,11 @@ export function CameraBarcodeScanner({ open, onOpenChange, onDetected, title = "
     if (code === l.code && now - l.at < SAME_CODE_GAP) return;
     lastRef.current = { code, at: now, anyAt: now };
     busyRef.current = true;
+    // Beep as soon as the camera reads a barcode (like a handheld scanner),
+    // before product lookup — so the cashier hears feedback instantly.
+    beep(true);
+    setFlash("ok");
+    setTimeout(() => setFlash(null), 450);
     let outcome: ScanOutcome;
     try {
       outcome = await onDetectedRef.current(code);
@@ -202,9 +218,11 @@ export function CameraBarcodeScanner({ open, onOpenChange, onDetected, title = "
       busyRef.current = false;
       lastRef.current = { ...lastRef.current, at: Date.now(), anyAt: Date.now() };
     }
-    beep(outcome.ok);
-    setFlash(outcome.ok ? "ok" : "bad");
-    setTimeout(() => setFlash(null), 450);
+    if (!outcome.ok) {
+      beep(false);
+      setFlash("bad");
+      setTimeout(() => setFlash(null), 450);
+    }
     const label = outcome.ok ? outcome.name || code : outcome.message || "No product with this barcode";
     setLast({ ok: outcome.ok, text: outcome.ok ? `Added: ${label}` : `${label} (${code})` });
     setRecent((prev) => {
@@ -234,9 +252,10 @@ export function CameraBarcodeScanner({ open, onOpenChange, onDetected, title = "
     return () => document.removeEventListener("visibilitychange", onVis);
   }, [open]);
 
-  // Fresh session each time it opens.
+  // Fresh session each time it opens — also unlock audio for the first beep.
   useEffect(() => {
     if (open) {
+      primeScannerAudio();
       setRecent([]);
       setLast(null);
       setPaused(false);
