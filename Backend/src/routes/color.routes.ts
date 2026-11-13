@@ -17,12 +17,26 @@ import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
+const catalogReaders = authorize([
+  'SUPER_ADMIN',
+  'ADMIN',
+  'BRANCH_MANAGER',
+  'WAREHOUSE_MANAGER',
+  'PURCHASE_MANAGER',
+  'CASHIER',
+]);
+const catalogWriters = authorize([
+  'SUPER_ADMIN',
+  'ADMIN',
+  'WAREHOUSE_MANAGER',
+  'PURCHASE_MANAGER',
+]);
 
-router.post('/', validate(createColorSchema), createColor);
-router.get('/', validate(listColorsSchema), listColors);
-router.get('/:id', validate(getColorSchema), getColor);
-router.patch('/:id', validate(updateColorSchema), updateColor);
-router.delete('/:id', validate(getColorSchema), deleteColor);
+router.get('/', authenticate, catalogReaders, validate(listColorsSchema), listColors);
+router.get('/:id', authenticate, catalogReaders, validate(getColorSchema), getColor);
+
+router.post('/', authenticate, catalogWriters, validate(createColorSchema), createColor);
+router.patch('/:id', authenticate, catalogWriters, validate(updateColorSchema), updateColor);
+router.delete('/:id', authenticate, catalogWriters, validate(getColorSchema), deleteColor);
 
 export default router;

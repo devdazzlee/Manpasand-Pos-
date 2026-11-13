@@ -17,12 +17,26 @@ import { validate } from '../middleware/validation.middleware';
 
 const router = express.Router();
 
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
+const catalogReaders = authorize([
+  'SUPER_ADMIN',
+  'ADMIN',
+  'BRANCH_MANAGER',
+  'WAREHOUSE_MANAGER',
+  'PURCHASE_MANAGER',
+  'CASHIER',
+]);
+const catalogWriters = authorize([
+  'SUPER_ADMIN',
+  'ADMIN',
+  'WAREHOUSE_MANAGER',
+  'PURCHASE_MANAGER',
+]);
 
-router.post('/', validate(createSizeSchema), createSize);
-router.get('/', validate(listSizesSchema), listSizes);
-router.get('/:id', validate(getSizeSchema), getSize);
-router.patch('/:id', validate(updateSizeSchema), updateSize);
-router.delete('/:id', validate(getSizeSchema), deleteSize);
+router.get('/', authenticate, catalogReaders, validate(listSizesSchema), listSizes);
+router.get('/:id', authenticate, catalogReaders, validate(getSizeSchema), getSize);
+
+router.post('/', authenticate, catalogWriters, validate(createSizeSchema), createSize);
+router.patch('/:id', authenticate, catalogWriters, validate(updateSizeSchema), updateSize);
+router.delete('/:id', authenticate, catalogWriters, validate(getSizeSchema), deleteSize);
 
 export default router;

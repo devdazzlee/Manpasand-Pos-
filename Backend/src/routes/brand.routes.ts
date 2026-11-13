@@ -17,14 +17,29 @@ import { validate } from '../middleware/validation.middleware';
 import { authenticate, authorize } from '../middleware/auth.middleware';
 
 const router = express.Router();
-router.post('/', authenticate, validate(createBrandSchema), createBrand);
 
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN']));
+/** Add Product / stock dropdowns — warehouse accounts were 403'd when this was ADMIN-only. */
+const catalogReaders = authorize([
+  'SUPER_ADMIN',
+  'ADMIN',
+  'BRANCH_MANAGER',
+  'WAREHOUSE_MANAGER',
+  'PURCHASE_MANAGER',
+  'CASHIER',
+]);
+const catalogWriters = authorize([
+  'SUPER_ADMIN',
+  'ADMIN',
+  'WAREHOUSE_MANAGER',
+  'PURCHASE_MANAGER',
+]);
 
-router.get('/', validate(listBrandsSchema), listBrands);
-router.get('/:id', validate(getBrandSchema), getBrand);
-router.patch('/:id', validate(updateBrandSchema), updateBrand);
-router.delete('/:id', validate(getBrandSchema), deleteBrand);
-router.patch('/:id/toggle-display', validate(getBrandSchema), toggleBrandDisplay);
+router.get('/', authenticate, catalogReaders, validate(listBrandsSchema), listBrands);
+router.get('/:id', authenticate, catalogReaders, validate(getBrandSchema), getBrand);
+
+router.post('/', authenticate, catalogWriters, validate(createBrandSchema), createBrand);
+router.patch('/:id', authenticate, catalogWriters, validate(updateBrandSchema), updateBrand);
+router.delete('/:id', authenticate, catalogWriters, validate(getBrandSchema), deleteBrand);
+router.patch('/:id/toggle-display', authenticate, catalogWriters, validate(getBrandSchema), toggleBrandDisplay);
 
 export default router;
