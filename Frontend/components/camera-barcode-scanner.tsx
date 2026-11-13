@@ -59,8 +59,32 @@ export function primeScannerAudio() {
   }
 }
 
+/** Phone buzz on scan — Android Chrome supports this; iPhone Safari does not. */
+function vibrateOnScan(ok: boolean) {
+  try {
+    const vibrate =
+      typeof navigator !== "undefined"
+        ? navigator.vibrate?.bind(navigator) ||
+          (navigator as any).webkitVibrate?.bind(navigator) ||
+          (navigator as any).mozVibrate?.bind(navigator)
+        : null;
+    if (!vibrate) return;
+    // Cancel any ongoing buzz, then pulse so it is easy to feel in the hand.
+    vibrate(0);
+    if (ok) {
+      vibrate([50, 40, 80]); // detect: short + stronger tap
+    } else {
+      vibrate([100, 60, 100, 60, 120]); // miss: longer triple buzz
+    }
+  } catch {
+    // ignore — some browsers block vibration
+  }
+}
+
 /** Retail-scanner style chirp — short high beep on detect, low buzz on miss. */
 function beep(ok: boolean) {
+  // Vibration first so it still fires even if audio is blocked / unavailable.
+  vibrateOnScan(ok);
   try {
     if (!audioCtx) primeScannerAudio();
     const ctx = audioCtx;
@@ -90,18 +114,43 @@ function beep(ok: boolean) {
   } catch {
     // ignore
   }
-  try {
-    navigator.vibrate?.(ok ? [40, 30, 40] : [80, 60, 80]);
-  } catch {
-    // ignore
-  }
 }
 
 /* ---------------- decoders ---------------- */
 
 type Stopper = () => void;
 
-async function startNativeDecoder(video: HTMLVideoElement, onCode: (code: string) => void): Promise<Stopper | null> {
+/** Draw the live video into a canvas (scaled down for speed). */
+function grabVideoFrame(video: HTMLVideoElement, canvas: HTMLCanvasElement): boolean {
+  const vw = video.videoWidth;
+  const vh = video.videoHeight;
+  if (!vw || !vh || video.readyState < 2) return false;
+  const maxSide = 960;
+  const scale = Math.min(1, maxSide / Math.max(vw, vh));
+  const w = Math.max(1, Math.round(vw * scale));
+  const h = Math.max(1, Math.round(vh * scale));
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return false;
+  ctx.drawImage(video, 0, 0, w, h);
+  return true;
+}
+
+/** Rotate src 90° clockwise into dst (portrait ↔ landscape barcodes). */
+function rotateCanvas90(src: HTMLCanvasElement, dst: HTMLCanvasElement) {
+  dst.width = src.height;
+  dst.height = src.width;
+  const ctx = dst.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return;
+  ctx.translate(dst.width, 0);
+  ctx.rotate(Math.PI / 2);
+  ctx.drawImage(src, 0, 0);
+}
+
+async function createNativeDetector(): Promise<any | null> {
   const BD = (window as any).BarcodeDetector;
   if (!BD) return null;
   let formats: string[] = NATIVE_FORMATS;
@@ -112,59 +161,123 @@ async function startNativeDecoder(video: HTMLVideoElement, onCode: (code: string
   } catch {
     // older builds: try the full list
   }
-  let detector: any;
   try {
-    detector = new BD({ formats });
+    return new BD({ formats });
   } catch {
     return null;
   }
+}
+
+async function createZxingReader(): Promise<{
+  decodeCanvas: (canvas: HTMLCanvasElement) => string | null;
+} | null> {
+  try {
+    const [{ MultiFormatReader, BarcodeFormat, DecodeHintType, BinaryBitmap, HybridBinarizer }, { HTMLCanvasElementLuminanceSource }] =
+      await Promise.all([import("@zxing/library"), import("@zxing/browser")]);
+    const hints = new Map<any, any>();
+    hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+      BarcodeFormat.EAN_13,
+      BarcodeFormat.EAN_8,
+      BarcodeFormat.UPC_A,
+      BarcodeFormat.UPC_E,
+      BarcodeFormat.CODE_128,
+      BarcodeFormat.CODE_39,
+      BarcodeFormat.CODE_93,
+      BarcodeFormat.CODABAR,
+      BarcodeFormat.ITF,
+      BarcodeFormat.QR_CODE,
+    ]);
+    // TRY_HARDER also retries a 90° rotate inside 1D readers.
+    hints.set(DecodeHintType.TRY_HARDER, true);
+    const reader = new MultiFormatReader();
+    reader.setHints(hints);
+    return {
+      decodeCanvas: (canvas: HTMLCanvasElement) => {
+        try {
+          const source = new HTMLCanvasElementLuminanceSource(canvas);
+          const bitmap = new BinaryBitmap(new HybridBinarizer(source));
+          const result = reader.decodeWithState(bitmap);
+          reader.reset();
+          return result?.getText?.() || null;
+        } catch {
+          try {
+            reader.reset();
+          } catch {
+            // ignore
+          }
+          return null;
+        }
+      },
+    };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Scan frames at 0° / 90° / 180° / 270° so a barcode works whether the label
+ * is held portrait or landscape (and upside-down).
+ */
+async function startOrientationAwareDecoder(
+  video: HTMLVideoElement,
+  onCode: (code: string) => void,
+): Promise<Stopper> {
+  const detector = await createNativeDetector();
+  const zxing = await createZxingReader();
+  if (!detector && !zxing) {
+    throw new Error("No barcode decoder available");
+  }
+
+  // Pre-allocate orientation canvases (avoid creating DOM nodes every frame).
+  const o0 = document.createElement("canvas");
+  const o90 = document.createElement("canvas");
+  const o180 = document.createElement("canvas");
+  const o270 = document.createElement("canvas");
+  const orientations = [o0, o90, o180, o270];
+
   let stopped = false;
   let timer: ReturnType<typeof setTimeout> | undefined;
-  const tick = async () => {
-    if (stopped) return;
-    if (video.readyState >= 2) {
+  // Round-robin which angle we try first so landscape/portrait stay equally fast.
+  let startAngle = 0;
+
+  const decodeOne = async (canvas: HTMLCanvasElement): Promise<string | null> => {
+    if (detector) {
       try {
-        const codes = await detector.detect(video);
+        const codes = await detector.detect(canvas);
         const value = codes?.[0]?.rawValue;
-        if (value && !stopped) onCode(String(value));
+        if (value) return String(value);
       } catch {
         // frame not ready
       }
     }
-    if (!stopped) timer = setTimeout(tick, 120);
+    if (zxing) return zxing.decodeCanvas(canvas);
+    return null;
+  };
+
+  const tick = async () => {
+    if (stopped) return;
+    if (grabVideoFrame(video, o0)) {
+      rotateCanvas90(o0, o90);
+      rotateCanvas90(o90, o180);
+      rotateCanvas90(o180, o270);
+
+      for (let i = 0; i < 4; i++) {
+        const canvas = orientations[(startAngle + i) % 4];
+        const value = await decodeOne(canvas);
+        if (value && !stopped) {
+          onCode(value);
+          break;
+        }
+      }
+      startAngle = (startAngle + 1) % 4;
+    }
+    if (!stopped) timer = setTimeout(tick, 140);
   };
   void tick();
   return () => {
     stopped = true;
     if (timer) clearTimeout(timer);
   };
-}
-
-async function startZxingDecoder(video: HTMLVideoElement, onCode: (code: string) => void): Promise<Stopper> {
-  const [{ BrowserMultiFormatReader }, { BarcodeFormat, DecodeHintType }] = await Promise.all([
-    import("@zxing/browser"),
-    import("@zxing/library"),
-  ]);
-  const hints = new Map<any, any>();
-  hints.set(DecodeHintType.POSSIBLE_FORMATS, [
-    BarcodeFormat.EAN_13,
-    BarcodeFormat.EAN_8,
-    BarcodeFormat.UPC_A,
-    BarcodeFormat.UPC_E,
-    BarcodeFormat.CODE_128,
-    BarcodeFormat.CODE_39,
-    BarcodeFormat.CODE_93,
-    BarcodeFormat.CODABAR,
-    BarcodeFormat.ITF,
-    BarcodeFormat.QR_CODE,
-  ]);
-  hints.set(DecodeHintType.TRY_HARDER, true);
-  const reader = new BrowserMultiFormatReader(hints, { delayBetweenScanAttempts: 100 });
-  const controls = reader.scan(video, (result) => {
-    const text = result?.getText();
-    if (text) onCode(text);
-  });
-  return () => controls.stop();
 }
 
 /* ---------------- component ---------------- */
@@ -362,8 +475,7 @@ export function CameraBarcodeScanner({ open, onOpenChange, onDetected, title = "
         .catch(() => undefined);
 
       try {
-        let stop = await startNativeDecoder(el, (c) => void handleCode(c));
-        if (!stop) stop = await startZxingDecoder(el, (c) => void handleCode(c));
+        const stop = await startOrientationAwareDecoder(el, (c) => void handleCode(c));
         if (cancelled) {
           stop();
           return;
@@ -421,7 +533,7 @@ export function CameraBarcodeScanner({ open, onOpenChange, onDetected, title = "
       <div className="flex items-center justify-between gap-3 px-4 pb-3 pt-[max(0.75rem,env(safe-area-inset-top))]">
         <div className="min-w-0">
           <p className="text-base font-semibold leading-tight">{title}</p>
-          <p className="text-xs text-white/60">Each scan adds 1 to the cart</p>
+          <p className="text-xs text-white/60">Any angle — portrait or landscape</p>
         </div>
         <div className="flex items-center gap-2">
           <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-sm font-semibold tabular-nums text-emerald-300">
@@ -446,7 +558,8 @@ export function CameraBarcodeScanner({ open, onOpenChange, onDetected, title = "
           <div className="pointer-events-none absolute inset-0 flex items-center justify-center">
             <div
               className={cn(
-                "relative h-[34%] max-h-56 w-[82%] rounded-2xl shadow-[0_0_0_9999px_rgba(0,0,0,0.45)] transition-colors duration-150",
+                // Near-square guide so both landscape and portrait labels fit.
+                "relative h-[42%] max-h-64 w-[78%] max-w-sm rounded-2xl shadow-[0_0_0_9999px_rgba(0,0,0,0.45)] transition-colors duration-150",
                 flash === "ok" && "bg-emerald-400/25",
                 flash === "bad" && "bg-red-500/25",
               )}
@@ -559,7 +672,7 @@ export function CameraBarcodeScanner({ open, onOpenChange, onDetected, title = "
         {recent.length === 0 ? (
           <p className="flex items-center gap-2 py-3 text-sm text-white/50">
             <ScanBarcode className="h-4 w-4" />
-            Hold a barcode inside the box. It is added automatically.
+            Hold a barcode inside the box — any orientation is fine.
           </p>
         ) : (
           <ul className="divide-y divide-white/5">
