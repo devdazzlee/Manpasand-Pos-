@@ -114,7 +114,7 @@ type QuickAction = {
 const QUICK_ACTIONS: QuickAction[] = [
   { label: "Stock In", description: "Receive purchases", tab: "purchases", icon: ShoppingBag, tone: "bg-emerald-50 text-emerald-600", roles: ["SUPER_ADMIN", "ADMIN", "PURCHASE_MANAGER", "WAREHOUSE_MANAGER"] },
   { label: "Transfers", description: "Move between branches", tab: "transfers", icon: Truck, tone: "bg-blue-50 text-blue-600" },
-  { label: "Stock Out", description: "Damage, loss, return", tab: "stock-out", icon: PackageMinus, tone: "bg-rose-50 text-rose-600", roles: ["SUPER_ADMIN", "ADMIN"] },
+  { label: "Stock Out", description: "Damage, loss, return", tab: "stock-out", icon: PackageMinus, tone: "bg-rose-50 text-rose-600", roles: ["SUPER_ADMIN", "ADMIN", "WAREHOUSE_MANAGER"] },
   { label: "Adjustments", description: "Correct stock levels", tab: "stock-adjustment", icon: ClipboardList, tone: "bg-amber-50 text-amber-600" },
   { label: "By Location", description: "Stock per branch", tab: "stock-view", icon: Warehouse, tone: "bg-violet-50 text-violet-600" },
   { label: "Stock Mgmt", description: "Full stock tools", tab: "stock-management", icon: ArrowRightLeft, tone: "bg-slate-100 text-slate-600" },

@@ -6,7 +6,7 @@ import { productSalesProfitSchema } from '../validations/product-sales-profit.va
 
 const router = Router();
 
-router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER']));
+router.use(authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER']));
 
 router.get('/', validate(productSalesProfitSchema), getProductSalesProfit);
 

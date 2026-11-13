@@ -19,7 +19,7 @@ const router = Router();
 
 router.use(
   authenticate,
-  authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER'])
+  authorize(['SUPER_ADMIN', 'ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER'])
 );
 
 router.get('/stats', getMonthlyStats);

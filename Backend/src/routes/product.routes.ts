@@ -115,6 +115,6 @@ router.get('/:id/price-history', authenticate, validate(getProductSchema), getPr
 router.get('/:id', authenticate, validate(getProductSchema), getProduct);
 router.patch('/:id', authenticate, productWriters, validate(updateProductSchema), requirePermission(priceChangeCheck), updateProduct);
 router.patch('/:id/toggle-status', authenticate, productWriters, validate(getProductSchema), toggleProductStatus);
-router.delete('/:id', authenticate, authorize(['SUPER_ADMIN', 'ADMIN']), validate(getProductSchema), deleteProduct);
+router.delete('/:id', authenticate, authorize(['SUPER_ADMIN', 'ADMIN', 'WAREHOUSE_MANAGER']), validate(getProductSchema), deleteProduct);
 
 export default router;

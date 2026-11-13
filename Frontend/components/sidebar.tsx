@@ -105,10 +105,24 @@ const TRANSFER_ROLES: UserRole[] = [
 const STOCK_OUT_ROLES: UserRole[] = [
   "SUPER_ADMIN",
   "ADMIN",
+  "WAREHOUSE_MANAGER",
 ];
 const BRANCH_DATA_ROLES: UserRole[] = [
   "SUPER_ADMIN",
   "ADMIN",
+];
+/** Catalog master pages (brands/units/colors/sizes) — warehouse manages products. */
+const CATALOG_ROLES: UserRole[] = [
+  "SUPER_ADMIN",
+  "ADMIN",
+  "WAREHOUSE_MANAGER",
+];
+/** Item sales / profit style reports warehouse also needs. */
+const STOCK_SALES_REPORT_ROLES: UserRole[] = [
+  "SUPER_ADMIN",
+  "ADMIN",
+  "BRANCH_MANAGER",
+  "WAREHOUSE_MANAGER",
 ];
 /**
  * Branch accounts see inventory screens in view-only mode, scoped to their own
@@ -213,7 +227,7 @@ const menuSections: SidebarMenuSection[] = [
         id: "sales-report",
         label: "Sales Report",
         icon: Receipt,
-        roles: SALES_ROLES,
+        roles: STOCK_SALES_REPORT_ROLES,
       },
       {
         id: "returns",
@@ -383,10 +397,10 @@ const menuSections: SidebarMenuSection[] = [
         icon: Tags,
         roles: BRANCH_DATA_ROLES,
       },
-      { id: "units", label: "Units", icon: Package, roles: ADMIN_ROLES },
-      { id: "brand", label: "Brands", icon: StoreIcon, roles: ADMIN_ROLES },
-      { id: "colors", label: "Colors", icon: Package, roles: ADMIN_ROLES },
-      { id: "sizes", label: "Sizes", icon: Package, roles: ADMIN_ROLES },
+      { id: "units", label: "Units", icon: Package, roles: CATALOG_ROLES },
+      { id: "brand", label: "Brands", icon: StoreIcon, roles: CATALOG_ROLES },
+      { id: "colors", label: "Colors", icon: Package, roles: CATALOG_ROLES },
+      { id: "sizes", label: "Sizes", icon: Package, roles: CATALOG_ROLES },
     ],
   },
   {
@@ -509,7 +523,7 @@ const menuSections: SidebarMenuSection[] = [
         id: "product-sales-profit",
         label: "Product Sales & Profit",
         icon: Percent,
-        roles: OWNER_FINANCE_ROLES,
+        roles: STOCK_SALES_REPORT_ROLES,
       },
       // {
       //   id: "users",
