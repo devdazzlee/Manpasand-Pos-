@@ -993,8 +993,13 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
     holdPurchasesLoading,
   } = useHoldPurchases(warehouseBranchId);
   const [isHoldingPurchase, setIsHoldingPurchase] = useState(false);
-  const [showHeldPurchases, setShowHeldPurchases] = useState(false);
+  const [showHeldPurchases, setShowHeldPurchases] = useState(true);
   const [resumingHoldIndex, setResumingHoldIndex] = useState<number | null>(null);
+
+  // Keep the held list open whenever this branch has drafts waiting.
+  useEffect(() => {
+    if (holdPurchases.length > 0) setShowHeldPurchases(true);
+  }, [holdPurchases.length]);
 
   const clearError = (key: keyof PurchaseFieldErrors) =>
     setFormErrors((prev) => {
@@ -1546,6 +1551,11 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             {allDraftLines.length > 0 ? (
               <span className="rounded-full bg-emerald-600 px-1.5 text-[10px] font-semibold tabular-nums text-white">
                 {allDraftLines.length}
+              </span>
+            ) : null}
+            {holdPurchases.length > 0 ? (
+              <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-semibold tabular-nums text-white">
+                {holdPurchases.length} held
               </span>
             ) : null}
           </TabsTrigger>
@@ -2401,6 +2411,72 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
         </TabsContent>
 
         <TabsContent value="new" className="mt-0 space-y-3 focus-visible:outline-none">
+          {holdPurchases.length > 0 ? (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 px-3 py-2.5 shadow-sm sm:px-4">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-950">
+                    {holdPurchases.length} held Stock In
+                    {holdPurchases.length === 1 ? "" : "s"} for this branch
+                  </p>
+                  <p className="text-[11px] text-amber-800/80">
+                    Resume a draft below, or open the list on the right under This bill.
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="h-8 border-amber-300 bg-white text-amber-900 hover:bg-amber-100"
+                  onClick={() => setShowHeldPurchases(true)}
+                >
+                  <Pause className="mr-1.5 h-3.5 w-3.5" />
+                  Show held list
+                </Button>
+              </div>
+              <ul className="mt-2 max-h-36 space-y-1.5 overflow-y-auto">
+                {holdPurchases.map((hp, index) => (
+                  <li
+                    key={hp.id}
+                    className="flex items-center gap-2 rounded-lg border border-amber-200/80 bg-white px-2.5 py-1.5"
+                  >
+                    <div className="min-w-0 flex-1">
+                      <p className="truncate text-xs font-medium text-slate-900">
+                        {hp.supplierName || "No supplier"} · {hp.lineCount} line
+                        {hp.lineCount === 1 ? "" : "s"}
+                      </p>
+                      <p className="text-[10px] tabular-nums text-slate-500">
+                        {new Date(hp.createdAt).toLocaleString(undefined, {
+                          dateStyle: "short",
+                          timeStyle: "short",
+                        })}
+                      </p>
+                    </div>
+                    <Button
+                      type="button"
+                      size="sm"
+                      className="h-7 bg-amber-600 px-2.5 text-[11px] text-white hover:bg-amber-700"
+                      disabled={resumingHoldIndex === index}
+                      onClick={() => void handleResumeHoldPurchase(index)}
+                    >
+                      {resumingHoldIndex === index ? "…" : "Resume"}
+                    </Button>
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="h-7 w-7 p-0 text-slate-400 hover:text-red-600"
+                      onClick={() => void deleteHoldPurchase(index)}
+                      title="Delete hold"
+                    >
+                      <Trash2 className="h-3.5 w-3.5" />
+                    </Button>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+
           {/* Guided receipt: step strip + compact delivery fields */}
           <div
             className={cn(
@@ -2912,30 +2988,31 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                   </Button>
                 </div>
 
-                {holdPurchases.length > 0 ? (
-                  <div className="space-y-1.5 border-t border-slate-100 pt-2">
-                    <button
-                      type="button"
-                      className="flex w-full items-center justify-between text-[11px] font-medium text-slate-600 hover:text-slate-900"
-                      onClick={() => setShowHeldPurchases((v) => !v)}
-                    >
-                      <span>
-                        Held Stock In ({holdPurchases.length})
-                        {holdPurchasesLoading ? " · loading…" : ""}
-                      </span>
-                      <ChevronDown
-                        className={cn(
-                          "h-3.5 w-3.5 transition-transform",
-                          showHeldPurchases && "rotate-180",
-                        )}
-                      />
-                    </button>
-                    {showHeldPurchases ? (
+                <div className="space-y-1.5 border-t border-slate-100 pt-2">
+                  <button
+                    type="button"
+                    className="flex w-full items-center justify-between text-[11px] font-medium text-slate-600 hover:text-slate-900"
+                    onClick={() => setShowHeldPurchases((v) => !v)}
+                  >
+                    <span className="inline-flex items-center gap-1.5">
+                      <Pause className="h-3 w-3 text-amber-600" />
+                      Held Stock In ({holdPurchases.length})
+                      {holdPurchasesLoading ? " · loading…" : ""}
+                    </span>
+                    <ChevronDown
+                      className={cn(
+                        "h-3.5 w-3.5 transition-transform",
+                        showHeldPurchases && "rotate-180",
+                      )}
+                    />
+                  </button>
+                  {showHeldPurchases ? (
+                    holdPurchases.length > 0 ? (
                       <ul className="max-h-40 space-y-1 overflow-y-auto">
                         {holdPurchases.map((hp, index) => (
                           <li
                             key={hp.id}
-                            className="flex items-center gap-2 rounded-md border border-slate-200 bg-white px-2 py-1.5"
+                            className="flex items-center gap-2 rounded-md border border-amber-200 bg-amber-50/60 px-2 py-1.5"
                           >
                             <div className="min-w-0 flex-1">
                               <p className="truncate text-[11px] font-medium text-slate-800">
@@ -2953,7 +3030,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                               type="button"
                               size="sm"
                               variant="outline"
-                              className="h-7 px-2 text-[11px]"
+                              className="h-7 border-amber-300 px-2 text-[11px]"
                               disabled={resumingHoldIndex === index}
                               onClick={() => void handleResumeHoldPurchase(index)}
                             >
@@ -2972,9 +3049,14 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                           </li>
                         ))}
                       </ul>
-                    ) : null}
-                  </div>
-                ) : null}
+                    ) : (
+                      <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-2 py-2 text-[11px] text-slate-500">
+                        No held Stock Ins for this branch. Use <span className="font-medium text-slate-700">Hold</span> to
+                        save a draft and resume later.
+                      </p>
+                    )
+                  ) : null}
+                </div>
               </div>
             }
           />

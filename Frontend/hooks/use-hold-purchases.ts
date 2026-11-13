@@ -1,8 +1,6 @@
 import { useState, useEffect, useCallback } from "react";
 import apiClient from "@/lib/apiClient";
 import { normalizeBranchId } from "@/lib/branch-utils";
-import { API_BASE } from "@/config/constants";
-
 export interface HoldPurchasePayload {
   supplierId?: string;
   warehouseBranchId?: string;
@@ -26,6 +24,8 @@ export interface HoldPurchasePayload {
       sku?: string;
       quantity: number;
       costPrice: number;
+      salePrice?: string | number;
+      currentSalePrice?: number | null;
     }>;
   }>;
   activeBillId?: string;
@@ -75,7 +75,7 @@ export function useHoldPurchases(branchIdOverride?: string) {
     }
     try {
       setLoading(true);
-      const response = await apiClient.get(`${API_BASE}/purchases/hold`, {
+      const response = await apiClient.get(`/purchases/hold`, {
         params: { branchId },
       });
       const holds = Array.isArray(response?.data?.data)
@@ -105,7 +105,7 @@ export function useHoldPurchases(branchIdOverride?: string) {
       if (!hasLines) return false;
 
       try {
-        const response = await apiClient.post(`${API_BASE}/purchases/hold`, {
+        const response = await apiClient.post(`/purchases/hold`, {
           branchId,
           supplierId: payload.supplierId || null,
           label: label || null,
@@ -133,7 +133,7 @@ export function useHoldPurchases(branchIdOverride?: string) {
       const branchId = getBranchId();
       try {
         const response = await apiClient.post(
-          `${API_BASE}/purchases/hold/${record.id}/retrieve`,
+          `/purchases/hold/${record.id}/retrieve`,
           { branchId },
         );
         const retrieved = response?.data?.data ? mapHold(response.data.data) : record;
@@ -153,7 +153,7 @@ export function useHoldPurchases(branchIdOverride?: string) {
       const record = holdPurchases[index];
       const branchId = getBranchId();
       try {
-        await apiClient.delete(`${API_BASE}/purchases/hold/${record.id}`, {
+        await apiClient.delete(`/purchases/hold/${record.id}`, {
           params: { branchId },
         });
         setHoldPurchases((prev) => prev.filter((item) => item.id !== record.id));
