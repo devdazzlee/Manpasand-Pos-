@@ -44,7 +44,7 @@ router.use(
 
 router.post('/', validate(createPurchaseSchema), createPurchase);
 // A Stock In line may carry a new selling price; changing a price needs
-// "Change prices" (admin / purchase manager) or a manager's approval.
+// "Change prices" (admin / purchase / warehouse) or a manager's approval.
 const stockInPriceCheck = async (req: Request) => {
   const lines: Array<{ productId?: string; salePrice?: number }> = Array.isArray(req.body?.lines) ? req.body.lines : [];
   const priced = lines.filter((l) => l.productId && l.salePrice !== undefined && l.salePrice !== null);

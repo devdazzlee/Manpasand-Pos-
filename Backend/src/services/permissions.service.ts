@@ -64,8 +64,9 @@ const DEFAULTS: Record<string, Role[]> = {
   'register.approve_variance': ['ADMIN', 'BRANCH_MANAGER', 'SUPERVISOR'],
   'register.reopen': ['ADMIN'],
   'inventory.adjust': ['ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER'],
-  'inventory.import': ['ADMIN'],
-  'products.price_change': ['ADMIN', 'PURCHASE_MANAGER'],
+  'inventory.import': ['ADMIN', 'WAREHOUSE_MANAGER'],
+  // Warehouse runs Stock In and product edits — must change cost / sale price without manager approval.
+  'products.price_change': ['ADMIN', 'PURCHASE_MANAGER', 'WAREHOUSE_MANAGER'],
   'expenses.approve': ['ADMIN', 'BRANCH_MANAGER'],
   'customers.adjust': ['ADMIN', 'BRANCH_MANAGER'],
   'payroll.manage': ['ADMIN'],
