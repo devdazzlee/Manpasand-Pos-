@@ -156,10 +156,23 @@ export function StockProductPicker({
   const [remoteProducts, setRemoteProducts] = useState<StockPickerProduct[]>([]);
   const [remoteLoading, setRemoteLoading] = useState(false);
   const [remoteTotal, setRemoteTotal] = useState<number | null>(null);
+  /** Keyboard highlight in the product results list (−1 = none). */
+  const [highlightIndex, setHighlightIndex] = useState(-1);
+  /** After add / Enter chain: focus this line field (or product search). */
+  const [focusTarget, setFocusTarget] = useState<{
+    productId?: string;
+    field: "qty" | "cost" | "sale" | "search";
+  } | null>(null);
   const searchRef = useRef<HTMLInputElement>(null);
+  const catalogScrollRef = useRef<HTMLDivElement>(null);
+  const cartScrollRef = useRef<HTMLDivElement>(null);
   const isSplit = layout === "split";
 
   const categoryOptions = useMemo(() => dedupeCategories(categories), [categories]);
+
+  useEffect(() => {
+    setHighlightIndex(-1);
+  }, [searchTerm, categoryFilter]);
 
   useEffect(() => {
     const timer = window.setTimeout(async () => {
@@ -263,32 +276,129 @@ export function StockProductPicker({
           },
         ]);
       }
-      // Only reset search after keyboard/barcode entry — clicking a row must
-      // keep list scroll position (focusing search scrolls the pane to top).
       if (opts?.fromSearch) {
         setSearchTerm("");
-        searchRef.current?.focus();
+        setHighlightIndex(-1);
       }
+      // Always land on Qty so staff can type amount immediately.
+      setFocusTarget({ productId: product.id, field: "qty" });
     },
     [disabled, lockAdd, onAddBlocked, lineMap, getCurrentQty, onLinesChange, lines, showUnitCost, showSalePrice, initialQuantity],
   );
 
-  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const focusNextAfterQty = useCallback(
+    (productId: string) => {
+      if (showUnitCost) setFocusTarget({ productId, field: "cost" });
+      else if (showSalePrice) setFocusTarget({ productId, field: "sale" });
+      else setFocusTarget({ field: "search" });
+    },
+    [showUnitCost, showSalePrice],
+  );
+
+  const focusNextAfterCost = useCallback(
+    (productId: string) => {
+      if (showSalePrice) setFocusTarget({ productId, field: "sale" });
+      else setFocusTarget({ field: "search" });
+    },
+    [showSalePrice],
+  );
+
+  const onLineFieldKeyDown = (
+    e: React.KeyboardEvent<HTMLInputElement>,
+    productId: string,
+    field: "qty" | "cost" | "sale",
+  ) => {
     if (e.key !== "Enter") return;
     e.preventDefault();
-    const term = normalizeSearch(searchTerm);
-    if (!term) return;
+    e.stopPropagation();
+    if (field === "qty") focusNextAfterQty(productId);
+    else if (field === "cost") focusNextAfterCost(productId);
+    else setFocusTarget({ field: "search" });
+  };
 
+  // Focus + scroll cart to the active line after add / Enter chain.
+  useEffect(() => {
+    if (!focusTarget) return;
+    const run = () => {
+      if (focusTarget.field === "search") {
+        searchRef.current?.focus();
+        searchRef.current?.select?.();
+        setFocusTarget(null);
+        return;
+      }
+      const { productId, field } = focusTarget;
+      if (!productId) {
+        setFocusTarget(null);
+        return;
+      }
+      const row = document.querySelector(
+        `[data-stock-row="${productId}"]`,
+      ) as HTMLElement | null;
+      row?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      const input = document.querySelector(
+        `[data-stock-line="${productId}"][data-stock-field="${field}"]`,
+      ) as HTMLInputElement | null;
+      if (input) {
+        input.focus();
+        input.select();
+      }
+      setFocusTarget(null);
+    };
+    const t = window.setTimeout(run, 30);
+    return () => window.clearTimeout(t);
+  }, [focusTarget, lines]);
+
+  // Keep highlighted catalog row visible while arrowing.
+  useEffect(() => {
+    if (highlightIndex < 0) return;
+    const el = catalogScrollRef.current?.querySelector(
+      `[data-catalog-index="${highlightIndex}"]`,
+    ) as HTMLElement | null;
+    el?.scrollIntoView({ block: "nearest" });
+  }, [highlightIndex]);
+
+  const handleSearchKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowDown") {
+      e.preventDefault();
+      if (filteredProducts.length === 0) return;
+      setHighlightIndex((i) =>
+        i < 0 ? 0 : Math.min(i + 1, filteredProducts.length - 1),
+      );
+      return;
+    }
+    if (e.key === "ArrowUp") {
+      e.preventDefault();
+      if (filteredProducts.length === 0) return;
+      setHighlightIndex((i) => (i <= 0 ? 0 : i - 1));
+      return;
+    }
+    if (e.key === "Escape") {
+      setHighlightIndex(-1);
+      return;
+    }
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (addBlocked) {
+      onAddBlocked?.();
+      return;
+    }
+    const term = normalizeSearch(searchTerm);
+    const highlighted =
+      highlightIndex >= 0 ? filteredProducts[highlightIndex] : undefined;
     const exact =
-      products.find((p) => {
-        const code = getProductBarcodeDisplay(p).toLowerCase();
-        return (
-          code === term ||
-          p.sku?.toLowerCase() === term ||
-          p.barcode?.toLowerCase() === term ||
-          p.label_barcode?.toLowerCase() === term
-        );
-      }) || filteredProducts[0];
+      highlighted ||
+      (term
+        ? products.find((p) => {
+            const code = getProductBarcodeDisplay(p).toLowerCase();
+            return (
+              code === term ||
+              p.sku?.toLowerCase() === term ||
+              p.barcode?.toLowerCase() === term ||
+              p.label_barcode?.toLowerCase() === term
+            );
+          })
+        : undefined) ||
+      filteredProducts[0];
 
     if (exact) addOrBumpProduct(exact, { fromSearch: true });
   };
@@ -395,7 +505,9 @@ export function StockProductPicker({
             : ""}
         </span>
         <span className="hidden sm:inline">
-          {addBlocked ? "Select details above to add" : "Click to add · Enter = top match"}
+          {addBlocked
+            ? "Select details above to add"
+            : "↑↓ move · Enter = add · then Qty → Cost → Sell → search"}
         </span>
       </div>
     </>
@@ -415,20 +527,24 @@ export function StockProductPicker({
       </div>
     ) : isSplit ? (
       <div className="divide-y divide-slate-100 overflow-hidden rounded-lg border border-slate-200 bg-white">
-        {filteredProducts.map((product) => {
+        {filteredProducts.map((product, index) => {
           const selected = lineMap.get(product.id);
           const onHand = getCurrentQty?.(product.id);
+          const highlighted = highlightIndex === index;
           return (
             <button
               key={product.id}
               type="button"
+              data-catalog-index={index}
               disabled={disabled}
               onMouseDown={(e) => e.preventDefault()}
+              onMouseEnter={() => setHighlightIndex(index)}
               onClick={() => addOrBumpProduct(product)}
               className={cn(
                 "flex w-full items-center gap-3 px-3 py-2.5 text-left transition-colors",
                 "hover:bg-emerald-50/50 disabled:cursor-not-allowed disabled:opacity-50",
                 selected && "bg-emerald-50/70",
+                highlighted && "bg-emerald-100 ring-1 ring-inset ring-emerald-400",
               )}
             >
               <div className="min-w-0 flex-1">
@@ -474,22 +590,29 @@ export function StockProductPicker({
         })}
       </div>
     ) : (
-      <div className="max-h-[240px] overflow-y-auto -mx-0.5 px-0.5">
+      <div
+        ref={catalogScrollRef}
+        className="max-h-[240px] overflow-y-auto -mx-0.5 px-0.5"
+      >
         <div className="grid grid-cols-3 gap-1.5 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7">
-          {filteredProducts.map((product) => {
+          {filteredProducts.map((product, index) => {
             const selected = lineMap.get(product.id);
+            const highlighted = highlightIndex === index;
             return (
               <button
                 key={product.id}
                 type="button"
+                data-catalog-index={index}
                 disabled={disabled}
                 onMouseDown={(e) => e.preventDefault()}
+                onMouseEnter={() => setHighlightIndex(index)}
                 onClick={() => addOrBumpProduct(product)}
                 className={cn(
                   "relative flex min-h-[4rem] flex-col rounded-lg border px-2.5 py-2 text-left transition-colors",
                   "border-slate-200 bg-white hover:border-emerald-400 hover:bg-emerald-50/40",
                   "disabled:cursor-not-allowed disabled:opacity-50",
                   selected && "border-emerald-600 bg-emerald-50/60 ring-1 ring-emerald-600",
+                  highlighted && "border-emerald-500 bg-emerald-50 ring-2 ring-emerald-400",
                 )}
               >
                 {selected ? (
@@ -607,9 +730,12 @@ export function StockProductPicker({
             placeholder={quantityPlaceholder}
             value={line.quantity}
             disabled={disabled}
+            data-stock-line={line.productId}
+            data-stock-field="qty"
             onChange={(e) =>
               updateLine(line.productId, { quantity: e.target.value })
             }
+            onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "qty")}
             className="h-8 text-center text-sm text-slate-900"
           />
           <Button
@@ -635,9 +761,12 @@ export function StockProductPicker({
             placeholder="0.00"
             value={line.unitCost ?? ""}
             disabled={disabled}
+            data-stock-line={line.productId}
+            data-stock-field="cost"
             onChange={(e) =>
               updateLine(line.productId, { unitCost: e.target.value })
             }
+            onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "cost")}
             className="mt-0.5 h-8 text-sm text-slate-900"
           />
           {Number(line.unitCost) > 0 && Number(line.quantity) > 0 ? (
@@ -658,7 +787,10 @@ export function StockProductPicker({
             placeholder="0.00"
             value={line.salePrice ?? ""}
             disabled={disabled}
+            data-stock-line={line.productId}
+            data-stock-field="sale"
             onChange={(e) => updateLine(line.productId, { salePrice: e.target.value })}
+            onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "sale")}
             className={cn(
               "mt-0.5 h-8 text-sm text-slate-900",
               salePriceChanged(line) && "border-amber-400 bg-amber-50",
@@ -676,7 +808,10 @@ export function StockProductPicker({
 
   /** Dense POS cart rows — one line of controls so both panes stay equal height */
   const splitCartLines = (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
+    <div
+      ref={cartScrollRef}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-contain"
+    >
       <div className="divide-y divide-slate-100">
         {lines.map((line) => {
           const qty = Number(line.quantity) || 0;
@@ -696,6 +831,7 @@ export function StockProductPicker({
           return (
             <div
               key={line.productId}
+              data-stock-row={line.productId}
               className="flex items-end gap-2 bg-white px-2.5 py-2"
             >
               <div className="min-w-0 flex-1 self-center">
@@ -764,9 +900,12 @@ export function StockProductPicker({
                     placeholder={quantityPlaceholder}
                     value={line.quantity}
                     disabled={disabled}
+                    data-stock-line={line.productId}
+                    data-stock-field="qty"
                     onChange={(e) =>
                       updateLine(line.productId, { quantity: e.target.value })
                     }
+                    onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "qty")}
                     className="h-7 w-12 px-1 text-center text-xs tabular-nums text-slate-900"
                     title={quantityLabel}
                     aria-label={`Quantity for ${line.productName}`}
@@ -794,9 +933,12 @@ export function StockProductPicker({
                     placeholder="0"
                     value={line.unitCost ?? ""}
                     disabled={disabled}
+                    data-stock-line={line.productId}
+                    data-stock-field="cost"
                     onChange={(e) =>
                       updateLine(line.productId, { unitCost: e.target.value })
                     }
+                    onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "cost")}
                     className="h-7 px-1.5 text-xs tabular-nums text-slate-900"
                     title={unitCostLabel}
                     aria-label={`Cost price for ${line.productName}`}
@@ -815,7 +957,10 @@ export function StockProductPicker({
                     placeholder="0"
                     value={line.salePrice ?? ""}
                     disabled={disabled}
+                    data-stock-line={line.productId}
+                    data-stock-field="sale"
                     onChange={(e) => updateLine(line.productId, { salePrice: e.target.value })}
+                    onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "sale")}
                     className={cn(
                       "h-7 px-1.5 text-xs tabular-nums text-slate-900",
                       salePriceChanged(line) && "border-amber-400 bg-amber-50",
@@ -865,10 +1010,14 @@ export function StockProductPicker({
       ) : isSplit ? (
         splitCartLines
       ) : (
-        <div className="max-h-[320px] space-y-2 overflow-y-auto p-3">
+        <div
+          ref={cartScrollRef}
+          className="max-h-[320px] space-y-2 overflow-y-auto p-3"
+        >
           {lines.map((line) => (
             <div
               key={line.productId}
+              data-stock-row={line.productId}
               className="rounded-lg border border-slate-200 bg-white p-2.5 shadow-sm"
             >
               <div className="flex items-start justify-between gap-2">
@@ -951,7 +1100,10 @@ export function StockProductPicker({
             {catalogToolbar}
           </div>
 
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5">
+          <div
+            ref={catalogScrollRef}
+            className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-2.5"
+          >
             {catalogList}
           </div>
         </section>
