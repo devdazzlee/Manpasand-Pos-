@@ -118,7 +118,11 @@ export function SupplierHub() {
   const [deleting, setDeleting] = useState<SupplierRow | null>(null);
 
   useEffect(() => setRole(normalizeUserRole(localStorage.getItem("role"))), []);
-  const canDelete = role === "SUPER_ADMIN" || role === "ADMIN";
+  const canDelete =
+    role === "SUPER_ADMIN" ||
+    role === "ADMIN" ||
+    role === "WAREHOUSE_MANAGER" ||
+    role === "PURCHASE_MANAGER";
 
   useEffect(() => {
     const t = setTimeout(() => setDebounced(search.trim()), 300);

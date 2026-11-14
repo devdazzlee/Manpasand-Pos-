@@ -68,7 +68,8 @@ const DEFAULTS: Record<string, Role[]> = {
   // Warehouse runs Stock In and product edits — must change cost / sale price without manager approval.
   'products.price_change': ['ADMIN', 'PURCHASE_MANAGER', 'WAREHOUSE_MANAGER'],
   'expenses.approve': ['ADMIN', 'BRANCH_MANAGER'],
-  'customers.adjust': ['ADMIN', 'BRANCH_MANAGER'],
+  // Warehouse / purchase need this for supplier payment edit & delete on the ledger.
+  'customers.adjust': ['ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER'],
   'payroll.manage': ['ADMIN'],
   'reports.financial': ['ADMIN', 'BRANCH_MANAGER'],
   'reports.export': ['ADMIN', 'BRANCH_MANAGER', 'SUPERVISOR', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER'],

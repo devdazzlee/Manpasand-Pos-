@@ -418,7 +418,7 @@ const menuSections: SidebarMenuSection[] = [
         id: "suppliers",
         label: "Suppliers",
         icon: Truck,
-        roles: ADMIN_ROLES,
+        roles: PURCHASE_ROLES,
       },
     ],
   },
