@@ -12,7 +12,7 @@ import { ChartOfAccountsService } from './chart-of-accounts.service';
 import { applyWeightedAverageCost, productOnHandQty } from './product-cost.service';
 
 const PURCHASE_LIST_INCLUDE = {
-  product: true,
+  product: { include: { unit: { select: { id: true, name: true } } } },
   supplier: true,
   warehouse_branch: true,
   user: { select: { email: true } },

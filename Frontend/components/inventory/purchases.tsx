@@ -830,6 +830,11 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
           return {
             name: line.product?.name || "—",
             sku: line.product?.sku || undefined,
+            unit:
+              line.product?.unit?.name ||
+              line.product?.unit_name ||
+              line.unit ||
+              undefined,
             qty,
             cost,
             total: qty * cost,

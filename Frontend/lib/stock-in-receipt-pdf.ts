@@ -6,6 +6,8 @@
 export type StockInReceiptLine = {
   name: string;
   sku?: string;
+  /** Product unit name (PCS, Kg, Bottle, …). */
+  unit?: string;
   qty: number;
   cost: number;
   total: number;
@@ -199,12 +201,13 @@ export async function downloadStockInReceiptPdf(
 
   // Items table
   const cols = [
-    { h: "#", w: usable * 0.06, align: "left" as const },
-    { h: "Product", w: usable * 0.38, align: "left" as const },
-    { h: "SKU", w: usable * 0.2, align: "left" as const },
+    { h: "#", w: usable * 0.05, align: "left" as const },
+    { h: "Product", w: usable * 0.32, align: "left" as const },
+    { h: "SKU", w: usable * 0.16, align: "left" as const },
+    { h: "Unit", w: usable * 0.1, align: "left" as const },
     { h: "Qty", w: usable * 0.1, align: "right" as const },
     { h: "Cost", w: usable * 0.12, align: "right" as const },
-    { h: "Total", w: usable * 0.14, align: "right" as const },
+    { h: "Total", w: usable * 0.15, align: "right" as const },
   ];
 
   const drawHeader = () => {
@@ -241,6 +244,7 @@ export async function downloadStockInReceiptPdf(
       String(idx + 1),
       line.name,
       line.sku || "—",
+      line.unit || "—",
       formatQty(line.qty),
       formatMoney(line.cost),
       formatMoney(line.total),
@@ -250,11 +254,13 @@ export async function downloadStockInReceiptPdf(
       const tx = c.align === "right" ? x + c.w - 2 : x + 2;
       const text = cells[i];
       const clipped =
-        c.h === "Product" && text.length > 32
-          ? `${text.slice(0, 31)}…`
-          : c.h === "SKU" && text.length > 18
-            ? `${text.slice(0, 17)}…`
-            : text;
+        c.h === "Product" && text.length > 28
+          ? `${text.slice(0, 27)}…`
+          : c.h === "SKU" && text.length > 14
+            ? `${text.slice(0, 13)}…`
+            : c.h === "Unit" && text.length > 10
+              ? `${text.slice(0, 9)}…`
+              : text;
       doc.text(clipped, tx, y + 5, { align: c.align, maxWidth: c.w - 3 });
       x += c.w;
     });
