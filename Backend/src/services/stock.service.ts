@@ -143,22 +143,23 @@ class StockService {
         }
 
         return prisma.$transaction(async (tx) => {
-            // Get source stock
-            const sourceStock = await tx.stock.findUnique({
+            // Allow oversell / zero stock — source may go negative.
+            let sourceStock = await tx.stock.findUnique({
                 where: { product_id_branch_id: { product_id: productId, branch_id: fromBranchId } },
             });
 
             if (!sourceStock) {
-                throw new AppError(404, "Source stock not found");
+                sourceStock = await tx.stock.create({
+                    data: {
+                        product_id: productId,
+                        branch_id: fromBranchId,
+                        current_quantity: 0,
+                    },
+                });
             }
 
-            const sourceQty = asNumber(sourceStock.current_quantity);
-            if (sourceQty < quantity) {
-                throw new AppError(400, "Insufficient stock for transfer");
-            }
-
-            // Deduct from source branch
-            const newSourceQty = addDecimal(sourceStock.current_quantity, -quantity);
+            const previousSourceQty = sourceStock.current_quantity;
+            const newSourceQty = addDecimal(previousSourceQty, -quantity);
             await tx.stock.update({
                 where: { product_id_branch_id: { product_id: productId, branch_id: fromBranchId } },
                 data: { current_quantity: newSourceQty },
@@ -170,6 +171,7 @@ class StockService {
             });
 
             let finalDestQty;
+            const previousDestQty = destinationStock?.current_quantity ?? 0;
             if (!destinationStock) {
                 // Create destination stock if it doesn't exist
                 destinationStock = await tx.stock.create({
@@ -197,7 +199,7 @@ class StockService {
                     branch_id: fromBranchId,
                     movement_type: "TRANSFER_OUT",
                     quantity_change: -quantity,
-                    previous_qty: sourceStock.current_quantity,
+                    previous_qty: previousSourceQty,
                     new_qty: newSourceQty,
                     notes: notes || `Transferred to ${toBranchId}`,
                     created_by: createdBy,
@@ -211,7 +213,7 @@ class StockService {
                     branch_id: toBranchId,
                     movement_type: "TRANSFER_IN",
                     quantity_change: quantity,
-                    previous_qty: destinationStock.current_quantity || 0,
+                    previous_qty: previousDestQty,
                     new_qty: finalDestQty,
                     notes: notes || `Transferred from ${fromBranchId}`,
                     created_by: createdBy,

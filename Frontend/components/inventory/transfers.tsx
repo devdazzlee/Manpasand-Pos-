@@ -362,16 +362,8 @@ export function Transfers() {
     const lineErr = validateTransferLines(transferLines);
     if (lineErr) errors.lines = lineErr;
 
-    if (!errors.lines && form.fromBranchId) {
-      for (const line of transferLines) {
-        const qty = Number(line.quantity);
-        const available = getStockQty(line.productId) ?? 0;
-        if (qty > available) {
-          errors.lines = `Insufficient stock for ${line.productName}. Available: ${available}`;
-          break;
-        }
-      }
-    }
+    // Source may go negative — warehouse/branch can still transfer when
+    // on-hand is 0 or less than the qty being moved.
 
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);

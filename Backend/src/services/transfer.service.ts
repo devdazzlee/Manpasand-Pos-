@@ -30,7 +30,9 @@ export class TransferService {
     }
 
     return prisma.$transaction(async (tx) => {
-      const sourceStock = await tx.stock.findUnique({
+      // Allow transfers even when source has 0 / less than requested — on-hand
+      // may go negative so warehouse can move stock before counts catch up.
+      let sourceStock = await tx.stock.findUnique({
         where: {
           product_id_branch_id: {
             product_id: data.productId,
@@ -40,12 +42,13 @@ export class TransferService {
       });
 
       if (!sourceStock) {
-        throw new AppError(404, 'Source stock not found');
-      }
-
-      const sourceQty = asNumber(sourceStock.current_quantity);
-      if (sourceQty < data.quantity) {
-        throw new AppError(400, 'Insufficient stock for transfer');
+        sourceStock = await tx.stock.create({
+          data: {
+            product_id: data.productId,
+            branch_id: data.fromBranchId,
+            current_quantity: 0,
+          },
+        });
       }
 
       const referenceNo = generateTransferRef();
@@ -73,7 +76,8 @@ export class TransferService {
         },
       });
 
-      const newSourceQty = addDecimal(sourceStock.current_quantity, -data.quantity);
+      const previousQty = sourceStock.current_quantity;
+      const newSourceQty = addDecimal(previousQty, -data.quantity);
       await tx.stock.update({
         where: {
           product_id_branch_id: {
@@ -95,7 +99,7 @@ export class TransferService {
           reference_id: transfer.id,
           reference_type: 'transfer',
           quantity_change: -data.quantity,
-          previous_qty: sourceStock.current_quantity,
+          previous_qty: previousQty,
           new_qty: newSourceQty,
           notes: `Transfer to ${transfer.to_branch?.name || data.toBranchId} - ${referenceNo}`,
           created_by: data.createdBy,
