@@ -25,6 +25,7 @@ export const PERMISSIONS: PermissionDef[] = [
   { key: 'register.reopen', group: 'Cash register', label: 'Reopen closed register', description: 'Reopen a register that was already closed' },
   // Inventory & products
   { key: 'inventory.adjust', group: 'Inventory', label: 'Stock adjustments', description: 'Adjust stock quantities with a reason' },
+  { key: 'inventory.assemble', group: 'Inventory', label: 'Product assembly / conversion', description: 'Combine component products into a finished product and update stock' },
   { key: 'inventory.import', group: 'Inventory', label: 'Opening stock import', description: 'Import stock from another POS (posts to Opening Balance Equity) and undo imports' },
   { key: 'products.price_change', group: 'Inventory', label: 'Change prices', description: 'Edit cost price, sale price or product discount' },
   // Money
@@ -64,6 +65,7 @@ const DEFAULTS: Record<string, Role[]> = {
   'register.approve_variance': ['ADMIN', 'BRANCH_MANAGER', 'SUPERVISOR'],
   'register.reopen': ['ADMIN'],
   'inventory.adjust': ['ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER'],
+  'inventory.assemble': ['ADMIN', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER'],
   'inventory.import': ['ADMIN', 'WAREHOUSE_MANAGER'],
   // Warehouse runs Stock In and product edits — must change cost / sale price without manager approval.
   'products.price_change': ['ADMIN', 'PURCHASE_MANAGER', 'WAREHOUSE_MANAGER'],

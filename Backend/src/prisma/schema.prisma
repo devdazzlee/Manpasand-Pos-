@@ -34,6 +34,7 @@ model User {
   purchases        Purchase[]
   transfers        Transfer[]
   stock_adjustments StockAdjustment[]
+  stock_assemblies  StockAssembly[]
   supplier_payments SupplierPayment[]
   customer_payments CustomerPayment[]
   expenses_created  Expense[]         @relation("ExpenseCreator")
@@ -98,6 +99,7 @@ model Branch {
   transfers_from     Transfer[]    @relation("TransferFrom")
   transfers_to       Transfer[]    @relation("TransferTo")
   stock_adjustments  StockAdjustment[]
+  stock_assemblies   StockAssembly[]
   loyalty_customers  Customer[] @relation("CustomerLoyaltyBranch")
   stock_import_lines StockImportLine[]
 
@@ -415,6 +417,8 @@ model Product {
   purchases            Purchase[]
   purchase_return_items PurchaseReturnItem[]
   stock_adjustments    StockAdjustment[]
+  stock_assemblies_finished StockAssembly[] @relation("AssemblyFinished")
+  stock_assembly_lines StockAssemblyLine[]
   stock_import_lines   StockImportLine[]
   transfers            Transfer[]
   created_at           DateTime            @default(now())
@@ -631,6 +635,44 @@ model StockAdjustment {
   @@index([adjustment_date])
   @@index([adjustment_type])
   @@index([adjustment_category])
+}
+
+/// Combine component products into one finished product (e.g. bottle + sticker → packaged item).
+model StockAssembly {
+  id                   String              @id @default(uuid())
+  reference_no         String              @unique
+  branch_id            String
+  branch               Branch              @relation(fields: [branch_id], references: [id])
+  finished_product_id  String
+  finished_product     Product             @relation("AssemblyFinished", fields: [finished_product_id], references: [id])
+  finished_quantity    Decimal
+  /// Weighted unit cost of the finished item from consumed components.
+  unit_cost            Decimal?
+  notes                String?
+  created_by           String
+  user                 User                @relation(fields: [created_by], references: [id])
+  created_at           DateTime            @default(now())
+  lines                StockAssemblyLine[]
+
+  @@index([branch_id])
+  @@index([finished_product_id])
+  @@index([created_at])
+  @@index([reference_no])
+}
+
+model StockAssemblyLine {
+  id         String        @id @default(uuid())
+  assembly_id String
+  assembly   StockAssembly @relation(fields: [assembly_id], references: [id], onDelete: Cascade)
+  product_id String
+  product    Product       @relation(fields: [product_id], references: [id])
+  /// Quantity of this component consumed for the assembly.
+  quantity   Decimal
+  unit_cost  Decimal?
+  created_at DateTime      @default(now())
+
+  @@index([assembly_id])
+  @@index([product_id])
 }
 
 // NEW: Sales/Sell Table
@@ -1190,6 +1232,8 @@ enum StockMovementType {
   DAMAGE
   EXPIRED
   LOSS
+  ASSEMBLY_IN
+  ASSEMBLY_OUT
 }
 
 enum PurchaseOrderStatus {

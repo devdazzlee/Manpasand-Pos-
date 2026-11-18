@@ -80,6 +80,7 @@ import {
   Waves,
   ShieldCheck,
   Globe,
+  Combine,
 } from "lucide-react";
 import { BarcodeScanIcon } from "@/components/icons/barcode-scan-icon";
 
@@ -321,6 +322,17 @@ const menuSections: SidebarMenuSection[] = [
         label: "Stock Adjustment",
         icon: SlidersHorizontal,
         roles: withBranchView(INVENTORY_ROLES),
+      },
+      {
+        id: "product-assembly",
+        label: "Product Assembly",
+        icon: Combine,
+        roles: withBranchView([
+          "SUPER_ADMIN",
+          "ADMIN",
+          "WAREHOUSE_MANAGER",
+          "PURCHASE_MANAGER",
+        ]),
       },
       {
         id: "scan-stock-count",

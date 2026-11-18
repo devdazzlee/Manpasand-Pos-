@@ -26,6 +26,7 @@ const RULES: Rule[] = [
   { method: 'PATCH', pattern: /^\/products\/[^/]+$/, action: 'product.update', category: 'inventory', entity: 'product', summary: ({ body, result }) => `Updated product ${result?.name || ''}: ${Object.keys(body || {}).slice(0, 8).join(', ')}` },
   { method: 'DELETE', pattern: /^\/products\/[^/]+$/, action: 'product.delete', category: 'inventory', entity: 'product', summary: ({ id }) => `Deleted product ${id}` },
   { method: 'POST', pattern: /^\/stock-adjustments/, action: 'inventory.adjust', category: 'inventory', entity: 'stock_adjustment', summary: ({ body }) => `Stock adjustment${body?.adjustment_category ? ` (${body.adjustment_category})` : ''}${body?.reason ? ` — ${body.reason}` : ''}` },
+  { method: 'POST', pattern: /^\/stock-assemblies/, action: 'inventory.assemble', category: 'inventory', entity: 'stock_assembly', summary: ({ body, result }) => `Assembled ${body?.finishedQuantity || result?.finished_quantity || ''} × product from ${(body?.components || []).length || result?.lines?.length || 0} component(s)` },
   { method: 'POST', pattern: /^\/transfers/, action: 'inventory.transfer', category: 'inventory', entity: 'transfer', summary: () => 'Stock transfer' },
   { method: 'POST', pattern: /^\/stock-out/, action: 'inventory.stock_out', category: 'inventory', entity: 'stock_out', summary: () => 'Stock out' },
   { method: 'POST', pattern: /^\/purchases/, action: 'purchase.receive', category: 'suppliers', entity: 'purchase', summary: () => 'Stock in / goods received' },

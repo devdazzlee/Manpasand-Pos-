@@ -1066,6 +1066,8 @@ export class ProductService {
             await tx.productImage.deleteMany({ where: { product_id: id } });
             await tx.stockMovement.deleteMany({ where: { product_id: id } });
             await tx.stockAdjustment.deleteMany({ where: { product_id: id } });
+            await tx.stockAssemblyLine.deleteMany({ where: { product_id: id } });
+            await tx.stockAssembly.deleteMany({ where: { finished_product_id: id } });
             await tx.transfer.deleteMany({ where: { product_id: id } });
             await tx.stock.deleteMany({ where: { product_id: id } });
             await tx.saleItem.deleteMany({ where: { product_id: id } });

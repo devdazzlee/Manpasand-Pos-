@@ -88,6 +88,8 @@ const MOVEMENT_TYPES = [
   { value: "DAMAGE", label: "Damage" },
   { value: "EXPIRED", label: "Expired" },
   { value: "LOSS", label: "Loss" },
+  { value: "ASSEMBLY_IN", label: "Assembly in" },
+  { value: "ASSEMBLY_OUT", label: "Assembly out" },
 ] as const;
 
 interface MovementRow {
@@ -120,12 +122,14 @@ function typeTone(t: string) {
     case "PURCHASE":
     case "TRANSFER_IN":
     case "RETURN":
+    case "ASSEMBLY_IN":
       return "bg-emerald-50 text-emerald-800 border-emerald-200";
     case "SALE":
     case "TRANSFER_OUT":
     case "DAMAGE":
     case "EXPIRED":
     case "LOSS":
+    case "ASSEMBLY_OUT":
       return "bg-rose-50 text-rose-800 border-rose-200";
     case "ADJUSTMENT":
       return "bg-sky-50 text-sky-800 border-sky-200";

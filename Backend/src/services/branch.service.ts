@@ -70,6 +70,7 @@ export class BranchService {
         await tx.holdSale.deleteMany({ where: { branch_id: id } });
         await tx.stockMovement.deleteMany({ where: { branch_id: id } });
         await tx.stockAdjustment.deleteMany({ where: { branch_id: id } });
+        await tx.stockAssembly.deleteMany({ where: { branch_id: id } });
         await tx.stock.deleteMany({ where: { branch_id: id } });
 
         await tx.purchaseOrderItem.deleteMany({

@@ -10,7 +10,7 @@ import { getActiveBranchScope } from "@/lib/branch-scope";
  */
 const BRANCH_SCOPED_API = [
   "/dashboard", "/reports", "/sales-report", "/register-report", "/sale", "/cash-register", "/till",
-  "/expenses", "/products", "/stock", "/stock-out", "/stock-adjustments", "/stock-imports", "/transfers",
+  "/expenses", "/products", "/stock", "/stock-out", "/stock-adjustments", "/stock-assemblies", "/stock-imports", "/transfers",
   "/purchases", "/purchase-orders", "/purchase-invoices", "/purchase-returns", "/purchase-report",
   "/inventory", "/stock-quantity-report", "/product-sales-profit", "/commissions", "/payroll",
   "/financial-statement", "/profit-loss", "/balance-sheet", "/trial-balance", "/chart-of-accounts",

@@ -93,6 +93,7 @@ const BRANCH_READONLY_INVENTORY_PREFIXES = [
   '/stock',
   '/stock-out',
   '/stock-adjustments',
+  '/stock-assemblies',
   '/stock-imports',
   '/purchases',
   '/purchase-orders',

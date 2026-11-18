@@ -72,6 +72,7 @@ import {
   StockOut,
   StockMovementLog,
   StockAdjustment,
+  ProductAssembly,
   StockView,
   InventoryReports,
   InventoryAudit,
@@ -302,6 +303,8 @@ export function Dashboard({ onLogout }: DashboardProps) {
         return <StockMovementLog />;
       case "stock-adjustment":
         return <StockAdjustment />;
+      case "product-assembly":
+        return <ProductAssembly />;
       case "stock-view":
         return <StockView onNavigate={setActiveTab} />;
       case "bulk-product-upload":
