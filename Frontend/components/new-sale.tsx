@@ -1277,13 +1277,14 @@ export function NewSale() {
   const [gridWidth, setGridWidth] = useState(0);
   const [gridScrollMargin, setGridScrollMargin] = useState(0);
 
-  // Phones stay at 2 columns. Desktop widths keep the previous 4 / 5 / 6 layout.
+  // Phones stay at 2 columns. With a wider cart, the product pane is narrower —
+  // keep cards readable (fewer columns) instead of squeezing 6 tiny tiles.
   useEffect(() => {
     const el = productScrollRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
     const compute = () => {
       const w = el.clientWidth;
-      setGridColumns(w < 480 ? 2 : w < 680 ? 4 : w < 1000 ? 5 : 6);
+      setGridColumns(w < 480 ? 2 : w < 720 ? 3 : w < 980 ? 4 : 5);
       setGridWidth(w);
     };
     compute();
@@ -3763,7 +3764,7 @@ export function NewSale() {
             </p>
           </div>
         ) : !virtualizeGrid ? (
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-2 lg:grid-cols-5 xl:grid-cols-6">
+          <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-2 lg:grid-cols-4 xl:grid-cols-5">
             {gridProducts.map((product) => renderProductCard(product))}
           </div>
         ) : (
@@ -3798,10 +3799,10 @@ export function NewSale() {
         )}
       </div>
 
-      {/* Cart Section */}
+      {/* Cart Section — wider than the old 360px strip so full product names stay readable while billing. */}
       <div
         className={cn(
-          "flex w-full min-h-0 flex-col overflow-hidden bg-white lg:h-full lg:max-h-full lg:w-[360px] lg:shrink-0 lg:self-stretch lg:border-l lg:border-slate-200",
+          "flex w-full min-h-0 flex-col overflow-hidden bg-white lg:h-full lg:max-h-full lg:w-[min(42%,30rem)] lg:min-w-[26rem] lg:max-w-[32rem] lg:shrink-0 lg:self-stretch lg:border-l lg:border-slate-200",
           cart.length === 0
             ? "max-lg:hidden"
             : cn(
@@ -4146,7 +4147,10 @@ export function NewSale() {
                         </div>
 
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-medium leading-tight text-slate-900">
+                          <p
+                            className="break-words text-[13px] font-semibold leading-snug text-slate-900 sm:text-sm"
+                            title={item.name}
+                          >
                             {item.name}
                           </p>
                           <p className="mt-0.5 text-[11px] tabular-nums text-slate-500">
@@ -4157,7 +4161,7 @@ export function NewSale() {
                           </p>
                         </div>
 
-                        <span className="shrink-0 text-[13px] font-bold tabular-nums text-slate-900">
+                        <span className="shrink-0 self-start pt-0.5 text-[13px] font-bold tabular-nums text-slate-900 sm:text-sm">
                           {formatMoney(lineAmount)}
                         </span>
 
