@@ -987,6 +987,31 @@ export function NewSale() {
     activeCartLineIdRef.current = activeCartLineId;
   }, [activeCartLineId]);
 
+  /** Keep the active cart line visible inside the cart pane only (no page jump). */
+  const scrollCartLineIntoView = useCallback((lineId: string | null) => {
+    if (!lineId) return;
+    const container = cartScrollContainerRef.current;
+    const item = cartItemRefs.current[lineId];
+    if (!container || !item) return;
+    const cRect = container.getBoundingClientRect();
+    const iRect = item.getBoundingClientRect();
+    const pad = 8;
+    if (iRect.bottom > cRect.bottom) {
+      container.scrollTop += iRect.bottom - cRect.bottom + pad;
+    } else if (iRect.top < cRect.top) {
+      container.scrollTop -= cRect.top - iRect.top + pad;
+    }
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!activeCartLineId) return;
+    // New lines mount after the cart update — wait one frame for the ref.
+    const frame = requestAnimationFrame(() => {
+      scrollCartLineIntoView(activeCartLineId);
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [activeCartLineId, cart.length, scrollCartLineIntoView]);
+
   useEffect(() => {
     if (cart.length === 0) {
       setMobileCartOpen(false);
