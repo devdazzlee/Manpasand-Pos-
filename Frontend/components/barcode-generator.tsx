@@ -157,6 +157,8 @@ const LABEL_SIZES: Record<string, { label: string; w: number; h: number; css: st
 const DEFAULT_LABEL_SIZE = "58x40mm";
 // New key: browsers had 50×25 auto-saved under the old one, which is not this shop's roll.
 const SETTINGS_KEY = "barcode-generator-settings-v2";
+/** Print queue survives tab switches / remounts (dashboard unmounts this screen). */
+const QUEUE_KEY = "barcode-generator-print-queue-v1";
 
 /** Lets the box be cleared while typing; an empty or zero value goes back to the last valid number. */
 function CopiesInput({ value, onChange }: { value: number; onChange: (next: number) => void }) {
@@ -215,10 +217,30 @@ function BarcodeSourceToggle({
   );
 }
 
+function reviveQueueItem(raw: any): SelectedProductItem | null {
+  if (!raw || typeof raw !== "object" || !raw.product?.id) return null;
+  const packageDate = raw.packageDate ? new Date(raw.packageDate) : new Date();
+  const expiryDate = raw.expiryDate ? new Date(raw.expiryDate) : undefined;
+  return {
+    id: String(raw.id || raw.product.id),
+    product: raw.product as Product,
+    netWeight: String(raw.netWeight ?? ""),
+    packageDate: Number.isNaN(packageDate.getTime()) ? new Date() : packageDate,
+    expiryDuration: String(raw.expiryDuration ?? "12"),
+    expiryDate:
+      expiryDate && !Number.isNaN(expiryDate.getTime()) ? expiryDate : undefined,
+    copies: Math.max(1, Number(raw.copies) || 1),
+    barcodeMode: raw.barcodeMode === "manual" ? "manual" : "auto",
+    customBarcode:
+      typeof raw.customBarcode === "string" ? raw.customBarcode : undefined,
+  };
+}
+
 export default function BarcodeGenerator() {
   const [selectedProducts, setSelectedProducts] = useState<
     SelectedProductItem[]
   >([]);
+  const [queueLoaded, setQueueLoaded] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [debouncedSearch, setDebouncedSearch] = useState("");
   const [globalExpiryDuration, setGlobalExpiryDuration] = useState("12");
@@ -258,6 +280,38 @@ export default function BarcodeGenerator() {
   useEffect(() => {
     productSearchInputRef.current?.focus();
   }, []);
+
+  // Restore print queue after leaving the tab (component remounts empty otherwise).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(QUEUE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          const restored = parsed
+            .map(reviveQueueItem)
+            .filter((item): item is SelectedProductItem => item != null);
+          if (restored.length) setSelectedProducts(restored);
+        }
+      }
+    } catch {
+      // ignore bad queue data
+    }
+    setQueueLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!queueLoaded) return;
+    try {
+      if (selectedProducts.length === 0) {
+        localStorage.removeItem(QUEUE_KEY);
+      } else {
+        localStorage.setItem(QUEUE_KEY, JSON.stringify(selectedProducts));
+      }
+    } catch {
+      // storage full / private mode — queue just won't persist
+    }
+  }, [selectedProducts, queueLoaded]);
 
   // Remember label settings between visits (per browser).
   useEffect(() => {

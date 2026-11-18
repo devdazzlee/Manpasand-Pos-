@@ -1381,12 +1381,19 @@ export function NewSale() {
 
   useEffect(() => {
     if (!productSearchOpen) return;
-    // While typing on mobile, scrollIntoView on a changing results list scrolls
-    // ancestors and used to blur the search field (keyboard closed every key).
-    if (document.activeElement === searchInputRef.current) return;
-    const highlightedEl = searchDropdownItemRefs.current[highlightedProductIndex];
-    if (!highlightedEl) return;
-    highlightedEl.scrollIntoView({ block: "nearest" });
+    // Scroll only the dropdown list — never page ancestors. scrollIntoView on
+    // the item used to scroll the whole sale pane (and on mobile closed the
+    // keyboard); skipping while the input was focused also blocked ↑↓ nav.
+    const container = searchDropdownRef.current;
+    const item = searchDropdownItemRefs.current[highlightedProductIndex];
+    if (!container || !item) return;
+    const cRect = container.getBoundingClientRect();
+    const iRect = item.getBoundingClientRect();
+    if (iRect.bottom > cRect.bottom) {
+      container.scrollTop += iRect.bottom - cRect.bottom;
+    } else if (iRect.top < cRect.top) {
+      container.scrollTop -= cRect.top - iRect.top;
+    }
   }, [highlightedProductIndex, productSearchOpen, searchDropdownProducts.length]);
 
   const focusSearchInput = useCallback((options?: { clear?: boolean; allowTouch?: boolean }) => {
