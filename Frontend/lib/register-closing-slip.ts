@@ -14,6 +14,8 @@ export interface ClosingSlip {
   autoClosed: boolean;
   bills: number;
   netSales: number;
+  /** Cash + card + bank + wallet (printed last under REVENUE). */
+  totalRevenue?: number;
   cashRevenue: number;
   cardRevenue: number;
   bankRevenue: number;
@@ -65,13 +67,23 @@ export function buildClosingReceipt(slip: ClosingSlip): ReceiptData {
     return { label: tag ? `${e.particular} (${tag})` : e.particular, value: pkr(e.amount) };
   });
 
+  const totalRevenue = Number(
+    slip.totalRevenue ??
+      Number(slip.cashRevenue || 0) +
+        Number(slip.cardRevenue || 0) +
+        Number(slip.bankRevenue || 0) +
+        Number(slip.walletRevenue || 0),
+  );
+
+  // Method breakdown first; Total Revenue always last on the closing slip.
   const revenueRows = [
     { label: "Total Cash Revenue", value: pkr(slip.cashRevenue) },
     { label: "Total Card Revenue", value: pkr(slip.cardRevenue) },
     { label: "Total Bank Revenue", value: pkr(slip.bankRevenue) },
-    ...(Math.abs(slip.walletRevenue) > 0.004
-      ? [{ label: "Wallet Revenue (JazzCash / Easypaisa)", value: pkr(slip.walletRevenue) }]
+    ...(Math.abs(Number(slip.walletRevenue || 0)) > 0.004
+      ? [{ label: "Total Wallet Revenue", value: pkr(slip.walletRevenue) }]
       : []),
+    { label: "Total Revenue", value: pkr(totalRevenue), emphasis: true },
   ];
 
   const expectedCash = Number(slip.expectedCash ?? slip.cashInHand ?? 0);

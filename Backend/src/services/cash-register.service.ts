@@ -1025,6 +1025,7 @@ export class CashRegisterService {
     const cardRevenue = r2(live.byMethod.CARD || 0);
     const bankRevenue = r2(live.byMethod.BANK_TRANSFER || 0);
     const walletRevenue = r2(live.byMethod.MOBILE_MONEY || 0);
+    const totalRevenue = r2(cashRevenue + cardRevenue + bankRevenue + walletRevenue);
     const cashExpense = r2(live.expensesByMethod.CASH || 0);
     const totalExpense = r2(live.allExpenses);
     const nonCashExpense = r2(totalExpense - cashExpense);
@@ -1040,6 +1041,8 @@ export class CashRegisterService {
       autoClosed: s.status === 'CLOSED' && !s.closed_by && /^Auto-closed/i.test(s.variance_note || ''),
       bills: live.bills,
       netSales: live.netSales,
+      /** Cash + card + bank + wallet for the printed closing slip. */
+      totalRevenue,
       cashRevenue,
       cardRevenue,
       bankRevenue,
