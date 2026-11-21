@@ -4447,9 +4447,12 @@ export function NewSale() {
                         <span>
                           🎁 Lifetime winner — {loyaltyStatus.discountPercent}% off, capped at{" "}
                           {formatMoney(Number(loyaltyStatus.discountCap ?? 0))}
+                          {loyaltyStatus.offlineEstimate ? " (offline estimate)" : ""}
                         </span>
                         <span className="shrink-0 tabular-nums">
-                          {(loyaltyStatus.usedThisMonth ?? 0) + 1}/{loyaltyStatus.monthlyLimit} this month
+                          {loyaltyStatus.usedThisMonth == null
+                            ? `≤${loyaltyStatus.monthlyLimit}/mo`
+                            : `${(loyaltyStatus.usedThisMonth ?? 0) + 1}/${loyaltyStatus.monthlyLimit} this month`}
                         </span>
                       </>
                     ) : (

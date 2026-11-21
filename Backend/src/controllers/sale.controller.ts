@@ -208,6 +208,7 @@ const createHoldSaleController = asyncHandler(async (req: Request, res: Response
         customerId: req.body?.customerId,
         createdBy: req.user?.id,
         items: req.body?.items || [],
+        clientHoldId: req.body?.clientHoldId,
     });
 
     new ApiResponse(holdSale, "Sale held successfully", 201).send(res);

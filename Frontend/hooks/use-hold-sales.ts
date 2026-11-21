@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import apiClient from "@/lib/apiClient";
 import { normalizeBranchId } from "@/lib/branch-utils";
+import { offlineDB } from "@/lib/offline-db";
+import { isNetworkFailure, syncManager } from "@/lib/offline-sync";
 
 interface CartItem {
   id: string;
@@ -37,6 +39,7 @@ interface HoldSaleRecord {
   createdAt: string;
   customerId: string | null;
   customer: HoldSaleCustomer | null;
+  offlinePending?: boolean;
 }
 
 export function useHoldSales(branchIdOverride?: string) {
@@ -51,6 +54,18 @@ export function useHoldSales(branchIdOverride?: string) {
     if (typeof window === "undefined") return "";
     return normalizeBranchId(localStorage.getItem("branch"));
   }, [branchIdOverride]);
+
+  const getBranchName = useCallback(() => {
+    if (typeof window === "undefined") return "Branch";
+    try {
+      const raw = localStorage.getItem("branch");
+      if (!raw) return "Branch";
+      const parsed = JSON.parse(raw);
+      return parsed?.name || "Branch";
+    } catch {
+      return "Branch";
+    }
+  }, []);
 
   const normalizeItem = (item: any): CartItem => ({
     id: item.id,
@@ -68,7 +83,7 @@ export function useHoldSales(branchIdOverride?: string) {
     unit: item.unit,
   });
 
-  const mapHoldSale = (holdSale: any): HoldSaleRecord => {
+  const mapHoldSale = (holdSale: any, offlinePending = false): HoldSaleRecord => {
     const customer = holdSale.customer
       ? {
           id: String(holdSale.customer.id),
@@ -89,14 +104,35 @@ export function useHoldSales(branchIdOverride?: string) {
       id: holdSale.id,
       items: Array.isArray(holdSale.items) ? holdSale.items.map(normalizeItem) : [],
       subtotal: Number(holdSale.subtotal || 0),
-      totalItems: Number(holdSale.total_items || 0),
-      branchId: holdSale.branch_id || "",
-      branchName: holdSale.branch?.name || "Unknown Branch",
-      createdAt: holdSale.created_at || new Date().toISOString(),
+      totalItems: Number(holdSale.total_items || holdSale.totalItems || 0),
+      branchId: holdSale.branch_id || holdSale.branchId || "",
+      branchName: holdSale.branch?.name || holdSale.branchName || "Unknown Branch",
+      createdAt: holdSale.created_at || holdSale.createdAt || new Date().toISOString(),
       customerId: customerId ? String(customerId) : null,
       customer,
+      offlinePending,
     };
   };
+
+  const loadLocalHolds = useCallback(async (branchId: string): Promise<HoldSaleRecord[]> => {
+    const local = await offlineDB.getHoldSalesForBranch(branchId);
+    return local.map((row) =>
+      mapHoldSale(
+        {
+          id: row.id,
+          items: row.items,
+          subtotal: row.subtotal,
+          total_items: row.totalItems,
+          branch_id: row.branchId,
+          branchName: row.branchName,
+          created_at: row.createdAt,
+          customerId: row.customerId,
+          customer: row.customer,
+        },
+        row.synced === false,
+      ),
+    );
+  }, []);
 
   const refreshHoldSales = useCallback(async () => {
     const branchId = getBranchId();
@@ -107,18 +143,25 @@ export function useHoldSales(branchIdOverride?: string) {
 
     try {
       setLoading(true);
-      const response = await apiClient.get("/sale/hold", { params: { branchId } });
-      const holds = Array.isArray(response?.data?.data)
-        ? response.data.data.map(mapHoldSale)
-        : [];
-      setHoldSales(holds);
-    } catch (error) {
-      console.error("Failed to load hold sales from API:", error);
-      setHoldSales([]);
+
+      if (!navigator.onLine || !syncManager.canMakeRequest()) {
+        setHoldSales(await loadLocalHolds(branchId));
+        return;
+      }
+
+      try {
+        const response = await apiClient.get("/sale/hold", { params: { branchId } });
+        const serverHolds = Array.isArray(response?.data?.data) ? response.data.data : [];
+        await offlineDB.replaceSyncedHoldSales(branchId, serverHolds);
+        setHoldSales(await loadLocalHolds(branchId));
+      } catch (error) {
+        console.error("Failed to load hold sales from API:", error);
+        setHoldSales(await loadLocalHolds(branchId));
+      }
     } finally {
       setLoading(false);
     }
-  }, [getBranchId]);
+  }, [getBranchId, loadLocalHolds]);
 
   useEffect(() => {
     refreshHoldSales();
@@ -130,38 +173,106 @@ export function useHoldSales(branchIdOverride?: string) {
     const branchId = getBranchId();
     if (!branchId || branchId === "Not Found") return false;
 
-    try {
-      const response = await apiClient.post("/sale/hold", {
-        branchId,
-        customerId: customerId || null,
-        items: cart,
-      });
-      const created = response?.data?.data ? mapHoldSale(response.data.data) : null;
-      if (created) {
-        setHoldSales((prev) => [created, ...prev]);
-        return true;
+    const clientHoldId = crypto.randomUUID();
+    const branchName = getBranchName();
+    let customer: HoldSaleCustomer | null = null;
+    if (customerId) {
+      const cached = await offlineDB.getCustomer(customerId);
+      if (cached) {
+        customer = {
+          id: cached.id,
+          name: cached.name,
+          email: cached.email ?? null,
+          phone_number: cached.phone ?? cached.data?.phone_number ?? null,
+          phone: cached.phone ?? null,
+          is_active: cached.data?.is_active !== false,
+        };
+      } else {
+        customer = { id: customerId };
       }
-      await refreshHoldSales();
-      return true;
-    } catch (error) {
-      console.error("Failed to hold sale in DB:", error);
-      return false;
     }
-  }, [getBranchId, refreshHoldSales]);
+
+    const offlineRow = await offlineDB.saveHoldSale({
+      id: clientHoldId,
+      clientHoldId,
+      branchId,
+      branchName,
+      customerId: customerId || null,
+      customer,
+      items: cart,
+      synced: false,
+    });
+
+    const tryOnline = navigator.onLine && syncManager.canMakeRequest();
+    if (tryOnline) {
+      try {
+        const response = await apiClient.post("/sale/hold", {
+          branchId,
+          customerId: customerId || null,
+          items: cart,
+          clientHoldId,
+        });
+        const created = response?.data?.data ? mapHoldSale(response.data.data) : null;
+        if (created) {
+          await offlineDB.markHoldSynced(offlineRow.id, response.data.data);
+          setHoldSales((prev) => [created, ...prev.filter((h) => h.id !== offlineRow.id)]);
+          return true;
+        }
+      } catch (error) {
+        if (!isNetworkFailure(error)) {
+          await offlineDB.deleteHoldSaleLocal(offlineRow.id);
+          console.error("Failed to hold sale in DB:", error);
+          return false;
+        }
+        // Network blip — keep local hold and continue offline path.
+      }
+    }
+
+    const local = mapHoldSale(
+      {
+        id: offlineRow.id,
+        items: offlineRow.items,
+        subtotal: offlineRow.subtotal,
+        total_items: offlineRow.totalItems,
+        branch_id: offlineRow.branchId,
+        branchName: offlineRow.branchName,
+        created_at: offlineRow.createdAt,
+        customerId: offlineRow.customerId,
+        customer: offlineRow.customer,
+      },
+      true,
+    );
+    setHoldSales((prev) => [local, ...prev.filter((h) => h.id !== local.id)]);
+    return true;
+  }, [getBranchId, getBranchName]);
 
   const retrieveHoldSale = useCallback(async (index: number): Promise<HoldSaleRecord | null> => {
     if (index < 0 || index >= holdSales.length) return null;
     const holdSaleRecord = holdSales[index];
     const branchId = getBranchId();
 
+    const finishLocal = async () => {
+      await offlineDB.markHoldPendingDelete(holdSaleRecord.id);
+      setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
+      return holdSaleRecord;
+    };
+
+    if (!navigator.onLine || !syncManager.canMakeRequest() || holdSaleRecord.offlinePending) {
+      return finishLocal();
+    }
+
     try {
       const response = await apiClient.post(`/sale/hold/${holdSaleRecord.id}/retrieve`, {
         branchId,
       });
       const retrieved = response?.data?.data ? mapHoldSale(response.data.data) : holdSaleRecord;
+      await offlineDB.deleteHoldSaleLocal(holdSaleRecord.id);
       setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
       return retrieved;
     } catch (error) {
+      if (isNetworkFailure(error)) {
+        return finishLocal();
+      }
       console.error("Failed to retrieve hold sale from DB:", error);
       return null;
     }
@@ -172,27 +283,48 @@ export function useHoldSales(branchIdOverride?: string) {
     const holdSaleRecord = holdSales[index];
     const branchId = getBranchId();
 
+    const finishLocal = async () => {
+      await offlineDB.markHoldPendingDelete(holdSaleRecord.id);
+      setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
+    };
+
+    if (!navigator.onLine || !syncManager.canMakeRequest() || holdSaleRecord.offlinePending) {
+      await finishLocal();
+      return;
+    }
+
     try {
       await apiClient.delete(`/sale/hold/${holdSaleRecord.id}`, {
         data: { branchId },
       });
+      await offlineDB.deleteHoldSaleLocal(holdSaleRecord.id);
       setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
     } catch (error) {
+      if (isNetworkFailure(error)) {
+        await finishLocal();
+        return;
+      }
       console.error("Failed to delete hold sale from DB:", error);
     }
   }, [getBranchId, holdSales]);
 
   const clearAllHoldSales = useCallback(async () => {
-    const holdIds = holdSales.map((sale) => sale.id);
+    const snapshot = [...holdSales];
     const branchId = getBranchId();
-    for (const holdId of holdIds) {
-      try {
-        // eslint-disable-next-line no-await-in-loop
-        await apiClient.delete(`/sale/hold/${holdId}`, {
-          data: { branchId },
-        });
-      } catch (error) {
-        console.error("Failed to delete hold sale from DB:", error);
+    for (const hold of snapshot) {
+      // eslint-disable-next-line no-await-in-loop
+      await offlineDB.markHoldPendingDelete(hold.id);
+      if (navigator.onLine && syncManager.canMakeRequest() && !hold.offlinePending) {
+        try {
+          // eslint-disable-next-line no-await-in-loop
+          await apiClient.delete(`/sale/hold/${hold.id}`, {
+            data: { branchId },
+          });
+          // eslint-disable-next-line no-await-in-loop
+          await offlineDB.deleteHoldSaleLocal(hold.id);
+        } catch {
+          /* pending delete kept for sync */
+        }
       }
     }
     setHoldSales([]);
@@ -208,4 +340,3 @@ export function useHoldSales(branchIdOverride?: string) {
     holdSalesLoading: loading,
   };
 }
-

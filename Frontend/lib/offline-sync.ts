@@ -16,6 +16,8 @@ export interface SyncStatus {
   pendingCount: number;
   failedCount: number;
   unsyncedSales: number;
+  unsyncedCustomers: number;
+  unsyncedHolds: number;
 }
 
 class OfflineSyncManager {
@@ -28,6 +30,8 @@ class OfflineSyncManager {
     pendingCount: 0,
     failedCount: 0,
     unsyncedSales: 0,
+    unsyncedCustomers: 0,
+    unsyncedHolds: 0,
   };
 
   private boundOnline = () => this.handleOnline();
@@ -44,7 +48,15 @@ class OfflineSyncManager {
 
   private async refreshUnsyncedCount() {
     try {
-      this.status.unsyncedSales = await offlineDB.countUnsyncedSales();
+      const [unsyncedSales, unsyncedCustomers, unsyncedHolds] = await Promise.all([
+        offlineDB.countUnsyncedSales(),
+        offlineDB.countUnsyncedCustomers(),
+        offlineDB.countUnsyncedHolds(),
+      ]);
+      this.status.unsyncedSales = unsyncedSales;
+      this.status.unsyncedCustomers = unsyncedCustomers;
+      this.status.unsyncedHolds = unsyncedHolds;
+      this.status.pendingCount = unsyncedSales + unsyncedCustomers + unsyncedHolds;
       this.notifyListeners();
     } catch {
       /* ignore */
@@ -84,17 +96,19 @@ class OfflineSyncManager {
     let failed = 0;
     try {
       await this.syncPendingRequests();
+      // Customers first so temp ids remap before holds/sales POST.
+      failed += await this.syncCustomers();
+      failed += await this.syncHoldSales();
       failed += await this.syncSales();
       await this.pullFreshData();
 
       this.status.lastSync = Date.now();
       this.status.failedCount = failed;
       await this.refreshUnsyncedCount();
-      this.status.pendingCount = this.status.unsyncedSales;
 
       console.log(
         failed
-          ? `⚠️ Sync finished with ${failed} sale(s) still pending`
+          ? `⚠️ Sync finished with ${failed} item(s) still pending`
           : '✅ Sync completed successfully',
       );
     } catch (error) {
@@ -119,8 +133,13 @@ class OfflineSyncManager {
           continue;
         }
 
-        // Never replay /sale here — sales use the dedicated sales table + clientSaleId.
-        if (String(request.url).includes('/sale')) {
+        // Never replay dedicated flows here — they use their own tables.
+        const url = String(request.url);
+        if (
+          url.includes('/sale') ||
+          url.includes('/customer') ||
+          url.includes('/hold')
+        ) {
           await offlineDB.removePendingRequest(request.id);
           continue;
         }
@@ -153,6 +172,148 @@ class OfflineSyncManager {
     }
   }
 
+  /** @returns number of customers that failed to sync */
+  private async syncCustomers(): Promise<number> {
+    const pending = await offlineDB.getUnsyncedCustomers();
+    if (!pending.length) return 0;
+    console.log(`📤 Syncing ${pending.length} offline customers...`);
+
+    let failed = 0;
+    for (const row of pending) {
+      try {
+        const payload = {
+          name: row.data?.name || row.name,
+          phone_number: row.data?.phone_number || row.phone,
+          email: row.data?.email || row.email || undefined,
+          address: row.data?.address || undefined,
+          default_discount_percent: row.data?.default_discount_percent,
+          is_active: row.data?.is_active !== false,
+        };
+
+        const response = await apiClient.post('/customer', payload);
+        const created =
+          response?.data?.data?.customer ||
+          response?.data?.data ||
+          response?.data?.customer ||
+          null;
+        const realId = created?.id;
+        if (!realId) {
+          failed += 1;
+          await offlineDB.markCustomerSyncFailed(row.id, 'Empty customer response');
+          continue;
+        }
+
+        await offlineDB.remapCustomerId(row.id, String(realId), created);
+        console.log('✅ Synced customer:', row.id, '→', realId);
+      } catch (error: any) {
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          'Failed to sync customer';
+
+        // Duplicate email/phone — try to find existing by phone and remap.
+        if (
+          String(message).toLowerCase().includes('already exists') ||
+          error?.response?.status === 400
+        ) {
+          try {
+            const phone = row.data?.phone_number || row.phone;
+            if (phone) {
+              const search = await apiClient.get('/customer', {
+                params: { search: phone, limit: 5, page: 1 },
+              });
+              const list = Array.isArray(search?.data?.data) ? search.data.data : [];
+              const match = list.find(
+                (c: any) =>
+                  String(c.phone_number || c.phone || '').replace(/\D/g, '') ===
+                  String(phone).replace(/\D/g, ''),
+              );
+              if (match?.id) {
+                await offlineDB.remapCustomerId(row.id, String(match.id), match);
+                console.log('✅ Remapped offline customer to existing:', match.id);
+                continue;
+              }
+            }
+          } catch {
+            /* fall through */
+          }
+        }
+
+        failed += 1;
+        console.error('❌ Failed to sync customer:', row.id, message);
+        await offlineDB.markCustomerSyncFailed(row.id, String(message));
+      }
+    }
+    return failed;
+  }
+
+  /** @returns number of holds that failed to sync */
+  private async syncHoldSales(): Promise<number> {
+    let failed = 0;
+
+    const pendingDelete = await offlineDB.getPendingDeleteHoldSales();
+    for (const hold of pendingDelete) {
+      try {
+        const serverId = hold.serverId || hold.id;
+        await apiClient.delete(`/sale/hold/${serverId}`, {
+          data: { branchId: hold.branchId },
+        });
+        await offlineDB.deleteHoldSaleLocal(hold.id);
+      } catch (error: any) {
+        if (error?.response?.status === 404) {
+          await offlineDB.deleteHoldSaleLocal(hold.id);
+          continue;
+        }
+        failed += 1;
+        const message =
+          error?.response?.data?.message || error?.message || 'Failed to delete hold';
+        await offlineDB.markHoldSyncFailed(hold.id, String(message));
+      }
+    }
+
+    const unsynced = await offlineDB.getUnsyncedHoldSales();
+    if (!unsynced.length) return failed;
+    console.log(`📤 Syncing ${unsynced.length} offline hold sales...`);
+
+    for (const hold of unsynced) {
+      try {
+        // Wait for offline customer remap before attaching customerId.
+        if (offlineDB.isOfflineCustomerId(hold.customerId)) {
+          failed += 1;
+          await offlineDB.markHoldSyncFailed(
+            hold.id,
+            'Waiting for offline customer sync',
+          );
+          continue;
+        }
+
+        const response = await apiClient.post('/sale/hold', {
+          branchId: hold.branchId,
+          customerId: hold.customerId || null,
+          items: hold.items,
+          clientHoldId: hold.clientHoldId,
+        });
+        const created = response?.data?.data;
+        if (created?.id) {
+          await offlineDB.markHoldSynced(hold.id, created);
+          console.log('✅ Synced hold:', hold.clientHoldId);
+        } else {
+          failed += 1;
+          await offlineDB.markHoldSyncFailed(hold.id, 'Empty hold response');
+        }
+      } catch (error: any) {
+        failed += 1;
+        const message =
+          error?.response?.data?.message ||
+          error?.message ||
+          'Failed to sync hold';
+        console.error('❌ Failed to sync hold:', hold.id, message);
+        await offlineDB.markHoldSyncFailed(hold.id, String(message));
+      }
+    }
+    return failed;
+  }
+
   /** @returns number of sales that failed to sync */
   private async syncSales(): Promise<number> {
     const unsyncedSales = await offlineDB.getUnsyncedSales();
@@ -162,6 +323,16 @@ class OfflineSyncManager {
     let failed = 0;
     for (const sale of unsyncedSales) {
       try {
+        const customerId = sale.customer?.id;
+        if (offlineDB.isOfflineCustomerId(customerId)) {
+          failed += 1;
+          await offlineDB.markSaleSyncFailed(
+            sale.id,
+            'Waiting for offline customer sync',
+          );
+          continue;
+        }
+
         const clientSaleId = sale.clientSaleId || sale.id;
         const salePayload: Record<string, unknown> = {
           clientSaleId,
@@ -172,7 +343,7 @@ class OfflineSyncManager {
           })),
           paymentMethod: sale.payment?.method || 'CASH',
           branchId: sale.branchId,
-          customerId: sale.customer?.id,
+          customerId: customerId || undefined,
           salespersonId: (sale as any).salespersonId || undefined,
           discountAmount: Number(sale.discountAmount) || 0,
           waiveBranchDiscount: sale.waiveBranchDiscount === true || undefined,
@@ -280,6 +451,10 @@ export default syncManager;
 
 /** True when the failure is connectivity/timeout — safe to queue offline. */
 export function isNetworkSaleFailure(error: unknown): boolean {
+  return isNetworkFailure(error);
+}
+
+export function isNetworkFailure(error: unknown): boolean {
   const err = error as {
     response?: unknown;
     code?: string;
