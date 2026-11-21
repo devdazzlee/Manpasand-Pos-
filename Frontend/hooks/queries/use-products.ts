@@ -9,6 +9,7 @@ import {
   fetchProducts,
   fetchAllPosProducts,
   readPosCatalogCache,
+  dedupeProductsById,
   fetchProductCostHistory,
   type ProductQuery,
   type PosProduct,
@@ -92,12 +93,14 @@ export function useAllPosProducts(options?: { enabled?: boolean }) {
     enabled,
   });
 
+  const products = dedupeProductsById(query.data ?? EMPTY);
+
   return {
     ...query,
-    products: query.data ?? EMPTY,
+    products,
     /** No cached catalog yet — show skeletons. Once seeded from IndexedDB this
      *  is false even while the first network fetch is still in flight. */
-    isFirstLoad: query.isPending && (query.data ?? EMPTY).length === 0,
+    isFirstLoad: query.isPending && products.length === 0,
     isRefreshing: query.isFetching && !query.isPending,
   };
 }

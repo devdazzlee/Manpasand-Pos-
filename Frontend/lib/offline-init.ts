@@ -52,7 +52,7 @@ async function fetchInitialData() {
   try {
     const products = await collectPaginatedData('/products', {}, { limit: 100, maxPages: 50 });
     if (products.length > 0) {
-      await offlineDB.saveProducts(products);
+      await offlineDB.replaceProducts(products);
       console.log(`✅ Cached ${products.length} products`);
     }
 
