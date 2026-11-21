@@ -775,6 +775,8 @@ model Sale {
   id               String        @id @default(uuid())
   sale_number      String        @unique
   invoice_number   String?       @unique
+  /// Till-generated id for offline / retry idempotency (one sale per client id).
+  client_sale_id   String?       @unique
   branch_id        String?
   branch           Branch?       @relation(fields: [branch_id], references: [id])
   customer_id      String?
@@ -822,6 +824,7 @@ model Sale {
 
   @@index([sale_number])
   @@index([invoice_number])
+  @@index([client_sale_id])
   @@index([branch_id])
   @@index([customer_id])
   @@index([sale_date])

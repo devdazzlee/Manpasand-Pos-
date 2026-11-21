@@ -8,6 +8,8 @@
 import { offlineDB } from './offline-db';
 import { syncManager } from './offline-sync';
 import { offlineAPIClient } from './offline-api-client';
+import apiClient from './apiClient';
+import { getBranchScopeParam } from '@/lib/session';
 import { collectPaginatedData } from './paginated-fetch';
 
 export async function initializeOfflineMode() {
@@ -50,10 +52,13 @@ export async function initializeOfflineMode() {
 
 async function fetchInitialData() {
   try {
-    const products = await collectPaginatedData('/products', {}, { limit: 100, maxPages: 50 });
+    const catalogRes = await apiClient.get('/products/pos-catalog', {
+      params: { ...getBranchScopeParam() },
+    });
+    const products = Array.isArray(catalogRes.data?.data) ? catalogRes.data.data : [];
     if (products.length > 0) {
       await offlineDB.replaceProducts(products);
-      console.log(`✅ Cached ${products.length} products`);
+      console.log(`✅ Cached ${products.length} POS products`);
     }
 
     const customers = await collectPaginatedData('/customer', {}, { limit: 100, maxPages: 50 });

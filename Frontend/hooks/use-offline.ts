@@ -53,7 +53,8 @@ export function useOfflineStats() {
     sales: 0,
     customers: 0,
     pendingRequests: 0,
-    cachedData: 0
+    cachedData: 0,
+    unsyncedSales: 0,
   });
   const [loading, setLoading] = useState(true);
 

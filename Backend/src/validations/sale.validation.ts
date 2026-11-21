@@ -10,6 +10,8 @@ const createSaleSchema = z.object({
     body: z.object({
         customerId: z.string().optional(),
         salespersonId: z.string().uuid().nullable().optional(),
+        /** Till UUID so offline retries / sync cannot create the same bill twice. */
+        clientSaleId: z.string().uuid().optional(),
         paymentMethod: z.enum(["CASH", "CARD", "MOBILE_MONEY", "BANK_TRANSFER", "CREDIT"]),
         /** Split tenders. When omitted the whole bill is paid with `paymentMethod`. */
         payments: z
