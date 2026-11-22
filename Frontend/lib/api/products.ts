@@ -87,27 +87,13 @@ export function fetchProductCostHistory(id: string, signal?: AbortSignal) {
  * brand-supplier-tax joins), returns the entire catalog in one response, and
  * mirrors the raw rows into IndexedDB so a reload / offline start is instant.
  */
-/** Keep the first occurrence of each product id (guards stale offline merges). */
-export function dedupeProductsById(products: PosProduct[]): PosProduct[] {
-  const seen = new Set<string>();
-  const out: PosProduct[] = [];
-  for (const product of products) {
-    const id = product?.id;
-    if (!id || seen.has(id)) continue;
-    seen.add(id);
-    out.push(product);
-  }
-  return out;
-}
-
 export async function fetchAllPosProducts(): Promise<PosProduct[]> {
   const res = await getList<any>(
     "/products/pos-catalog",
     cleanParams({ ...getBranchScopeParam() }),
   );
-  // Full replace so deleted / recreated SKUs do not linger in IndexedDB.
-  void offlineDB.replaceProducts(res.data).catch(() => {});
-  return dedupeProductsById(res.data.map(mapApiProductToStoreProduct));
+  void offlineDB.saveProducts(res.data).catch(() => {});
+  return res.data.map(mapApiProductToStoreProduct);
 }
 
 /**
@@ -117,26 +103,9 @@ export async function fetchAllPosProducts(): Promise<PosProduct[]> {
 export async function readPosCatalogCache(): Promise<PosProduct[]> {
   try {
     const rows = await offlineDB.getProducts();
-    // Newest sync first so recreated SKUs win over stale IndexedDB copies.
-    const sorted = [...rows].sort(
-      (a: any, b: any) => Number(b?.lastSync || 0) - Number(a?.lastSync || 0),
-    );
-    const byId = dedupeProductsById(
-      sorted
-        .map((r: any) => mapApiProductToStoreProduct(r.data ?? r))
-        .filter((p) => p.is_active !== false && p.display_on_pos !== false),
-    );
-    // Stale offline rows can keep an old id for the same name after a product
-    // was deleted and re-added — collapse those before the network refresh lands.
-    const seenNames = new Set<string>();
-    const out: PosProduct[] = [];
-    for (const product of byId) {
-      const key = (product.name || "").trim().toLowerCase();
-      if (key && seenNames.has(key)) continue;
-      if (key) seenNames.add(key);
-      out.push(product);
-    }
-    return out;
+    return rows
+      .map((r: any) => mapApiProductToStoreProduct(r.data ?? r))
+      .filter((p) => p.is_active !== false && p.display_on_pos !== false);
   } catch {
     return [];
   }

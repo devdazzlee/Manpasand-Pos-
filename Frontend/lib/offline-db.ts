@@ -103,23 +103,6 @@ export const offlineDB = {
     return productsToStore.length;
   },
 
-  /**
-   * Full catalog sync: drop stale rows first. `saveProducts` only upserts, so
-   * deleted / recreated products otherwise pile up and New Sale search shows
-   * the same name twice.
-   */
-  async replaceProducts(products: any[]) {
-    if (!Array.isArray(products)) {
-      console.warn('replaceProducts: products is not an array', products);
-      return 0;
-    }
-    await db.transaction('rw', db.products, async () => {
-      await db.products.clear();
-      await offlineDB.saveProducts(products);
-    });
-    return products.length;
-  },
-
   async getProducts() {
     return await db.products.toArray();
   },

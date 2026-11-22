@@ -182,7 +182,7 @@ class OfflineSyncManager {
     try {
       const productsArray = await collectPaginatedData('/products', {}, { limit: 100, maxPages: 50 });
       if (productsArray.length > 0) {
-        await offlineDB.replaceProducts(productsArray);
+        await offlineDB.saveProducts(productsArray);
         console.log(`✅ Updated ${productsArray.length} products`);
       } else {
         console.warn('No products array found in response');
