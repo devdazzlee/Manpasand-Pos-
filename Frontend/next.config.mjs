@@ -1,5 +1,3 @@
-import withPWA from 'next-pwa';
-
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: 'export', // Enable static HTML export
@@ -15,62 +13,72 @@ const nextConfig = {
   trailingSlash: true, // Helps with hosting compatibility
 }
 
-const pwaConfig = withPWA({
-  dest: 'public',
-  disable: process.env.NODE_ENV === 'development' || process.env.DISABLE_PWA === '1',
-  register: true,
-  skipWaiting: true,
-  buildExcludes: [/middleware-manifest\.json$/],
-  publicExcludes: ['!robots.txt', '!sitemap.xml'],
-  // Advanced caching configuration
-  runtimeCaching: [
-    {
-      urlPattern: /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
-      handler: 'CacheFirst',
-      options: {
-        cacheName: 'google-fonts',
-        expiration: {
-          maxEntries: 10,
-          maxAgeSeconds: 60 * 60 * 24 * 365 // 365 days
-        }
-      }
-    },
-    {
-      urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp|ico)$/i,
-      handler: 'CacheFirst',
-      options: {
-        cacheName: 'images',
-        expiration: {
-          maxEntries: 200,
-          maxAgeSeconds: 60 * 60 * 24 * 30 // 30 days
-        }
-      }
-    },
-    {
-      urlPattern: /^https?:\/\/.*\/api\/.*/i,
-      handler: 'NetworkFirst',
-      options: {
-        cacheName: 'api-cache',
-        expiration: {
-          maxEntries: 100,
-          maxAgeSeconds: 60 * 5 // 5 minutes
-        },
-        networkTimeoutSeconds: 120 // 2 minutes — image uploads can be slow
-      }
-    },
-    {
-      urlPattern: /.*/i,
-      handler: 'NetworkFirst',
-      options: {
-        cacheName: 'others',
-        expiration: {
-          maxEntries: 50,
-          maxAgeSeconds: 60 * 60 * 24 // 24 hours
-        },
-        networkTimeoutSeconds: 30
-      }
-    }
-  ]
-});
+// Skip next-pwa entirely for production VPS builds (DISABLE_PWA=1).
+// Loading the plugin still pulls workbox/webpack even when "disabled".
+const disablePwa =
+  process.env.DISABLE_PWA === '1' || process.env.NODE_ENV === 'development';
 
-export default pwaConfig(nextConfig)
+/** @type {import('next').NextConfig} */
+let exportConfig = nextConfig;
+
+if (!disablePwa) {
+  const withPWA = (await import('next-pwa')).default;
+  exportConfig = withPWA({
+    dest: 'public',
+    disable: false,
+    register: true,
+    skipWaiting: true,
+    buildExcludes: [/middleware-manifest\.json$/],
+    publicExcludes: ['!robots.txt', '!sitemap.xml'],
+    runtimeCaching: [
+      {
+        urlPattern: /^https:\/\/fonts\.(?:googleapis|gstatic)\.com\/.*/i,
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'google-fonts',
+          expiration: {
+            maxEntries: 10,
+            maxAgeSeconds: 60 * 60 * 24 * 365,
+          },
+        },
+      },
+      {
+        urlPattern: /\.(?:png|jpg|jpeg|svg|gif|webp|ico)$/i,
+        handler: 'CacheFirst',
+        options: {
+          cacheName: 'images',
+          expiration: {
+            maxEntries: 200,
+            maxAgeSeconds: 60 * 60 * 24 * 30,
+          },
+        },
+      },
+      {
+        urlPattern: /^https?:\/\/.*\/api\/.*/i,
+        handler: 'NetworkFirst',
+        options: {
+          cacheName: 'api-cache',
+          expiration: {
+            maxEntries: 100,
+            maxAgeSeconds: 60 * 5,
+          },
+          networkTimeoutSeconds: 120,
+        },
+      },
+      {
+        urlPattern: /.*/i,
+        handler: 'NetworkFirst',
+        options: {
+          cacheName: 'others',
+          expiration: {
+            maxEntries: 50,
+            maxAgeSeconds: 60 * 60 * 24,
+          },
+          networkTimeoutSeconds: 30,
+        },
+      },
+    ],
+  })(nextConfig);
+}
+
+export default exportConfig;
