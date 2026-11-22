@@ -119,8 +119,10 @@ jobs:
         run: |
           $SSH "set -e
             cd $APP_DIR/pos-src
+            # Fresh install — stale/partial node_modules breaks next-pwa (missing webpack/@babel).
+            rm -rf node_modules .next out
             npx -y yarn@1.22.22 install --frozen-lockfile --non-interactive
-            NODE_OPTIONS=--max-old-space-size=4096 npx next build
+            NODE_OPTIONS=--max-old-space-size=4096 DISABLE_PWA=1 npx next build
             test -f out/index.html
             rm -rf $APP_DIR/pos.new && cp -r out $APP_DIR/pos.new
             mv $APP_DIR/pos $APP_DIR/pos.old && mv $APP_DIR/pos.new $APP_DIR/pos && rm -rf $APP_DIR/pos.old"
