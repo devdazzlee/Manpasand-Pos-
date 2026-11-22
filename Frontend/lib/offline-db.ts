@@ -19,8 +19,6 @@ export interface Product {
 
 export interface Sale {
   id: string;
-  /** Same UUID sent as clientSaleId so server retries are idempotent. */
-  clientSaleId?: string;
   products: any[];
   total: number;
   customer?: any;
@@ -29,10 +27,6 @@ export interface Sale {
   synced: boolean;
   employeeId?: string;
   branchId?: string;
-  discountAmount?: number;
-  waiveBranchDiscount?: boolean;
-  lastError?: string | null;
-  syncAttempts?: number;
 }
 
 export interface Customer {
@@ -146,22 +140,16 @@ export const offlineDB = {
 
   // Sales
   async saveSale(sale: any) {
-    const id = sale.id || sale.clientSaleId || crypto.randomUUID();
     const saleData: Sale = {
-      id,
-      clientSaleId: sale.clientSaleId || id,
+      id: sale.id || `sale_${Date.now()}_${Math.random()}`,
       products: sale.products || sale.items,
       total: sale.total || sale.amount,
       customer: sale.customer,
       payment: sale.payment,
-      timestamp: sale.timestamp || Date.now(),
+      timestamp: Date.now(),
       synced: false,
       employeeId: sale.employeeId || sale.employee_id,
-      branchId: sale.branchId || sale.branch_id,
-      discountAmount: Number(sale.discountAmount) || 0,
-      waiveBranchDiscount: sale.waiveBranchDiscount === true,
-      lastError: null,
-      syncAttempts: 0,
+      branchId: sale.branchId || sale.branch_id
     };
     await db.sales.put(saleData);
     return saleData;
@@ -171,20 +159,8 @@ export const offlineDB = {
     return await db.sales.where('synced').equals(0).toArray();
   },
 
-  async countUnsyncedSales() {
-    return await db.sales.where('synced').equals(0).count();
-  },
-
   async markSaleSynced(id: string) {
-    await db.sales.update(id, { synced: true, lastError: null });
-  },
-
-  async markSaleSyncFailed(id: string, error: string) {
-    const row = await db.sales.get(id);
-    await db.sales.update(id, {
-      lastError: error.slice(0, 500),
-      syncAttempts: (row?.syncAttempts || 0) + 1,
-    });
+    await db.sales.update(id, { synced: true });
   },
 
   async getAllSales() {
@@ -304,13 +280,12 @@ export const offlineDB = {
   },
 
   async getStats() {
-    const [products, sales, customers, pending, cached, unsyncedSales] = await Promise.all([
+    const [products, sales, customers, pending, cached] = await Promise.all([
       db.products.count(),
       db.sales.count(),
       db.customers.count(),
       db.pendingRequests.count(),
-      db.cachedData.count(),
-      db.sales.where('synced').equals(0).count(),
+      db.cachedData.count()
     ]);
     
     return {
@@ -318,8 +293,7 @@ export const offlineDB = {
       sales,
       customers,
       pendingRequests: pending,
-      cachedData: cached,
-      unsyncedSales,
+      cachedData: cached
     };
   }
 };

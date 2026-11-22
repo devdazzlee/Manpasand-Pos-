@@ -1131,7 +1131,6 @@ class SaleService {
     applyPromotions,
     loyaltyPoints,
     giftCards,
-    clientSaleId,
   }: {
     branchId: string;
     customerId?: string;
@@ -1147,18 +1146,7 @@ class SaleService {
     applyPromotions?: boolean;
     loyaltyPoints?: number;
     giftCards?: { code: string; amount: number }[];
-    /** Till UUID — retries / offline sync return the same sale instead of posting twice. */
-    clientSaleId?: string;
   }) {
-    const clientId = clientSaleId?.trim() || undefined;
-    if (clientId) {
-      const existing = await prisma.sale.findUnique({
-        where: { client_sale_id: clientId },
-        include: { sale_items: true, payments: true, customer: true, branch: true },
-      });
-      if (existing) return existing;
-    }
-
     // 1) Validate OUTSIDE any interactive transaction
     const [customer, branch] = await Promise.all([
       customerId ? prisma.customer.findUnique({ where: { id: customerId } }) : null,
@@ -1372,7 +1360,6 @@ class SaleService {
       prisma.sale.create({
         data: {
           sale_number: saleNumber,
-          client_sale_id: clientId || null,
           branch_id: branchId,
           customer_id: customerId,
           salesperson_id: salespersonId || null,
@@ -1482,21 +1469,8 @@ class SaleService {
       ops.push(prisma.giftCard.update({ where: { id: c.id }, data: { balance: { decrement: c.amount } } }));
     }
 
-    let saleResult: Prisma.SaleGetPayload<{ include: { sale_items: true } }>;
-    try {
-      const [sale] = await prisma.$transaction(ops);
-      saleResult = sale as Prisma.SaleGetPayload<{ include: { sale_items: true } }>;
-    } catch (err: any) {
-      // Concurrent offline sync of the same till id — return the winner.
-      if (clientId && err?.code === 'P2002') {
-        const existing = await prisma.sale.findUnique({
-          where: { client_sale_id: clientId },
-          include: { sale_items: true, payments: true, customer: true, branch: true },
-        });
-        if (existing) return existing;
-      }
-      throw err;
-    }
+    const [sale] = await prisma.$transaction(ops);
+    const saleResult = sale as Prisma.SaleGetPayload<{ include: { sale_items: true } }>;
 
     if (cards.length) {
       await prisma.giftCard.updateMany({ where: { id: { in: cards.map((c) => c.id) }, balance: { lte: 0 }, status: 'ACTIVE' }, data: { status: 'USED' } });

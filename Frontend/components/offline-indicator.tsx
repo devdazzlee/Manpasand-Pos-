@@ -64,9 +64,9 @@ export function OfflineIndicator() {
           <RefreshCw className="w-4 h-4 ml-2 animate-spin" />
         )}
         
-        {(stats.unsyncedSales > 0 || stats.pendingRequests > 0) && (
+        {stats.pendingRequests > 0 && (
           <Badge variant="secondary" className="ml-2">
-            {stats.unsyncedSales || stats.pendingRequests}
+            {stats.pendingRequests}
           </Badge>
         )}
       </Button>
@@ -121,17 +121,17 @@ export function OfflineIndicator() {
               </div>
             )}
 
-            {/* Unsynced sales — the critical production queue */}
-            {stats.unsyncedSales > 0 && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                <div className="flex items-center gap-2 text-amber-900">
-                  <AlertCircle className="h-4 w-4" />
+            {/* Pending Requests */}
+            {stats.pendingRequests > 0 && (
+              <div className="bg-yellow-50 border border-yellow-200 rounded-lg p-3">
+                <div className="flex items-center gap-2 text-yellow-800">
+                  <AlertCircle className="w-4 h-4" />
                   <span className="font-semibold">
-                    {stats.unsyncedSales} sale{stats.unsyncedSales === 1 ? "" : "s"} waiting to sync
+                    {stats.pendingRequests} pending request{stats.pendingRequests !== 1 ? 's' : ''}
                   </span>
                 </div>
-                <p className="mt-1 text-xs text-amber-800">
-                  Saved on this till. Tap refresh when online — they post once (no duplicates).
+                <p className="text-xs text-yellow-700 mt-1">
+                  Will sync when connection is restored
                 </p>
               </div>
             )}
@@ -139,29 +139,29 @@ export function OfflineIndicator() {
             {/* Offline Data Stats */}
             <div className="space-y-2">
               <div className="flex items-center gap-2 text-sm font-semibold">
-                <Database className="h-4 w-4" />
+                <Database className="w-4 h-4" />
                 <span>Offline Data</span>
               </div>
               
               <div className="grid grid-cols-2 gap-2 text-sm">
-                <div className="rounded bg-gray-50 p-2">
+                <div className="bg-gray-50 rounded p-2">
                   <div className="text-gray-600">Products</div>
                   <div className="font-semibold">{stats.products}</div>
                 </div>
                 
-                <div className="rounded bg-gray-50 p-2">
+                <div className="bg-gray-50 rounded p-2">
                   <div className="text-gray-600">Customers</div>
                   <div className="font-semibold">{stats.customers}</div>
                 </div>
                 
-                <div className="rounded bg-gray-50 p-2">
-                  <div className="text-gray-600">Unsynced sales</div>
-                  <div className="font-semibold">{stats.unsyncedSales}</div>
+                <div className="bg-gray-50 rounded p-2">
+                  <div className="text-gray-600">Sales</div>
+                  <div className="font-semibold">{stats.sales}</div>
                 </div>
                 
-                <div className="rounded bg-gray-50 p-2">
-                  <div className="text-gray-600">All local sales</div>
-                  <div className="font-semibold">{stats.sales}</div>
+                <div className="bg-gray-50 rounded p-2">
+                  <div className="text-gray-600">Cached</div>
+                  <div className="font-semibold">{stats.cachedData}</div>
                 </div>
               </div>
             </div>
