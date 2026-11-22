@@ -64,15 +64,9 @@ export function OfflineIndicator() {
           <RefreshCw className="w-4 h-4 ml-2 animate-spin" />
         )}
         
-        {(stats.unsyncedSales > 0 ||
-          stats.unsyncedCustomers > 0 ||
-          stats.unsyncedHolds > 0 ||
-          stats.pendingRequests > 0) && (
+        {(stats.unsyncedSales > 0 || stats.pendingRequests > 0) && (
           <Badge variant="secondary" className="ml-2">
-            {stats.unsyncedSales +
-              (stats.unsyncedCustomers || 0) +
-              (stats.unsyncedHolds || 0) ||
-              stats.pendingRequests}
+            {stats.unsyncedSales || stats.pendingRequests}
           </Badge>
         )}
       </Button>
@@ -127,32 +121,17 @@ export function OfflineIndicator() {
               </div>
             )}
 
-            {/* Unsynced queue — sales / customers / holds */}
-            {(stats.unsyncedSales > 0 ||
-              stats.unsyncedCustomers > 0 ||
-              stats.unsyncedHolds > 0) && (
+            {/* Unsynced sales — the critical production queue */}
+            {stats.unsyncedSales > 0 && (
               <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                 <div className="flex items-center gap-2 text-amber-900">
                   <AlertCircle className="h-4 w-4" />
                   <span className="font-semibold">
-                    {[
-                      stats.unsyncedSales > 0
-                        ? `${stats.unsyncedSales} sale${stats.unsyncedSales === 1 ? "" : "s"}`
-                        : null,
-                      stats.unsyncedCustomers > 0
-                        ? `${stats.unsyncedCustomers} customer${stats.unsyncedCustomers === 1 ? "" : "s"}`
-                        : null,
-                      stats.unsyncedHolds > 0
-                        ? `${stats.unsyncedHolds} hold${stats.unsyncedHolds === 1 ? "" : "s"}`
-                        : null,
-                    ]
-                      .filter(Boolean)
-                      .join(" · ")}{" "}
-                    waiting to sync
+                    {stats.unsyncedSales} sale{stats.unsyncedSales === 1 ? "" : "s"} waiting to sync
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-amber-800">
-                  Saved on this till. Tap refresh when online — customers sync first, then holds and sales.
+                  Saved on this till. Tap refresh when online — they post once (no duplicates).
                 </p>
               </div>
             )}

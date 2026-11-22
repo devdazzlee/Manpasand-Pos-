@@ -953,43 +953,14 @@ class SaleService {
     customerId,
     createdBy,
     items,
-    clientHoldId,
   }: {
     branchId: string;
     customerId?: string;
     createdBy?: string;
     items: HoldSaleCartItem[];
-    clientHoldId?: string;
   }) {
     if (!items?.length) {
       throw new AppError(400, 'No items provided for hold sale');
-    }
-
-    const clientId = clientHoldId?.trim() || undefined;
-    const holdInclude = {
-      branch: {
-        select: {
-          id: true,
-          name: true,
-        },
-      },
-      customer: {
-        select: {
-          id: true,
-          name: true,
-          email: true,
-          phone_number: true,
-          is_active: true,
-        },
-      },
-    } as const;
-
-    if (clientId) {
-      const existing = await prisma.holdSale.findUnique({
-        where: { client_hold_id: clientId },
-        include: holdInclude,
-      });
-      if (existing) return existing;
     }
 
     const branch = await prisma.branch.findUnique({ where: { id: branchId } });
@@ -998,13 +969,6 @@ class SaleService {
     }
     assertBranchCanSell(branch);
     await assertCashRegisterOpenForSale(branchId);
-
-    // Skip offline temp customer ids until the customer sync remaps them.
-    const rawCustomerId = customerId?.trim() || '';
-    const safeCustomerId =
-      rawCustomerId && !rawCustomerId.startsWith('offline_cust_')
-        ? rawCustomerId
-        : null;
 
     const normalizedItems = items.map((item) => ({
       id: item.id,
@@ -1025,30 +989,33 @@ class SaleService {
       0,
     );
 
-    try {
-      return await prisma.holdSale.create({
-        data: {
-          client_hold_id: clientId || null,
-          branch_id: branchId,
-          customer_id: safeCustomerId,
-          created_by: createdBy,
-          items: normalizedItems as Prisma.InputJsonValue,
-          subtotal: new Prisma.Decimal(subtotal),
-          total_items: normalizedItems.length,
+    return prisma.holdSale.create({
+      data: {
+        branch_id: branchId,
+        customer_id: customerId?.trim() ? customerId.trim() : null,
+        created_by: createdBy,
+        items: normalizedItems as Prisma.InputJsonValue,
+        subtotal: new Prisma.Decimal(subtotal),
+        total_items: normalizedItems.length,
+      },
+      include: {
+        branch: {
+          select: {
+            id: true,
+            name: true,
+          },
         },
-        include: holdInclude,
-      });
-    } catch (error: any) {
-      // Race: another retry already inserted this clientHoldId.
-      if (clientId && error?.code === 'P2002') {
-        const existing = await prisma.holdSale.findUnique({
-          where: { client_hold_id: clientId },
-          include: holdInclude,
-        });
-        if (existing) return existing;
-      }
-      throw error;
-    }
+        customer: {
+          select: {
+            id: true,
+            name: true,
+            email: true,
+            phone_number: true,
+            is_active: true,
+          },
+        },
+      },
+    });
   }
 
   async retrieveHoldSale({
