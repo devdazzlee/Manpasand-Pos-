@@ -157,6 +157,7 @@ interface Product {
   id: string;
   name: string;
   sku?: string | null;
+  unitName?: string | null;
 }
 
 interface Supplier {
@@ -181,6 +182,8 @@ interface DraftLine {
   salePrice?: string;
   /** Product's selling price when the line was added. */
   currentSalePrice?: number | null;
+  /** Product unit (PCS, KG, …) for the bill row. */
+  unitName?: string | null;
 }
 
 /** Number to send as the line's new selling price, or undefined to leave the price alone. */
@@ -1079,8 +1082,12 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
         currentQty: stockMap[l.productId] ?? 0,
         salePrice: l.salePrice,
         currentSalePrice: l.currentSalePrice,
+        unitName:
+          l.unitName ||
+          products.find((p) => p.id === l.productId)?.unitName ||
+          null,
       })),
-    [lines, stockMap],
+    [lines, stockMap, products],
   );
 
   const onPickerLinesChange = (next: StockLineItem[]) => {
@@ -1098,6 +1105,7 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
             costPrice: Number(l.unitCost) || 0,
             salePrice: l.salePrice === undefined ? undefined : String(l.salePrice),
             currentSalePrice: l.currentSalePrice ?? null,
+            unitName: l.unitName ?? null,
           })),
         };
       }),
@@ -1742,6 +1750,32 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                       className="h-10 border-indigo-200/80 bg-white pl-9 text-sm shadow-sm"
                     />
                   </div>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold text-indigo-900/80">Branch</Label>
+                  {branchesLoading ? (
+                    <StockSelectSkeleton label="Loading branches" className="h-10" />
+                  ) : (
+                    <Select
+                      value={filterBranch}
+                      onValueChange={(v) => {
+                        setFilterBranch(v);
+                        setPage(1);
+                      }}
+                    >
+                      <SelectTrigger className="h-10 border-indigo-200/80 bg-white text-sm shadow-sm">
+                        <SelectValue placeholder="All branches" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="all">All branches</SelectItem>
+                        {branches.map((b) => (
+                          <SelectItem key={b.id} value={b.id}>
+                            {b.name}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  )}
                 </div>
                 <div className="space-y-1.5">
                   <Label className="text-xs font-semibold text-indigo-900/80">Supplier</Label>
@@ -2851,7 +2885,30 @@ export function Purchases({ onNavigate }: { onNavigate?: (tab: string) => void }
                   <p className="text-[11px] tabular-nums text-slate-500">
                     <span className="font-semibold text-slate-900">{totals.lineCount}</span> line
                     {totals.lineCount === 1 ? "" : "s"} ·{" "}
-                    <span className="font-semibold text-slate-900">{formatQty(totals.units)}</span> units
+                    <span className="font-semibold text-slate-900">
+                      {(() => {
+                        const byUnit = new Map<string, number>();
+                        let unnamed = 0;
+                        for (const l of allDraftLines) {
+                          const qty = Number(l.quantity) || 0;
+                          if (qty <= 0) continue;
+                          const unit =
+                            (l.unitName ||
+                              products.find((p) => p.id === l.productId)?.unitName ||
+                              "").trim();
+                          if (!unit) {
+                            unnamed += qty;
+                            continue;
+                          }
+                          byUnit.set(unit, (byUnit.get(unit) || 0) + qty);
+                        }
+                        const parts = [...byUnit.entries()].map(
+                          ([unit, qty]) => `${formatQty(qty)} ${unit}`,
+                        );
+                        if (unnamed > 0) parts.push(`${formatQty(unnamed)} units`);
+                        return parts.join(" · ") || `${formatQty(totals.units)} units`;
+                      })()}
+                    </span>
                   </p>
                   <p className="text-lg font-bold tabular-nums tracking-tight text-slate-900">
                     Rs {formatMoney(totals.value)}

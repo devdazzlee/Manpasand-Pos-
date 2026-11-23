@@ -43,6 +43,8 @@ export interface StockPickerProduct {
   price?: number | null;
   cost?: number | null;
   categoryName?: string | null;
+  /** e.g. PCS, KG — shown next to Qty on the bill. */
+  unitName?: string | null;
 }
 
 export interface StockLineItem {
@@ -56,6 +58,8 @@ export interface StockLineItem {
   salePrice?: string | number;
   /** The product's selling price when the line was added — to show what changes. */
   currentSalePrice?: number | null;
+  /** Product unit label (PCS, KG, …). */
+  unitName?: string | null;
 }
 
 interface StockProductPickerProps {
@@ -209,6 +213,11 @@ export function StockProductPicker({
             price:
               Number(item.sales_rate_inc_dis_and_tax ?? item.sales_rate_exc_dis_and_tax ?? 0) || null,
             cost: Number(item.purchase_rate ?? 0) || null,
+            unitName:
+              (typeof item.unit?.name === "string" && item.unit.name.trim()) ||
+              (typeof item.unit_name === "string" && item.unit_name.trim()) ||
+              (typeof item.unitName === "string" && item.unitName.trim()) ||
+              null,
           })),
         );
       } catch {
@@ -254,9 +263,13 @@ export function StockProductPicker({
 
       if (existing) {
         const current = Number(existing.quantity) || 0;
+        const unitName =
+          existing.unitName?.trim() || product.unitName?.trim() || null;
         onLinesChange(
           lines.map((l) =>
-            l.productId === product.id ? { ...l, quantity: current + 1 } : l,
+            l.productId === product.id
+              ? { ...l, quantity: current + 1, unitName }
+              : l,
           ),
         );
       } else {
@@ -270,6 +283,7 @@ export function StockProductPicker({
             // Prefill with the product's purchase rate; still editable per line.
             unitCost: showUnitCost && product.cost ? String(product.cost) : "",
             currentQty,
+            unitName: product.unitName?.trim() || null,
             ...(showSalePrice
               ? { salePrice: product.price ? String(product.price) : "", currentSalePrice: product.price ?? null }
               : {}),
@@ -428,7 +442,38 @@ export function StockProductPicker({
 
   const clearAll = () => onLinesChange([]);
 
+  const fmtNum = (n: number) =>
+    n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+  const resolveUnitName = (line: StockLineItem) =>
+    line.unitName?.trim() ||
+    products.find((p) => p.id === line.productId)?.unitName?.trim() ||
+    remoteProducts.find((p) => p.id === line.productId)?.unitName?.trim() ||
+    "";
+
   const totalUnits = lines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
+  const unitsSummary = (() => {
+    const named = lines
+      .map((l) => ({
+        qty: Number(l.quantity) || 0,
+        unit: resolveUnitName(l),
+      }))
+      .filter((x) => x.qty > 0);
+    if (named.length === 0) return totalUnits > 0 ? `${fmtNum(totalUnits)} units` : "";
+    const byUnit = new Map<string, number>();
+    let unnamed = 0;
+    for (const row of named) {
+      if (!row.unit) {
+        unnamed += row.qty;
+        continue;
+      }
+      byUnit.set(row.unit, (byUnit.get(row.unit) || 0) + row.qty);
+    }
+    const parts = [...byUnit.entries()].map(
+      ([unit, qty]) => `${fmtNum(qty)} ${unit}`,
+    );
+    if (unnamed > 0) parts.push(`${fmtNum(unnamed)} units`);
+    return parts.join(" · ") || (totalUnits > 0 ? `${fmtNum(totalUnits)} units` : "");
+  })();
   const totalCost = lines.reduce(
     (s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitCost) || 0),
     0,
@@ -437,8 +482,6 @@ export function StockProductPicker({
     const live = getCurrentQty?.(line.productId);
     return live != null ? live : line.currentQty ?? null;
   };
-  const fmtNum = (n: number) =>
-    n.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 2 });
   /** True when the line's selling price differs from the product's current price. */
   const salePriceChanged = (line: StockLineItem) => {
     if (!showSalePrice || line.salePrice === undefined || String(line.salePrice).trim() === "") return false;
@@ -713,6 +756,11 @@ export function StockProductPicker({
       <div className={!showUnitCost ? "sm:col-span-2" : ""}>
         <Label className="text-[10px] uppercase tracking-wide text-slate-400">
           {quantityLabel}
+          {resolveUnitName(line) ? (
+            <span className="ml-1 font-semibold normal-case tracking-normal text-slate-600">
+              ({resolveUnitName(line)})
+            </span>
+          ) : null}
         </Label>
         <div className="mt-0.5 flex items-center gap-1">
           <Button
@@ -771,8 +819,8 @@ export function StockProductPicker({
           />
           {Number(line.unitCost) > 0 && Number(line.quantity) > 0 ? (
             <p className="mt-0.5 text-[10px] tabular-nums text-slate-500">
-              Cost {fmtNum(Number(line.unitCost) || 0)} × {fmtNum(Number(line.quantity) || 0)} = Rs{" "}
-              {fmtNum((Number(line.unitCost) || 0) * (Number(line.quantity) || 0))}
+              Cost {fmtNum(Number(line.unitCost) || 0)} × {fmtNum(Number(line.quantity) || 0)}
+              {resolveUnitName(line) ? ` ${resolveUnitName(line)}` : ""}
             </p>
           ) : null}
         </div>
@@ -803,6 +851,15 @@ export function StockProductPicker({
           ) : null}
         </div>
       ) : null}
+
+      {showUnitCost && Number(line.unitCost) > 0 && Number(line.quantity) > 0 ? (
+        <div className="sm:col-span-1">
+          <Label className="text-[10px] uppercase tracking-wide text-slate-400">Total</Label>
+          <p className="mt-0.5 text-lg font-bold tabular-nums leading-tight text-emerald-700">
+            Rs {fmtNum((Number(line.unitCost) || 0) * (Number(line.quantity) || 0))}
+          </p>
+        </div>
+      ) : null}
     </div>
   );
 
@@ -816,6 +873,8 @@ export function StockProductPicker({
         {lines.map((line) => {
           const qty = Number(line.quantity) || 0;
           const cost = Number(line.unitCost) || 0;
+          const lineTotal = qty * cost;
+          const unitLabel = resolveUnitName(line);
           const onHand = onHandFor(line);
           const after =
             onHand != null && previewMode
@@ -832,13 +891,47 @@ export function StockProductPicker({
             <div
               key={line.productId}
               data-stock-row={line.productId}
-              className="flex items-end gap-2 bg-white px-2.5 py-2"
+              className="grid grid-cols-[minmax(0,1fr)_auto_auto_auto_auto_auto] items-center gap-x-2 gap-y-0.5 bg-white px-2.5 py-2"
             >
-              <div className="min-w-0 flex-1 self-center">
-                <p className="truncate text-[13px] font-semibold leading-tight text-slate-900">
+              {/* Labels row — empty first cell keeps name/controls on one baseline */}
+              <span aria-hidden className="h-[13px]" />
+              <span className="whitespace-nowrap text-[9px] font-medium uppercase tracking-wide text-slate-400">
+                Qty
+                {unitLabel ? (
+                  <span className="ml-0.5 font-semibold normal-case tracking-normal text-slate-600">
+                    ({unitLabel})
+                  </span>
+                ) : null}
+              </span>
+              {showUnitCost ? (
+                <span className="whitespace-nowrap text-[9px] font-medium uppercase tracking-wide text-slate-400">
+                  Cost price
+                </span>
+              ) : (
+                <span />
+              )}
+              {showSalePrice ? (
+                <span className="whitespace-nowrap text-[9px] font-medium uppercase tracking-wide text-slate-400">
+                  Selling price
+                </span>
+              ) : (
+                <span />
+              )}
+              {showUnitCost ? (
+                <span className="whitespace-nowrap text-right text-[9px] font-medium uppercase tracking-wide text-slate-400">
+                  Total
+                </span>
+              ) : (
+                <span />
+              )}
+              <span aria-hidden className="h-[13px]" />
+
+              {/* Controls row — one horizontal line */}
+              <div className="flex min-h-7 min-w-0 flex-col justify-center">
+                <p className="truncate text-[13px] font-semibold leading-none text-slate-900">
                   {line.productName}
                 </p>
-                <p className="truncate text-[10px] leading-tight text-slate-500">
+                <p className="mt-0.5 truncate text-[10px] leading-none text-slate-500">
                   {showCurrentQty && onHand != null ? (
                     <span className="tabular-nums">
                       {fmtNum(onHand)}
@@ -862,120 +955,120 @@ export function StockProductPicker({
                       ) : null}
                     </span>
                   ) : null}
-                  {showUnitCost && qty > 0 && cost > 0 ? (
-                    <span className="tabular-nums text-slate-600">
-                      {" · "}
-                      <span className="font-medium text-slate-500">Cost</span>{" "}
-                      <span className="font-medium text-slate-700">
-                        {fmtNum(cost)} × {fmtNum(qty)}
-                      </span>
-                      {" = "}Rs {fmtNum(qty * cost)}
-                    </span>
-                  ) : null}
                   {salePriceChanged(line) ? (
                     <span className="font-semibold tabular-nums text-amber-700">
-                      {" · "}Sell Rs {fmtNum(line.currentSalePrice ?? 0)} → {fmtNum(Number(line.salePrice))}
+                      {" · "}Sell Rs {fmtNum(line.currentSalePrice ?? 0)} →{" "}
+                      {fmtNum(Number(line.salePrice))}
                     </span>
                   ) : null}
                 </p>
               </div>
 
-              <div className="flex shrink-0 flex-col gap-0.5">
-                <span className="text-[9px] font-medium uppercase tracking-wide text-slate-400">
-                  Qty
-                </span>
-                <div className="flex items-center gap-1">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-7 w-7"
-                    disabled={disabled}
-                    onClick={() => adjustLineQty(line.productId, -1)}
-                  >
-                    <Minus className="h-3 w-3" />
-                  </Button>
-                  <Input
-                    type="number"
-                    placeholder={quantityPlaceholder}
-                    value={line.quantity}
-                    disabled={disabled}
-                    data-stock-line={line.productId}
-                    data-stock-field="qty"
-                    onChange={(e) =>
-                      updateLine(line.productId, { quantity: e.target.value })
-                    }
-                    onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "qty")}
-                    className="h-7 w-12 px-1 text-center text-xs tabular-nums text-slate-900"
-                    title={quantityLabel}
-                    aria-label={`Quantity for ${line.productName}`}
-                  />
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="h-7 w-7"
-                    disabled={disabled}
-                    onClick={() => adjustLineQty(line.productId, 1)}
-                  >
-                    <Plus className="h-3 w-3" />
-                  </Button>
-                </div>
+              <div className="flex h-7 items-center gap-1">
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={disabled}
+                  onClick={() => adjustLineQty(line.productId, -1)}
+                >
+                  <Minus className="h-3 w-3" />
+                </Button>
+                <Input
+                  type="number"
+                  placeholder={quantityPlaceholder}
+                  value={line.quantity}
+                  disabled={disabled}
+                  data-stock-line={line.productId}
+                  data-stock-field="qty"
+                  onChange={(e) =>
+                    updateLine(line.productId, { quantity: e.target.value })
+                  }
+                  onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "qty")}
+                  className="h-7 w-12 px-1 text-center text-xs tabular-nums text-slate-900"
+                  title={quantityLabel}
+                  aria-label={`Quantity for ${line.productName}`}
+                />
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  className="h-7 w-7"
+                  disabled={disabled}
+                  onClick={() => adjustLineQty(line.productId, 1)}
+                >
+                  <Plus className="h-3 w-3" />
+                </Button>
               </div>
 
               {showUnitCost ? (
-                <div className="flex w-[5.25rem] shrink-0 flex-col gap-0.5">
-                  <span className="whitespace-nowrap text-[9px] font-medium uppercase tracking-wide text-slate-400">
-                    Cost price
-                  </span>
-                  <Input
-                    type="number"
-                    placeholder="0"
-                    value={line.unitCost ?? ""}
-                    disabled={disabled}
-                    data-stock-line={line.productId}
-                    data-stock-field="cost"
-                    onChange={(e) =>
-                      updateLine(line.productId, { unitCost: e.target.value })
-                    }
-                    onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "cost")}
-                    className="h-7 px-1.5 text-xs tabular-nums text-slate-900"
-                    title={unitCostLabel}
-                    aria-label={`Cost price for ${line.productName}`}
-                  />
-                </div>
-              ) : null}
+                <Input
+                  type="number"
+                  placeholder="0"
+                  value={line.unitCost ?? ""}
+                  disabled={disabled}
+                  data-stock-line={line.productId}
+                  data-stock-field="cost"
+                  onChange={(e) =>
+                    updateLine(line.productId, { unitCost: e.target.value })
+                  }
+                  onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "cost")}
+                  className="h-7 w-[5.25rem] px-1.5 text-xs tabular-nums text-slate-900"
+                  title={unitCostLabel}
+                  aria-label={`Cost price for ${line.productName}`}
+                />
+              ) : (
+                <span />
+              )}
 
               {showSalePrice ? (
-                <div className="flex w-[5.25rem] shrink-0 flex-col gap-0.5">
-                  <span className="whitespace-nowrap text-[9px] font-medium uppercase tracking-wide text-slate-400">
-                    Selling price
-                  </span>
-                  <Input
-                    type="number"
-                    min={0}
-                    placeholder="0"
-                    value={line.salePrice ?? ""}
-                    disabled={disabled}
-                    data-stock-line={line.productId}
-                    data-stock-field="sale"
-                    onChange={(e) => updateLine(line.productId, { salePrice: e.target.value })}
-                    onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "sale")}
-                    className={cn(
-                      "h-7 px-1.5 text-xs tabular-nums text-slate-900",
-                      salePriceChanged(line) && "border-amber-400 bg-amber-50",
-                    )}
-                    title="Selling price — change it to update the product's price when you save"
-                    aria-label={`Selling price for ${line.productName}`}
-                  />
-                </div>
-              ) : null}
+                <Input
+                  type="number"
+                  min={0}
+                  placeholder="0"
+                  value={line.salePrice ?? ""}
+                  disabled={disabled}
+                  data-stock-line={line.productId}
+                  data-stock-field="sale"
+                  onChange={(e) =>
+                    updateLine(line.productId, { salePrice: e.target.value })
+                  }
+                  onKeyDown={(e) => onLineFieldKeyDown(e, line.productId, "sale")}
+                  className={cn(
+                    "h-7 w-[5.25rem] px-1.5 text-xs tabular-nums text-slate-900",
+                    salePriceChanged(line) && "border-amber-400 bg-amber-50",
+                  )}
+                  title="Selling price — change it to update the product's price when you save"
+                  aria-label={`Selling price for ${line.productName}`}
+                />
+              ) : (
+                <span />
+              )}
+
+              {showUnitCost ? (
+                <p
+                  className={cn(
+                    "flex h-7 min-w-[5.5rem] items-center justify-end text-base font-bold tabular-nums leading-none",
+                    lineTotal > 0 ? "text-emerald-700" : "text-slate-400",
+                  )}
+                  title={
+                    qty > 0 && cost > 0
+                      ? `Line total: ${fmtNum(cost)} × ${fmtNum(qty)}${unitLabel ? ` ${unitLabel}` : ""}`
+                      : "Line total (cost × qty)"
+                  }
+                >
+                  Rs {fmtNum(lineTotal)}
+                </p>
+              ) : (
+                <span />
+              )}
 
               <Button
                 type="button"
                 variant="ghost"
                 size="icon"
-                className="mb-0.5 h-7 w-7 shrink-0 text-slate-400 hover:text-rose-600"
+                className="h-7 w-7 shrink-0 text-slate-400 hover:text-rose-600"
                 disabled={disabled}
                 onClick={() => removeLine(line.productId)}
               >
@@ -1117,7 +1210,7 @@ export function StockProductPicker({
                 <h3 className="text-sm font-semibold text-slate-900">{cartTitle}</h3>
                 <p className="text-[11px] tabular-nums text-slate-500">
                   {lines.length} item{lines.length === 1 ? "" : "s"}
-                  {totalUnits > 0 ? ` · ${fmtNum(totalUnits)} units` : ""}
+                  {unitsSummary ? ` · ${unitsSummary}` : ""}
                   {showUnitCost && totalCost > 0 ? ` · Rs ${fmtNum(totalCost)}` : ""}
                 </p>
               </div>
@@ -1184,7 +1277,7 @@ export function StockProductPicker({
               <h3 className="text-sm font-semibold text-slate-900">{cartTitle}</h3>
               <p className="text-[11px] text-slate-500">
                 {lines.length} item{lines.length === 1 ? "" : "s"}
-                {totalUnits > 0 ? ` · ${fmtNum(totalUnits)} units` : ""}
+                {unitsSummary ? ` · ${unitsSummary}` : ""}
                 {showUnitCost && totalCost > 0 ? ` · Rs ${fmtNum(totalCost)}` : ""}
               </p>
             </div>

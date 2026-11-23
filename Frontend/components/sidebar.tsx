@@ -306,6 +306,12 @@ const menuSections: SidebarMenuSection[] = [
         roles: withBranchView(PURCHASE_ROLES),
       },
       {
+        id: "expenses",
+        label: "Warehouse Expenses",
+        icon: Receipt,
+        roles: withBranchView(PURCHASE_ROLES),
+      },
+      {
         id: "stock-out",
         label: "Stock Out",
         icon: Package,

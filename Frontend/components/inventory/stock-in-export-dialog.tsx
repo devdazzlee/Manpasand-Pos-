@@ -433,6 +433,18 @@ export function StockInExportDialog({
 
           <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Branch</Label>
+              <SearchableSelect
+                value={branchId}
+                onValueChange={setBranchId}
+                options={[
+                  { value: "all", label: "All branches" },
+                  ...branches.map((b) => ({ value: b.id, label: b.name })),
+                ]}
+                placeholder="All branches"
+              />
+            </div>
+            <div className="space-y-1.5">
               <Label className="text-xs font-semibold uppercase tracking-wide text-slate-500">Supplier</Label>
               <SearchableSelect
                 value={supplierId}

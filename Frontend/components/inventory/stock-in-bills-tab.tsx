@@ -349,8 +349,8 @@ export function StockInBillsTab({
             <h2 className="text-sm font-semibold text-slate-900">All supplier bills</h2>
           </div>
           <p className="mt-1 text-[11px] text-slate-500">{billListHint}</p>
-          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-3">
-            <div className="relative sm:col-span-3">
+          <div className="mt-3 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <div className="relative sm:col-span-2 lg:col-span-4">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-slate-400" />
               <Input
                 value={search}
@@ -359,6 +359,19 @@ export function StockInBillsTab({
                 className="h-9 pl-8 text-sm"
               />
             </div>
+            <Select value={filterBranch} onValueChange={setFilterBranch}>
+              <SelectTrigger className="h-9 text-sm">
+                <SelectValue placeholder="Branch" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All branches</SelectItem>
+                {branches.map((b) => (
+                  <SelectItem key={b.id} value={b.id}>
+                    {b.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
             <Select value={filterSupplier} onValueChange={setFilterSupplier}>
               <SelectTrigger className="h-9 text-sm">
                 <SelectValue placeholder="Supplier" />

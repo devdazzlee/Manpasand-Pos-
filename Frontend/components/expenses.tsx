@@ -133,8 +133,8 @@ export function Expenses() {
   return (
     <>
       <PageHeader
-        title="Expenses"
-        description="Record, approve and report on business spend"
+        title="Warehouse Expenses"
+        description="Record, approve and report warehouse and branch spend"
       />
       <PageBody className="space-y-5">
         <div className="flex flex-wrap gap-1.5">
