@@ -33,7 +33,11 @@ function currentActor(): OutboxEntry["actor"] {
   if (typeof localStorage === "undefined") return undefined
   const token = localStorage.getItem("token")
   if (!token) return undefined
-  return { token, userId: localStorage.getItem("userId") ?? undefined, email: localStorage.getItem("email") ?? undefined }
+  return {
+    token,
+    userId: localStorage.getItem("userId") ?? undefined,
+    email: localStorage.getItem("email") || localStorage.getItem("userEmail") || undefined,
+  }
 }
 
 export interface OutboxEffects {

@@ -40,7 +40,8 @@ export function normalizedRequestKey(url: string, params: Record<string, unknown
  */
 function userScope(): string {
   if (typeof localStorage === "undefined") return "anon"
-  return (localStorage.getItem("email") || "anon").trim().toLowerCase()
+  // Manpasand historically stored `userEmail`; Sarwat uses `email`. Prefer either.
+  return (localStorage.getItem("email") || localStorage.getItem("userEmail") || "anon").trim().toLowerCase()
 }
 
 export const scopedKey = (key: string, scope = userScope()) => `${scope}|${key}`

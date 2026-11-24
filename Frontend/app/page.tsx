@@ -73,7 +73,22 @@ export default function Home() {
     localStorage.setItem("branch", user.branch_id ?? "Not Found");
     localStorage.setItem("role", user.role);
     localStorage.setItem("userEmail", user.email);
+    // Offline http_cache / outbox scope (same key Sarwat uses).
+    if (user.email) localStorage.setItem("email", user.email);
     setToken(jwt);
+
+    // Sarwat-style: after login, force a full offline POS download and start auto-upload.
+    // Do not wait for "Update now" / "Sync now" — those are manual fallbacks only.
+    try {
+      const { markLoginForPrefetch, startOfflinePrefetch } = await import("@/lib/offline/prefetch");
+      const { startSyncEngine, flush } = await import("@/lib/offline/sync-engine");
+      markLoginForPrefetch();
+      startSyncEngine();
+      startOfflinePrefetch({ justLoggedIn: true });
+      void flush();
+    } catch (error) {
+      console.warn("[offline] Could not start auto sync after login:", error);
+    }
 
     // Fetch and log branch name
     if (user.branch_id && user.branch_id !== "Not Found") {

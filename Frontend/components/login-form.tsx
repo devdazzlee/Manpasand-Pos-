@@ -75,8 +75,8 @@ export function LoginForm({ onLogin }: LoginFormProps) {
         const { token, branch, user } = response.data
         toast({ variant: "success", title: "Login successful" })
 
-        // Full offline catalog download after this login; remember till for offline sign-in.
-        void import("@/lib/offline/prefetch").then(({ markLoginForPrefetch }) => markLoginForPrefetch())
+        // Remember this till for offline sign-in (PBKDF2 hash — never the raw password in IDB).
+        // Full offline download is kicked from page.tsx after token/email/branch are written.
         void import("@/lib/offline/offline-auth").then(({ rememberLogin, rememberBranch }) =>
           rememberLogin({
             email: user?.email || username,

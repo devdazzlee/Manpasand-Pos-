@@ -106,8 +106,8 @@ export function OfflineStatus() {
           <div className="text-sm font-semibold">{online ? "Connected to server" : "Working offline"}</div>
           <p className="mt-1 text-xs text-gray-600">
             {online
-              ? "Changes upload as soon as they are made."
-              : "Sales, payments, returns and other changes are saved on this till and upload automatically when the internet is back. Keep this browser open and don't clear its data."}
+              ? "Changes upload automatically. You do not need to press Sync now unless something is stuck."
+              : "Sales, holds and new customers are saved on this till and upload automatically when the internet is back. Keep this browser open and don't clear its data."}
           </p>
           {authBlocked && <p className="mt-1 text-xs text-red-600">Your session has ended — log in again so waiting changes can sync.</p>}
           {lastError && !authBlocked && <p className="mt-1 text-xs text-gray-500">{lastError}</p>}
