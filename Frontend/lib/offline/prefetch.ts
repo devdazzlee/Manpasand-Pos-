@@ -1,9 +1,11 @@
 /**
  * Downloads, while online, the GETs New Sale / holds / customers need offline.
+ * Phase 1 — POS till only (not Sarwat’s full admin screen crawl).
  */
 import apiClient from "@/lib/apiClient"
 import { normalizeBranchId } from "@/lib/branch-utils"
-import { cachedAt, normalizedRequestKey, scopedKey } from "./http-cache"
+import { getBranchScopeParam } from "@/lib/session"
+import { cachedAt, normalizedRequestKey, scopedKey, whenSaved } from "./http-cache"
 import { isOnline, subscribeOnline } from "./network"
 
 interface PrefetchRequest {
@@ -37,11 +39,14 @@ const FRESH_MS = 25 * 60_000
 const REFRESH_EVERY_MS = 30 * 60_000
 const CONCURRENCY = 4
 
+/** Same GETs New Sale / holds / customers use, so http_cache keys match the screens. */
 function screenRequests(): PrefetchRequest[] {
   const branchId = normalizeBranchId(localStorage.getItem("branch"))
   const branch = branchId ? { branchId } : {}
+  // Must match fetchAllPosProducts() — otherwise the till caches a key the sale screen never reads.
+  const catalogParams = { ...getBranchScopeParam() }
   return [
-    { url: "/products/pos-catalog" },
+    { url: "/products/pos-catalog", params: catalogParams },
     { url: "/categories" },
     { url: "/customer", params: { page: 1, limit: 100 } },
     { url: "/customer", params: { page: 1, limit: 500 } },
@@ -52,52 +57,83 @@ function screenRequests(): PrefetchRequest[] {
   ]
 }
 
-async function runOne(req: PrefetchRequest) {
-  const key = scopedKey(normalizedRequestKey(req.url, req.params ?? {}))
-  const saved = await cachedAt(key).catch(() => null)
-  if (saved && Date.now() - saved < FRESH_MS) return
-  await apiClient.get(req.url, { params: req.params })
-}
+let running: Promise<void> | null = null
 
-export async function prefetchForOffline() {
-  if (!isOnline() || state.running) return
-  const token = typeof localStorage !== "undefined" ? localStorage.getItem("token") : null
-  if (!token) return
+/**
+ * Brings the till’s offline POS copy up to date.
+ * `force` re-downloads everything (Update now / first login).
+ */
+export function prefetchForOffline({ force = false }: { force?: boolean } = {}): Promise<void> {
+  if (running) return running
+  if (typeof window === "undefined" || !localStorage.getItem("token") || !isOnline()) {
+    return Promise.resolve()
+  }
 
-  const requests = screenRequests()
-  setState({ running: true, done: 0, total: requests.length, failed: 0 })
-  let failed = 0
-  let done = 0
-  const queue = [...requests]
-  const workers = Array.from({ length: CONCURRENCY }, async () => {
-    while (queue.length) {
-      const req = queue.shift()!
-      try {
-        await runOne(req)
-      } catch {
-        failed += 1
-      } finally {
-        done += 1
-        setState({ done, failed })
+  running = (async () => {
+    setState({ running: true, done: 0, total: 0, failed: 0 })
+    let failed = 0
+    let done = 0
+    try {
+      const requests = screenRequests()
+      const seen = new Set<string>()
+      const todo: PrefetchRequest[] = []
+      for (const r of requests) {
+        const key = normalizedRequestKey(r.url, r.params ?? {})
+        if (seen.has(key)) continue
+        seen.add(key)
+        if (!force) {
+          const at = await cachedAt(scopedKey(key)).catch(() => null)
+          if (at && Date.now() - at < FRESH_MS) continue
+        }
+        todo.push(r)
       }
+      setState({ total: todo.length })
+
+      let next = 0
+      const worker = async () => {
+        while (next < todo.length) {
+          if (!isOnline()) return
+          const r = todo[next++]
+          try {
+            await apiClient.get(r.url, { params: r.params })
+          } catch (error: any) {
+            if (error?.response?.status !== 403) failed += 1
+          }
+          done += 1
+          setState({ done, failed })
+        }
+      }
+      await Promise.all(Array.from({ length: CONCURRENCY }, worker))
+      await whenSaved()
+      if (isOnline()) {
+        localStorage.setItem(LAST_RUN_KEY, String(Date.now()))
+        setState({ lastCompletedAt: Date.now() })
+      }
+    } finally {
+      setState({ running: false })
+      running = null
     }
-  })
-  await Promise.all(workers)
-  localStorage.setItem(LAST_RUN_KEY, String(Date.now()))
-  setState({ running: false, lastCompletedAt: Date.now() })
+  })()
+  return running
 }
 
 let started = false
-export function startOfflinePrefetch() {
-  if (started || typeof window === "undefined") return
+
+/** Download at login, then keep the copy fresh while online. Idempotent. */
+export function startOfflinePrefetch({ justLoggedIn = false }: { justLoggedIn?: boolean } = {}) {
+  if (typeof window === "undefined") return
+  const last = Number(localStorage.getItem(LAST_RUN_KEY) || 0)
+  if (last) setState({ lastCompletedAt: last })
+  void prefetchForOffline({ force: justLoggedIn || !last })
+  if (started) return
   started = true
-  const kick = () => {
-    const last = Number(localStorage.getItem(LAST_RUN_KEY) || 0)
-    if (!last || Date.now() - last > REFRESH_EVERY_MS) void prefetchForOffline()
-  }
-  kick()
+  setInterval(() => void prefetchForOffline(), REFRESH_EVERY_MS)
   subscribeOnline((online) => {
-    if (online) kick()
+    if (online) void prefetchForOffline()
   })
-  setInterval(kick, REFRESH_EVERY_MS)
+}
+
+/** A new login on this till: the next download is a full one. */
+export function markLoginForPrefetch() {
+  localStorage.removeItem(LAST_RUN_KEY)
 }
