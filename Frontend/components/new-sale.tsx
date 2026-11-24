@@ -73,8 +73,9 @@ import {
 } from "@/lib/receipt";
 import apiClient from "@/lib/apiClient";
 import { mapApiProductToStoreProduct } from "@/lib/store";
-import { offlineDB } from "@/lib/offline-db";
-import { syncManager } from "@/lib/offline-sync";
+import { submitMutation, SyncRejectedError } from "@/lib/offline/sync-engine";
+import { nextSaleNumber } from "@/lib/offline/device";
+import { uuidv7 } from "@/lib/offline/ids";
 import { useVirtualizer } from "@tanstack/react-virtual";
 import { useAllPosProducts } from "@/hooks/queries/use-products";
 import { useCategories } from "@/hooks/queries/use-categories";
@@ -2516,84 +2517,52 @@ export function NewSale() {
           payload.payments = tender.payments;
         }
 
-        // Check if online
-        const isOnline = syncManager.canMakeRequest();
-        
+        // Till-owned ids so resends never create the same sale twice (Sarwat outbox method).
+        payload.clientId = uuidv7();
+        payload.saleNumber = nextSaleNumber();
+        payload.saleDate = new Date().toISOString();
+
+        const stockEffect: Record<string, number> = {};
+        for (const item of saleItems) {
+          stockEffect[item.productId] = (stockEffect[item.productId] ?? 0) + item.quantity;
+        }
+
         let saleData: any;
         let transactionId: string;
-        
-        if (isOnline) {
-          // Online: Call create sale API
-          try {
-            const saleResponse = await apiClient.post("/sale", payload);
-            saleData = saleResponse.data.data;
-            transactionId = saleData.sale_number || generateTransactionId();
-          } catch (error: any) {
-            // If API call fails, fall back to offline mode
-            console.warn("API call failed, saving offline:", error);
-            transactionId = generateTransactionId();
-            saleData = {
-              sale_number: transactionId,
-              id: `offline_${transactionId}`,
-              _pending: true,
-              _offline: true
-            };
-            
-            // Save sale to IndexedDB for later sync
-            await offlineDB.saveSale({
-              id: transactionId,
-              products: saleItems,
-              total: total,
-              customer: selectedCustomer ? { id: selectedCustomer } : null,
-              payment: {
-                method: tender?.primary ?? (method === "Cash" ? "CASH" : "CARD"),
-                payments: tender?.payments,
-                amountPaid,
-                changeAmount
-              },
-              employeeId: localStorage.getItem("userId") || undefined,
-              branchId: branchId || undefined,
-              timestamp: Date.now(),
-              synced: false,
-              discountAmount: globalDiscountAmount,
-              waiveBranchDiscount: branchDiscountWaived || undefined,
-            });
-            // Synced later by syncManager.syncSales() — do NOT also queue via
-            // offlineAPIClient.post, that made every offline sale post twice.
-          }
-        } else {
-          // Offline: Generate local sale ID and save to IndexedDB
-          transactionId = generateTransactionId();
-          saleData = {
-            sale_number: transactionId,
-            id: `offline_${transactionId}`,
-            _pending: true,
-            _offline: true
-          };
-          
-          // Save sale to IndexedDB for later sync
-          await offlineDB.saveSale({
-            id: transactionId,
-            products: saleItems,
-            total: total,
-            customer: selectedCustomer ? { id: selectedCustomer } : null,
-            payment: {
-              method: tender?.primary ?? (method === "Cash" ? "CASH" : "CARD"),
-              payments: tender?.payments,
-              amountPaid,
-              changeAmount
-            },
-            employeeId: localStorage.getItem("userId") || undefined,
-            branchId: branchId || undefined,
-            timestamp: Date.now(),
-            synced: false,
-            discountAmount: globalDiscountAmount,
-            waiveBranchDiscount: branchDiscountWaived || undefined,
-          });
-          // Synced later by syncManager.syncSales() — do NOT also queue via
-          // offlineAPIClient.post, that made every offline sale post twice.
 
-          console.log("💾 Sale saved offline, will sync when connection restored");
+        try {
+          const outcome = await submitMutation("sale.create", payload, {
+            effects: { stock: stockEffect },
+            summary: {
+              saleNumber: payload.saleNumber,
+              total,
+              paymentMethod: payload.paymentMethod,
+              customerName:
+                customers.find((c) => c.id === selectedCustomer)?.name || "Walk-in Customer",
+              items: cartSnapshot.length,
+            },
+          });
+
+          if (outcome.status === "queued") {
+            saleData = {
+              sale_number: payload.saleNumber,
+              id: payload.clientId,
+              _pending: true,
+              _offline: true,
+            };
+            transactionId = payload.saleNumber;
+            toast.warning(
+              `${payload.saleNumber} saved offline — will sync when the internet is back.`,
+            );
+          } else {
+            saleData = outcome.data;
+            transactionId = saleData?.sale_number || payload.saleNumber;
+          }
+        } catch (error: any) {
+          if (error instanceof SyncRejectedError) {
+            throw new Error(error.message || "Sale was rejected by the server");
+          }
+          throw error;
         }
         const receiptData = generateReceiptData(
           transactionId,

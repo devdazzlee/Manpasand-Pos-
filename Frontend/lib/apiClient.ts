@@ -2,6 +2,13 @@ import { API_BASE } from "@/config/constants";
 import axios, { AxiosResponse, InternalAxiosRequestConfig } from "axios";
 import { approvalHeaders, requestApproval } from "@/lib/approval";
 import { getActiveBranchScope } from "@/lib/branch-scope";
+import { cacheKeyFor, readCachedResponse, saveResponse } from "@/lib/offline/http-cache";
+import {
+  isNetworkError,
+  isOnline,
+  reportServerReachable,
+  reportServerUnreachable,
+} from "@/lib/offline/network";
 
 /**
  * API areas whose data belongs to a branch and whose endpoints accept a
@@ -23,27 +30,23 @@ function isBranchScopedUrl(url?: string): boolean {
   return BRANCH_SCOPED_API.some((p) => path === p || path.startsWith(`${p}/`));
 }
 
-// Create axios instance
 const apiClient = axios.create({
   baseURL: API_BASE,
-  timeout: 120000, // 2 minutes – large base64 image payloads need more time
+  timeout: 120000,
   headers: {
     "Content-Type": "application/json",
   },
 });
 
-// Request interceptor to add auth token and prevent stale HTTP cache hits.
 apiClient.interceptors.request.use(
-  (config: InternalAxiosRequestConfig) => {
+  async (config: InternalAxiosRequestConfig) => {
     const token = localStorage.getItem("token");
 
-    if (token) {
+    // Sync engine may send a specific cashier's token.
+    if (token && !config.headers.Authorization) {
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Back-office branch scope (admin header switcher): scope every read of
-    // branch-specific data to the chosen branch, unless the caller already
-    // asked for a specific branch. Writes are never touched.
     const scope = getActiveBranchScope();
     if (scope && (config.method ?? "get").toLowerCase() === "get" && isBranchScopedUrl(config.url)) {
       const params = (config.params ?? {}) as Record<string, unknown>;
@@ -52,30 +55,38 @@ apiClient.interceptors.request.use(
       }
     }
 
-    // Cache busting is handled via `_t` query params and server response headers.
-    // Do NOT set Cache-Control on requests — it triggers CORS preflight and is
-    // not listed in the backend allowedHeaders, which blocks all API calls.
+    // Known offline: answer GET from IndexedDB cache immediately.
+    const key = cacheKeyFor(config);
+    (config as any).offlineKey = key;
+    if (key && !isOnline()) {
+      const cached = await readCachedResponse(key, config);
+      if (cached) config.adapter = async () => cached;
+    }
 
     return config;
   },
-  (error) => {
-    return Promise.reject(error);
-  }
+  (error) => Promise.reject(error),
 );
 
-// Response interceptor.
-//
-// Intentionally does NOT auto-logout on 401. The backend issues JWTs with no
-// expiration (see auth.service.ts / customer.service.ts), so the user should
-// remain signed in until they explicitly click Logout. A spurious 401 from a
-// single endpoint — Redis blip, a misconfigured route, etc. — must not wipe
-// the session and reload the whole app. The 401 still bubbles up to the
-// caller so individual screens can render their own error states.
 apiClient.interceptors.response.use(
-  (response: AxiosResponse) => response,
+  (response: AxiosResponse) => {
+    reportServerReachable();
+    const key = (response.config as any)?.offlineKey as string | null | undefined;
+    if (key && (response.config.method ?? "get").toLowerCase() === "get") {
+      void saveResponse(key, response);
+    }
+    return response;
+  },
   async (error) => {
-    // Restricted action (discount, void, refund, cash out…): ask a manager to
-    // approve, then replay the same request with their credentials attached.
+    if (isNetworkError(error)) {
+      reportServerUnreachable();
+      const key = error?.config ? ((error.config as any).offlineKey ?? cacheKeyFor(error.config)) : null;
+      if (key && error.config) {
+        const cached = await readCachedResponse(key, error.config);
+        if (cached) return cached;
+      }
+    }
+
     const info = error?.response?.status === 403 ? error.response.data?.errors?.[0] : null;
     const config = error?.config as (InternalAxiosRequestConfig & { __approvalAttempts?: number }) | undefined;
     if (info && (info.code === "APPROVAL_REQUIRED" || info.code === "APPROVAL_INVALID") && config && typeof window !== "undefined") {

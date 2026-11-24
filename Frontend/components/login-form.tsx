@@ -70,33 +70,64 @@ export function LoginForm({ onLogin }: LoginFormProps) {
     setIsLoading(true)
     
     try {
-      const response = await loginRequest(username, password) as LoginResponse
-      const { token, branch, user } = response.data
-      toast({ variant: "success", title: "Login successful" })
+      try {
+        const response = await loginRequest(username, password) as LoginResponse
+        const { token, branch, user } = response.data
+        toast({ variant: "success", title: "Login successful" })
 
-      // Save / clear username based on "Remember me"
-      if (rememberMe) {
-        localStorage.setItem("savedUsername", username)
-        localStorage.setItem("rememberMe", "true")
-      } else {
-        localStorage.removeItem("savedUsername")
-        localStorage.removeItem("rememberMe")
+        // Remember this till for offline sign-in (PBKDF2 hash — never the raw password in IDB).
+        void import("@/lib/offline/offline-auth").then(({ rememberLogin, rememberBranch }) =>
+          rememberLogin({
+            email: user?.email || username,
+            password,
+            token,
+            user: {
+              id: user?.id,
+              email: user?.email || username,
+              role: user?.role || "",
+              branch_id: user?.branch_id ?? branch?.id ?? null,
+            },
+          }).then(() => {
+            if (branch?.name) {
+              void rememberBranch(user?.email || username, branch.name, branch.address || "")
+            }
+          }),
+        )
+
+        if (rememberMe) {
+          localStorage.setItem("savedUsername", username)
+          localStorage.setItem("rememberMe", "true")
+        } else {
+          localStorage.removeItem("savedUsername")
+          localStorage.removeItem("rememberMe")
+        }
+
+        if (rememberPassword) {
+          localStorage.setItem("savedPassword", password)
+          localStorage.setItem("rememberPassword", "true")
+        } else {
+          localStorage.removeItem("savedPassword")
+          localStorage.removeItem("rememberPassword")
+        }
+
+        onLogin(token, branch, user)
+      } catch (onlineErr: any) {
+        // No internet: unlock with a password already remembered on this till.
+        const { offlineSignIn } = await import("@/lib/offline/offline-auth")
+        const offline = await offlineSignIn(username, password)
+        if (offline.ok) {
+          toast({ variant: "success", title: "Offline login", description: "Working offline on this till" })
+          onLogin(offline.token, {
+            id: offline.user.branch_id || "",
+            name: offline.branchName || "Offline branch",
+            address: offline.branchAddress,
+          } as any, offline.user as any)
+          return
+        }
+        const errorMessage = onlineErr?.message || "Login failed. Please try again."
+        setError(errorMessage)
+        toast({ variant: "destructive", title: "Login failed", description: errorMessage })
       }
-
-      // Save / clear password based on "Save password"
-      if (rememberPassword) {
-        localStorage.setItem("savedPassword", password)
-        localStorage.setItem("rememberPassword", "true")
-      } else {
-        localStorage.removeItem("savedPassword")
-        localStorage.removeItem("rememberPassword")
-      }
-
-      onLogin(token, branch, user)
-    } catch (err: any) {
-      const errorMessage = err?.message || "Login failed. Please try again."
-      setError(errorMessage)
-      toast({ variant: "destructive", title: "Login failed", description: errorMessage })
     } finally {
       setIsLoading(false)
     }

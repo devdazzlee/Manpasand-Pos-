@@ -99,6 +99,19 @@ export async function fetchCustomerLoyaltyStatus(
 export type CustomerPayload = Record<string, unknown>;
 
 export async function createCustomer(body: CustomerPayload) {
+  const { isOnline } = await import("@/lib/offline/network");
+  if (!isOnline()) {
+    const { createCustomerOffline } = await import("@/lib/offline/mutations");
+    const { id, outcome } = await createCustomerOffline(body as any);
+    if (outcome.status === "rejected") {
+      throw new Error((outcome as any).error || "Could not create customer offline");
+    }
+    const customer =
+      outcome.status === "synced" && (outcome.data as any)?.customer
+        ? (outcome.data as any).customer
+        : { id, ...(body as object), pending_sync: true };
+    return customer as Customer;
+  }
   return post<Customer>("/customer", body);
 }
 

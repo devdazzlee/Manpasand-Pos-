@@ -949,15 +949,19 @@ class SaleService {
   }
 
   async createHoldSale({
+    id,
     branchId,
     customerId,
     createdBy,
     items,
+    skipRegisterCheck = false,
   }: {
+    id?: string;
     branchId: string;
     customerId?: string;
     createdBy?: string;
     items: HoldSaleCartItem[];
+    skipRegisterCheck?: boolean;
   }) {
     if (!items?.length) {
       throw new AppError(400, 'No items provided for hold sale');
@@ -968,7 +972,9 @@ class SaleService {
       throw new AppError(400, 'Invalid branch');
     }
     assertBranchCanSell(branch);
-    await assertCashRegisterOpenForSale(branchId);
+    if (!skipRegisterCheck) {
+      await assertCashRegisterOpenForSale(branchId);
+    }
 
     const normalizedItems = items.map((item) => ({
       id: item.id,
@@ -991,6 +997,7 @@ class SaleService {
 
     return prisma.holdSale.create({
       data: {
+        ...(id ? { id } : {}),
         branch_id: branchId,
         customer_id: customerId?.trim() ? customerId.trim() : null,
         created_by: createdBy,
@@ -1131,6 +1138,11 @@ class SaleService {
     applyPromotions,
     loyaltyPoints,
     giftCards,
+    clientId,
+    saleNumber: tillSaleNumber,
+    saleDate,
+    deviceId,
+    recordedOffline = false,
   }: {
     branchId: string;
     customerId?: string;
@@ -1146,6 +1158,13 @@ class SaleService {
     applyPromotions?: boolean;
     loyaltyPoints?: number;
     giftCards?: { code: string; amount: number }[];
+    /** Till-generated id for offline sync idempotency. */
+    clientId?: string;
+    /** Till invoice number when recorded offline. */
+    saleNumber?: string;
+    saleDate?: Date;
+    deviceId?: string;
+    recordedOffline?: boolean;
   }) {
     // 1) Validate OUTSIDE any interactive transaction
     const [customer, branch] = await Promise.all([
@@ -1156,7 +1175,10 @@ class SaleService {
     if (!branch) throw new AppError(400, 'Invalid branch');
     assertBranchCanSell(branch);
     if (!items.length) throw new AppError(400, 'No items provided');
-    await assertCashRegisterOpenForSale(branchId);
+    // Offline sales sync later — don't block on register state at upload time.
+    if (!recordedOffline) {
+      await assertCashRegisterOpenForSale(branchId);
+    }
     if (salespersonId) {
       const salesperson = await prisma.employee.findUnique({
         where: { id: salespersonId },
@@ -1217,7 +1239,8 @@ class SaleService {
       const change = gp.qty.mul(-1); // sale => decrement
       const next = prev.plus(change);
 
-      if (!ALLOW_NEGATIVE_STOCK_SALE && prev.lt(gp.qty)) {
+      // Offline tills may have sold below recorded stock; accept and flag via SyncMutation.warning later.
+      if (!ALLOW_NEGATIVE_STOCK_SALE && !recordedOffline && prev.lt(gp.qty)) {
         const name = nameOf.get(gp.productId) || 'Product';
         const available = Number(prev);
         const requested = Number(gp.qty);
@@ -1353,7 +1376,10 @@ class SaleService {
 
     const ops: Prisma.PrismaPromise<any>[] = [];
 
-    const saleNumber = await allocateSaleNumber('SALE');
+    const saleNumber =
+      tillSaleNumber && tillSaleNumber.trim()
+        ? tillSaleNumber.trim()
+        : await allocateSaleNumber('SALE');
 
     // (a) Sale + items
     ops.push(
@@ -1363,6 +1389,10 @@ class SaleService {
           branch_id: branchId,
           customer_id: customerId,
           salesperson_id: salespersonId || null,
+          ...(saleDate && !Number.isNaN(saleDate.getTime()) ? { sale_date: saleDate } : {}),
+          ...(clientId ? { client_id: clientId } : {}),
+          ...(deviceId ? { device_id: deviceId } : {}),
+          recorded_offline: Boolean(recordedOffline),
           total_amount: new Prisma.Decimal(finalTotal),
           subtotal: new Prisma.Decimal(subtotalAmt),
           discount_amount: new Prisma.Decimal(finalDiscount),

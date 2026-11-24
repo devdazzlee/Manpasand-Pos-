@@ -4,6 +4,7 @@ import { Inter } from "next/font/google"
 import "./globals.css"
 import { QueryProvider } from "@/lib/query/query-provider"
 import { DataProvider } from "@/components/data-provider"
+import { OfflineStatus } from "@/components/offline-status"
 import { PWABanner } from "@/components/pwa-banner"
 import { Toaster as ToasterOutlet } from "@/components/ui/sonner"
 // shadcn Toaster — kept mounted so the many existing `useToast()` callers
@@ -56,29 +57,32 @@ export default function RootLayout({
         <QueryProvider>
           <DataProvider>
             {children}
+            <div className="fixed bottom-4 left-4 z-[60]">
+              <OfflineStatus />
+            </div>
             <ToasterOutlet position="bottom-right" richColors />
             <ShadcnToaster />
           </DataProvider>
         </QueryProvider>
         <PWABanner />
-        {/* Unregister stale service workers in development to prevent timeout issues */}
+        {/* Dev: clear stale SWs. Prod: register shell SW so the till opens offline. */}
         <script
           dangerouslySetInnerHTML={{
             __html: `
-              if ('serviceWorker' in navigator && location.hostname === 'localhost') {
-                navigator.serviceWorker.getRegistrations().then(function(registrations) {
-                  registrations.forEach(function(registration) {
-                    registration.unregister().then(function() {
-                      console.log('[SW] Unregistered stale service worker for development');
-                    });
+              if ('serviceWorker' in navigator) {
+                if (location.hostname === 'localhost' || location.hostname === '127.0.0.1') {
+                  navigator.serviceWorker.getRegistrations().then(function(registrations) {
+                    registrations.forEach(function(registration) { registration.unregister(); });
                   });
-                });
-                // Also clear all caches left by old service workers
-                if ('caches' in window) {
-                  caches.keys().then(function(names) {
-                    names.forEach(function(name) {
-                      caches.delete(name);
-                      console.log('[SW] Deleted cache:', name);
+                  if ('caches' in window) {
+                    caches.keys().then(function(names) {
+                      names.forEach(function(name) { caches.delete(name); });
+                    });
+                  }
+                } else {
+                  window.addEventListener('load', function() {
+                    navigator.serviceWorker.register('/sw.js').catch(function(err) {
+                      console.warn('[SW] register failed', err);
                     });
                   });
                 }

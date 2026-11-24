@@ -135,44 +135,13 @@ class OfflineSyncManager {
     }
   }
 
-  // Sync unsynced sales
+  /**
+   * Legacy Dexie sale queue — disabled.
+   * Sales now sync via Sarwat-style outbox → POST /sync/push (see lib/offline/sync-engine.ts).
+   * Posting incomplete Dexie rows to POST /sale caused duplicates and lost discounts.
+   */
   private async syncSales() {
-    const unsyncedSales = await offlineDB.getUnsyncedSales();
-    console.log(`📤 Syncing ${unsyncedSales.length} unsynced sales...`);
-
-    for (const sale of unsyncedSales) {
-      try {
-        // Prepare sale payload for API
-        const salePayload = {
-          items: sale.products.map((item: any) => ({
-            productId: item.productId || item.id,
-            quantity: item.quantity,
-            price: item.price
-          })),
-          paymentMethod: sale.payment?.method || 'CASH',
-          branchId: sale.branchId,
-          customerId: sale.customer?.id,
-          salespersonId: (sale as any).salespersonId || undefined,
-          // Branch auto-discount is also enforced server-side; still forward the
-          // till amount so higher cashier discounts survive offline sync.
-          discountAmount: Number((sale as any).discountAmount) || 0,
-          // Branch discount removed at the till for this bill (permission re-checked by the server).
-          waiveBranchDiscount: (sale as any).waiveBranchDiscount === true || undefined,
-          applyPromotions: false,
-        };
-        
-        // Post sale to server
-        const response = await apiClient.post('/sale', salePayload);
-        
-        if (response?.data?.data) {
-          console.log('✅ Synced sale:', sale.id);
-          await offlineDB.markSaleSynced(sale.id);
-        }
-      } catch (error) {
-        console.error('❌ Failed to sync sale:', error);
-        // Don't mark as synced if it failed
-      }
-    }
+    return;
   }
 
   // Pull fresh data from server

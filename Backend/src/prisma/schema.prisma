@@ -817,6 +817,10 @@ model Sale {
   // Employee credited with this sale for commission (null = cashier's linked employee)
   salesperson_id   String?
   salesperson      Employee?     @relation("SaleSalesperson", fields: [salesperson_id], references: [id], onDelete: SetNull)
+  // Offline-first sync: till-generated id so a replayed upload never creates the same sale twice.
+  client_id        String?       @unique
+  device_id        String?
+  recorded_offline Boolean       @default(false)
   created_at       DateTime      @default(now())
   updated_at       DateTime      @default(now()) @updatedAt
 
@@ -2062,4 +2066,29 @@ model Promotion {
 
   @@index([is_active])
   @@index([code])
+}
+
+enum SyncMutationStatus {
+  APPLIED
+  REJECTED
+}
+
+/// Durable idempotency log for POST /sync/push. Till outbox entry id is the PK.
+model SyncMutation {
+  id           String             @id
+  device_id    String
+  user_id      String?
+  type         String
+  status       SyncMutationStatus
+  result       Json?
+  error        String?
+  client_time  DateTime?
+  processed_at DateTime           @default(now())
+  warning      String?
+  reviewed_at  DateTime?
+  reviewed_by  String?
+
+  @@index([device_id])
+  @@index([processed_at])
+  @@index([reviewed_at])
 }

@@ -93,6 +93,7 @@ class CustomerService {
     }
 
     public async createShopCustomer(data: Partial<Customer> & {
+        id?: string;
         credit_limit?: number | null;
         previous_credit_balance?: number | null;
         default_discount_percent?: number | null;
@@ -114,6 +115,7 @@ class CustomerService {
         const isLoyaltyWinner = data.is_loyalty_winner ?? false;
         const customer = await prisma.customer.create({
             data: {
+                ...(data.id ? { id: data.id } : {}),
                 name: data.name,
                 phone_number: data.phone_number,
                 email,

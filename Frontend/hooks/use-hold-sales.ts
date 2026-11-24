@@ -1,6 +1,8 @@
 import { useState, useEffect, useCallback } from "react";
 import apiClient from "@/lib/apiClient";
 import { normalizeBranchId } from "@/lib/branch-utils";
+import { pendingPayloads } from "@/lib/offline/local-effects";
+import { deleteHoldSaleOffline, holdSaleOffline } from "@/lib/offline/mutations";
 
 interface CartItem {
   id: string;
@@ -47,7 +49,6 @@ export function useHoldSales(branchIdOverride?: string) {
     if (branchIdOverride && branchIdOverride.trim()) {
       return branchIdOverride.trim();
     }
-
     if (typeof window === "undefined") return "";
     return normalizeBranchId(localStorage.getItem("branch"));
   }, [branchIdOverride]);
@@ -80,21 +81,36 @@ export function useHoldSales(branchIdOverride?: string) {
         }
       : null;
     const customerId =
-      holdSale.customer_id ||
-      holdSale.customerId ||
-      customer?.id ||
-      null;
+      holdSale.customer_id || holdSale.customerId || customer?.id || null;
 
     return {
       id: holdSale.id,
       items: Array.isArray(holdSale.items) ? holdSale.items.map(normalizeItem) : [],
       subtotal: Number(holdSale.subtotal || 0),
-      totalItems: Number(holdSale.total_items || 0),
-      branchId: holdSale.branch_id || "",
+      totalItems: Number(holdSale.total_items || holdSale.items?.length || 0),
+      branchId: holdSale.branch_id || holdSale.branchId || getBranchId(),
       branchName: holdSale.branch?.name || "Unknown Branch",
-      createdAt: holdSale.created_at || new Date().toISOString(),
+      createdAt: holdSale.created_at || holdSale.createdAt || new Date().toISOString(),
       customerId: customerId ? String(customerId) : null,
       customer,
+    };
+  };
+
+  const holdFromPayload = (payload: any): HoldSaleRecord => {
+    const items = Array.isArray(payload.items) ? payload.items.map(normalizeItem) : [];
+    return {
+      id: payload.id,
+      items,
+      subtotal: items.reduce(
+        (sum: number, item: CartItem) => sum + (item.actualUnitPrice || item.price) * item.quantity,
+        0,
+      ),
+      totalItems: items.length,
+      branchId: payload.branchId || getBranchId(),
+      branchName: "This till",
+      createdAt: payload._entry?.createdAt || new Date().toISOString(),
+      customerId: payload.customerId || null,
+      customer: null,
     };
   };
 
@@ -108,13 +124,27 @@ export function useHoldSales(branchIdOverride?: string) {
     try {
       setLoading(true);
       const response = await apiClient.get("/sale/hold", { params: { branchId } });
-      const holds = Array.isArray(response?.data?.data)
+      const holds: HoldSaleRecord[] = Array.isArray(response?.data?.data)
         ? response.data.data.map(mapHoldSale)
         : [];
-      setHoldSales(holds);
+      const [created, deleted] = await Promise.all([
+        pendingPayloads("holdSale.create"),
+        pendingPayloads<{ id: string }>("holdSale.delete"),
+      ]);
+      const deletedIds = new Set(deleted.map((d) => d.id));
+      const known = new Set(holds.map((h) => h.id));
+      const localOnly = created
+        .filter((c: any) => !known.has(c.id))
+        .map(holdFromPayload);
+      setHoldSales([...localOnly.reverse(), ...holds].filter((h) => !deletedIds.has(h.id)));
     } catch (error) {
       console.error("Failed to load hold sales from API:", error);
-      setHoldSales([]);
+      try {
+        const created = await pendingPayloads("holdSale.create");
+        setHoldSales(created.map(holdFromPayload).reverse());
+      } catch {
+        setHoldSales([]);
+      }
     } finally {
       setLoading(false);
     }
@@ -124,79 +154,78 @@ export function useHoldSales(branchIdOverride?: string) {
     refreshHoldSales();
   }, [refreshHoldSales]);
 
-  const holdSale = useCallback(async (cart: CartItem[], customerId?: string) => {
-    if (!cart.length) return false;
+  const holdSale = useCallback(
+    async (cart: CartItem[], customerId?: string) => {
+      if (!cart.length) return false;
+      const branchId = getBranchId();
+      if (!branchId || branchId === "Not Found") return false;
 
-    const branchId = getBranchId();
-    if (!branchId || branchId === "Not Found") return false;
-
-    try {
-      const response = await apiClient.post("/sale/hold", {
-        branchId,
-        customerId: customerId || null,
-        items: cart,
-      });
-      const created = response?.data?.data ? mapHoldSale(response.data.data) : null;
-      if (created) {
-        setHoldSales((prev) => [created, ...prev]);
+      try {
+        const subtotal = cart.reduce(
+          (sum, item) => sum + (item.actualUnitPrice || item.price) * item.quantity,
+          0,
+        );
+        const { id, outcome } = await holdSaleOffline({
+          customerId,
+          items: cart.map((c) => ({ ...c })) as any,
+          subtotal,
+          branchId,
+        });
+        const created =
+          outcome.status === "synced" && (outcome.data as any)?.id
+            ? mapHoldSale(outcome.data)
+            : holdFromPayload({ id, customerId, items: cart, branchId });
+        setHoldSales((prev) => [created, ...prev.filter((h) => h.id !== created.id)]);
         return true;
+      } catch (error) {
+        console.error("Failed to hold sale:", error);
+        return false;
       }
-      await refreshHoldSales();
-      return true;
-    } catch (error) {
-      console.error("Failed to hold sale in DB:", error);
-      return false;
-    }
-  }, [getBranchId, refreshHoldSales]);
+    },
+    [getBranchId],
+  );
 
-  const retrieveHoldSale = useCallback(async (index: number): Promise<HoldSaleRecord | null> => {
-    if (index < 0 || index >= holdSales.length) return null;
-    const holdSaleRecord = holdSales[index];
-    const branchId = getBranchId();
+  const retrieveHoldSale = useCallback(
+    async (index: number): Promise<HoldSaleRecord | null> => {
+      if (index < 0 || index >= holdSales.length) return null;
+      const holdSaleRecord = holdSales[index];
+      try {
+        await deleteHoldSaleOffline(holdSaleRecord.id);
+        setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
+        return holdSaleRecord;
+      } catch (error) {
+        console.error("Failed to retrieve hold sale:", error);
+        return null;
+      }
+    },
+    [holdSales],
+  );
 
-    try {
-      const response = await apiClient.post(`/sale/hold/${holdSaleRecord.id}/retrieve`, {
-        branchId,
-      });
-      const retrieved = response?.data?.data ? mapHoldSale(response.data.data) : holdSaleRecord;
-      setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
-      return retrieved;
-    } catch (error) {
-      console.error("Failed to retrieve hold sale from DB:", error);
-      return null;
-    }
-  }, [getBranchId, holdSales]);
-
-  const deleteHoldSale = useCallback(async (index: number) => {
-    if (index < 0 || index >= holdSales.length) return;
-    const holdSaleRecord = holdSales[index];
-    const branchId = getBranchId();
-
-    try {
-      await apiClient.delete(`/sale/hold/${holdSaleRecord.id}`, {
-        data: { branchId },
-      });
-      setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
-    } catch (error) {
-      console.error("Failed to delete hold sale from DB:", error);
-    }
-  }, [getBranchId, holdSales]);
+  const deleteHoldSale = useCallback(
+    async (index: number) => {
+      if (index < 0 || index >= holdSales.length) return;
+      const holdSaleRecord = holdSales[index];
+      try {
+        await deleteHoldSaleOffline(holdSaleRecord.id);
+        setHoldSales((prev) => prev.filter((item) => item.id !== holdSaleRecord.id));
+      } catch (error) {
+        console.error("Failed to delete hold sale:", error);
+      }
+    },
+    [holdSales],
+  );
 
   const clearAllHoldSales = useCallback(async () => {
     const holdIds = holdSales.map((sale) => sale.id);
-    const branchId = getBranchId();
     for (const holdId of holdIds) {
       try {
-        // eslint-disable-next-line no-await-in-loop
-        await apiClient.delete(`/sale/hold/${holdId}`, {
-          data: { branchId },
-        });
+        await deleteHoldSaleOffline(holdId);
       } catch (error) {
-        console.error("Failed to delete hold sale from DB:", error);
+        console.error("Failed to delete hold sale:", error);
       }
     }
     setHoldSales([]);
-  }, [getBranchId, holdSales]);
+  }, [holdSales]);
 
   return {
     holdSales,
@@ -208,4 +237,3 @@ export function useHoldSales(branchIdOverride?: string) {
     holdSalesLoading: loading,
   };
 }
-
