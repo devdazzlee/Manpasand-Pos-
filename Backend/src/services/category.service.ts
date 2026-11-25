@@ -187,9 +187,10 @@ export class CategoryService {
     };
   }
 
+  /** Public / customer-app catalog — POS-only categories stay off the website. */
   async getCategories() {
     return prisma.category.findMany({
-      where: { is_active: true },
+      where: { is_active: true, display_on_website: true },
       orderBy: { name: 'asc' },
       include: CATEGORY_IMAGE_INCLUDE,
     });

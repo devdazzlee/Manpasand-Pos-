@@ -7,6 +7,8 @@ const categoryBaseSchema = {
   get_tax_from_item: z.boolean().optional().default(false),
   editable_sale_rate: z.boolean().optional().default(false),
   display_on_pos: z.boolean().optional().default(true),
+  display_on_website: z.boolean().optional().default(true),
+  is_active: z.boolean().optional().default(true),
   branch_id: z.string().optional(),
 };
 

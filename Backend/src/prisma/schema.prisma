@@ -119,6 +119,8 @@ model Category {
   get_tax_from_item   Boolean          @default(false)
   editable_sale_rate  Boolean          @default(false)
   display_on_pos      Boolean          @default(true)
+  /// When false, category (and its products) stay off the public website / customer app.
+  display_on_website  Boolean          @default(true)
   products            Product[]
   branch_id           String?
   branch              Branch?          @relation(fields: [branch_id], references: [id])
@@ -130,6 +132,7 @@ model Category {
   @@index([slug])
   @@index([is_active])
   @@index([display_on_pos])
+  @@index([display_on_website])
   @@index([branch_id])
 }
 

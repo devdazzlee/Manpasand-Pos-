@@ -125,7 +125,12 @@ export function Categories() {
   const [current, setCurrent] = useState<Category | null>(null);
   const [deleteTarget, setDeleteTarget] = useState<Category | null>(null);
 
-  const [form, setForm] = useState({ name: "", slug: "", is_active: true });
+  const [form, setForm] = useState({
+    name: "",
+    slug: "",
+    is_active: true,
+    display_on_website: true,
+  });
   const [formError, setFormError] = useState("");
   const [preview, setPreview] = useState<string | null>(null);
   const [imageRemoved, setImageRemoved] = useState(false);
@@ -153,7 +158,7 @@ export function Categories() {
 
   const resetForm = () => {
     if (preview?.startsWith("blob:")) URL.revokeObjectURL(preview);
-    setForm({ name: "", slug: "", is_active: true });
+    setForm({ name: "", slug: "", is_active: true, display_on_website: true });
     setFormError("");
     setPreview(null);
     setImageRemoved(false);
@@ -174,6 +179,7 @@ export function Categories() {
       name: c.name,
       slug: c.slug || generateSlug(c.name),
       is_active: categoryIsActive(c),
+      display_on_website: c.display_on_website !== false,
     });
     setFormError("");
     setPreview(c.image || null);
@@ -257,6 +263,7 @@ export function Categories() {
         ...parsed.data,
         display_on_branches: allBranchIds,
         display_on_pos: true,
+        display_on_website: form.display_on_website,
         is_active: form.is_active,
       };
       if (imageRemoved) body.remove_image = true;
@@ -277,6 +284,7 @@ export function Categories() {
         ...parsed.data,
         display_on_branches: allBranchIds,
         display_on_pos: true,
+        display_on_website: form.display_on_website,
         get_tax_from_item: false,
         editable_sale_rate: false,
         is_active: form.is_active,
@@ -478,6 +486,7 @@ export function Categories() {
                         Products
                       </TableHead>
                       <TableHead className="text-xs uppercase tracking-wide">Status</TableHead>
+                      <TableHead className="text-xs uppercase tracking-wide">Website</TableHead>
                       <TableHead className="text-xs uppercase tracking-wide">Created</TableHead>
                       <TableHead className="w-[220px] text-right text-xs uppercase tracking-wide">
                         Actions
@@ -521,6 +530,39 @@ export function Categories() {
                             >
                               {active ? "Active" : "Inactive"}
                             </span>
+                          </TableCell>
+                          <TableCell>
+                            <div className="flex items-center gap-2">
+                              <Switch
+                                checked={c.display_on_website !== false}
+                                disabled={update.isPending}
+                                onCheckedChange={(v) => {
+                                  update.mutate(
+                                    {
+                                      id: c.id,
+                                      body: { display_on_website: v },
+                                    },
+                                    {
+                                      onSuccess: () =>
+                                        toast({
+                                          title: v
+                                            ? "Category shown on website"
+                                            : "Category hidden from website",
+                                        }),
+                                      onError: (e) =>
+                                        toast({
+                                          variant: "destructive",
+                                          title: "Could not update website visibility",
+                                          description: extractApiError(e),
+                                        }),
+                                    },
+                                  );
+                                }}
+                              />
+                              <span className="text-xs text-muted-foreground">
+                                {c.display_on_website !== false ? "On" : "Off"}
+                              </span>
+                            </div>
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground nums">
                             {day(c.created_at)}
@@ -633,6 +675,20 @@ export function Categories() {
               <Switch
                 checked={form.is_active}
                 onCheckedChange={(v) => setForm((f) => ({ ...f, is_active: v }))}
+                disabled={submitting}
+              />
+            </div>
+
+            <div className="flex items-center justify-between rounded-lg border border-border bg-muted/30 p-3">
+              <div className="space-y-0.5">
+                <Label className="text-sm font-medium text-foreground">Show on website</Label>
+                <p className="text-xs text-muted-foreground">
+                  Off = POS only (hidden from the online store and customer app)
+                </p>
+              </div>
+              <Switch
+                checked={form.display_on_website}
+                onCheckedChange={(v) => setForm((f) => ({ ...f, display_on_website: v }))}
                 disabled={submitting}
               />
             </div>

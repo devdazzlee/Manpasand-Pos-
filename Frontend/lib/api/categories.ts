@@ -13,6 +13,8 @@ export interface Category {
   productCount?: number;
   display_on_branches?: string[];
   display_on_pos?: boolean;
+  /** When false, category is POS-only and hidden from the website. */
+  display_on_website?: boolean;
   created_at?: string;
 }
 
