@@ -2,6 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useScopedBranch } from "@/lib/branch-scope";
+import { isAdminRole, normalizeBranchId } from "@/lib/branch-utils";
 import { isReadOnlyRole } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -248,11 +249,25 @@ export function ProductAssembly() {
     componentLines.every((l) => Number(l.quantity) > 0) &&
     shortComponents.length === 0;
 
+  /** Prefer page filter → login branch → admin header scope. Branch accounts always get their own. */
+  const defaultAssemblyBranchId = () => {
+    if (filterBranch && filterBranch !== "all") return filterBranch;
+    if (typeof window === "undefined") return "";
+    const loginBranch = normalizeBranchId(localStorage.getItem("branch"));
+    if (loginBranch) return loginBranch;
+    return "";
+  };
+
+  const branchLocked =
+    typeof window !== "undefined" &&
+    !isAdminRole(localStorage.getItem("role")) &&
+    !!normalizeBranchId(localStorage.getItem("branch"));
+
   const openNew = () => {
     if (readOnly) return;
     setForm({
       ...DEFAULT_FORM,
-      branchId: filterBranch !== "all" ? filterBranch : "",
+      branchId: defaultAssemblyBranchId(),
     });
     setFinishedLines([]);
     setComponentLines([]);
@@ -542,6 +557,12 @@ export function ProductAssembly() {
               </Label>
               {branchesLoading ? (
                 <StockSelectSkeleton label="Loading branches" />
+              ) : branchLocked ? (
+                <Input
+                  readOnly
+                  value={branches.find((b) => b.id === form.branchId)?.name || "Your branch"}
+                  className="h-10 bg-slate-50 text-sm"
+                />
               ) : (
                 <Select
                   value={form.branchId}
