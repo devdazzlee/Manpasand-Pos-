@@ -65,7 +65,8 @@ const DEFAULTS: Record<string, Role[]> = {
   'register.approve_variance': ['ADMIN', 'BRANCH_MANAGER', 'SUPERVISOR'],
   'register.reopen': ['ADMIN'],
   'inventory.adjust': ['ADMIN', 'BRANCH_MANAGER', 'WAREHOUSE_MANAGER'],
-  'inventory.assemble': ['ADMIN', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER'],
+  // Branch tills assemble finished goods too — not admin-only.
+  'inventory.assemble': ['ADMIN', 'BRANCH_MANAGER', 'SUPERVISOR', 'CASHIER', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER'],
   'inventory.import': ['ADMIN', 'WAREHOUSE_MANAGER'],
   // Warehouse runs Stock In and product edits — must change cost / sale price without manager approval.
   'products.price_change': ['ADMIN', 'PURCHASE_MANAGER', 'WAREHOUSE_MANAGER'],

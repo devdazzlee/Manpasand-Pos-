@@ -117,7 +117,7 @@ const QUICK_ACTIONS: QuickAction[] = [
   { label: "Transfers", description: "Move between branches", tab: "transfers", icon: Truck, tone: "bg-blue-50 text-blue-600" },
   { label: "Stock Out", description: "Damage, loss, return", tab: "stock-out", icon: PackageMinus, tone: "bg-rose-50 text-rose-600", roles: ["SUPER_ADMIN", "ADMIN", "WAREHOUSE_MANAGER"] },
   { label: "Adjustments", description: "Correct stock levels", tab: "stock-adjustment", icon: ClipboardList, tone: "bg-amber-50 text-amber-600" },
-  { label: "Assemble", description: "Combine into one product", tab: "product-assembly", icon: Combine, tone: "bg-teal-50 text-teal-600", roles: ["SUPER_ADMIN", "ADMIN", "WAREHOUSE_MANAGER", "PURCHASE_MANAGER"] },
+  { label: "Assemble", description: "Combine into one product", tab: "product-assembly", icon: Combine, tone: "bg-teal-50 text-teal-600", roles: ["SUPER_ADMIN", "ADMIN", "BRANCH_MANAGER", "SUPERVISOR", "CASHIER", "WAREHOUSE_MANAGER", "PURCHASE_MANAGER", "INVENTORY_VIEWER"] },
   { label: "By Location", description: "Stock per branch", tab: "stock-view", icon: Warehouse, tone: "bg-violet-50 text-violet-600" },
   { label: "Stock Mgmt", description: "Full stock tools", tab: "stock-management", icon: ArrowRightLeft, tone: "bg-slate-100 text-slate-600" },
 ];

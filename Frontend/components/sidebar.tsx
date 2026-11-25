@@ -333,12 +333,17 @@ const menuSections: SidebarMenuSection[] = [
         id: "product-assembly",
         label: "Product Assembly",
         icon: Combine,
-        roles: withBranchView([
+        // Available to every signed-in role (including cashiers / supervisors).
+        roles: [
           "SUPER_ADMIN",
           "ADMIN",
+          "BRANCH_MANAGER",
+          "SUPERVISOR",
+          "CASHIER",
           "WAREHOUSE_MANAGER",
           "PURCHASE_MANAGER",
-        ]),
+          "INVENTORY_VIEWER",
+        ],
       },
       {
         id: "scan-stock-count",
@@ -593,9 +598,10 @@ const filterMenuSectionsByRole = (role: UserRole | null): SidebarMenuSection[] =
     "printer-settings",
     "today-revenue",
     "today-cash-sales",
+    "product-assembly",
   ]);
-  // View-only account: products and stock screens only.
-  const VIEWER_TABS = new Set(["inventory", "stock-view", "stock-quantity-report"]);
+  // View-only account: products and stock screens only (+ assembly history).
+  const VIEWER_TABS = new Set(["inventory", "stock-view", "stock-quantity-report", "product-assembly"]);
   const roleAllows = (roles?: UserRole[]) => {
     if (!roles) return role !== "CASHIER";
     if (roles.includes(role)) return true;

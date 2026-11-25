@@ -17,7 +17,16 @@ const router = Router();
 
 router.use(
   authenticate,
-  authorize(['SUPER_ADMIN', 'ADMIN', 'WAREHOUSE_MANAGER', 'PURCHASE_MANAGER', 'BRANCH_MANAGER']),
+  authorize([
+    'SUPER_ADMIN',
+    'ADMIN',
+    'BRANCH_MANAGER',
+    'SUPERVISOR',
+    'CASHIER',
+    'WAREHOUSE_MANAGER',
+    'PURCHASE_MANAGER',
+    'INVENTORY_VIEWER',
+  ]),
 );
 
 router.post('/', validate(createAssemblySchema), requirePermission('inventory.assemble'), createAssembly);

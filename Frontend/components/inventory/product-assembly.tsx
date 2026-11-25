@@ -2,7 +2,7 @@
 
 import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { useScopedBranch } from "@/lib/branch-scope";
-import { getInventoryReadOnly } from "@/lib/role-utils";
+import { isReadOnlyRole } from "@/lib/role-utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -92,7 +92,9 @@ const DEFAULT_FORM = {
 };
 
 export function ProductAssembly() {
-  const readOnly = getInventoryReadOnly();
+  // Branch/cashier accounts may assemble; only the inventory viewer stays view-only.
+  const readOnly =
+    typeof window !== "undefined" && isReadOnlyRole(localStorage.getItem("role"));
   const { products, categories, branches, productsLoading, branchesLoading, fetchProducts, fetchBranches } =
     usePosData();
 
