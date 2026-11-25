@@ -2814,7 +2814,7 @@ export function ReturnsModule({
                             </div>
                             <div className="flex flex-wrap items-end gap-3">
                               <div className="space-y-1">
-                                <Label className="text-xs text-gray-500">Discount on this dress (Rs)</Label>
+                                <Label className="text-xs text-gray-500">Discount on this item (Rs)</Label>
                                 <Input
                                   type="number"
                                   inputMode="decimal"
@@ -2917,7 +2917,7 @@ export function ReturnsModule({
                       <div>
                         <p className="text-sm font-semibold text-stone-900">Exchange amounts</p>
                         <p className="text-xs text-stone-500 mt-0.5">
-                          Old dress = credit. New dresses = what customer pays (minus credit).
+                          Returned items = credit. New items = what customer pays (minus credit).
                         </p>
                       </div>
 
@@ -2925,7 +2925,7 @@ export function ReturnsModule({
                         <div className="flex flex-wrap items-start justify-between gap-2">
                           <div>
                             <p className="text-xs font-medium text-emerald-900">
-                              1. Credit for old dress (returned item)
+                              1. Credit for returned item
                             </p>
                             <p className="text-xl font-bold tabular-nums text-emerald-800 mt-0.5">
                               {formatMoney(
@@ -2984,7 +2984,7 @@ export function ReturnsModule({
                             />
                             <p className="text-xs text-emerald-800/80">
                               Maximum {formatMoney(returnRefundGross)} (full tag price of returned
-                              dress). Usually use {formatMoney(returnRefundTotal)} (what they paid).
+                              item). Usually use {formatMoney(returnRefundTotal)} (what they paid).
                             </p>
                           </div>
                         )}
@@ -2992,11 +2992,11 @@ export function ReturnsModule({
 
                       <div className="rounded-lg border border-stone-200 bg-stone-50 px-3 py-3 space-y-2">
                         <p className="text-xs font-medium text-stone-800">
-                          2. Extra discount on all new dresses — optional
+                          2. Extra discount on all new items — optional
                         </p>
                         <div className="flex flex-wrap items-center gap-2">
                           <Label htmlFor="exchange-order-discount" className="sr-only">
-                            Extra discount on new dresses
+                            Extra discount on new items
                           </Label>
                           <Input
                             id="exchange-order-discount"
@@ -3013,9 +3013,9 @@ export function ReturnsModule({
                           <span className="text-sm text-stone-600">Rs off total</span>
                         </div>
                         <p className="text-xs text-stone-600">
-                          New dresses total (before this): {formatMoney(exchangeSubtotal)}. Set
-                          per-dress discount on each item above if needed; use this only for one
-                          discount on the whole bill.
+                          New items total (before this): {formatMoney(exchangeSubtotal)}. Set
+                          per-item discount above if needed; use this only for one discount on the
+                          whole bill.
                         </p>
                       </div>
                     </div>

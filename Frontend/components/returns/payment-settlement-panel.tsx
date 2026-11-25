@@ -79,7 +79,7 @@ export function PaymentSettlementPanel({
             <div className="flex items-center justify-between px-1">
               <span className="text-gray-600">
                 {transactionType === "EXCHANGE"
-                  ? "Credit from old dress"
+                  ? "Credit from returned item"
                   : settlement.returnScope === "FULL"
                     ? "Full return value"
                     : "Partial return value"}
@@ -91,7 +91,7 @@ export function PaymentSettlementPanel({
             {hasProratedDiscount && (
               <>
                 <div className="flex items-center justify-between px-1 text-xs">
-                  <span className="text-gray-500">Tag price of returned dress</span>
+                  <span className="text-gray-500">Tag price of returned item</span>
                   <span className="text-gray-500">{formatMoney(returnedItemsGrossValue)}</span>
                 </div>
                 <div className="flex items-center justify-between px-1">
@@ -123,13 +123,13 @@ export function PaymentSettlementPanel({
                 {hasExchangeOrderDiscount && (
                   <>
                     <div className="flex items-center justify-between px-1 text-xs">
-                      <span className="text-gray-500">New dresses total (before extra discount)</span>
+                      <span className="text-gray-500">New items total (before extra discount)</span>
                       <span className="text-gray-500">
                         {formatMoney(replacementItemsGrossValue ?? replacementItemsValue)}
                       </span>
                     </div>
                     <div className="flex items-center justify-between px-1">
-                      <span className="text-gray-600">Extra discount on new dresses</span>
+                      <span className="text-gray-600">Extra discount on new items</span>
                       <span className="font-semibold text-gray-600">
                         − {formatMoney(exchangeOrderDiscountApplied ?? 0)}
                       </span>
@@ -137,14 +137,14 @@ export function PaymentSettlementPanel({
                   </>
                 )}
                 <div className="flex items-center justify-between px-1">
-                  <span className="text-gray-600">New dresses total (after discounts)</span>
+                  <span className="text-gray-600">New items total (after discounts)</span>
                   <span className="font-semibold">{formatMoney(replacementItemsValue)}</span>
                 </div>
               </>
             )}
             {returnedItemsValue > 0.005 && replacementItemsValue > 0.005 && (
               <div className="flex items-center justify-between px-1 border-t border-dashed pt-2">
-                <span className="text-gray-600">Old dress credit applied</span>
+                <span className="text-gray-600">Return credit applied</span>
                 <span className="font-semibold text-green-700">
                   -{formatMoney(returnedItemsValue)}
                 </span>
